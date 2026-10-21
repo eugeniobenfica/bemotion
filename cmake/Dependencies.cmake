@@ -50,3 +50,9 @@ target_compile_definitions(imgui PUBLIC
     IMGUI_DEFINE_MATH_OPERATORS
     IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
 target_link_libraries(imgui PUBLIC glfw OpenGL::GL)
+
+# On X11 the GLFW backend calls Xlib directly (e.g. for IME/window hints).
+if(UNIX AND NOT APPLE)
+    find_package(X11 REQUIRED)
+    target_link_libraries(imgui PUBLIC X11::X11)
+endif()
