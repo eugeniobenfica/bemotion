@@ -1,0 +1,3 @@
+add_executable(mirage_core_tests core_tests.cpp)
+target_link_libraries(mirage_core_tests PRIVATE mirage_core)
+add_test(NAME core_tests COMMAND mirage_core_tests)

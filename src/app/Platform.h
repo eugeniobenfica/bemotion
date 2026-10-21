@@ -1,0 +1,30 @@
+#pragma once
+
+// Thin OS abstraction: well-known folders, native file dialogs, UTF-8 paths.
+
+#include <filesystem>
+#include <optional>
+#include <string>
+
+namespace mirage::platform {
+
+namespace fs = std::filesystem;
+
+std::string toUtf8(const fs::path& path);
+fs::path fromUtf8(const std::string& utf8);
+
+fs::path executableDir();
+fs::path appDataDir();         // per-user settings, created on demand
+fs::path defaultProjectsDir(); // Documents/Mirage, created on demand
+fs::path assetsDir();
+
+// Native window handle used to parent dialogs (HWND on Windows).
+void setMainWindowHandle(void* handle);
+
+std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const char* extension);
+std::optional<fs::path> saveFileDialog(const char* title, const fs::path& suggested, const char* filterName,
+                                       const char* extension);
+
+void revealInFileManager(const fs::path& path);
+
+} // namespace mirage::platform

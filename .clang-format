@@ -1,0 +1,8 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+ColumnLimit: 120
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortCaseLabelsOnASingleLine: true
+PointerAlignment: Left
+IncludeBlocks: Preserve

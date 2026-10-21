@@ -1,0 +1,19 @@
+# Build output
+build/
+build-*/
+out/
+cmake-build-*/
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+*.user
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Temporary save files
+*.mirage.tmp
