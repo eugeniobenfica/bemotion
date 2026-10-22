@@ -1,5 +1,6 @@
 #include "ui/panels/TimelinePanel.h"
 
+#include "core/Snapping.h"
 #include "render/Fonts.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -51,6 +52,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
         ImGui::End();
         return;
     }
+    snapLineTime_ = -1.0;
     Composition& comp = ctx.comp();
     drawToolbar(ctx);
 
@@ -146,6 +148,10 @@ void TimelinePanel::draw(EditorContext& ctx) {
         dl->AddRectFilled(ImVec2(endX, bodyTop), ImVec2(trackX0_ + trackW_, bodyBottom), IM_COL32(0, 0, 0, 80));
     const float ph = timeToX(ctx.time);
     dl->AddLine(ImVec2(ph, bodyTop), ImVec2(ph, bodyBottom), theme::kAccent, 1.5f);
+    if (snapLineTime_ >= 0.0) { // what the dragged item snapped to
+        const float sx = timeToX(snapLineTime_);
+        dl->AddLine(ImVec2(sx, bodyTop), ImVec2(sx, bodyBottom), theme::kSnap, 1.0f);
+    }
 
     // Razor tool: show where the cut will happen.
     const bool overTracks = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
@@ -182,6 +188,9 @@ void TimelinePanel::drawToolbar(EditorContext& ctx) {
     ImGui::SameLine();
     if (ui::iconButton("##split", ui::Icon::SplitPlayhead, s, "Split selected layers at the playhead (Ctrl+K)"))
         ctx.splitSelectedAtPlayhead();
+    ImGui::SameLine();
+    if (ui::iconButton("##snap", ui::Icon::Magnet, s, "Snapping (S): clips, keyframes and objects snap. Hold Ctrl to bypass", ctx.snapping))
+        ctx.snapping = !ctx.snapping;
     ImGui::SameLine(0, 14);
     if (ui::iconButton("##start", ui::Icon::ToStart, s, "Go to start (Home)")) {
         ctx.playing = false;
@@ -238,9 +247,15 @@ void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float widt
     // Scrub area.
     ImGui::SetCursorScreenPos(ImVec2(trackX0_, y0));
     ImGui::InvisibleButton("##ruler", ImVec2(trackW_, kRulerHeight));
+    if (ImGui::IsItemActivated()) collectTimeSnapTargets(ctx, {}, false);
     if (ImGui::IsItemActive()) {
         ctx.playing = false;
-        ctx.setTime(xToTime(ImGui::GetIO().MousePos.x));
+        double t = xToTime(ImGui::GetIO().MousePos.x);
+        if (ImGui::GetIO().KeyShift) { // Shift: the playhead snaps to clip edges and keyframes
+            std::erase(timeTargets_, ctx.time);
+            t = snappedDelta(ctx, {0.0}, t);
+        }
+        ctx.setTime(t);
     }
     if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
 
@@ -633,6 +648,43 @@ void TimelinePanel::beginLayerDrag(EditorContext& ctx, Drag mode, uint64_t id) {
     dragOrigOut_ = layer->outPoint;
     dragApplied_ = 0.0;
     restacking_ = false;
+    dragClips_.clear();
+    std::vector<uint64_t> moving = mode == Drag::LayerMove ? ctx.selection : std::vector<uint64_t>{id};
+    for (uint64_t m : moving)
+        if (const Layer* l = ctx.comp().findLayer(m)) dragClips_.push_back({m, l->inPoint, l->outPoint});
+    collectTimeSnapTargets(ctx, moving, false);
+}
+
+void TimelinePanel::collectTimeSnapTargets(EditorContext& ctx, const std::vector<uint64_t>& movingClips, bool movingKeys) {
+    const Composition& comp = ctx.comp();
+    timeTargets_ = {0.0, comp.duration, ctx.time}; // composition ends and the playhead
+    auto isDraggedKey = [&](uint64_t layerId, const char* prop, uint32_t uid) {
+        if (!movingKeys) return false;
+        for (const auto& [sel, orig] : dragKeys_)
+            if (sel.layerId == layerId && sel.propertyId == prop && sel.keyUid == uid) return true;
+        return false;
+    };
+    for (const Layer& l : comp.layers) {
+        if (std::find(movingClips.begin(), movingClips.end(), l.id) != movingClips.end()) continue;
+        timeTargets_.push_back(l.inPoint);
+        timeTargets_.push_back(l.outPoint);
+        for (const PropertyRef& p : const_cast<Layer&>(l).properties())
+            for (int k = 0; k < p.anim->keyCount(); ++k)
+                if (!isDraggedKey(l.id, p.id, p.anim->keyUid(k))) timeTargets_.push_back(p.anim->keyTime(k));
+    }
+}
+
+double TimelinePanel::snappedDelta(EditorContext& ctx, const std::vector<double>& base, double rawDelta) {
+    // Test the raw (unrounded) position so a target is caught before frame rounding jumps past it.
+    if (ctx.snapping && !ImGui::GetIO().KeyCtrl) {
+        std::vector<double> edges;
+        for (double b : base) edges.push_back(b + rawDelta);
+        if (const SnapResult r = snap1D(edges, timeTargets_, 8.0 / pxPerSec_); r.snapped) { // 8 screen pixels
+            snapLineTime_ = r.target;
+            return rawDelta + r.offset;
+        }
+    }
+    return snapDelta(rawDelta, ctx.comp().fps);
 }
 
 void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
@@ -645,11 +697,14 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
 
     Layer* layer = comp.findLayer(dragLayer_);
     if (!layer) return;
-    double delta = snapDelta(dx / pxPerSec_, comp.fps);
-    if (restacking_ && std::fabs(dx) < 12.0f) delta = 0.0; // vertical drags shouldn't nudge time
+    const double raw = dx / pxPerSec_;
+    const bool frozen = restacking_ && std::fabs(dx) < 12.0f; // vertical drags shouldn't nudge time
     const double fd = comp.frameDuration();
     switch (drag_) {
     case Drag::LayerMove: {
+        std::vector<double> edges;
+        for (const ClipStart& c : dragClips_) edges.insert(edges.end(), {c.in, c.out});
+        const double delta = frozen ? 0.0 : snappedDelta(ctx, edges, raw);
         // Clips never overlap others on their track: stop at the neighbors.
         double lo = 0, hi = 0;
         comp.timeShiftLimits(ctx.selection, lo, hi);
@@ -664,14 +719,16 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
     case Drag::LayerIn: {
         double minIn = 0, maxOut = 0;
         comp.clipLimits(layer->id, minIn, maxOut);
-        layer->inPoint = std::clamp(dragOrigIn_ + delta, minIn, std::max(minIn, layer->outPoint - fd));
+        const double in = dragOrigIn_ + snappedDelta(ctx, {dragOrigIn_}, raw);
+        layer->inPoint = std::clamp(in, minIn, std::max(minIn, layer->outPoint - fd));
         ctx.touch();
         break;
     }
     case Drag::LayerOut: {
         double minIn = 0, maxOut = 0;
         comp.clipLimits(layer->id, minIn, maxOut);
-        layer->outPoint = std::clamp(dragOrigOut_ + delta, std::min(maxOut, layer->inPoint + fd), maxOut);
+        const double out = dragOrigOut_ + snappedDelta(ctx, {dragOrigOut_}, raw);
+        layer->outPoint = std::clamp(out, std::min(maxOut, layer->inPoint + fd), maxOut);
         ctx.touch();
         break;
     }
@@ -821,11 +878,14 @@ void TimelinePanel::beginKeyDrag(EditorContext& ctx) {
         if (PropertyRef* p = layer->findProperty(props, sel.propertyId.c_str()))
             if (const int i = p->anim->findKeyByUid(sel.keyUid); i >= 0) dragKeys_.emplace_back(sel, p->anim->keyTime(i));
     }
+    collectTimeSnapTargets(ctx, {}, true);
 }
 
 void TimelinePanel::updateKeyDrag(EditorContext& ctx) {
     if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.0f)) return;
-    const double delta = snapDelta((ImGui::GetIO().MousePos.x - dragStartX_) / pxPerSec_, ctx.comp().fps);
+    std::vector<double> edges;
+    for (const auto& [sel, orig] : dragKeys_) edges.push_back(orig);
+    const double delta = snappedDelta(ctx, edges, (ImGui::GetIO().MousePos.x - dragStartX_) / pxPerSec_);
     for (const auto& [sel, orig] : dragKeys_) {
         Layer* layer = ctx.comp().findLayer(sel.layerId);
         if (!layer) continue;

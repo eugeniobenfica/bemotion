@@ -104,6 +104,19 @@ private:
     ImVec2 marqueeStart_;
     std::vector<uint64_t> marqueeBase_;
     std::vector<std::pair<KeySelection, double>> dragKeys_;
+    // Snapping: targets are gathered when a drag starts; snapLineTime_ marks
+    // the time that snapped this frame (drawn as a pink line), or -1.
+    void collectTimeSnapTargets(EditorContext& ctx, const std::vector<uint64_t>& movingClips, bool movingKeys);
+    // Moves `base` times by `rawDelta`, snapped to a target if one is close, else to whole frames.
+    double snappedDelta(EditorContext& ctx, const std::vector<double>& base, double rawDelta);
+    std::vector<double> timeTargets_;
+    double snapLineTime_ = -1.0;
+    struct ClipStart {
+        uint64_t id;
+        double in, out;
+    };
+    std::vector<ClipStart> dragClips_;
+
     std::vector<RowRect> rows_;   // rebuilt every frame
     std::vector<ClipRect> clips_; // rebuilt every frame
     float rowsBottom_ = 0.0f;

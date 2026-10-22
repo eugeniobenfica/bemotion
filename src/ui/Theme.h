@@ -19,6 +19,8 @@ inline constexpr ImU32 kAccentActive = IM_COL32(208, 160, 30, 255);
 inline constexpr ImU32 kAccentSoft = IM_COL32(232, 185, 49, 40);
 inline constexpr ImU32 kOnAccent = IM_COL32(20, 18, 12, 255);   // text on gold
 inline constexpr ImU32 kDanger = IM_COL32(229, 96, 77, 255);
+inline constexpr ImU32 kSnap = IM_COL32(255, 79, 163, 255);  // smart-guide lines
+inline constexpr ImU32 kGuide = IM_COL32(64, 196, 255, 200); // ruler guides
 
 inline ImVec4 vec(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 

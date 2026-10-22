@@ -28,6 +28,8 @@ constexpr ShortcutHelp kShortcuts[] = {
     {"J / K", "Previous / next keyframe"},
     {"V / C", "Selection tool / Cut tool"},
     {"Ctrl+K", "Split selected layers at the playhead"},
+    {"S", "Snapping on / off (hold Ctrl while dragging to bypass)"},
+    {"Shift + scrub", "Snap the playhead to clip edges and keyframes"},
     {"T", "Add text"},
     {"Ctrl+A", "Select all layers"},
     {"Shift / Ctrl + click", "Add to / toggle the selection"},
@@ -168,6 +170,24 @@ void EditorScreen::drawMenuBar() {
         if (ImGui::MenuItem("Zoom In", "Ctrl+=")) viewport_.zoomBy(1.25f);
         if (ImGui::MenuItem("Zoom Out", "Ctrl+-")) viewport_.zoomBy(1.0f / 1.25f);
         ImGui::Separator();
+        ImGui::MenuItem("Snapping", "S", &ctx_.snapping);
+        ImGui::MenuItem("Rulers", nullptr, &ctx_.showRulers);
+        if (ImGui::BeginMenu("Guides")) {
+            ImGui::MenuItem("Show Guides", nullptr, &ctx_.showGuides);
+            ImGui::MenuItem("Lock Guides", nullptr, &ctx_.lockGuides);
+            if (ImGui::MenuItem("Add Center Guides")) {
+                const Composition& c = ctx_.comp();
+                ctx_.comp().guides.push_back({true, c.width * 0.5f});
+                ctx_.comp().guides.push_back({false, c.height * 0.5f});
+                ctx_.touch();
+            }
+            if (ImGui::MenuItem("Clear Guides", nullptr, false, !ctx_.comp().guides.empty())) {
+                ctx_.comp().guides.clear();
+                ctx_.touch();
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::Separator();
         if (ImGui::BeginMenu("Panels")) {
             ImGui::MenuItem(ObjectsPanel::kWindowName, nullptr, &objects_.open);
             ImGui::MenuItem(ViewportPanel::kWindowName, nullptr, &viewport_.open);
@@ -254,6 +274,7 @@ void EditorScreen::handleShortcuts() {
     const bool shift = io.KeyShift;
     if (ImGui::IsKeyPressed(ImGuiKey_V, false)) ctx_.tool = Tool::Select;
     if (ImGui::IsKeyPressed(ImGuiKey_C, false)) ctx_.tool = Tool::Razor;
+    if (ImGui::IsKeyPressed(ImGuiKey_S, false)) ctx_.snapping = !ctx_.snapping;
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) ctx_.stepFrames(shift ? -10 : -1);
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) ctx_.stepFrames(shift ? 10 : 1);
     if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) ctx_.setTime(0.0);

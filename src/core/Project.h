@@ -8,6 +8,12 @@
 
 namespace bemotion {
 
+// A ruler guide in composition pixels (vertical: x = position; else y).
+struct Guide {
+    bool vertical = true;
+    float position = 0.0f;
+};
+
 // A timeline row: a contiguous run of `layers` sharing one track id.
 struct TrackRow {
     uint64_t track = 0;
@@ -27,6 +33,7 @@ struct Composition {
     std::vector<Layer> layers;
     uint64_t nextLayerId = 1;
     uint64_t nextTrackId = 1;
+    std::vector<Guide> guides;
 
     double frameDuration() const { return 1.0 / fps; }
     int frameCount() const;

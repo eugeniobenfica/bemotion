@@ -156,6 +156,9 @@ std::string serializeProject(const Project& project) {
     comp["background"] = encode(c.background);
     comp["next_layer_id"] = c.nextLayerId;
     comp["next_track_id"] = c.nextTrackId;
+    json guides = json::array();
+    for (const Guide& g : c.guides) guides.push_back({{"vertical", g.vertical}, {"position", g.position}});
+    comp["guides"] = std::move(guides);
     json layers = json::array();
     for (const auto& l : c.layers) layers.push_back(encodeLayer(l));
     comp["layers"] = std::move(layers);
@@ -204,6 +207,8 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
             for (auto& l : c.layers)
                 if (l.track == 0) l.track = c.nextTrackId++;
             c.normalizeTracks();
+            for (const auto& gj : cj.value("guides", json::array()))
+                c.guides.push_back({gj.value("vertical", true), gj.value("position", 0.0f)});
         }
         out = std::move(p);
         return true;

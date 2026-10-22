@@ -6,7 +6,8 @@ add_library(bemotion_core STATIC
     core/Layer.cpp
     core/Presets.cpp
     core/Project.cpp
-    core/Serialization.cpp)
+    core/Serialization.cpp
+    core/Snapping.cpp)
 target_include_directories(bemotion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion_core PUBLIC nlohmann_json::nlohmann_json)
 

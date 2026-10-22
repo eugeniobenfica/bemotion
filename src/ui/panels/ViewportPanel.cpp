@@ -1,5 +1,7 @@
 #include "ui/panels/ViewportPanel.h"
 
+#include "core/Snapping.h"
+#include "render/Fonts.h"
 #include "render/SceneRenderer.h"
 #include "ui/EditorContext.h"
 #include "ui/Theme.h"
@@ -19,6 +21,7 @@ constexpr float kMinZoom = 0.02f;
 constexpr float kMaxZoom = 32.0f;
 constexpr float kHandleRadius = 5.0f;
 constexpr float kRotateOffset = 26.0f;
+constexpr float kRuler = 20.0f; // ruler band thickness
 // Neutral gray around the frame so the composition edge is always visible.
 constexpr ImU32 kCanvasColor = IM_COL32(30, 30, 34, 255);
 
@@ -82,6 +85,20 @@ void outline(ImDrawList* dl, const Handles& h, ImU32 col, float thickness) {
 
 bool near(Vec2 a, Vec2 b, float r) { return (a - b).length() <= r; }
 
+// Axis-aligned bounds of a layer in composition pixels.
+bool compBox(const Layer& layer, double t, Vec2& mn, Vec2& mx) {
+    Vec2 lmn, lmx;
+    if (!render::localBounds(layer, t, lmn, lmx)) return false;
+    const Affine m = layer.matrixAt(t);
+    const Vec2 corners[4] = {m.apply(lmn), m.apply({lmx.x, lmn.y}), m.apply(lmx), m.apply({lmn.x, lmx.y})};
+    mn = mx = corners[0];
+    for (const Vec2& c : corners) {
+        mn = {std::min(mn.x, c.x), std::min(mn.y, c.y)};
+        mx = {std::max(mx.x, c.x), std::max(mx.y, c.y)};
+    }
+    return true;
+}
+
 bool spaceHeld() { return ImGui::IsKeyDown(ImGuiKey_Space) && !ImGui::GetIO().WantTextInput; }
 
 } // namespace
@@ -123,6 +140,8 @@ void ViewportPanel::draw(EditorContext& ctx) {
     const bool hovered = ImGui::IsItemHovered();
     if (hovered) ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY); // the wheel zooms here, nothing else scrolls
 
+    snapLinesX_.clear();
+    snapLinesY_.clear();
     handleDrop(ctx);
     handleNavigation(hovered);
     handleSelectionInput(ctx, hovered);
@@ -133,9 +152,12 @@ void ViewportPanel::draw(EditorContext& ctx) {
     dl->AddRectFilled(ImVec2(origin_.x + 4, origin_.y + 6), ImVec2(compMax.x + 4, compMax.y + 6), IM_COL32(0, 0, 0, 90), 2);
     render::drawComposition(dl, c, ctx.time, view);
     dl->AddRect(im(origin_), im(compMax), theme::kBorder);
+    drawGuides(ctx);
     drawOverlay(ctx, hovered);
     dl->PopClipRect();
 
+    handleGuides(ctx); // rulers are items on top of the canvas
+    drawRulers(ctx);
     drawHud(ctx);
     ImGui::End();
 }
@@ -183,6 +205,10 @@ void ViewportPanel::handleDrop(EditorContext& ctx) {
         dropKind_ = *static_cast<const int*>(payload->Data);
         dropPos_ = (mouse - origin_) / zoom_;
         dropPos_ = {std::round(dropPos_.x), std::round(dropPos_.y)};
+        if (ctx.snapping && !ImGui::GetIO().KeyCtrl) { // the new object's center snaps too
+            collectSnapTargets(ctx, {});
+            dropPos_ = dropPos_ + snapMove(dropPos_, dropPos_, {0, 0});
+        }
         dropHover_ = true;
         if (payload->IsDelivery()) {
             if (dropKind_ < 0) ctx.addText(dropPos_);
@@ -222,9 +248,16 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
         dragMoved_ = false;
         dragStartScreen_ = mouse;
         dragStartMouse_ = mouseComp;
+        const int guide = guideAt(ctx, mouse);
         if (spaceHeld() || io.KeyAlt) {
             drag_ = Drag::Pan;
             if (spaceHeld()) spaceUsed_ = true;
+        } else if (guide >= 0 && !ctx.lockGuides) {
+            guideDrag_ = guide; // guides win over the layers underneath
+            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                guideEdit_ = guide;
+                ImGui::OpenPopup("##guideEdit");
+            }
         } else {
             if (haveHandles && !additive) {
                 for (int i = 0; i < 4; ++i)
@@ -255,8 +288,20 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                         drag_ = Drag::Move;
                         dragLayer_ = hit;
                         dragStartPositions_.clear();
-                        for (Layer* l : ctx.selectedLayers())
-                            if (!l->locked) dragStartPositions_.emplace_back(l->id, l->transform.position.valueAt(t));
+                        std::vector<uint64_t> moving;
+                        dragBoxMin_ = {1e9f, 1e9f};
+                        dragBoxMax_ = {-1e9f, -1e9f};
+                        for (Layer* l : ctx.selectedLayers()) {
+                            if (l->locked) continue;
+                            dragStartPositions_.emplace_back(l->id, l->transform.position.valueAt(t));
+                            moving.push_back(l->id);
+                            Vec2 mn, mx;
+                            if (l->activeAt(t) && compBox(*l, t, mn, mx)) {
+                                dragBoxMin_ = {std::min(dragBoxMin_.x, mn.x), std::min(dragBoxMin_.y, mn.y)};
+                                dragBoxMax_ = {std::max(dragBoxMax_.x, mx.x), std::max(dragBoxMax_.y, mx.y)};
+                            }
+                        }
+                        collectSnapTargets(ctx, moving);
                     }
                 } else {
                     drag_ = Drag::Marquee;
@@ -299,6 +344,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
     case Drag::Move: {
         Vec2 delta = mouseComp - dragStartMouse_;
         if (io.KeyShift) (std::fabs(delta.x) > std::fabs(delta.y) ? delta.y : delta.x) = 0.0f;
+        if (ctx.snapping && !io.KeyCtrl) delta = delta + snapMove(dragBoxMin_, dragBoxMax_, delta);
         for (const auto& [id, start] : dragStartPositions_)
             if (Layer* l = ctx.comp().findLayer(id)) l->transform.position.set(t, start + delta);
         break;
@@ -413,6 +459,16 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
         }
     }
 
+    // Smart-guide lines for whatever snapped this frame.
+    for (float x : snapLinesX_) {
+        const float sx = view.toScreen({x, 0}).x;
+        dl->AddLine(ImVec2(sx, canvasMin_.y), ImVec2(sx, canvasMax_.y), theme::kSnap, 1.0f);
+    }
+    for (float y : snapLinesY_) {
+        const float sy = view.toScreen({0, y}).y;
+        dl->AddLine(ImVec2(canvasMin_.x, sy), ImVec2(canvasMax_.x, sy), theme::kSnap, 1.0f);
+    }
+
     // Ghost of an object being dragged in from the Objects panel.
     if (dropHover_) {
         Layer ghost = dropKind_ < 0 ? makeTextLayer("Your text", dropPos_, comp.duration)
@@ -440,9 +496,13 @@ void ViewportPanel::drawHud(EditorContext& ctx) {
 
     // Zoom controls, bottom right: [-] [ 50% v ] [+] [Fit]
     const float comboW = 76.0f, btn = lineH;
-    float x = canvasMax_.x - 12 - (btn * 2 + comboW + 46 + 4 * 3);
+    float x = canvasMax_.x - 12 - (btn * 3 + comboW + 46 + 4 * 3 + 12);
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(30, 30, 34, 220));
     ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(30, 30, 34, 220));
+    ImGui::SetCursorScreenPos(ImVec2(x, y));
+    if (ui::iconButton("##snap", ui::Icon::Magnet, btn, "Snapping (S) - hold Ctrl while dragging to bypass", ctx.snapping))
+        ctx.snapping = !ctx.snapping;
+    x += btn + 12;
     ImGui::SetCursorScreenPos(ImVec2(x, y));
     if (ui::iconButton("##zoomOut", ui::Icon::ZoomOut, btn, "Zoom out (Ctrl+-)")) zoomBy(1.0f / 1.25f);
     x += btn + 4;
@@ -467,6 +527,204 @@ void ViewportPanel::drawHud(EditorContext& ctx) {
     if (ImGui::Button("Fit", ImVec2(46, 0))) requestFit();
     ui::tooltip("Fit composition to view (Ctrl+0)\nWheel: zoom  ·  Middle/right drag or Space+drag: pan");
     ImGui::PopStyleColor(2);
+}
+
+// --- snapping & guides ------------------------------------------------------------------
+
+void ViewportPanel::collectSnapTargets(EditorContext& ctx, const std::vector<uint64_t>& exclude) {
+    const Composition& comp = ctx.comp();
+    snapTargetsX_ = {0.0, comp.width * 0.5, static_cast<double>(comp.width)};
+    snapTargetsY_ = {0.0, comp.height * 0.5, static_cast<double>(comp.height)};
+    if (ctx.showGuides)
+        for (const Guide& g : comp.guides) (g.vertical ? snapTargetsX_ : snapTargetsY_).push_back(g.position);
+    for (const Layer& l : comp.layers) {
+        if (!l.activeAt(ctx.time) || std::find(exclude.begin(), exclude.end(), l.id) != exclude.end()) continue;
+        Vec2 mn, mx;
+        if (!compBox(l, ctx.time, mn, mx)) continue;
+        snapTargetsX_.insert(snapTargetsX_.end(), {mn.x, (mn.x + mx.x) * 0.5, mx.x});
+        snapTargetsY_.insert(snapTargetsY_.end(), {mn.y, (mn.y + mx.y) * 0.5, mx.y});
+    }
+}
+
+Vec2 ViewportPanel::snapMove(Vec2 boxMin, Vec2 boxMax, Vec2 delta) {
+    const double threshold = 8.0 / zoom_; // 8 screen pixels
+    Vec2 correction{0, 0};
+    const SnapResult sx = snap1D({boxMin.x + delta.x, (boxMin.x + boxMax.x) * 0.5 + delta.x, boxMax.x + delta.x},
+                                 snapTargetsX_, threshold);
+    if (sx.snapped) {
+        correction.x = static_cast<float>(sx.offset);
+        snapLinesX_.push_back(static_cast<float>(sx.target));
+    }
+    const SnapResult sy = snap1D({boxMin.y + delta.y, (boxMin.y + boxMax.y) * 0.5 + delta.y, boxMax.y + delta.y},
+                                 snapTargetsY_, threshold);
+    if (sy.snapped) {
+        correction.y = static_cast<float>(sy.offset);
+        snapLinesY_.push_back(static_cast<float>(sy.target));
+    }
+    return correction;
+}
+
+int ViewportPanel::guideAt(EditorContext& ctx, Vec2 screen) const {
+    if (!ctx.showGuides) return -1;
+    const render::View view{origin_, zoom_};
+    const auto& guides = ctx.comp().guides;
+    for (int i = static_cast<int>(guides.size()) - 1; i >= 0; --i) {
+        const Vec2 s = view.toScreen({guides[i].position, guides[i].position});
+        if (guides[i].vertical ? std::fabs(screen.x - s.x) <= 4.0f : std::fabs(screen.y - s.y) <= 4.0f) return i;
+    }
+    return -1;
+}
+
+void ViewportPanel::handleGuides(EditorContext& ctx) {
+    const ImGuiIO& io = ImGui::GetIO();
+    const render::View view{origin_, zoom_};
+    const Vec2 mouse = vec(io.MousePos);
+    const Vec2 mouseComp = view.toComp(mouse);
+    auto& guides = ctx.comp().guides;
+
+    // Drag a guide out of a ruler.
+    if (ctx.showRulers && ctx.showGuides) {
+        ImGui::SetCursorScreenPos(ImVec2(canvasMin_.x + kRuler, canvasMin_.y));
+        ImGui::InvisibleButton("##rulerTop", ImVec2(std::max(1.0f, canvasMax_.x - canvasMin_.x - kRuler), kRuler));
+        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+        ui::tooltip("Drag into the canvas to add a horizontal guide");
+        if (ImGui::IsItemActivated() && !ctx.lockGuides) {
+            guides.push_back({false, std::round(mouseComp.y)});
+            guideDrag_ = static_cast<int>(guides.size()) - 1;
+        }
+        ImGui::SetCursorScreenPos(ImVec2(canvasMin_.x, canvasMin_.y + kRuler));
+        ImGui::InvisibleButton("##rulerLeft", ImVec2(kRuler, std::max(1.0f, canvasMax_.y - canvasMin_.y - kRuler)));
+        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        ui::tooltip("Drag into the canvas to add a vertical guide");
+        if (ImGui::IsItemActivated() && !ctx.lockGuides) {
+            guides.push_back({true, std::round(mouseComp.x)});
+            guideDrag_ = static_cast<int>(guides.size()) - 1;
+        }
+    }
+
+    // Hover feedback over an existing guide.
+    const bool inCanvas =
+        mouse.x >= canvasMin_.x && mouse.x < canvasMax_.x && mouse.y >= canvasMin_.y && mouse.y < canvasMax_.y;
+    if (guideDrag_ < 0 && drag_ == Drag::None && inCanvas && !ctx.lockGuides && ImGui::IsWindowHovered())
+        if (const int g = guideAt(ctx, mouse); g >= 0)
+            ImGui::SetMouseCursor(guides[g].vertical ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+
+    // Move the guide being dragged; dropping it on a ruler (or outside) deletes it.
+    if (guideDrag_ >= 0 && guideDrag_ < static_cast<int>(guides.size())) {
+        Guide& g = guides[guideDrag_];
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            double pos = std::round(g.vertical ? mouseComp.x : mouseComp.y);
+            const double size = g.vertical ? compSize_.x : compSize_.y;
+            if (ctx.snapping && !io.KeyCtrl)
+                if (const SnapResult s = snap1D({pos}, {0.0, size * 0.5, size}, 8.0 / zoom_); s.snapped) pos = s.target;
+            g.position = static_cast<float>(pos);
+            ImGui::SetMouseCursor(g.vertical ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+        } else {
+            const bool overRuler = mouse.x < canvasMin_.x + kRuler || mouse.y < canvasMin_.y + kRuler;
+            if (overRuler || !inCanvas) guides.erase(guides.begin() + guideDrag_);
+            guideDrag_ = -1;
+        }
+        ctx.touch();
+    } else {
+        guideDrag_ = -1;
+    }
+
+    // Double-click on a guide: exact position.
+    if (ImGui::BeginPopup("##guideEdit")) {
+        if (guideEdit_ >= 0 && guideEdit_ < static_cast<int>(guides.size())) {
+            Guide& g = guides[guideEdit_];
+            ImGui::TextUnformatted(g.vertical ? "Vertical guide" : "Horizontal guide");
+            ImGui::SetNextItemWidth(160);
+            if (ImGui::DragFloat("##pos", &g.position, 1.0f, -100000.0f, 100000.0f, "%.0f px")) ctx.touch();
+            if (ImGui::Button("Delete Guide")) {
+                guides.erase(guides.begin() + guideEdit_);
+                guideEdit_ = -1;
+                ctx.touch();
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        ImGui::EndPopup();
+    }
+}
+
+void ViewportPanel::drawGuides(EditorContext& ctx) {
+    if (!ctx.showGuides) return;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const render::View view{origin_, zoom_};
+    const auto& guides = ctx.comp().guides;
+    for (int i = 0; i < static_cast<int>(guides.size()); ++i) {
+        const Guide& g = guides[i];
+        const Vec2 s = view.toScreen({g.position, g.position});
+        const bool active = i == guideDrag_;
+        const ImU32 col = active ? theme::kText : theme::kGuide;
+        if (g.vertical) dl->AddLine(ImVec2(s.x, canvasMin_.y), ImVec2(s.x, canvasMax_.y), col, 1.0f);
+        else dl->AddLine(ImVec2(canvasMin_.x, s.y), ImVec2(canvasMax_.x, s.y), col, 1.0f);
+        if (active) {
+            char buf[32];
+            std::snprintf(buf, sizeof(buf), "%.0f px", g.position);
+            const ImVec2 at = g.vertical ? ImVec2(s.x + 6, canvasMin_.y + kRuler + 6)
+                                         : ImVec2(canvasMin_.x + kRuler + 6, s.y + 4);
+            dl->AddText(at, theme::kText, buf);
+        }
+    }
+}
+
+void ViewportPanel::drawRulers(EditorContext& ctx) {
+    if (!ctx.showRulers) return;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const render::View view{origin_, zoom_};
+    const ImVec2 a = im(canvasMin_), b = im(canvasMax_);
+    const ImU32 bg = IM_COL32(20, 20, 23, 245);
+    dl->AddRectFilled(a, ImVec2(b.x, a.y + kRuler), bg);
+    dl->AddRectFilled(ImVec2(a.x, a.y + kRuler), ImVec2(a.x + kRuler, b.y), bg);
+    dl->AddLine(ImVec2(a.x, a.y + kRuler), ImVec2(b.x, a.y + kRuler), theme::kBorder);
+    dl->AddLine(ImVec2(a.x + kRuler, a.y), ImVec2(a.x + kRuler, b.y), theme::kBorder);
+
+    // Tick spacing in composition pixels, at least ~60 screen pixels apart.
+    float step = 5000.0f;
+    for (float s : {1.f, 2.f, 5.f, 10.f, 25.f, 50.f, 100.f, 250.f, 500.f, 1000.f, 2500.f, 5000.f})
+        if (s * zoom_ >= 60.0f) {
+            step = s;
+            break;
+        }
+    ImFont* font = Fonts::ui();
+    const float fs = 10.5f;
+    char label[16];
+    // Top ruler (x).
+    dl->PushClipRect(ImVec2(a.x + kRuler, a.y), ImVec2(b.x, a.y + kRuler), true);
+    const float x0 = view.toComp(Vec2(a.x + kRuler, 0)).x, x1 = view.toComp(Vec2(b.x, 0)).x;
+    for (float x = std::floor(x0 / step) * step; x <= x1; x += step) {
+        const float sx = view.toScreen({x, 0}).x;
+        dl->AddLine(ImVec2(sx, a.y + kRuler - 8), ImVec2(sx, a.y + kRuler), theme::kTextFaint);
+        for (int k = 1; k < 5; ++k) {
+            const float mx = view.toScreen({x + step * k / 5.0f, 0}).x;
+            dl->AddLine(ImVec2(mx, a.y + kRuler - 3), ImVec2(mx, a.y + kRuler), theme::kBorder);
+        }
+        std::snprintf(label, sizeof(label), "%.0f", x);
+        dl->AddText(font, fs, ImVec2(sx + 3, a.y + 2), theme::kTextFaint, label);
+    }
+    dl->PopClipRect();
+    // Left ruler (y).
+    dl->PushClipRect(ImVec2(a.x, a.y + kRuler), ImVec2(a.x + kRuler, b.y), true);
+    const float y0 = view.toComp(Vec2(0, a.y + kRuler)).y, y1 = view.toComp(Vec2(0, b.y)).y;
+    for (float y = std::floor(y0 / step) * step; y <= y1; y += step) {
+        const float sy = view.toScreen({0, y}).y;
+        dl->AddLine(ImVec2(a.x + kRuler - 8, sy), ImVec2(a.x + kRuler, sy), theme::kTextFaint);
+        for (int k = 1; k < 5; ++k) {
+            const float my = view.toScreen({0, y + step * k / 5.0f}).y;
+            dl->AddLine(ImVec2(a.x + kRuler - 3, my), ImVec2(a.x + kRuler, my), theme::kBorder);
+        }
+        std::snprintf(label, sizeof(label), "%.0f", y);
+        dl->AddText(font, fs, ImVec2(a.x + 2, sy + 2), theme::kTextFaint, label);
+    }
+    dl->PopClipRect();
+
+    // Mouse position markers.
+    const ImVec2 m = ImGui::GetIO().MousePos;
+    if (m.x > a.x + kRuler && m.x < b.x && m.y > a.y && m.y < b.y) {
+        dl->AddLine(ImVec2(m.x, a.y), ImVec2(m.x, a.y + kRuler), theme::kAccent);
+        dl->AddLine(ImVec2(a.x, m.y), ImVec2(a.x + kRuler, m.y), theme::kAccent);
+    }
 }
 
 } // namespace bemotion

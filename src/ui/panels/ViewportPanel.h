@@ -78,6 +78,22 @@ private:
     bool dropHover_ = false;
     int dropKind_ = 0;
     Vec2 dropPos_;
+
+    // --- snapping & guides ---------------------------------------------------------
+    // Targets in composition pixels: canvas center/edges, guides, other layers' edges/centers.
+    void collectSnapTargets(EditorContext& ctx, const std::vector<uint64_t>& exclude);
+    // Snaps a box moving by `delta` (composition pixels); records the lines to draw.
+    Vec2 snapMove(Vec2 boxMin, Vec2 boxMax, Vec2 delta);
+    void handleGuides(EditorContext& ctx);
+    void drawRulers(EditorContext& ctx);
+    void drawGuides(EditorContext& ctx);
+    int guideAt(EditorContext& ctx, Vec2 screen) const; // -1 if none
+
+    std::vector<double> snapTargetsX_, snapTargetsY_;
+    std::vector<float> snapLinesX_, snapLinesY_; // snapped this frame (composition pixels)
+    Vec2 dragBoxMin_, dragBoxMax_;                // moving layers' bounds at drag start
+    int guideDrag_ = -1;                          // index into Composition::guides
+    int guideEdit_ = -1;                          // guide whose position popup is open
 };
 
 } // namespace bemotion

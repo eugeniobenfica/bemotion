@@ -38,6 +38,10 @@ public:
     std::vector<KeySelection> selectedKeys;
 
     Tool tool = Tool::Select;
+    bool snapping = true;     // magnet: objects, clips and keyframes snap (hold Ctrl to bypass)
+    bool showGuides = true;
+    bool lockGuides = false;
+    bool showRulers = true;
     double time = 0.0;
     bool playing = false;
     bool loop = true;

@@ -6,6 +6,7 @@
 #include "core/Presets.h"
 #include "core/Project.h"
 #include "core/Serialization.h"
+#include "core/Snapping.h"
 
 #include <cmath>
 #include <cstdio>
@@ -281,6 +282,21 @@ void testDefaultValues() {
     CHECK((defaultPropertyValue(l, "position", {960, 540}) == std::vector<float>{960.0f, 540.0f}));
 }
 
+void testSnapping() {
+    // Edges 98 and 150 against targets 0, 100, 200: 98 -> 100 is the closest.
+    SnapResult r = snap1D({98, 150}, {0, 100, 200}, 5);
+    CHECK(r.snapped && near(static_cast<float>(r.offset), 2.0f) && near(static_cast<float>(r.target), 100.0f));
+    CHECK(!snap1D({50}, {0, 100}, 5).snapped); // nothing close enough
+}
+
+void testGuidesRoundTrip() {
+    Project p;
+    p.comp.guides = {{true, 480.0f}, {false, 270.5f}};
+    Project q;
+    CHECK(deserializeProject(serializeProject(p), q));
+    CHECK(q.comp.guides.size() == 2 && !q.comp.guides[1].vertical && near(q.comp.guides[1].position, 270.5f));
+}
+
 void testTracksRoundTrip() {
     Project p;
     p.comp = makeSplitStack();
@@ -335,6 +351,8 @@ int main() {
         {"presets stack", testPresetsStack},
         {"preset json round trip", testPresetJsonRoundTrip},
         {"default values", testDefaultValues},
+        {"snapping", testSnapping},
+        {"guides round trip", testGuidesRoundTrip},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };
