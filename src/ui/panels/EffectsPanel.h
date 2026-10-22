@@ -23,8 +23,13 @@ private:
     void drawBrowser(EditorContext& ctx);
 
     std::string search_;
+    std::string category_; // browser page; empty: the category grid
     std::string message_;
     std::string saveName_;
 };
+
+// "Effect" menu contents (categories as submenus, then presets): applies the
+// choice to the selected layers. Used by the timeline's layer menu and Layer > Effect.
+void effectMenuItems(EditorContext& ctx);
 
 } // namespace bemotion

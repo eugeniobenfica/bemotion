@@ -26,13 +26,19 @@ common moves are one click away through *Quick Animations*.
   rulers); in the timeline clips snap to each other, keyframes and the playhead
 - **Motion paths**: position keyframes follow a curve drawn in the viewport —
   drag the keys and their bezier handles (Alt breaks a handle into a corner)
+- **Graph Editor** (the curve button in the timeline toolbar), like After
+  Effects': value curves of the selected layer (X / Y separately), drag
+  keyframes and easing handles; Easy Ease (F9), Ease In (Shift+F9), Ease Out
+  (Ctrl+Shift+F9), Linear and Hold
 - **Properties panel**: every property is animatable, with a keyframe toggle
   and a **reset** button; collapsible sections; any installed **font family**
 - **Effects** tab next to Properties (like After Effects' *Effect Controls* +
   *Effects & Presets*): Gaussian and Directional Blur, Brightness & Contrast,
   Hue/Saturation, Tint, Invert, Wave Warp, Fill, Stroke, Drop Shadow, Glow and
-  Motion Blur — GPU rendered, stackable, every parameter keyframable (also in
-  the timeline under *Effects*), with presets you can **import / save**
+  Motion Blur — browse them by category icons, apply from the tab or from the
+  timeline's right-click *Effect* menu (also *Layer → Effect*); GPU rendered,
+  stackable, every parameter keyframable (also in the timeline under
+  *Effects*), with presets you can **import / save**
 - **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
   Draw On… stack without breaking; **import** more or save your own
 - **Timeline**: tracks holding several clips, trim in/out (clamped to
@@ -45,7 +51,8 @@ common moves are one click away through *Quick Animations*.
   (built in on Windows), PNG sequence with transparency, and — with
   [FFmpeg](https://ffmpeg.org) installed — MOV ProRes 4444, WebM VP9 and GIF
 - **Panels** can be minimized to their tab (the arrow at the right of the tab bar)
-- **Settings** (Ctrl+, or the gear) with *Theme*, *Editor* and *Plugins* tabs: Dark, Light and Midnight themes, any
+- **Settings** (Ctrl+, or the gear) with *Theme*, *Interface* (timeline row
+  heights, keyframe size, text size), *Editor* and *Plugins* pages: Dark, Light and Midnight themes, any
   accent color, and an *advanced mode* to edit every UI color, rounding and the
   snap distance; **import, save and export themes** (JSON, see
   [examples/themes](examples/themes))
@@ -105,6 +112,7 @@ The format follows the file extension (`.mp4`, `.png`, `.mov`, `.webm`, `.gif`).
 | Ctrl+M | Export video |
 | S | Toggle snapping (hold Ctrl while dragging to skip it) |
 | Ctrl+, | Settings |
+| F9 / Shift+F9 / Ctrl+Shift+F9 | Easy Ease / Ease In / Ease Out on the selected keyframes |
 | Wheel · Middle/right drag | Zoom · pan the viewport |
 | Ctrl+0 / Ctrl+1 / Ctrl+= / Ctrl+- | Fit / 100% / zoom in / zoom out |
 

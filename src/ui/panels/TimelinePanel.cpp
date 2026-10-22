@@ -5,6 +5,7 @@
 #include "render/Fonts.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
+#include "ui/panels/EffectsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 
 #include <imgui.h>
@@ -20,11 +21,12 @@ namespace bemotion {
 namespace {
 
 constexpr float kRulerHeight = 26.0f;
-constexpr float kLayerRowHeight = 36.0f;
-constexpr float kPropRowHeight = 30.0f;
-constexpr float kGroupRowHeight = 24.0f;
+// Row sizes come from Settings > Interface.
+float layerRowHeight() { return settings().timelineLayerRow; }
+float propRowHeight() { return settings().timelinePropertyRow; }
+float groupRowHeight() { return std::max(18.0f, settings().timelinePropertyRow * 0.8f); }
 constexpr float kEdgeGrab = 6.0f;
-constexpr float kKeyRadius = 5.0f;
+float keyRadius() { return settings().keyframeSize; }
 
 ImU32 toU32(Color c, float alpha = 1.0f) { return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, c.a * alpha)); }
 
@@ -153,6 +155,9 @@ void TimelinePanel::draw(EditorContext& ctx) {
     rows_.clear();
     clips_.clear();
     auto& layers = comp.layers;
+    if (graphMode_) {
+        drawGraphEditor(ctx, x0, winPos.y, winSize.y);
+    } else {
     const auto trackRows = comp.trackRows();
     for (int r = 0; r < static_cast<int>(trackRows.size()); ++r) {
         const TrackRow& row = trackRows[r];
@@ -188,7 +193,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
     // Empty space below the rows: click to deselect, drag to box-select.
     const float y = ImGui::GetCursorScreenPos().y;
     rowsBottom_ = y;
-    const float rest = std::max(kLayerRowHeight, winPos.y + winSize.y - y);
+    const float rest = std::max(layerRowHeight(), winPos.y + winSize.y - y);
     ImGui::SetCursorScreenPos(ImVec2(x0, y));
     ImGui::InvisibleButton("##empty", ImVec2(avail.x, rest));
     if (ImGui::IsItemActivated()) beginMarquee(ctx);
@@ -200,6 +205,8 @@ void TimelinePanel::draw(EditorContext& ctx) {
         const ImVec2 ts = ImGui::CalcTextSize(hint);
         dl->AddText(ImVec2(winPos.x + (winSize.x - ts.x) * 0.5f, y + 24), theme::kTextFaint, hint);
     }
+
+    } // rows
 
     // Column divider, area past the end of the composition, playhead.
     const float bodyTop = winPos.y, bodyBottom = winPos.y + winSize.y;
@@ -285,18 +292,43 @@ void TimelinePanel::drawToolbar(EditorContext& ctx) {
     ImGui::TextColored(theme::vec(theme::kTextFaint), "frame %d / %d  ·  %.4g fps", comp.frameAt(ctx.time),
                        comp.frameCount() - 1, comp.fps);
 
-    // Right-aligned controls.
-    const float rightW = 330.0f;
+    // Graph editor easing buttons (for the selected keyframes).
+    if (graphMode_) {
+        ImGui::SameLine(0, 20);
+        const bool any = !ctx.selectedKeys.empty();
+        ImGui::BeginDisabled(!any);
+        if (ImGui::SmallButton("Easy Ease")) applyEase(ctx, Ease::EasyEase);
+        ui::tooltip("Smooth in and out of the selected keyframes (F9)");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Ease In")) applyEase(ctx, Ease::EaseIn);
+        ui::tooltip("Slow down into the selected keyframes (Shift+F9)");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Ease Out")) applyEase(ctx, Ease::EaseOut);
+        ui::tooltip("Speed up out of the selected keyframes (Ctrl+Shift+F9)");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Linear")) applyEase(ctx, Ease::Linear);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Hold")) applyEase(ctx, Ease::Hold);
+        ImGui::EndDisabled();
+    }
+
+    // Right-aligned controls: icons only.
+    const float rightW = s * 5 + 2 * 4 + 12;
     ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 10, toolbarRight - rightW));
-    ImGui::Checkbox("Animated only", &animatedOnly_);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
+    if (ui::iconButton("##graph", ui::Icon::Graph, s, "Graph Editor: edit the curves of the selected layer's keyframes",
+                       graphMode_))
+        graphMode_ = !graphMode_;
     ImGui::SameLine();
-    float zoom = static_cast<float>(pxPerSec_);
-    ImGui::SetNextItemWidth(110);
-    if (ImGui::SliderFloat("##zoom", &zoom, 10.0f, 2000.0f, "Zoom", ImGuiSliderFlags_Logarithmic)) pxPerSec_ = zoom;
-    ui::tooltip("Timeline zoom (Ctrl+Wheel)");
+    if (ui::iconButton("##animOnly", ui::Icon::Diamond, s, "Show only animated properties", animatedOnly_))
+        animatedOnly_ = !animatedOnly_;
+    ImGui::SameLine(0, 10);
+    if (ui::iconButton("##zoomOut", ui::Icon::ZoomOut, s, "Zoom out (Ctrl+Wheel)")) pxPerSec_ /= 1.5;
     ImGui::SameLine();
-    if (ImGui::Button("Fit")) pxPerSec_ = 0.0;
-    ui::tooltip("Fit the whole composition");
+    if (ui::iconButton("##zoomIn", ui::Icon::ZoomIn, s, "Zoom in (Ctrl+Wheel)")) pxPerSec_ *= 1.5;
+    ImGui::SameLine();
+    if (ui::iconButton("##fit", ui::Icon::Reset, s, "Fit the whole composition")) pxPerSec_ = 0.0;
+    ImGui::PopStyleVar();
 }
 
 void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float width) {
@@ -313,11 +345,15 @@ void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float widt
     if (ImGui::IsItemActivated()) {
         collectTimeSnapTargets(ctx, {}, false);
         timeTargets_.erase(timeTargets_.begin() + 2); // the playhead itself (see collectTimeSnapTargets)
+        // Grabbing the playhead keeps the grab point: it moves with the mouse instead of
+        // jumping to it, and snapping tests where the playhead is, not the cursor.
+        const float mx = ImGui::GetIO().MousePos.x;
+        playheadGrab_ = std::fabs(mx - timeToX(ctx.time)) <= 8.0f ? ctx.time - xToTime(mx) : 0.0;
     }
     if (ImGui::IsItemActive()) {
         ctx.playing = false;
         const ImGuiIO& io = ImGui::GetIO();
-        double t = xToTime(io.MousePos.x);
+        double t = xToTime(io.MousePos.x) + playheadGrab_;
         // With the magnet on (or Shift held) the playhead snaps to clip edges and keyframes.
         // The targets were collected once on press, so the playhead never snaps to itself.
         if ((ctx.snapping || io.KeyShift) && !io.KeyCtrl) {
@@ -377,7 +413,7 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
     const ImGuiIO& io = ImGui::GetIO();
     auto& layers = ctx.comp().layers;
     const float y = ImGui::GetCursorScreenPos().y;
-    const float h = kLayerRowHeight;
+    const float h = layerRowHeight();
     rows_.push_back({rowIndex, row.track, y, y + h});
 
     // The clip that represents the track in the left column: the primary
@@ -458,6 +494,11 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
             }
             if (ImGui::MenuItem("Duplicate", "Ctrl+D")) ctx.duplicateSelected();
             if (ImGui::MenuItem("Split at Playhead", "Ctrl+K")) ctx.splitSelectedAtPlayhead();
+            ImGui::Separator();
+            if (ImGui::BeginMenu("Effect")) {
+                effectMenuItems(ctx);
+                ImGui::EndMenu();
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Bring to Front", "Ctrl+Shift+]")) ctx.shiftSelected(-1000);
             if (ImGui::MenuItem("Bring Forward", "Ctrl+]")) ctx.shiftSelected(-1);
@@ -555,7 +596,7 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
 bool TimelinePanel::drawGroupRow(uint64_t track, const char* group, float x0, float width, float indent) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float y = ImGui::GetCursorScreenPos().y;
-    const float h = kGroupRowHeight;
+    const float h = groupRowHeight();
     const std::string key = std::to_string(track) + "/" + group;
     const bool open = !collapsedGroups_.count(key);
 
@@ -583,7 +624,7 @@ void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const Prop
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImGuiIO& io = ImGui::GetIO();
     const float y = ImGui::GetCursorScreenPos().y;
-    const float h = kPropRowHeight;
+    const float h = propRowHeight();
     AnimatedBase& anim = *prop.anim;
     ImGui::PushID(prop.id);
 
@@ -622,7 +663,7 @@ void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const Prop
     int hoveredKey = -1;
     if (ImGui::IsItemHovered())
         for (int k = 0; k < anim.keyCount(); ++k)
-            if (std::fabs(io.MousePos.x - timeToX(anim.keyTime(k))) <= kKeyRadius + 2) hoveredKey = k;
+            if (std::fabs(io.MousePos.x - timeToX(anim.keyTime(k))) <= keyRadius() + 2) hoveredKey = k;
 
     if (ImGui::IsItemActivated()) {
         if (hoveredKey >= 0) {
@@ -660,7 +701,7 @@ void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const Prop
         const bool sel = ctx.isKeySelected({layer.id, prop.id, anim.keyUid(k)});
         const ImU32 fill = sel ? theme::kAccent : (k == hoveredKey ? theme::kText : theme::kTextDim);
         const ImU32 outline = sel ? theme::kAccentHover : theme::kBgDeep;
-        drawKeyGlyph(dl, ImVec2(timeToX(anim.keyTime(k)), cy), kKeyRadius + (sel ? 1.0f : 0.0f), anim.keyEasing(k), fill,
+        drawKeyGlyph(dl, ImVec2(timeToX(anim.keyTime(k)), cy), keyRadius() + (sel ? 1.0f : 0.0f), anim.keyEasing(k), fill,
                      outline);
     }
     if (hoveredKey >= 0) ui::tooltip(easingLabel(anim.keyEasing(hoveredKey)));
@@ -763,7 +804,7 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
     const ImGuiIO& io = ImGui::GetIO();
     Composition& comp = ctx.comp();
     const float dx = io.MousePos.x - dragStartX_, dy = io.MousePos.y - dragStartY_;
-    if ((drag_ == Drag::LayerName || drag_ == Drag::LayerMove) && std::fabs(dy) > kLayerRowHeight * 0.6f)
+    if ((drag_ == Drag::LayerName || drag_ == Drag::LayerMove) && std::fabs(dy) > layerRowHeight() * 0.6f)
         restacking_ = true;
     if (restacking_) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
 

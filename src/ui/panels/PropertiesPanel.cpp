@@ -490,7 +490,6 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
     }
 
     if (layer.type == LayerType::Camera) return; // cameras are not drawn: no effects or animation presets
-    drawEffects(ctx, layer);
     drawPresets(ctx, layer);
 }
 
@@ -564,18 +563,6 @@ void PropertiesPanel::drawPluginData(EditorContext& ctx, Layer& layer) {
         ImGui::SetClipboardText(text.c_str());
     }
     ui::tooltip("Copy the data as CSV");
-}
-
-void PropertiesPanel::drawEffects(EditorContext& ctx, Layer& layer) {
-    (void)ctx;
-    // Effects live in their own tab (Effect Controls), like After Effects.
-    if (!ImGui::CollapsingHeader("Effects", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    std::string list;
-    for (const Effect& e : layer.effects) list += (list.empty() ? "" : ", ") + e.group;
-    ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
-    ImGui::TextWrapped("%s", list.empty() ? "No effects." : list.c_str());
-    ImGui::PopStyleColor();
-    if (ImGui::Button("Open Effects Tab", ImVec2(-FLT_MIN, 0))) ImGui::SetWindowFocus("Effects");
 }
 
 void PropertiesPanel::drawPresets(EditorContext& ctx, Layer& layer) {

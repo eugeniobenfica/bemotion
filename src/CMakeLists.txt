@@ -47,6 +47,7 @@ add_executable(bemotion WIN32
     ui/panels/EffectsPanel.cpp
     ui/panels/ObjectsPanel.cpp
     ui/panels/PropertiesPanel.cpp
+    ui/panels/TimelineGraph.cpp
     ui/panels/TimelinePanel.cpp
     ui/panels/ViewportPanel.cpp)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

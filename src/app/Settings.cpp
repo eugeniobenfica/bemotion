@@ -68,6 +68,10 @@ void loadSettings() {
         s.advanced = j.value("advanced", false);
         s.snapDistance = std::clamp(j.value("snap_distance", s.snapDistance), 2.0f, 30.0f);
         s.disabledPlugins = j.value("disabled_plugins", std::vector<std::string>{});
+        s.timelineLayerRow = std::clamp(j.value("timeline_layer_row", s.timelineLayerRow), 22.0f, 80.0f);
+        s.timelinePropertyRow = std::clamp(j.value("timeline_property_row", s.timelinePropertyRow), 20.0f, 60.0f);
+        s.keyframeSize = std::clamp(j.value("keyframe_size", s.keyframeSize), 3.0f, 10.0f);
+        s.textScale = std::clamp(j.value("text_scale", s.textScale), 0.8f, 1.5f);
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
     } catch (const std::exception&) {
         // Missing or unreadable settings: keep the defaults.
@@ -77,7 +81,9 @@ void loadSettings() {
 void saveSettings() {
     const Settings& s = settings();
     json j = {{"theme", s.theme},        {"custom_accent", s.customAccent}, {"accent", s.accent},
-              {"advanced", s.advanced}, {"snap_distance", s.snapDistance}, {"disabled_plugins", s.disabledPlugins}};
+              {"advanced", s.advanced}, {"snap_distance", s.snapDistance}, {"disabled_plugins", s.disabledPlugins},
+              {"timeline_layer_row", s.timelineLayerRow}, {"timeline_property_row", s.timelinePropertyRow},
+              {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);
 }
@@ -94,6 +100,7 @@ theme::Palette effectivePalette() {
 void applySettings(float dpiScale) {
     if (dpiScale > 0.0f) g_dpiScale = dpiScale;
     theme::apply(effectivePalette(), g_dpiScale);
+    ImGui::GetStyle().FontScaleMain = settings().textScale;
 }
 
 // --- themes ---------------------------------------------------------------------

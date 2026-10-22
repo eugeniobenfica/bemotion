@@ -154,6 +154,10 @@ void EditorScreen::drawMenuBar() {
     if (ImGui::BeginMenu("Layer")) {
         const bool any = !ctx_.selection.empty();
         if (ImGui::MenuItem("Split at Playhead", "Ctrl+K")) ctx_.splitSelectedAtPlayhead();
+        if (ImGui::BeginMenu("Effect", any)) {
+            effectMenuItems(ctx_);
+            ImGui::EndMenu();
+        }
         if (ImGui::MenuItem("Cut Tool", "C", ctx_.tool == Tool::Razor)) ctx_.tool = Tool::Razor;
         if (ImGui::MenuItem("Selection Tool", "V", ctx_.tool == Tool::Select)) ctx_.tool = Tool::Select;
         ImGui::Separator();
@@ -229,9 +233,10 @@ void EditorScreen::drawMenuBar() {
 
     // Export, always one click away in the top-right corner.
     const float exportW = 104.0f;
-    ImGui::SameLine(ImGui::GetWindowWidth() - exportW - 10 - 34);
+    const float edge = ImGui::GetStyle().WindowPadding.x + 6.0f; // stay clear of the window edge
+    ImGui::SameLine(ImGui::GetWindowWidth() - exportW - edge - 36);
     if (ui::iconButton("##settings", ui::Icon::Gear, 26.0f, "Settings (Ctrl+,)")) ui::openSettings();
-    ImGui::SameLine(ImGui::GetWindowWidth() - exportW - 10);
+    ImGui::SameLine(ImGui::GetWindowWidth() - exportW - edge);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 4));
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3);
     const ImVec2 bp = ImGui::GetCursorScreenPos();
@@ -266,6 +271,11 @@ void EditorScreen::handleShortcuts() {
         viewport_.zoomBy(1.0f / 1.25f);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_M, global)) exportDialog_.open(ctx_);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_K, global)) ctx_.splitSelectedAtPlayhead();
+    // Keyframe easing, as in After Effects.
+    if (ImGui::Shortcut(ImGuiKey_F9, global)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EasyEase);
+    if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_F9, global)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseIn);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F9, global))
+        TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseOut);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_RightBracket, global)) ctx_.shiftSelected(-1);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_LeftBracket, global)) ctx_.shiftSelected(1);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_RightBracket, global)) ctx_.shiftSelected(-1000);

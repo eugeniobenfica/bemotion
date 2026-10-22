@@ -9,7 +9,7 @@ namespace bemotion {
 class EditorContext;
 
 // Right panel: every property of the selected layer (or the composition when
-// nothing is selected), with keyframe toggles, effects and quick animation presets.
+// nothing is selected), with keyframe toggles and quick animation presets (effects have their own tab).
 class PropertiesPanel {
 public:
     static constexpr const char* kWindowName = "Properties";
@@ -19,7 +19,6 @@ public:
 private:
     void drawComposition(EditorContext& ctx);
     void drawLayer(EditorContext& ctx, Layer& layer);
-    void drawEffects(EditorContext& ctx, Layer& layer);
     void drawPluginData(EditorContext& ctx, Layer& layer);
     void drawPresets(EditorContext& ctx, Layer& layer);
 

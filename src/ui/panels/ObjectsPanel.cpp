@@ -45,9 +45,12 @@ void ObjectsPanel::draw(EditorContext& ctx) {
         return;
     }
 
+    // As many compact tiles per row as fit.
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
-    const float tileW = std::max(64.0f, (ImGui::GetContentRegionAvail().x - spacing) * 0.5f);
-    const ImVec2 tile(tileW, std::clamp(tileW * 0.78f, 64.0f, 110.0f));
+    const float avail = ImGui::GetContentRegionAvail().x;
+    const int cols = std::max(2, static_cast<int>((avail + spacing) / (84.0f + spacing)));
+    const float tileW = std::max(56.0f, (avail - spacing * (cols - 1)) / cols);
+    const ImVec2 tile(tileW, std::clamp(tileW * 0.8f, 56.0f, 84.0f));
 
     ui::sectionLabel("TEXT");
     if (ui::objectTile("##text", ui::Icon::Text, "Text", tile)) ctx.addText();
@@ -59,7 +62,7 @@ void ObjectsPanel::draw(EditorContext& ctx) {
     int column = 0;
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) {
         const auto kind = static_cast<ShapeKind>(i);
-        if (column++ % 2 == 1) ImGui::SameLine();
+        if (column++ % cols != 0) ImGui::SameLine();
         ImGui::PushID(i);
         if (ui::objectTile("##shape", ui::iconForShape(kind), shapeKindLabel(kind), tile)) ctx.addShape(kind);
         ui::tooltip("Click to add at the center, or drag onto the canvas");
@@ -88,7 +91,7 @@ void ObjectsPanel::draw(EditorContext& ctx) {
             ui::sectionLabel(title.c_str());
             column = 0;
         }
-        if (column++ % 2 == 1) ImGui::SameLine();
+        if (column++ % cols != 0) ImGui::SameLine();
         ImGui::PushID(static_cast<int>(i) + 1000);
         const ui::Icon icon = ui::iconForPlugin(type.icon);
         if (ui::objectTile("##plugin", icon, type.name.c_str(), tile)) ctx.addPluginObject(type);
@@ -98,10 +101,6 @@ void ObjectsPanel::draw(EditorContext& ctx) {
         ImGui::PopID();
     }
 
-    ImGui::Dummy(ImVec2(0, 10));
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-    ImGui::TextWrapped("Click an object to add it at the center, or drag it to any spot on the canvas.");
-    ImGui::PopStyleColor();
 
     ui::panelMinimizeButton();
     ImGui::End();

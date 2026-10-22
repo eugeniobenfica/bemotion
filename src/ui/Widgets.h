@@ -51,6 +51,20 @@ enum class Icon {
     BarChart,
     LineChart,
     PieChart,
+    // Effect categories
+    FxBlur,
+    FxColor,
+    FxChannel,
+    FxDistort,
+    FxGenerate,
+    FxPerspective,
+    FxStylize,
+    FxTime,
+    // Settings pages
+    Palette,
+    Sliders,
+    Graph,  // timeline graph editor
+    Back,   // "go back" arrow
 };
 
 Icon iconForLayer(const Layer& layer);

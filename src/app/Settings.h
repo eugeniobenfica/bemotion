@@ -21,6 +21,11 @@ struct Settings {
     bool customPalette = false;
     theme::Palette palette;
     float snapDistance = 8.0f; // screen pixels
+    // Interface sizes.
+    float timelineLayerRow = 36.0f;    // clip rows
+    float timelinePropertyRow = 30.0f; // keyframe rows (group headers derive from it)
+    float keyframeSize = 5.0f;         // keyframe glyph radius
+    float textScale = 1.0f;            // UI text size multiplier
     std::vector<std::string> disabledPlugins; // plugin ids
 };
 

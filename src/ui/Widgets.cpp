@@ -269,6 +269,81 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         dl->PathFillConvex(col);
         break;
     }
+    case Icon::FxBlur:
+        for (int i = 0; i < 3; ++i)
+            dl->AddCircle(c, h * (0.35f + 0.25f * i), (col & ~IM_COL32_A_MASK) | (static_cast<ImU32>(255 - i * 80) << IM_COL32_A_SHIFT),
+                          0, th);
+        break;
+    case Icon::FxColor:
+        dl->AddCircle(c, h * 0.8f, col, 0, th);
+        dl->PathArcTo(c, h * 0.8f, -kPi * 0.5f, kPi * 0.5f);
+        dl->PathFillConvex(col);
+        break;
+    case Icon::FxChannel:
+        for (int i = 0; i < 3; ++i) {
+            const float a = -kPi * 0.5f + i * kPi * 2.0f / 3.0f;
+            dl->AddCircle(ImVec2(c.x + std::cos(a) * h * 0.35f, c.y + std::sin(a) * h * 0.35f), h * 0.5f, col, 0, th);
+        }
+        break;
+    case Icon::FxDistort: {
+        ImVec2 pts[17];
+        for (int i = 0; i <= 16; ++i) {
+            const float x = -0.85f + 1.7f * i / 16.0f;
+            pts[i] = ImVec2(c.x + x * h, c.y + std::sin(x * kPi * 1.6f) * h * 0.45f);
+        }
+        dl->AddPolyline(pts, 17, col, 0, th * 1.2f);
+        break;
+    }
+    case Icon::FxGenerate: {
+        const ImVec2 star[8] = {ImVec2(c.x, c.y - h * 0.85f), ImVec2(c.x + h * 0.2f, c.y - h * 0.2f), ImVec2(c.x + h * 0.85f, c.y),
+                                ImVec2(c.x + h * 0.2f, c.y + h * 0.2f), ImVec2(c.x, c.y + h * 0.85f), ImVec2(c.x - h * 0.2f, c.y + h * 0.2f),
+                                ImVec2(c.x - h * 0.85f, c.y), ImVec2(c.x - h * 0.2f, c.y - h * 0.2f)};
+        dl->AddConcavePolyFilled(star, 8, col);
+        break;
+    }
+    case Icon::FxPerspective:
+        dl->AddRectFilled(ImVec2(c.x - h * 0.4f, c.y - h * 0.4f), ImVec2(c.x + h * 0.8f, c.y + h * 0.8f),
+                          (col & ~IM_COL32_A_MASK) | (90u << IM_COL32_A_SHIFT), 2.0f);
+        dl->AddRect(ImVec2(c.x - h * 0.8f, c.y - h * 0.8f), ImVec2(c.x + h * 0.4f, c.y + h * 0.4f), col, 2.0f, 0, th);
+        break;
+    case Icon::FxStylize:
+        dl->AddCircleFilled(c, h * 0.35f, col);
+        for (int i = 0; i < 8; ++i) {
+            const float a = i * kPi * 0.25f;
+            dl->AddLine(ImVec2(c.x + std::cos(a) * h * 0.55f, c.y + std::sin(a) * h * 0.55f),
+                        ImVec2(c.x + std::cos(a) * h * 0.85f, c.y + std::sin(a) * h * 0.85f), col, th);
+        }
+        break;
+    case Icon::FxTime:
+        dl->AddCircle(c, h * 0.8f, col, 0, th);
+        dl->AddLine(c, ImVec2(c.x, c.y - h * 0.5f), col, th);
+        dl->AddLine(c, ImVec2(c.x + h * 0.35f, c.y + h * 0.15f), col, th);
+        break;
+    case Icon::Palette:
+        dl->AddCircle(c, h * 0.8f, col, 0, th);
+        dl->AddCircleFilled(ImVec2(c.x - h * 0.35f, c.y - h * 0.25f), h * 0.13f, col);
+        dl->AddCircleFilled(ImVec2(c.x + h * 0.1f, c.y - h * 0.45f), h * 0.13f, col);
+        dl->AddCircleFilled(ImVec2(c.x + h * 0.45f, c.y - h * 0.1f), h * 0.13f, col);
+        dl->AddCircleFilled(ImVec2(c.x - h * 0.05f, c.y + h * 0.4f), h * 0.18f, col);
+        break;
+    case Icon::Sliders:
+        for (int i = 0; i < 3; ++i) {
+            const float y = c.y + (i - 1) * h * 0.6f, k = i == 1 ? 0.3f : -0.3f;
+            dl->AddLine(ImVec2(c.x - h * 0.8f, y), ImVec2(c.x + h * 0.8f, y), col, th);
+            dl->AddCircleFilled(ImVec2(c.x + k * h, y), h * 0.18f, col);
+        }
+        break;
+    case Icon::Graph: {
+        dl->AddLine(ImVec2(c.x - h * 0.85f, c.y + h * 0.8f), ImVec2(c.x + h * 0.85f, c.y + h * 0.8f), col, th);
+        const ImVec2 p0(c.x - h * 0.8f, c.y + h * 0.55f), p3(c.x + h * 0.8f, c.y - h * 0.65f);
+        dl->AddBezierCubic(p0, ImVec2(c.x + h * 0.1f, p0.y), ImVec2(c.x - h * 0.1f, p3.y), p3, col, th * 1.2f);
+        break;
+    }
+    case Icon::Back:
+        dl->AddLine(ImVec2(c.x - h * 0.7f, c.y), ImVec2(c.x + h * 0.7f, c.y), col, th * 1.2f);
+        dl->AddLine(ImVec2(c.x - h * 0.7f, c.y), ImVec2(c.x - h * 0.2f, c.y - h * 0.5f), col, th * 1.2f);
+        dl->AddLine(ImVec2(c.x - h * 0.7f, c.y), ImVec2(c.x - h * 0.2f, c.y + h * 0.5f), col, th * 1.2f);
+        break;
     case Icon::ZoomIn:
     case Icon::ZoomOut: {
         const ImVec2 lens(c.x - h * 0.15f, c.y - h * 0.15f);
@@ -332,8 +407,10 @@ bool objectTile(const char* id, Icon icon, const char* label, ImVec2 size) {
     drawIcon(dl, icon, ImVec2(pos.x + size.x * 0.5f, pos.y + size.y * 0.42f), iconSize,
              hovered ? theme::kAccent : theme::kText);
     const ImVec2 ts = ImGui::CalcTextSize(label);
-    dl->AddText(ImVec2(pos.x + (size.x - ts.x) * 0.5f, end.y - ts.y - size.y * 0.12f),
+    dl->PushClipRect(ImVec2(pos.x + 4, pos.y), ImVec2(end.x - 4, end.y), true); // long labels are clipped, not spilled
+    dl->AddText(ImVec2(pos.x + std::max(4.0f, (size.x - ts.x) * 0.5f), end.y - ts.y - size.y * 0.12f),
                 hovered ? theme::kText : theme::kTextDim, label);
+    dl->PopClipRect();
     return pressed;
 }
 
@@ -371,23 +448,42 @@ std::string formatTimecode(double seconds, double fps) {
 
 namespace {
 
-struct PanelState {
-    bool minimized = false;
-    float savedSize = 0.0f;
-};
+// Minimized = the dock node is (about) as small as its tab bar. The state is
+// derived from the size, so it survives restarts and is shared by every tab
+// of the node; only the size to restore to is remembered (per node).
+std::unordered_map<ImGuiID, float>& savedSizes() {
+    static std::unordered_map<ImGuiID, float> sizes;
+    return sizes;
+}
 
-PanelState& panelState() {
-    static std::unordered_map<ImGuiID, PanelState> states;
-    return states[ImGui::GetCurrentWindow()->ID];
+// The split that decides the node's size along `axis` (the closest ancestor split).
+ImGuiDockNode* splitChild(ImGuiDockNode* node, int& axis) {
+    while (node && node->ParentNode) {
+        if (node->ParentNode->SplitAxis != ImGuiAxis_None) {
+            axis = node->ParentNode->SplitAxis;
+            return node;
+        }
+        node = node->ParentNode;
+    }
+    return nullptr;
+}
+
+float minimizedSize(const ImGuiDockNode* node, int axis) {
+    const float bar = node->TabBar ? node->TabBar->BarRect.GetHeight() : ImGui::GetFrameHeight() + 4.0f;
+    return axis == ImGuiAxis_Y ? bar + 4.0f : 46.0f;
+}
+
+bool nodeMinimized(ImGuiDockNode* node) {
+    int axis = 0;
+    ImGuiDockNode* child = splitChild(node, axis);
+    return child && child->Size[axis] <= minimizedSize(node, axis) + 6.0f;
 }
 
 // Sets a docked node's size along its parent's split axis (the sibling takes the rest).
-void resizeDockNode(ImGuiDockNode* node, float size) {
-    ImGuiDockNode* parent = node ? node->ParentNode : nullptr;
-    if (!parent || parent->SplitAxis == ImGuiAxis_None) return;
-    const int axis = parent->SplitAxis;
+void resizeDockNode(ImGuiDockNode* node, int axis, float size) {
+    ImGuiDockNode* parent = node->ParentNode;
     ImGuiDockNode* sibling = parent->ChildNodes[0] == node ? parent->ChildNodes[1] : parent->ChildNodes[0];
-    size = std::clamp(size, 1.0f, parent->Size[axis] - 40.0f);
+    size = std::clamp(size, 1.0f, std::max(1.0f, parent->Size[axis] - 60.0f));
     // Only the resized node is locked: ImGui then gives the sibling the rest.
     node->SizeRef[axis] = node->Size[axis] = size;
     sibling->SizeRef[axis] = parent->Size[axis] - size;
@@ -396,40 +492,71 @@ void resizeDockNode(ImGuiDockNode* node, float size) {
 
 } // namespace
 
-bool panelIsMinimized() { return panelState().minimized; }
+bool panelIsMinimized() {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    return window->DockNode && nodeMinimized(window->DockNode);
+}
 
 void panelMinimizeButton() {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     ImGuiDockNode* node = window->DockNode;
-    if (!node || !node->TabBar || !node->HostWindow || !node->ParentNode || node->ParentNode->SplitAxis == ImGuiAxis_None)
-        return; // floating, alone in the dockspace, or without a tab bar
+    if (!node || !node->TabBar || !node->HostWindow) return; // floating or without a tab bar
     if (node->TabBar->SelectedTabId != window->TabId) return; // only the visible tab owns the button
-    PanelState& st = panelState();
-    const int axis = node->ParentNode->SplitAxis;
+    int axis = 0;
+    ImGuiDockNode* child = splitChild(node, axis);
+    if (!child) return; // alone in the dockspace
+    const bool minimized = nodeMinimized(node);
+    // Arrows point where the panel goes: toward its edge to minimize, back to restore.
+    const bool farSide = child->ParentNode->ChildNodes[1] == child; // right (or bottom) of its split
+    const Icon toEdge = axis == ImGuiAxis_Y ? Icon::ChevronDown : (farSide ? Icon::ChevronRight : Icon::Back);
+    const Icon fromEdge = axis == ImGuiAxis_Y ? Icon::ChevronUp : (farSide ? Icon::Back : Icon::ChevronRight);
+    auto toggle = [&] {
+        float& saved = savedSizes()[child->ID];
+        if (minimized) {
+            const float fallback = child->ParentNode->Size[axis] * (axis == ImGuiAxis_Y ? 0.35f : 0.22f);
+            resizeDockNode(child, axis, saved > minimizedSize(node, axis) + 20.0f ? saved : fallback);
+        } else {
+            saved = child->Size[axis];
+            resizeDockNode(child, axis, minimizedSize(node, axis));
+        }
+    };
+    if (minimized && axis == ImGuiAxis_X) {
+        // A narrow strip: its tab bar is too small for a button, so the whole
+        // strip restores the panel (arrow + the panel name written downwards).
+        const ImVec2 p = window->InnerRect.Min;
+        const ImVec2 size(window->InnerRect.GetWidth(), window->InnerRect.GetHeight());
+        ImGui::SetCursorScreenPos(p);
+        const bool clicked = ImGui::InvisibleButton("##restore", ImVec2(std::max(1.0f, size.x), std::max(1.0f, size.y)));
+        const bool hot = ImGui::IsItemHovered();
+        ImDrawList* dl = window->DrawList;
+        if (hot) dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), theme::kBgHover);
+        const float cx = p.x + size.x * 0.5f;
+        drawIcon(dl, fromEdge, ImVec2(cx, p.y + 18), 12.0f, hot ? theme::kAccent : theme::kTextDim);
+        float y = p.y + 36;
+        for (const char* c = window->Name; *c && *c != '#'; ++c, y += ImGui::GetFontSize()) {
+            const char ch[2] = {*c, 0};
+            dl->AddText(ImVec2(cx - ImGui::CalcTextSize(ch).x * 0.5f, y), hot ? theme::kText : theme::kTextFaint, ch);
+        }
+        if (hot) ImGui::SetTooltip("Restore panel");
+        if (clicked) toggle();
+        return;
+    }
     // The tab bar belongs to the dock host window, where this window's widgets
     // cannot be clicked: draw on the host and hit-test by hand.
     const ImRect bar = node->TabBar->BarRect;
-    const float s = std::min(bar.GetHeight(), ImGui::GetFrameHeight()) - 4.0f;
-    const ImVec2 a(bar.Max.x - s - 4.0f, bar.Min.y + (bar.GetHeight() - s) * 0.5f), b(a.x + s, a.y + s);
+    const float s = std::min(bar.GetHeight() - 2.0f, ImGui::GetFrameHeight());
+    const float cy = std::floor(bar.GetCenter().y) + 0.5f; // centered on the tab row
+    const ImVec2 a(bar.Max.x - s - 6.0f, cy - s * 0.5f), b(a.x + s, a.y + s);
     ImGuiContext& g = *ImGui::GetCurrentContext();
     const bool overHost = g.HoveredWindow && g.HoveredWindow->RootWindowDockTree == node->HostWindow->RootWindowDockTree;
     const bool hovered = overHost && ImGui::IsMouseHoveringRect(a, b, false) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
     ImDrawList* dl = node->HostWindow->DrawList;
     if (hovered) dl->AddRectFilled(a, b, theme::kBgHover, 4.0f);
-    const Icon icon = axis == ImGuiAxis_Y ? (st.minimized ? Icon::ChevronUp : Icon::ChevronDown)
-                                          : (st.minimized ? Icon::ChevronRight : Icon::ChevronDown);
-    drawIcon(dl, icon, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), s * 0.6f, hovered ? theme::kText : theme::kTextDim);
+    const Icon icon = minimized ? fromEdge : toEdge;
+    drawIcon(dl, icon, ImVec2((a.x + b.x) * 0.5f, cy), s * 0.55f, hovered ? theme::kText : theme::kTextDim);
     if (hovered) {
-        ImGui::SetTooltip(st.minimized ? "Restore panel" : "Minimize panel");
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-            st.minimized = !st.minimized;
-            if (st.minimized) {
-                st.savedSize = node->Size[axis];
-                resizeDockNode(node, axis == ImGuiAxis_Y ? bar.GetHeight() + 6.0f : 44.0f);
-            } else {
-                resizeDockNode(node, std::max(st.savedSize, 160.0f));
-            }
-        }
+        ImGui::SetTooltip(minimized ? "Restore panel" : "Minimize panel");
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) toggle();
     }
 }
 

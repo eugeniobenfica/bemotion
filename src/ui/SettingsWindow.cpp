@@ -239,14 +239,71 @@ void openSettings(SettingsTab tab) {
     g_selectTab = true;
 }
 
+namespace {
+
+void drawInterface(Settings& s) {
+    sectionLabel("TIMELINE");
+    ImGui::SetNextItemWidth(240);
+    if (ImGui::SliderFloat("Clip row height", &s.timelineLayerRow, 22.0f, 80.0f, "%.0f px")) changed();
+    ImGui::SetNextItemWidth(240);
+    if (ImGui::SliderFloat("Keyframe row height", &s.timelinePropertyRow, 20.0f, 60.0f, "%.0f px")) changed();
+    ImGui::SetNextItemWidth(240);
+    if (ImGui::SliderFloat("Keyframe size", &s.keyframeSize, 3.0f, 10.0f, "%.1f px")) changed();
+    if (ImGui::Button("Compact")) s.timelineLayerRow = 26, s.timelinePropertyRow = 22, s.keyframeSize = 4, changed();
+    ImGui::SameLine();
+    if (ImGui::Button("Comfortable")) s.timelineLayerRow = 36, s.timelinePropertyRow = 30, s.keyframeSize = 5, changed();
+    ImGui::SameLine();
+    if (ImGui::Button("Large")) s.timelineLayerRow = 48, s.timelinePropertyRow = 38, s.keyframeSize = 6.5f, changed();
+
+    ImGui::Spacing();
+    sectionLabel("TEXT");
+    ImGui::SetNextItemWidth(240);
+    float percent = s.textScale * 100.0f;
+    if (ImGui::SliderFloat("Text size", &percent, 80.0f, 150.0f, "%.0f%%")) {
+        s.textScale = percent / 100.0f;
+        changed();
+    }
+    if (ImGui::IsItemHovered()) tooltip("Scales every label in the interface");
+    hint("Colors, corner rounding and themes are in the Theme page.");
+}
+
+void drawEditor(Settings& s) {
+    sectionLabel("SNAPPING");
+    ImGui::SetNextItemWidth(240);
+    if (ImGui::SliderFloat("Snap distance", &s.snapDistance, 2.0f, 30.0f, "%.0f px")) changed();
+    hint("How close (on screen) an object, clip, keyframe or the playhead must get before it snaps. "
+         "Toggle snapping with S or the magnet button; hold Ctrl while dragging to ignore it.");
+}
+
+// One sidebar entry: icon + label, highlighted when selected.
+bool sidebarItem(const char* label, Icon icon, bool selected) {
+    const float h = ImGui::GetFrameHeight() + 10.0f;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    const bool clicked = ImGui::InvisibleButton(label, ImVec2(w, h));
+    const bool hovered = ImGui::IsItemHovered();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (selected || hovered) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), selected ? theme::kAccentSoft : theme::kBgHover, 6.0f);
+    if (selected) dl->AddRectFilled(ImVec2(p.x, p.y + 8), ImVec2(p.x + 3, p.y + h - 8), theme::kAccent, 2.0f);
+    const ImU32 col = selected ? theme::kText : theme::kTextDim;
+    drawIcon(dl, icon, ImVec2(p.x + 22, p.y + h * 0.5f), 16.0f, selected ? theme::kAccent : col);
+    dl->AddText(ImVec2(p.x + 42, p.y + (h - ImGui::GetFontSize()) * 0.5f), col, label);
+    return clicked;
+}
+
+} // namespace
+
 void drawSettings() {
     if (!g_open) return;
     Settings& s = settings();
     const ImGuiViewport* vp = ImGui::GetMainViewport();
+    // Always fits the screen; pages scroll inside.
+    const ImVec2 size(std::min(780.0f, vp->WorkSize.x * 0.92f), std::min(600.0f, vp->WorkSize.y * 0.88f));
     ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f),
                             g_recenter > 0 ? ImGuiCond_Always : ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (g_recenter > 0) --g_recenter;
-    ImGui::SetNextWindowSize(ImVec2(600, std::min(680.0f, vp->WorkSize.y * 0.9f)), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(size, ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(520, 360), vp->WorkSize);
     if (g_focus) {
         ImGui::SetNextWindowFocus();
         g_focus = false;
@@ -257,40 +314,46 @@ void drawSettings() {
     }
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape)) g_open = false;
 
-    auto tab = [&](const char* label, SettingsTab id) {
-        const bool select = g_selectTab && g_tab == id;
-        return ImGui::BeginTabItem(label, nullptr, select ? ImGuiTabItemFlags_SetSelected : 0);
+    struct Page {
+        SettingsTab tab;
+        const char* label;
+        Icon icon;
     };
-    if (ImGui::BeginTabBar("##settingsTabs")) {
-        if (tab("Theme", SettingsTab::Theme)) {
-            ImGui::BeginChild("##theme");
-            drawAppearance(s);
-            ImGui::Spacing();
-            ImGui::Separator();
-            ImGui::Spacing();
-            if (ImGui::Checkbox("Advanced mode", &s.advanced)) saveSettings();
-            hint("Shows every color and fine-tuning option. Your choices above stay as they are.");
-            if (s.advanced) {
-                ImGui::Spacing();
-                drawAdvanced(s);
-            }
-            ImGui::EndChild();
-            ImGui::EndTabItem();
-        }
-        if (tab("Editor", SettingsTab::Editor)) {
-            sectionLabel("SNAPPING");
-            ImGui::SetNextItemWidth(220);
-            if (ImGui::SliderFloat("Snap distance", &s.snapDistance, 2.0f, 30.0f, "%.0f px")) changed();
-            hint("How close (on screen) an object, clip, keyframe or the playhead must get before it snaps. "
-                 "Toggle snapping with S or the magnet button; hold Ctrl while dragging to ignore it.");
-            ImGui::EndTabItem();
-        }
-        if (tab("Plugins", SettingsTab::Plugins)) {
-            drawPluginsTab();
-            ImGui::EndTabItem();
-        }
-        ImGui::EndTabBar();
+    static constexpr Page kPages[] = {{SettingsTab::Theme, "Theme", Icon::Palette},
+                                      {SettingsTab::Interface, "Interface", Icon::Sliders},
+                                      {SettingsTab::Editor, "Editor", Icon::Magnet},
+                                      {SettingsTab::Plugins, "Plugins", Icon::Plugin}};
+    ImGui::BeginChild("##sidebar", ImVec2(170, 0), ImGuiChildFlags_None);
+    for (const Page& p : kPages)
+        if (sidebarItem(p.label, p.icon, g_tab == p.tab)) g_tab = p.tab;
+    ImGui::EndChild();
+    ImGui::SameLine(0, 0);
+    {
+        const ImVec2 a = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x + 6, a.y), ImVec2(a.x + 6, a.y + ImGui::GetContentRegionAvail().y),
+                                            theme::kBorder);
+        ImGui::Dummy(ImVec2(14, 0));
+        ImGui::SameLine(0, 0);
     }
+    ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_None);
+    switch (g_tab) {
+    case SettingsTab::Theme:
+        drawAppearance(s);
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        if (ImGui::Checkbox("Advanced mode", &s.advanced)) saveSettings();
+        hint("Shows every color and fine-tuning option. Your choices above stay as they are.");
+        if (s.advanced) {
+            ImGui::Spacing();
+            drawAdvanced(s);
+        }
+        break;
+    case SettingsTab::Interface: drawInterface(s); break;
+    case SettingsTab::Editor: drawEditor(s); break;
+    case SettingsTab::Plugins: drawPluginsTab(); break;
+    }
+    ImGui::EndChild();
     g_selectTab = false;
     ImGui::End();
 }

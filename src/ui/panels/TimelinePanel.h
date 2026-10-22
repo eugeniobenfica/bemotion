@@ -112,6 +112,7 @@ private:
     double snappedDelta(EditorContext& ctx, const std::vector<double>& base, double rawDelta);
     std::vector<double> timeTargets_;
     double snapLineTime_ = -1.0;
+    double playheadGrab_ = 0.0; // playhead time minus the time under the mouse when it was grabbed
     struct ClipStart {
         uint64_t id;
         double in, out;
@@ -121,6 +122,33 @@ private:
     std::vector<RowRect> rows_;   // rebuilt every frame
     std::vector<ClipRect> clips_; // rebuilt every frame
     float rowsBottom_ = 0.0f;
+
+    // --- graph editor ------------------------------------------------------------
+    // Value curves of the primary layer's animated properties, like After
+    // Effects' Graph Editor: drag keyframes (time / value) and the easing
+    // handles of each segment (they edit its cubic-bezier timing curve).
+    // Implemented in TimelineGraph.cpp.
+public:
+    enum class Ease { Linear, EasyEase, EaseIn, EaseOut, Hold };
+    // Applies an easing to the selected keyframes (F9 = Easy Ease, like After Effects).
+    static void applyEase(EditorContext& ctx, Ease ease);
+
+private:
+    void drawGraphEditor(EditorContext& ctx, float x0, float top, float height);
+    bool graphMode_ = false;
+    std::set<std::string> graphHidden_; // property ids switched off in the graph
+    float graphMin_ = 0.0f, graphMax_ = 1.0f; // value range on screen
+    struct GraphDrag {
+        enum Kind { None, Key, Handle } kind = None;
+        std::string prop;
+        int comp = 0;        // component (x / y) being dragged
+        uint32_t uid = 0;    // key (Key) or segment start key (Handle)
+        int which = 0;       // Handle: 1 = outgoing (x1, y1), 2 = incoming (x2, y2)
+        ImVec2 startMouse;
+        double startTime = 0.0; // Key: where the key was when grabbed
+        float startValue = 0.0f;
+        bool moved = false;     // past the drag threshold (a plain click changes nothing)
+    } graphDrag_;
 };
 
 } // namespace bemotion
