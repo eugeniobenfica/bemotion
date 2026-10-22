@@ -9,6 +9,9 @@
 namespace bemotion {
 
 // A ruler guide in composition pixels (vertical: x = position; else y).
+// How far past the end of the composition a clip may run (seconds).
+inline constexpr double kMaxOverhang = 3600.0;
+
 struct Guide {
     bool vertical = true;
     float position = 0.0f;

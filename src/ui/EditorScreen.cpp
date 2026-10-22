@@ -2,7 +2,6 @@
 
 #include "app/Platform.h"
 #include "app/RecentProjects.h"
-#include "ui/PluginsWindow.h"
 #include "ui/SettingsWindow.h"
 #include "core/Serialization.h"
 #include "render/Fonts.h"
@@ -73,6 +72,7 @@ EditorScreen::Request EditorScreen::draw(double dt) {
     objects_.draw(ctx_);
     viewport_.draw(ctx_);
     properties_.draw(ctx_);
+    effects_.draw(ctx_);
     timeline_.draw(ctx_);
 
     handleShortcuts();
@@ -100,6 +100,7 @@ void EditorScreen::buildDefaultLayout(unsigned int dockspaceId) {
     ImGui::DockBuilderDockWindow(ObjectsPanel::kWindowName, left);
     ImGui::DockBuilderDockWindow(ViewportPanel::kWindowName, center);
     ImGui::DockBuilderDockWindow(PropertiesPanel::kWindowName, right);
+    ImGui::DockBuilderDockWindow(EffectsPanel::kWindowName, right); // a tab beside Properties
     ImGui::DockBuilderDockWindow(TimelinePanel::kWindowName, bottom);
     ImGui::DockBuilderFinish(dockspaceId);
     viewport_.requestFit();
@@ -147,6 +148,7 @@ void EditorScreen::drawMenuBar() {
         if (ImGui::MenuItem("Deselect", "Esc")) ctx_.select(0);
         ImGui::Separator();
         if (ImGui::MenuItem("Settings...", "Ctrl+,")) ui::openSettings();
+        if (ImGui::MenuItem("Plugins...")) ui::openSettings(ui::SettingsTab::Plugins);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Layer")) {
@@ -197,17 +199,14 @@ void EditorScreen::drawMenuBar() {
             ImGui::MenuItem(ObjectsPanel::kWindowName, nullptr, &objects_.open);
             ImGui::MenuItem(ViewportPanel::kWindowName, nullptr, &viewport_.open);
             ImGui::MenuItem(PropertiesPanel::kWindowName, nullptr, &properties_.open);
+            ImGui::MenuItem(EffectsPanel::kWindowName, nullptr, &effects_.open);
             ImGui::MenuItem(TimelinePanel::kWindowName, nullptr, &timeline_.open);
             ImGui::EndMenu();
         }
         if (ImGui::MenuItem("Reset Layout")) {
             resetLayout_ = true;
-            objects_.open = viewport_.open = properties_.open = timeline_.open = true;
+            objects_.open = viewport_.open = properties_.open = effects_.open = timeline_.open = true;
         }
-        ImGui::EndMenu();
-    }
-    if (ImGui::BeginMenu("Plugins")) {
-        ui::pluginsMenuItems();
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {

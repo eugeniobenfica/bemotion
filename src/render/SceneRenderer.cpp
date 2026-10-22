@@ -250,9 +250,10 @@ void drawComposition(ImDrawList* dl, const Composition& comp, double time, const
 }
 
 bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax) {
-    if (layer.type == LayerType::Camera) { // the camera frame
-        outMin = layer.camera.frameSize * -0.5f;
-        outMax = layer.camera.frameSize * 0.5f;
+    if (layer.type == LayerType::Camera) { // the camera frame: what it sees at its zoom
+        const float zoom = std::max(0.01f, layer.camera.zoom.valueAt(time) * 0.01f);
+        outMin = layer.camera.frameSize * (-0.5f / zoom);
+        outMax = layer.camera.frameSize * (0.5f / zoom);
         return true;
     }
     if (layer.type == LayerType::Plugin) {

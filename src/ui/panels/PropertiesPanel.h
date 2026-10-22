@@ -25,8 +25,6 @@ private:
 
     std::string saveName_;
     std::string presetMessage_;
-    std::string effectMessage_;
-    std::string effectSaveName_;
     std::string fontFilter_;
 };
 

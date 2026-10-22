@@ -112,31 +112,13 @@ std::vector<PropertyRef> Layer::properties() {
         for (size_t j = 0; j <= i; ++j) sameType += effects[j].type == e.type;
         e.group = std::string(effectLabel(e.type)) + (sameType > 1 ? " " + std::to_string(sameType) : "");
         const std::string prefix = "fx" + std::to_string(i) + ".";
-        const char* names[5] = {"color", "opacity", "size", "offset", "shutter"};
-        for (int k = 0; k < 5; ++k) e.ids[k] = prefix + names[k];
-        const int fx = static_cast<int>(i);
-        const char* g = e.group.c_str();
-        switch (e.type) {
-        case EffectType::Outline:
-            p.push_back({e.ids[0].c_str(), g, "Color", PropertyKind::Color, &e.color, 1, 0, 0, "%.1f", fx});
-            p.push_back({e.ids[2].c_str(), g, "Width", PropertyKind::Float, &e.size, 0.1f, 0, 200, "%.1f px", fx});
-            p.push_back({e.ids[1].c_str(), g, "Opacity", PropertyKind::Float, &e.opacity, 0.5f, 0, 100, "%.0f%%", fx});
-            break;
-        case EffectType::Glow:
-            p.push_back({e.ids[0].c_str(), g, "Color", PropertyKind::Color, &e.color, 1, 0, 0, "%.1f", fx});
-            p.push_back({e.ids[2].c_str(), g, "Radius", PropertyKind::Float, &e.size, 0.25f, 0, 400, "%.1f px", fx});
-            p.push_back({e.ids[1].c_str(), g, "Intensity", PropertyKind::Float, &e.opacity, 0.5f, 0, 300, "%.0f%%", fx});
-            break;
-        case EffectType::DropShadow:
-            p.push_back({e.ids[0].c_str(), g, "Color", PropertyKind::Color, &e.color, 1, 0, 0, "%.1f", fx});
-            p.push_back({e.ids[3].c_str(), g, "Offset", PropertyKind::Vec2, &e.offset, 0.5f, 0, 0, "%.1f", fx});
-            p.push_back({e.ids[2].c_str(), g, "Softness", PropertyKind::Float, &e.size, 0.25f, 0, 400, "%.1f px", fx});
-            p.push_back({e.ids[1].c_str(), g, "Opacity", PropertyKind::Float, &e.opacity, 0.5f, 0, 100, "%.0f%%", fx});
-            break;
-        case EffectType::MotionBlur:
-            p.push_back({e.ids[4].c_str(), g, "Shutter Angle", PropertyKind::Float, &e.shutter, 1, 0, 720, "%.0f°", fx});
-            break;
-        case EffectType::Count: break;
+        for (int k = 0; k < kEffectSlotCount; ++k) e.ids[k] = prefix + effectSlotId(static_cast<EffectSlot>(k));
+        for (const EffectParam& ep : effectParams(e.type)) {
+            const PropertyKind kind = ep.slot == EffectSlot::Color    ? PropertyKind::Color
+                                      : ep.slot == EffectSlot::Offset ? PropertyKind::Vec2
+                                                                      : PropertyKind::Float;
+            p.push_back({e.ids[static_cast<int>(ep.slot)].c_str(), e.group.c_str(), ep.label, kind, &e.slot(ep.slot),
+                         ep.speed, ep.min, ep.max, ep.format, static_cast<int>(i)});
         }
     }
     return p;
@@ -150,6 +132,8 @@ PropertyRef* Layer::findProperty(std::vector<PropertyRef>& props, const char* pr
 
 Affine Layer::matrixAt(double t) const {
     const Vec2 pos = transform.position.valueAt(t);
+    // A camera is only a point of view: position and roll (zoom has its own property).
+    if (type == LayerType::Camera) return Affine::translate(pos) * Affine::rotateDeg(transform.rotation.valueAt(t));
     const Vec2 scl = transform.scale.valueAt(t) * 0.01f;
     const Vec2 anc = transform.anchor.valueAt(t);
     const float rot = transform.rotation.valueAt(t);

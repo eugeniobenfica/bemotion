@@ -81,13 +81,79 @@ in vec2 vUV; out vec4 o;
 uniform sampler2D uSrc; uniform float uGain;
 void main() { o = texture(uSrc, vUV) * uGain; })";
 
+// Directional blur: average along a line centered on each pixel (premultiplied).
+constexpr const char* kDirBlur = R"(#version 330 core
+in vec2 vUV; out vec4 o;
+uniform sampler2D uSrc; uniform vec2 uStep; uniform float uLength;
+void main() {
+    int n = clamp(int(uLength), 1, 96);
+    vec4 sum = vec4(0.0);
+    for (int i = 0; i <= n; ++i) sum += texture(uSrc, vUV + uStep * (float(i) / float(n) - 0.5) * uLength);
+    o = sum / float(n + 1);
+})";
+
+// Color effects on straight colors (the texture is premultiplied).
+//   0 brightness & contrast   uA = brightness, uB = contrast
+//   1 hue / saturation        uA = hue (deg), uB = saturation, uC = lightness
+//   2 tint                    uColor = white maps to, uAmount
+//   3 fill                    uColor, uAmount
+//   4 invert                  uAmount
+constexpr const char* kColorOps = R"(#version 330 core
+in vec2 vUV; out vec4 o;
+uniform sampler2D uSrc; uniform int uMode; uniform float uA; uniform float uB; uniform float uC;
+uniform vec4 uColor; uniform float uAmount;
+vec3 hueShift(vec3 c, float deg) {
+    const mat3 toYIQ = mat3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
+    const mat3 toRGB = mat3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
+    vec3 yiq = toYIQ * c;
+    float a = radians(deg), cs = cos(a), sn = sin(a);
+    yiq.yz = vec2(yiq.y * cs - yiq.z * sn, yiq.y * sn + yiq.z * cs);
+    return toRGB * yiq;
+}
+void main() {
+    vec4 p = texture(uSrc, vUV);
+    if (p.a < 0.0001) { o = vec4(0.0); return; }
+    vec3 c = p.rgb / p.a;
+    float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    if (uMode == 0) {
+        c += uA / 300.0;
+        float k = uB >= 0.0 ? 1.0 / max(0.01, 1.0 - uB / 101.0) : 1.0 + uB / 100.0;
+        c = (c - 0.5) * k + 0.5;
+    } else if (uMode == 1) {
+        c = hueShift(c, -uA); // positive = toward the next hue on the wheel, like After Effects
+        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        c = mix(vec3(l), c, 1.0 + uB / 100.0);
+        c = uC >= 0.0 ? mix(c, vec3(1.0), uC / 100.0) : c * (1.0 + uC / 100.0);
+    } else if (uMode == 2) {
+        c = mix(c, uColor.rgb * luma, uAmount * uColor.a);
+    } else if (uMode == 3) {
+        c = mix(c, uColor.rgb, uAmount * uColor.a);
+    } else {
+        c = mix(c, 1.0 - c, uAmount);
+    }
+    c = clamp(c, 0.0, 1.0);
+    o = vec4(c * p.a, p.a);
+})";
+
+// Wave warp: displaces pixels across the wave direction (all in pixels).
+constexpr const char* kWave = R"(#version 330 core
+in vec2 vUV; out vec4 o;
+uniform sampler2D uSrc; uniform vec2 uTexel; uniform vec2 uDir; uniform float uHeight; uniform float uWidth;
+uniform float uPhase;
+void main() {
+    vec2 px = vUV / uTexel;
+    float d = uHeight * sin(6.2831853 * (dot(px, uDir) / max(uWidth, 1.0) - uPhase));
+    vec2 perp = vec2(-uDir.y, uDir.x);
+    o = texture(uSrc, vUV + perp * d * uTexel);
+})";
+
 constexpr const char* kUnpremultiply = R"(#version 330 core
 in vec2 vUV; out vec4 o;
 uniform sampler2D uSrc;
 void main() { vec4 c = texture(uSrc, vUV); o = c.a > 0.0001 ? vec4(c.rgb / c.a, min(c.a, 1.0)) : vec4(0.0); })";
 
 struct Programs {
-    GLuint dilate = 0, blur = 0, composite = 0, scale = 0, unpremultiply = 0;
+    GLuint dilate = 0, blur = 0, composite = 0, scale = 0, unpremultiply = 0, dirBlur = 0, colorOps = 0, wave = 0;
     GLuint vao = 0, vbo = 0;
     int state = 0; // 0 not built, 1 ok, -1 failed
 };
@@ -137,7 +203,11 @@ bool ensurePrograms() {
     p.composite = link(kComposite);
     p.scale = link(kScale);
     p.unpremultiply = link(kUnpremultiply);
-    if (!p.dilate || !p.blur || !p.composite || !p.scale || !p.unpremultiply) return false;
+    p.dirBlur = link(kDirBlur);
+    p.colorOps = link(kColorOps);
+    p.wave = link(kWave);
+    if (!p.dilate || !p.blur || !p.composite || !p.scale || !p.unpremultiply || !p.dirBlur || !p.colorOps || !p.wave)
+        return false;
     const auto& gl = gl::api();
     const float quad[12] = {0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1};
     gl.GenVertexArrays(1, &p.vao);
@@ -375,8 +445,66 @@ void EffectRenderer::drawLayer(ImDrawList* dl, const Layer& layer, double t, dou
         return out;
     };
 
+    // Effects that transform the current image (rather than add something underneath).
+    auto colorOp = [&](int mode, float a, float b, float c, Color color, float amount) {
+        Target& out = acquire(w, h);
+        gl.UseProgram(prog.colorOps);
+        bindTexture(0, current->texture);
+        gl.Uniform1i(uniform(prog.colorOps, "uSrc"), 0);
+        gl.Uniform1i(uniform(prog.colorOps, "uMode"), mode);
+        gl.Uniform1f(uniform(prog.colorOps, "uA"), a);
+        gl.Uniform1f(uniform(prog.colorOps, "uB"), b);
+        gl.Uniform1f(uniform(prog.colorOps, "uC"), c);
+        gl.Uniform4f(uniform(prog.colorOps, "uColor"), color.r, color.g, color.b, color.a);
+        gl.Uniform1f(uniform(prog.colorOps, "uAmount"), std::clamp(amount, 0.0f, 1.0f));
+        pass(prog.colorOps, out, false);
+        current = &out;
+    };
+
     for (const Effect& e : layer.effects) {
         if (!e.enabled || e.type == EffectType::MotionBlur) continue;
+        const float v1 = e.value1.valueAt(t), v2 = e.value2.valueAt(t), v3 = e.value3.valueAt(t);
+        switch (e.type) {
+        case EffectType::GaussianBlur: {
+            Target& tmp = acquire(w, h);
+            blur(*current, tmp, std::max(0.0f, e.size.valueAt(t)) * compToScreen * 0.5f);
+            continue;
+        }
+        case EffectType::DirectionalBlur: {
+            Target& out = acquire(w, h);
+            const float a = degToRad(v1 - 90.0f); // 0° = vertical, like After Effects
+            gl.UseProgram(prog.dirBlur);
+            bindTexture(0, current->texture);
+            gl.Uniform1i(uniform(prog.dirBlur, "uSrc"), 0);
+            // Texture rows go bottom-up: flip y.
+            gl.Uniform2f(uniform(prog.dirBlur, "uStep"), std::cos(a) * texelX, -std::sin(a) * texelY);
+            gl.Uniform1f(uniform(prog.dirBlur, "uLength"), std::max(0.0f, e.size.valueAt(t)) * compToScreen);
+            pass(prog.dirBlur, out, false);
+            current = &out;
+            continue;
+        }
+        case EffectType::BrightnessContrast: colorOp(0, v1, v2, 0, {}, 0); continue;
+        case EffectType::HueSaturation: colorOp(1, v1, v2, v3, {}, 0); continue;
+        case EffectType::Tint: colorOp(2, 0, 0, 0, e.color.valueAt(t), e.opacity.valueAt(t) * 0.01f); continue;
+        case EffectType::Fill: colorOp(3, 0, 0, 0, e.color.valueAt(t), e.opacity.valueAt(t) * 0.01f); continue;
+        case EffectType::Invert: colorOp(4, 0, 0, 0, {}, e.opacity.valueAt(t) * 0.01f); continue;
+        case EffectType::WaveWarp: {
+            Target& out = acquire(w, h);
+            const float a = degToRad(e.shutter.valueAt(t));
+            gl.UseProgram(prog.wave);
+            bindTexture(0, current->texture);
+            gl.Uniform1i(uniform(prog.wave, "uSrc"), 0);
+            gl.Uniform2f(uniform(prog.wave, "uTexel"), texelX, texelY);
+            gl.Uniform2f(uniform(prog.wave, "uDir"), std::cos(a), std::sin(a));
+            gl.Uniform1f(uniform(prog.wave, "uHeight"), v1 * compToScreen);
+            gl.Uniform1f(uniform(prog.wave, "uWidth"), std::max(2.0f, v2) * compToScreen);
+            gl.Uniform1f(uniform(prog.wave, "uPhase"), static_cast<float>(v3 * (t - layer.inPoint)));
+            pass(prog.wave, out, false);
+            current = &out;
+            continue;
+        }
+        default: break;
+        }
         const float size = std::max(0.0f, e.size.valueAt(t)) * compToScreen;
         const float strength = std::max(0.0f, e.opacity.valueAt(t)) * 0.01f;
         const Color color = e.color.valueAt(t);

@@ -3,6 +3,7 @@
 #include "ui/EditorContext.h"
 #include "ui/ExportDialog.h"
 #include "ui/panels/ObjectsPanel.h"
+#include "ui/panels/EffectsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "ui/panels/TimelinePanel.h"
 #include "ui/panels/ViewportPanel.h"
@@ -47,6 +48,7 @@ private:
     ObjectsPanel objects_;
     ViewportPanel viewport_;
     PropertiesPanel properties_;
+    EffectsPanel effects_;
     TimelinePanel timeline_;
     ExportDialog exportDialog_;
 

@@ -28,8 +28,11 @@ common moves are one click away through *Quick Animations*.
   drag the keys and their bezier handles (Alt breaks a handle into a corner)
 - **Properties panel**: every property is animatable, with a keyframe toggle
   and a **reset** button; collapsible sections; any installed **font family**
-- **Effects**: outline, glow, drop shadow and motion blur (GPU), stackable,
-  animatable, with presets you can **import / save**
+- **Effects** tab next to Properties (like After Effects' *Effect Controls* +
+  *Effects & Presets*): Gaussian and Directional Blur, Brightness & Contrast,
+  Hue/Saturation, Tint, Invert, Wave Warp, Fill, Stroke, Drop Shadow, Glow and
+  Motion Blur — GPU rendered, stackable, every parameter keyframable (also in
+  the timeline under *Effects*), with presets you can **import / save**
 - **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
   Draw On… stack without breaking; **import** more or save your own
 - **Timeline**: tracks holding several clips, trim in/out (clamped to
@@ -41,7 +44,8 @@ common moves are one click away through *Quick Animations*.
 - **Video export** (Ctrl+M, or the button in the top-right corner): MP4 / H.264
   (built in on Windows), PNG sequence with transparency, and — with
   [FFmpeg](https://ffmpeg.org) installed — MOV ProRes 4444, WebM VP9 and GIF
-- **Settings** (Ctrl+, or the gear): Dark, Light and Midnight themes, any
+- **Panels** can be minimized to their tab (the arrow at the right of the tab bar)
+- **Settings** (Ctrl+, or the gear) with *Theme*, *Editor* and *Plugins* tabs: Dark, Light and Midnight themes, any
   accent color, and an *advanced mode* to edit every UI color, rounding and the
   snap distance; **import, save and export themes** (JSON, see
   [examples/themes](examples/themes))

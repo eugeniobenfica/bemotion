@@ -39,6 +39,11 @@ void ObjectsPanel::draw(EditorContext& ctx) {
         ImGui::End();
         return;
     }
+    if (ui::panelIsMinimized()) { // only the tab shows
+        ui::panelMinimizeButton();
+        ImGui::End();
+        return;
+    }
 
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     const float tileW = std::max(64.0f, (ImGui::GetContentRegionAvail().x - spacing) * 0.5f);
@@ -98,6 +103,7 @@ void ObjectsPanel::draw(EditorContext& ctx) {
     ImGui::TextWrapped("Click an object to add it at the center, or drag it to any spot on the canvas.");
     ImGui::PopStyleColor();
 
+    ui::panelMinimizeButton();
     ImGui::End();
 }
 

@@ -92,6 +92,8 @@ fs::path executableDir() {
 }
 
 fs::path appDataDir() {
+    // Developer aid: BEMOTION_APPDATA points settings, layout and caches elsewhere (scripted UI tests).
+    if (const char* dir = std::getenv("BEMOTION_APPDATA"); dir && *dir) return ensureDir(fromUtf8(dir));
 #ifdef _WIN32
     return ensureDir(knownFolder(FOLDERID_RoamingAppData) / "bemotion");
 #elif defined(__APPLE__)

@@ -100,6 +100,11 @@ void TimelinePanel::draw(EditorContext& ctx) {
         ImGui::End();
         return;
     }
+    if (ui::panelIsMinimized()) { // only the tab shows
+        ui::panelMinimizeButton();
+        ImGui::End();
+        return;
+    }
     snapLineTime_ = -1.0;
     Composition& comp = ctx.comp();
     drawToolbar(ctx);
@@ -110,13 +115,16 @@ void TimelinePanel::draw(EditorContext& ctx) {
     trackX0_ = area.x + leftWidth_;
     trackW_ = std::max(50.0f, avail.x - leftWidth_);
 
-    const double minPx = trackW_ / (comp.duration * 4.0);
+    // Clips may run past the composition end: keep them reachable.
+    double contentEnd = comp.duration;
+    for (const Layer& l : comp.layers) contentEnd = std::max(contentEnd, l.outPoint);
+    const double minPx = trackW_ / (contentEnd * 4.0);
     if (pxPerSec_ <= 0.0) {
         pxPerSec_ = (trackW_ - 24.0) / comp.duration;
         scroll_ = 0.0;
     }
     pxPerSec_ = std::clamp(pxPerSec_, minPx, 4000.0);
-    scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, comp.duration - (trackW_ - 24.0) / pxPerSec_));
+    scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, contentEnd + 1.0 - (trackW_ - 24.0) / pxPerSec_));
 
     drawRuler(ctx, area.x, area.y, avail.x);
 
@@ -158,11 +166,17 @@ void TimelinePanel::draw(EditorContext& ctx) {
             ImGui::PushID(static_cast<int>(focus->id));
             const char* group = nullptr;
             bool groupOpen = true;
+            bool effectsHeader = false, effectsOpen = true; // effects nest under one "Effects" group, like After Effects
             for (const PropertyRef& prop : focus->properties()) {
                 if (animatedOnly_ && !prop.anim->isAnimated()) continue;
+                if (prop.effectIndex >= 0 && !effectsHeader) {
+                    effectsHeader = true;
+                    effectsOpen = drawGroupRow(row.track, "Effects", x0, avail.x);
+                }
+                if (prop.effectIndex >= 0 && !effectsOpen) continue;
                 if (!group || std::strcmp(group, prop.group) != 0) {
                     group = prop.group;
-                    groupOpen = drawGroupRow(row.track, group, x0, avail.x);
+                    groupOpen = drawGroupRow(row.track, group, x0, avail.x, prop.effectIndex >= 0 ? 16.0f : 0.0f);
                 }
                 if (groupOpen) drawPropertyRow(ctx, *focus, prop, x0, avail.x);
             }
@@ -219,6 +233,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
     ImGui::PopStyleVar();
 
     drawKeyContextMenu(ctx);
+    ui::panelMinimizeButton();
     ImGui::End();
 }
 
@@ -295,13 +310,21 @@ void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float widt
     // Scrub area.
     ImGui::SetCursorScreenPos(ImVec2(trackX0_, y0));
     ImGui::InvisibleButton("##ruler", ImVec2(trackW_, kRulerHeight));
-    if (ImGui::IsItemActivated()) collectTimeSnapTargets(ctx, {}, false);
+    if (ImGui::IsItemActivated()) {
+        collectTimeSnapTargets(ctx, {}, false);
+        timeTargets_.erase(timeTargets_.begin() + 2); // the playhead itself (see collectTimeSnapTargets)
+    }
     if (ImGui::IsItemActive()) {
         ctx.playing = false;
-        double t = xToTime(ImGui::GetIO().MousePos.x);
-        if (ImGui::GetIO().KeyShift) { // Shift: the playhead snaps to clip edges and keyframes
-            std::erase(timeTargets_, ctx.time);
+        const ImGuiIO& io = ImGui::GetIO();
+        double t = xToTime(io.MousePos.x);
+        // With the magnet on (or Shift held) the playhead snaps to clip edges and keyframes.
+        // The targets were collected once on press, so the playhead never snaps to itself.
+        if ((ctx.snapping || io.KeyShift) && !io.KeyCtrl) {
+            const bool was = ctx.snapping;
+            ctx.snapping = true;
             t = snappedDelta(ctx, {0.0}, t);
+            ctx.snapping = was;
         }
         ctx.setTime(t);
     }
@@ -529,7 +552,7 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
     ImGui::Dummy(ImVec2(0, 0));
 }
 
-bool TimelinePanel::drawGroupRow(uint64_t track, const char* group, float x0, float width) {
+bool TimelinePanel::drawGroupRow(uint64_t track, const char* group, float x0, float width, float indent) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float y = ImGui::GetCursorScreenPos().y;
     const float h = kGroupRowHeight;
@@ -537,9 +560,10 @@ bool TimelinePanel::drawGroupRow(uint64_t track, const char* group, float x0, fl
     const bool open = !collapsedGroups_.count(key);
 
     dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), theme::shade(60));
+    x0 += indent;
     ImGui::SetCursorScreenPos(ImVec2(x0 + 24, y));
     ImGui::PushID(group);
-    if (ImGui::InvisibleButton("##group", ImVec2(leftWidth_ - 30, h))) {
+    if (ImGui::InvisibleButton("##group", ImVec2(leftWidth_ - 30 - indent, h))) {
         if (open) collapsedGroups_.insert(key);
         else collapsedGroups_.erase(key);
     }
@@ -550,7 +574,7 @@ bool TimelinePanel::drawGroupRow(uint64_t track, const char* group, float x0, fl
     dl->AddText(ImVec2(x0 + 48, y + (h - ImGui::GetFontSize()) * 0.5f), col, group);
     ImGui::PopFont();
 
-    ImGui::SetCursorScreenPos(ImVec2(x0, y + h));
+    ImGui::SetCursorScreenPos(ImVec2(x0 - indent, y + h));
     ImGui::Dummy(ImVec2(0, 0));
     return open;
 }

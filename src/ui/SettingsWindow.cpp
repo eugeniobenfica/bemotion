@@ -2,12 +2,14 @@
 
 #include "app/Platform.h"
 #include "app/Settings.h"
+#include "ui/PluginsWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
 
+#include <algorithm>
 #include <string>
 
 namespace bemotion::ui {
@@ -184,8 +186,6 @@ void drawAdvanced(Settings& s) {
         s.customPalette = true;
         changed();
     }
-    ImGui::SetNextItemWidth(200);
-    if (ImGui::SliderFloat("Snap distance", &s.snapDistance, 2.0f, 30.0f, "%.0f px")) changed();
 
     ImGui::Spacing();
     sectionLabel("SHARE");
@@ -228,10 +228,15 @@ void drawAdvanced(Settings& s) {
 
 } // namespace
 
-void openSettings() {
+SettingsTab g_tab = SettingsTab::Theme;
+bool g_selectTab = false;
+
+void openSettings(SettingsTab tab) {
     g_open = true;
     g_focus = true;
     g_recenter = 2;
+    g_tab = tab;
+    g_selectTab = true;
 }
 
 void drawSettings() {
@@ -241,31 +246,52 @@ void drawSettings() {
     ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f),
                             g_recenter > 0 ? ImGuiCond_Always : ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     if (g_recenter > 0) --g_recenter;
-    ImGui::SetNextWindowSizeConstraints(ImVec2(560, 0), ImVec2(560, vp->WorkSize.y * 0.9f));
+    ImGui::SetNextWindowSize(ImVec2(600, std::min(680.0f, vp->WorkSize.y * 0.9f)), ImGuiCond_Appearing);
     if (g_focus) {
         ImGui::SetNextWindowFocus();
         g_focus = false;
     }
-    if (!ImGui::Begin("Settings", &g_open, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
-                                                ImGuiWindowFlags_NoSavedSettings)) {
+    if (!ImGui::Begin("Settings", &g_open, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::End();
         return;
     }
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape)) g_open = false;
 
-    drawAppearance(s);
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::Spacing();
-    if (ImGui::Checkbox("Advanced mode", &s.advanced)) {
-        saveSettings();
-        g_recenter = 2; // the window changes height
+    auto tab = [&](const char* label, SettingsTab id) {
+        const bool select = g_selectTab && g_tab == id;
+        return ImGui::BeginTabItem(label, nullptr, select ? ImGuiTabItemFlags_SetSelected : 0);
+    };
+    if (ImGui::BeginTabBar("##settingsTabs")) {
+        if (tab("Theme", SettingsTab::Theme)) {
+            ImGui::BeginChild("##theme");
+            drawAppearance(s);
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            if (ImGui::Checkbox("Advanced mode", &s.advanced)) saveSettings();
+            hint("Shows every color and fine-tuning option. Your choices above stay as they are.");
+            if (s.advanced) {
+                ImGui::Spacing();
+                drawAdvanced(s);
+            }
+            ImGui::EndChild();
+            ImGui::EndTabItem();
+        }
+        if (tab("Editor", SettingsTab::Editor)) {
+            sectionLabel("SNAPPING");
+            ImGui::SetNextItemWidth(220);
+            if (ImGui::SliderFloat("Snap distance", &s.snapDistance, 2.0f, 30.0f, "%.0f px")) changed();
+            hint("How close (on screen) an object, clip, keyframe or the playhead must get before it snaps. "
+                 "Toggle snapping with S or the magnet button; hold Ctrl while dragging to ignore it.");
+            ImGui::EndTabItem();
+        }
+        if (tab("Plugins", SettingsTab::Plugins)) {
+            drawPluginsTab();
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
     }
-    hint("Shows every color and fine-tuning option. Your choices above stay as they are.");
-    if (s.advanced) {
-        ImGui::Spacing();
-        drawAdvanced(s);
-    }
+    g_selectTab = false;
     ImGui::End();
 }
 

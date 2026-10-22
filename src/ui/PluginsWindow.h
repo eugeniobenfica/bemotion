@@ -2,10 +2,8 @@
 
 namespace bemotion::ui {
 
-// Plugins menu contents (shared by the editor menu bar) and the Plugin
-// Manager window, drawn once per frame by the application.
-void pluginsMenuItems();
-void openPluginManager();
-void drawPluginManager();
+// Contents of the Settings window's Plugins tab: installed plugins (enable,
+// errors, log), install, reload and the plugins folder.
+void drawPluginsTab();
 
 } // namespace bemotion::ui

@@ -15,14 +15,12 @@ namespace {
 
 constexpr const char* kDocsUrl = "https://github.com/eugeniobenfica/bemotion/blob/main/docs/PLUGINS.md";
 
-bool g_open = false;
 std::string g_message;
 
 void installPlugin() {
     if (auto manifest = platform::openFileDialog("Install Plugin (choose its plugin.json)", "bemotion plugin", "json")) {
         std::string error;
         g_message = PluginHost::get().install(*manifest, &error) ? "Plugin installed." : "Could not install: " + error;
-        g_open = true;
     }
 }
 
@@ -34,37 +32,7 @@ void faint(const std::string& text) {
 
 } // namespace
 
-void pluginsMenuItems() {
-    PluginHost& host = PluginHost::get();
-    for (const Plugin& p : host.plugins()) {
-        bool enabled = p.enabled;
-        const std::string label = p.name + (p.error.empty() ? "" : "  (error)");
-        if (ImGui::MenuItem(label.c_str(), p.version.c_str(), &enabled)) host.setEnabled(p.id, enabled);
-    }
-    if (host.plugins().empty()) ImGui::TextDisabled("No plugins installed");
-    ImGui::Separator();
-    if (ImGui::MenuItem("Plugin Manager...")) openPluginManager();
-    if (ImGui::MenuItem("Install Plugin...")) installPlugin();
-    if (ImGui::MenuItem("Open Plugins Folder")) platform::revealInFileManager(PluginHost::userDir());
-    if (ImGui::MenuItem("Reload Plugins")) host.requestReload();
-    ImGui::Separator();
-    if (ImGui::MenuItem("Write a Plugin (docs)")) platform::openWithDefaultApp(kDocsUrl);
-}
-
-void openPluginManager() { g_open = true; }
-
-void drawPluginManager() {
-    if (!g_open) return;
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f),
-                            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(620, 520), ImGuiCond_Appearing);
-    if (!ImGui::Begin("Plugins", &g_open, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::End();
-        return;
-    }
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape)) g_open = false;
-
+void drawPluginsTab() {
     PluginHost& host = PluginHost::get();
     if (ui::accentButton("Install Plugin...")) installPlugin();
     ImGui::SameLine();
@@ -77,7 +45,7 @@ void drawPluginManager() {
     faint("Plugins add new kinds of objects. They run in a sandbox: no access to your files or the network.");
     ImGui::Separator();
 
-    ImGui::BeginChild("##list");
+    ImGui::BeginChild("##list", ImVec2(0, 0), ImGuiChildFlags_None);
     for (const Plugin& p : host.plugins()) {
         ImGui::PushID(p.id.c_str());
         bool enabled = p.enabled;
@@ -121,7 +89,6 @@ void drawPluginManager() {
         ImGui::PopID();
     }
     ImGui::EndChild();
-    ImGui::End();
 }
 
 } // namespace bemotion::ui

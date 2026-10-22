@@ -97,6 +97,8 @@ folders, native file dialogs and UTF-8 paths.
 
 - `BEMOTION_CAPTURE=shot.bmp` saves frame `BEMOTION_CAPTURE_FRAME` (default 60)
   to a BMP and quits.
+- `BEMOTION_APPDATA=dir` keeps settings, layout and caches in `dir` instead of
+  the user's app data folder (use it for scripted UI tests).
 - `BEMOTION_SCRIPT=steps.txt` replays scripted mouse/keyboard input and can
   capture frames along the way (see `app/DevScript.h`), so interactions can be
   checked without anyone at the screen.

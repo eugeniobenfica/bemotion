@@ -8,6 +8,7 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <unordered_map>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
@@ -366,6 +367,70 @@ std::string formatTimecode(double seconds, double fps) {
     std::snprintf(buf, sizeof(buf), "%02lld:%02lld:%02lld:%02lld", totalSec / 3600, (totalSec / 60) % 60, totalSec % 60,
                   frames);
     return buf;
+}
+
+namespace {
+
+struct PanelState {
+    bool minimized = false;
+    float savedSize = 0.0f;
+};
+
+PanelState& panelState() {
+    static std::unordered_map<ImGuiID, PanelState> states;
+    return states[ImGui::GetCurrentWindow()->ID];
+}
+
+// Sets a docked node's size along its parent's split axis (the sibling takes the rest).
+void resizeDockNode(ImGuiDockNode* node, float size) {
+    ImGuiDockNode* parent = node ? node->ParentNode : nullptr;
+    if (!parent || parent->SplitAxis == ImGuiAxis_None) return;
+    const int axis = parent->SplitAxis;
+    ImGuiDockNode* sibling = parent->ChildNodes[0] == node ? parent->ChildNodes[1] : parent->ChildNodes[0];
+    size = std::clamp(size, 1.0f, parent->Size[axis] - 40.0f);
+    // Only the resized node is locked: ImGui then gives the sibling the rest.
+    node->SizeRef[axis] = node->Size[axis] = size;
+    sibling->SizeRef[axis] = parent->Size[axis] - size;
+    node->WantLockSizeOnce = true;
+}
+
+} // namespace
+
+bool panelIsMinimized() { return panelState().minimized; }
+
+void panelMinimizeButton() {
+    ImGuiWindow* window = ImGui::GetCurrentWindow();
+    ImGuiDockNode* node = window->DockNode;
+    if (!node || !node->TabBar || !node->HostWindow || !node->ParentNode || node->ParentNode->SplitAxis == ImGuiAxis_None)
+        return; // floating, alone in the dockspace, or without a tab bar
+    if (node->TabBar->SelectedTabId != window->TabId) return; // only the visible tab owns the button
+    PanelState& st = panelState();
+    const int axis = node->ParentNode->SplitAxis;
+    // The tab bar belongs to the dock host window, where this window's widgets
+    // cannot be clicked: draw on the host and hit-test by hand.
+    const ImRect bar = node->TabBar->BarRect;
+    const float s = std::min(bar.GetHeight(), ImGui::GetFrameHeight()) - 4.0f;
+    const ImVec2 a(bar.Max.x - s - 4.0f, bar.Min.y + (bar.GetHeight() - s) * 0.5f), b(a.x + s, a.y + s);
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    const bool overHost = g.HoveredWindow && g.HoveredWindow->RootWindowDockTree == node->HostWindow->RootWindowDockTree;
+    const bool hovered = overHost && ImGui::IsMouseHoveringRect(a, b, false) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+    ImDrawList* dl = node->HostWindow->DrawList;
+    if (hovered) dl->AddRectFilled(a, b, theme::kBgHover, 4.0f);
+    const Icon icon = axis == ImGuiAxis_Y ? (st.minimized ? Icon::ChevronUp : Icon::ChevronDown)
+                                          : (st.minimized ? Icon::ChevronRight : Icon::ChevronDown);
+    drawIcon(dl, icon, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), s * 0.6f, hovered ? theme::kText : theme::kTextDim);
+    if (hovered) {
+        ImGui::SetTooltip(st.minimized ? "Restore panel" : "Minimize panel");
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+            st.minimized = !st.minimized;
+            if (st.minimized) {
+                st.savedSize = node->Size[axis];
+                resizeDockNode(node, axis == ImGuiAxis_Y ? bar.GetHeight() + 6.0f : 44.0f);
+            } else {
+                resizeDockNode(node, std::max(st.savedSize, 160.0f));
+            }
+        }
+    }
 }
 
 void nextPanelWindowClass() {

@@ -53,7 +53,7 @@ private:
     void updateMarquee(EditorContext& ctx, ImDrawList* dl);
     void drawDropIndicator(ImDrawList* dl, const DropTarget& target, float x0, float width) const;
     // Collapsible "Transform" / "Shape" / ... header; returns whether it is open.
-    bool drawGroupRow(uint64_t track, const char* group, float x0, float width);
+    bool drawGroupRow(uint64_t track, const char* group, float x0, float width, float indent = 0.0f);
     void drawPropertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop, float x0, float width);
     void drawKeyContextMenu(EditorContext& ctx);
 

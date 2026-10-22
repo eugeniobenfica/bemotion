@@ -10,7 +10,6 @@
 #include "render/EffectRenderer.h"
 #include "render/Fonts.h"
 #include "ui/EditorScreen.h"
-#include "ui/PluginsWindow.h"
 #include "ui/SettingsWindow.h"
 #include "ui/Theme.h"
 
@@ -299,7 +298,6 @@ void Application::frame(double dt) {
 
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, ImGuiInputFlags_RouteGlobal)) ui::openSettings();
     ui::drawSettings();
-    ui::drawPluginManager();
 
     ImGui::Render();
     int w = 0, h = 0;

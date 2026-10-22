@@ -113,6 +113,11 @@ void ViewportPanel::draw(EditorContext& ctx) {
         ImGui::End();
         return;
     }
+    if (ui::panelIsMinimized()) { // only the tab shows
+        ui::panelMinimizeButton();
+        ImGui::End();
+        return;
+    }
 
     Composition& c = ctx.comp();
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -160,6 +165,7 @@ void ViewportPanel::draw(EditorContext& ctx) {
     handleGuides(ctx); // rulers are items on top of the canvas
     drawRulers(ctx);
     drawHud(ctx);
+    ui::panelMinimizeButton();
     ImGui::End();
 }
 
@@ -244,12 +250,15 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
     // Scale/rotate handles exist only for a single editable layer.
     Layer* single = ctx.selection.size() == 1 ? ctx.selected() : nullptr;
     if (single && (single->locked || !single->activeAt(t))) single = nullptr;
+    // Looking through a camera, the camera itself is not grabbed (it would drag the view along).
+    if (single && single->type == LayerType::Camera && throughCamera_) single = nullptr;
+    const bool canScale = single && single->type != LayerType::Camera; // a camera zooms instead
     Handles h{};
     const bool haveHandles = single && computeHandles(*single, t, view, h);
 
     if (hovered && drag_ == Drag::None && haveHandles && !spaceHeld()) {
         for (int i = 0; i < 4; ++i)
-            if (near(mouse, h.screen[i], kHandleRadius + 3))
+            if (canScale && near(mouse, h.screen[i], kHandleRadius + 3))
                 ImGui::SetMouseCursor(i % 2 == 0 ? ImGuiMouseCursor_ResizeNWSE : ImGuiMouseCursor_ResizeNESW);
         if (near(mouse, h.rotate, kHandleRadius + 4)) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
     }
@@ -279,7 +288,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
         } else {
             if (haveHandles && !additive) {
                 for (int i = 0; i < 4; ++i)
-                    if (near(mouse, h.screen[i], kHandleRadius + 3)) {
+                    if (canScale && near(mouse, h.screen[i], kHandleRadius + 3)) {
                         drag_ = Drag::Scale;
                         dragCorner_ = h.local[i];
                     }
@@ -310,7 +319,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                         dragBoxMin_ = {1e9f, 1e9f};
                         dragBoxMax_ = {-1e9f, -1e9f};
                         for (Layer* l : ctx.selectedLayers()) {
-                            if (l->locked) continue;
+                            if (l->locked || (l->type == LayerType::Camera && throughCamera_)) continue;
                             dragStartPositions_.emplace_back(l->id, l->transform.position.valueAt(t));
                             moving.push_back(l->id);
                             Vec2 mn, mx;
@@ -552,7 +561,8 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
                     theme::accent(90), 2.0f, 0, 1.0f);
 
     // Handles for a single selection.
-    if (selected.size() == 1 && selected[0]->activeAt(t)) {
+    const bool cameraView = selected.size() == 1 && selected[0]->type == LayerType::Camera && throughCamera_;
+    if (selected.size() == 1 && selected[0]->activeAt(t) && !cameraView) {
         const Layer* sel = selected[0];
         Handles h{};
         if (computeHandles(*sel, t, view, h)) {
@@ -564,6 +574,7 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
                 dl->AddCircleFilled(im(h.rotate), kHandleRadius, theme::kBgPanel);
                 dl->AddCircle(im(h.rotate), kHandleRadius, theme::kAccent, 0, 1.5f);
                 for (const Vec2& c : h.screen) {
+                    if (sel->type == LayerType::Camera) break; // cameras zoom, they do not scale
                     const ImVec2 a(c.x - kHandleRadius, c.y - kHandleRadius), b(c.x + kHandleRadius, c.y + kHandleRadius);
                     dl->AddRectFilled(a, b, theme::kBgPanel, 2.0f);
                     dl->AddRect(a, b, theme::kAccent, 2.0f, 0, 1.5f);

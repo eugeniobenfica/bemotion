@@ -225,7 +225,10 @@ json encodeLayer(const Layer& constLayer) {
                                  {"opacity", encodeAnimated(e.opacity)},
                                  {"size", encodeAnimated(e.size)},
                                  {"offset", encodeAnimated(e.offset)},
-                                 {"shutter", encodeAnimated(e.shutter)}}}});
+                                 {"shutter", encodeAnimated(e.shutter)},
+                                 {"v1", encodeAnimated(e.value1)},
+                                 {"v2", encodeAnimated(e.value2)},
+                                 {"v3", encodeAnimated(e.value3)}}}});
         j["effects"] = std::move(effects);
     }
     return j;
@@ -279,6 +282,9 @@ Layer decodeLayer(const json& j) {
         if (params.contains("size")) decodeAnimated(params["size"], e.size);
         if (params.contains("offset")) decodeAnimated(params["offset"], e.offset);
         if (params.contains("shutter")) decodeAnimated(params["shutter"], e.shutter);
+        if (params.contains("v1")) decodeAnimated(params["v1"], e.value1);
+        if (params.contains("v2")) decodeAnimated(params["v2"], e.value2);
+        if (params.contains("v3")) decodeAnimated(params["v3"], e.value3);
         layer.effects.push_back(std::move(e));
     }
     return layer;

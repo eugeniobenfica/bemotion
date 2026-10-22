@@ -208,9 +208,10 @@ void Composition::timeShiftLimits(const std::vector<uint64_t>& layerIds, double&
     for (uint64_t id : layerIds) {
         const Layer* l = findLayer(id);
         if (!l) continue;
-        // Stay inside the composition (clips that already stick out may still move back in).
+        // Clips may run past the end of the composition (like After Effects), but
+        // never start before 0 or after the last frame.
         minDelta = std::max(minDelta, std::min(0.0, -l->inPoint));
-        maxDelta = std::min(maxDelta, std::max(0.0, duration - l->outPoint));
+        maxDelta = std::min(maxDelta, std::max(0.0, duration - frameDuration() - l->inPoint));
         for (const Layer& other : layers) {
             if (other.track != l->track || contains(layerIds, other.id)) continue;
             if (other.outPoint <= l->inPoint + kOverlapEpsilon) minDelta = std::max(minDelta, other.outPoint - l->inPoint);
@@ -236,7 +237,7 @@ void Composition::clipLimits(uint64_t layerId, double& minIn, double& maxOut) co
     double prevOut = 0, nextIn = 0;
     neighborBounds(layerId, prevOut, nextIn);
     minIn = std::max(0.0, prevOut);
-    maxOut = std::min(duration, nextIn);
+    maxOut = std::min(nextIn, duration + kMaxOverhang); // the out point may pass the composition end
 }
 
 uint64_t Composition::splitLayer(uint64_t id, double t) {

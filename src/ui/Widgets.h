@@ -84,6 +84,12 @@ void tooltip(const char* text);
 // Call right before Begin() of a dockable panel: one close button (on its tab), no extra one on the dock node.
 void nextPanelWindowClass();
 
+// Minimizing docked panels: a panel calls panelIsMinimized() right after Begin
+// (and skips its content when true) and panelMinimizeButton() just before End.
+// Minimizing shrinks the panel's dock node to its tab; restoring brings back its size.
+bool panelIsMinimized();
+void panelMinimizeButton();
+
 // "HH:MM:SS:FF" timecode.
 std::string formatTimecode(double seconds, double fps);
 

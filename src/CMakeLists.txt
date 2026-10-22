@@ -44,6 +44,7 @@ add_executable(bemotion WIN32
     ui/SettingsWindow.cpp
     ui/Theme.cpp
     ui/Widgets.cpp
+    ui/panels/EffectsPanel.cpp
     ui/panels/ObjectsPanel.cpp
     ui/panels/PropertiesPanel.cpp
     ui/panels/TimelinePanel.cpp
