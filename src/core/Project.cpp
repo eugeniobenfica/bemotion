@@ -45,6 +45,26 @@ Layer& Composition::addLayer(Layer layer, int index) {
     return *layers.insert(layers.begin() + at, std::move(layer));
 }
 
+MediaItem* Composition::findMedia(uint64_t id) {
+    for (auto& m : media)
+        if (m.id == id) return &m;
+    return nullptr;
+}
+
+const MediaItem* Composition::findMedia(uint64_t id) const {
+    for (const auto& m : media)
+        if (m.id == id) return &m;
+    return nullptr;
+}
+
+uint64_t Composition::addMedia(MediaItem item) {
+    for (const auto& m : media)
+        if (!item.path.empty() && m.path == item.path) return m.id;
+    item.id = nextMediaId++;
+    media.push_back(std::move(item));
+    return media.back().id;
+}
+
 Layer* Composition::findLayer(uint64_t id) {
     for (auto& l : layers)
         if (l.id == id) return &l;
@@ -238,6 +258,13 @@ void Composition::clipLimits(uint64_t layerId, double& minIn, double& maxOut) co
     neighborBounds(layerId, prevOut, nextIn);
     minIn = std::max(0.0, prevOut);
     maxOut = std::min(nextIn, duration + kMaxOverhang); // the out point may pass the composition end
+    // Video and audio clips cannot be trimmed past their source (stills can).
+    const Layer* l = findLayer(layerId);
+    const MediaItem* item = l && l->type == LayerType::Media ? findMedia(l->media.mediaId) : nullptr;
+    if (item && item->kind != MediaKind::Image && item->duration > 0) {
+        minIn = std::max(minIn, l->media.start);
+        maxOut = std::min(maxOut, l->media.start + item->duration);
+    }
 }
 
 void Composition::setInPoint(uint64_t layerId, double t) {

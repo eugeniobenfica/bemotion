@@ -100,6 +100,10 @@ void DevScript::apply() {
             capture_ = c.args[0];
             return;
         }
+        if (c.op == "drop") {
+            for (const std::string& f : c.args) drops_.emplace_back(std::u8string(f.begin(), f.end()));
+            return;
+        }
         if (c.op == "quit") {
             quit_ = true;
             return;

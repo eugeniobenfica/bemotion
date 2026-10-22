@@ -152,6 +152,55 @@ std::optional<fs::path> openFileDialog(const char* title, const char* filterName
 #endif
 }
 
+std::vector<fs::path> openFilesDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions) {
+    std::vector<fs::path> files;
+#ifdef _WIN32
+    std::string patterns;
+    for (const auto& e : extensions) patterns += (patterns.empty() ? "*." : ";*.") + e;
+    std::wstring filter = widen(std::string(filterName));
+    filter.push_back(L'\0');
+    filter += widen(patterns);
+    filter.push_back(L'\0');
+    filter += L"All files";
+    filter.push_back(L'\0');
+    filter += L"*.*";
+    filter.push_back(L'\0');
+    filter.push_back(L'\0');
+    std::vector<wchar_t> buffer(64 * 1024, L'\0');
+    const std::wstring wtitle = widen(title);
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = static_cast<HWND>(g_window);
+    ofn.lpstrFilter = filter.c_str();
+    ofn.lpstrFile = buffer.data();
+    ofn.nMaxFile = static_cast<DWORD>(buffer.size());
+    ofn.lpstrTitle = wtitle.c_str();
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER | OFN_ALLOWMULTISELECT;
+    if (!GetOpenFileNameW(&ofn)) return files;
+    // One file: its full path. Several: the folder, then each name, separated by NULs.
+    const wchar_t* p = buffer.data();
+    const fs::path first(p);
+    p += wcslen(p) + 1;
+    if (!*p) return {first};
+    for (; *p; p += wcslen(p) + 1) files.push_back(first / p);
+#else
+    std::string patterns;
+    for (const auto& e : extensions) patterns += " *." + e;
+    const std::string cmd = std::string("zenity --file-selection --multiple --separator='\n' --title=\"") + title +
+                            "\" --file-filter=\"" + filterName + " |" + patterns + "\" 2>/dev/null";
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) return files;
+    char line[4096];
+    while (fgets(line, sizeof(line), pipe)) {
+        std::string s = line;
+        while (!s.empty() && (s.back() == '\n' || s.back() == '\r')) s.pop_back();
+        if (!s.empty()) files.emplace_back(s);
+    }
+    pclose(pipe);
+#endif
+    return files;
+}
+
 std::optional<fs::path> saveFileDialog(const char* title, const fs::path& suggested, const char* filterName,
                                        const char* extension) {
 #ifdef _WIN32

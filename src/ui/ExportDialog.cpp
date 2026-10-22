@@ -1,6 +1,8 @@
 #include "ui/ExportDialog.h"
 
 #include "app/Platform.h"
+#include "media/AudioEngine.h"
+#include "media/MediaManager.h"
 #include "render/Fonts.h"
 #include "ui/EditorContext.h"
 #include "ui/Theme.h"
@@ -83,8 +85,8 @@ void ExportDialog::draw(EditorContext& ctx) {
     }
     switch (stage_) {
     case Stage::Settings: drawSettings(ctx); break;
-    case Stage::Preparing: // system fonts used by text layers load between frames
-        ImGui::TextUnformatted("Preparing fonts...");
+    case Stage::Preparing: // system fonts used by text layers, and audio, load between frames
+        ImGui::TextUnformatted(media::MediaManager::get().audioReady(ctx.comp()) ? "Preparing fonts..." : "Reading audio...");
         startExport(ctx);
         break;
     case Stage::Running: drawProgress(); break;
@@ -196,7 +198,8 @@ void ExportDialog::startExport(EditorContext& ctx) {
     if (settings_.output.extension() != exporting::formatExtension(settings_.format))
         settings_.output += exporting::formatExtension(settings_.format);
     error_.clear();
-    if (!Fonts::ensureLoaded(ctx.comp())) {
+    settings_.mixAudio = media::AudioEngine::mix;
+    if (!Fonts::ensureLoaded(ctx.comp()) || !media::MediaManager::get().audioReady(ctx.comp())) {
         stage_ = Stage::Preparing;
         return;
     }

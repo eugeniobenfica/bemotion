@@ -38,6 +38,7 @@ private:
 
     void drawToolbar(EditorContext& ctx);
     void drawBreadcrumb(EditorContext& ctx); // inside a compound: the path back to the composition
+    void drawWaveform(ImDrawList* dl, const Layer& layer, ImVec2 a, ImVec2 b, ImU32 color) const;
     void handleObjectDrop(EditorContext& ctx, ImDrawList* dl, float x0, float width);
     void drawRuler(EditorContext& ctx, float x0, float y0, float width);
     void drawTrackRow(EditorContext& ctx, const TrackRow& row, int rowIndex, float x0, float width);

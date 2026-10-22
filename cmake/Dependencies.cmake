@@ -41,7 +41,16 @@ FetchContent_Declare(lua
     URL_HASH SHA256=9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 
-FetchContent_MakeAvailable(glfw json imgui stb lua)
+# --- miniaudio (audio playback and decoding: WAV, MP3, FLAC) --------------------
+FetchContent_Declare(miniaudio
+    GIT_REPOSITORY https://github.com/mackron/miniaudio.git
+    GIT_TAG        0.11.23
+    GIT_SHALLOW    TRUE
+    SOURCE_SUBDIR  no-cmake) # only the header is needed: download without configuring its project
+
+FetchContent_MakeAvailable(glfw json imgui stb lua miniaudio)
+add_library(miniaudio INTERFACE)
+target_include_directories(miniaudio SYSTEM INTERFACE ${miniaudio_SOURCE_DIR})
 
 add_library(stb INTERFACE)
 target_include_directories(stb SYSTEM INTERFACE ${stb_SOURCE_DIR})

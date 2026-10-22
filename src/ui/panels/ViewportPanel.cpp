@@ -224,9 +224,15 @@ void ViewportPanel::handleDrop(EditorContext& ctx) {
     dropHover_ = false;
     if (!ImGui::BeginDragDropTarget()) return;
     constexpr ImGuiDragDropFlags flags = ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
-    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kObjectPayload, flags)) {
+    const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kObjectPayload, flags);
+    dropMedia_ = 0;
+    if (!payload) {
+        payload = ImGui::AcceptDragDropPayload(kMediaPayload, flags);
+        if (payload) dropMedia_ = *static_cast<const uint64_t*>(payload->Data);
+    }
+    if (payload) {
         const Vec2 mouse = vec(ImGui::GetIO().MousePos);
-        dropKind_ = *static_cast<const int*>(payload->Data);
+        if (!dropMedia_) dropKind_ = *static_cast<const int*>(payload->Data);
         dropPos_ = (mouse - origin_) / zoom_;
         dropPos_ = {std::round(dropPos_.x), std::round(dropPos_.y)};
         if (ctx.snapping && !ImGui::GetIO().KeyCtrl) { // the new object's center snaps too
@@ -236,7 +242,8 @@ void ViewportPanel::handleDrop(EditorContext& ctx) {
         dropHover_ = true;
         if (payload->IsDelivery()) {
             const Vec2 scenePos = world_.inverse().apply(dropPos_); // where the camera shows that point
-            if (dropKind_ == kDropCamera) ctx.addCamera();
+            if (dropMedia_) ctx.addMedia(dropMedia_, scenePos);
+            else if (dropKind_ == kDropCamera) ctx.addCamera();
             else if (const PluginObjectType* type = droppedPluginType()) ctx.addPluginObject(*type, scenePos);
             else if (dropKind_ < 0) ctx.addText(scenePos);
             else ctx.addShape(static_cast<ShapeKind>(dropKind_), scenePos);
@@ -644,13 +651,21 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
     // Ghost of an object being dragged in from the Objects panel.
     if (dropHover_) {
         const Vec2 scenePos = world_.inverse().apply(dropPos_);
-        const PluginObjectType* type = droppedPluginType();
-        Layer ghost = dropKind_ == kDropCamera ? makeCameraLayer(compSize_, comp.duration)
+        const PluginObjectType* type = dropMedia_ ? nullptr : droppedPluginType();
+        const MediaItem* item = dropMedia_ ? comp.findMedia(dropMedia_) : nullptr;
+        Layer ghost = item                     ? makeMediaLayer(*item, scenePos, 0.0, comp.duration)
+                      : dropKind_ == kDropCamera ? makeCameraLayer(compSize_, comp.duration)
                       : type                   ? makePluginLayer(type->name, type->prototype, scenePos, comp.duration)
                       : dropKind_ < 0          ? makeTextLayer("Your text", scenePos, comp.duration)
                                                : makeShapeLayer(static_cast<ShapeKind>(dropKind_), scenePos, comp.duration);
+        if (item && item->width > 0 && item->height > 0) { // fitted like the layer it becomes
+            const float fit = std::min({1.0f, static_cast<float>(comp.width) / item->width, static_cast<float>(comp.height) / item->height});
+            ghost.transform.scale.base = {fit * 100.0f, fit * 100.0f};
+        }
         ghost.transform.opacity.base = 55.0f;
-        render::drawLayer(dl, ghost, t, view.matrix() * ghost.matrixAt(t));
+        // Images show themselves; a video's ghost is its frame outline (no reader for a layer that does not exist yet).
+        render::drawLayer(dl, ghost, t, view.matrix() * ghost.matrixAt(t), -1.0f,
+                          item && item->kind == MediaKind::Image ? &comp : nullptr);
         const Vec2 s = view.toScreen(dropPos_);
         dl->AddLine(ImVec2(s.x - 10, s.y), ImVec2(s.x + 10, s.y), theme::kAccent, 1.5f);
         dl->AddLine(ImVec2(s.x, s.y - 10), ImVec2(s.x, s.y + 10), theme::kAccent, 1.5f);

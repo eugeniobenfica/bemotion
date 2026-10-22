@@ -66,6 +66,27 @@ cancelling trivial. Encoders:
   systems and for ProRes 4444, WebM VP9 and GIF.
 - `PngSequenceEncoder` — numbered PNGs via stb_image_write, with alpha.
 
+Audio is mixed once when the job starts (`Settings::mixAudio`, provided by the
+media module) and handed to the encoder: an AAC stream in Media Foundation
+MP4s, a temporary WAV input for FFmpeg, a `.wav` beside PNG sequences.
+
+## Media (`src/media`)
+
+Imported files live in `Composition::media` (`core/Media.h`); a media layer
+points at one by id and stores where the source's frame 0 sits in composition
+time (`MediaProps::start`, moved along by `shiftTime`), so cut, moved and
+trimmed clips stay in sync with their source.
+
+- `MediaIO` probes files and decodes images (stb_image) and audio (miniaudio;
+  Media Foundation for audio in video containers). `VideoReader` reads video
+  frames (Media Foundation on Windows, a stub elsewhere).
+- `MediaManager` is the runtime side: GL textures for images and thumbnails,
+  one video reader per (composition, layer) so the editor and an export never
+  fight over seeking, and audio decoded in the background. It plugs into the
+  renderer through `render::setMediaProvider`.
+- `AudioEngine` plays the timeline through a miniaudio device (resynced to
+  the playhead when it jumps) and mixes audio offline for exports.
+
 ## Editor (`src/ui`)
 
 - **`EditorContext`** holds the open project, the multi-layer selection (the

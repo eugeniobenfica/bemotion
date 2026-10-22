@@ -94,6 +94,8 @@ public:
     void enterScope(uint64_t compoundId);
     void exitScope(); // one level up
     void releaseSelectedCompounds();
+    // A layer for an imported media item (at the center / playhead unless given).
+    Layer* addMedia(uint64_t mediaId, std::optional<Vec2> position = {}, std::optional<double> start = {});
     // Adds an object of the Objects panel (see kObjectPayload) at a scene position, starting at `start`.
     Layer* addObject(int kind, Vec2 position, double start);
     bool selectionHasCompound();

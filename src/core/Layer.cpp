@@ -56,6 +56,10 @@ PluginParam* PluginProps::find(const std::string& id) {
 std::vector<PropertyRef> Layer::properties() {
     std::vector<PropertyRef> p;
     auto& tr = transform;
+    if (type == LayerType::Media && !media.hasVideo) { // audio only: just its level
+        p.push_back({"volume", "Audio", "Volume", PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
+        return p;
+    }
     if (type == LayerType::Camera) { // never drawn: no shape, text or effects
         p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
         p.push_back({"rotation", "Transform", "Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
@@ -86,6 +90,9 @@ std::vector<PropertyRef> Layer::properties() {
         p.push_back({"trim_end", "Stroke", "Trim End", PropertyKind::Float, &s.trimEnd, 0.5f, 0, 100, "%.0f%%"});
     } else if (type == LayerType::Compound) {
         // Only a transform: its contents are other layers.
+    } else if (type == LayerType::Media) {
+        if (media.hasAudio)
+            p.push_back({"volume", "Audio", "Volume", PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
     } else if (type == LayerType::Plugin) {
         p.push_back({"size", "Object", "Size", PropertyKind::Vec2, &plugin.size, 1.0f, 0, 100000});
         for (PluginParam& pp : plugin.params) {
@@ -145,6 +152,7 @@ Affine Layer::matrixAt(double t) const {
 void Layer::shiftTime(double delta) {
     inPoint += delta;
     outPoint += delta;
+    media.start += delta; // the footage moves with its layer
     for (auto& p : properties())
         for (int i = 0; i < p.anim->keyCount(); ++i) p.anim->setKeyTime(i, p.anim->keyTime(i) + delta);
 }
@@ -170,6 +178,33 @@ Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration) {
         break;
     case ShapeKind::Count: break;
     }
+    return l;
+}
+
+const char* mediaKindLabel(MediaKind kind) {
+    switch (kind) {
+    case MediaKind::Image: return "Image";
+    case MediaKind::Video: return "Video";
+    case MediaKind::Audio: return "Audio";
+    }
+    return "Media";
+}
+
+Layer makeMediaLayer(const MediaItem& item, Vec2 position, double start, double compDuration) {
+    Layer l;
+    l.type = LayerType::Media;
+    l.name = item.name;
+    l.label = item.kind == MediaKind::Audio ? 2 : item.kind == MediaKind::Video ? 5 : 1;
+    l.media.mediaId = item.id;
+    l.media.size = {static_cast<float>(item.width), static_cast<float>(item.height)};
+    l.media.hasVideo = item.kind != MediaKind::Audio;
+    l.media.hasAudio = item.hasAudio;
+    l.media.start = start;
+    l.inPoint = start;
+    // Footage lasts as long as its source; a still image until the composition ends.
+    const double length = item.kind == MediaKind::Image ? std::max(1.0, compDuration - start) : std::max(0.1, item.duration);
+    l.outPoint = start + length;
+    l.transform.position.base = position;
     return l;
 }
 

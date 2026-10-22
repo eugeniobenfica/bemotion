@@ -77,8 +77,16 @@ public:
 
         std::ostringstream cmd;
         cmd << quote(platform::toUtf8(*ffmpeg)) << " -hide_banner -loglevel error -y -f rawvideo -pix_fmt rgba -s "
-            << params.width << "x" << params.height << " -framerate " << params.fps << " -i - "
-            << codecArguments(params) << " " << quote(platform::toUtf8(params.output));
+            << params.width << "x" << params.height << " -framerate " << params.fps << " -i - ";
+        if (params.audio) { // the mixed audio goes in as a WAV file
+            wav_ = std::filesystem::temp_directory_path(ec) / "bemotion-export-audio.wav";
+            if (!writeWav(wav_, *params.audio, kExportAudioRate, error)) return false;
+            const char* codec = params.format == Format::MovProRes ? "pcm_s16le"
+                                : params.format == Format::WebM    ? "libopus -b:a 160k"
+                                                                   : "aac -b:a 192k";
+            cmd << "-i " << quote(platform::toUtf8(wav_)) << " -map 0:v -map 1:a -c:a " << codec << " ";
+        }
+        cmd << codecArguments(params) << " " << quote(platform::toUtf8(params.output));
         return launch(cmd.str(), error);
     }
 
@@ -96,6 +104,11 @@ public:
         if (!running_) return true;
         running_ = false;
         const int code = wait();
+        if (!wav_.empty()) {
+            std::error_code ec;
+            std::filesystem::remove(wav_, ec);
+            wav_.clear();
+        }
         if (code != 0) {
             error = "FFmpeg failed (code " + std::to_string(code) + "): " + readLog(log_);
             return false;
@@ -189,6 +202,7 @@ private:
 
     size_t frameBytes_ = 0;
     std::filesystem::path log_;
+    std::filesystem::path wav_; // temporary audio input
     bool running_ = false;
 };
 

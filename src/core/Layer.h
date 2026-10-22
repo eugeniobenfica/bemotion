@@ -2,6 +2,7 @@
 
 #include "core/Animated.h"
 #include "core/Effects.h"
+#include "core/Media.h"
 #include "core/Math.h"
 
 #include <cstdint>
@@ -10,7 +11,7 @@
 
 namespace bemotion {
 
-enum class LayerType { Shape, Text, Camera, Plugin, Compound };
+enum class LayerType { Shape, Text, Camera, Plugin, Compound, Media };
 
 enum class ShapeKind { Rectangle, Ellipse, Polygon, Star, Line, Count };
 
@@ -132,6 +133,19 @@ struct PluginProps {
     PluginParam* find(const std::string& id);
 };
 
+// A layer showing / playing a media item (video, image or audio).
+struct MediaProps {
+    uint64_t mediaId = 0;
+    Vec2 size{0.0f, 0.0f};    // source pixels (0 for audio only)
+    double start = 0.0;       // composition time of the source's first frame (moves with the layer;
+                              // trimming the in point reveals later source frames, like After Effects)
+    AnimFloat volume{100.0f}; // percent, layers with audio
+    bool hasVideo = false;
+    bool hasAudio = false;
+
+    double sourceTime(double t) const { return t - start; }
+};
+
 constexpr int kLabelColorCount = 8;
 Color labelColor(int index);
 
@@ -157,6 +171,7 @@ struct Layer {
     TextProps text;
     CameraProps camera;
     PluginProps plugin;
+    MediaProps media;
     std::vector<Effect> effects; // applied in order
 
     // All animatable properties that apply to this layer's type, in UI order.
@@ -176,6 +191,8 @@ Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
 Layer makeCameraLayer(Vec2 compSize, double duration);
 Layer makeCompoundLayer(Vec2 position, double duration);
+// A layer for `item` starting at `start` (videos and audio last as long as the source).
+Layer makeMediaLayer(const MediaItem& item, Vec2 position, double start, double compDuration);
 // A plugin object with the given parameters at their defaults (see PluginHost).
 Layer makePluginLayer(const std::string& name, PluginProps props, Vec2 position, double duration);
 

@@ -15,6 +15,8 @@ class EditorContext;
 // The payload is an int: -1 for text, kDropCamera for a camera, kDropPlugin - i
 // for plugin object type i (PluginHost::objectTypes()), otherwise a ShapeKind.
 inline constexpr const char* kObjectPayload = "BEMOTION_OBJECT";
+// Payload of a Media panel item: its uint64_t media id.
+inline constexpr const char* kMediaPayload = "BEMOTION_MEDIA";
 inline constexpr int kDropCamera = -2;
 inline constexpr int kDropPlugin = -100;
 
@@ -95,6 +97,7 @@ private:
     // Object being dragged in from the Objects panel (ghost preview).
     bool dropHover_ = false;
     int dropKind_ = 0;
+    uint64_t dropMedia_ = 0; // a Media panel item being dropped (instead of dropKind_)
     Vec2 dropPos_;
 
     // --- snapping & guides ---------------------------------------------------------

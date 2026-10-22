@@ -158,12 +158,15 @@ Layer& EditorContext::insertLayer(Layer layer) {
         layer.transform.position.base = toLocal.apply(layer.transform.position.base);
     }
     layer.name = comp().uniqueLayerName(layer.name);
-    layer.label = static_cast<int>(comp().nextLayerId % kLabelColorCount);
+    if (layer.type != LayerType::Media) layer.label = static_cast<int>(comp().nextLayerId % kLabelColorCount);
     // Like After Effects: the new layer starts at the playhead and runs to the end of the composition.
     const double start = comp().snapToFrame(std::clamp(time, 0.0, std::max(0.0, comp().duration - comp().frameDuration())));
     if (start > 0.0) {
         layer.shiftTime(start - layer.inPoint); // keyframes (e.g. plugin intros) move along
-        layer.outPoint = std::max(comp().duration, layer.inPoint + comp().frameDuration());
+        // Footage keeps its own length; everything else runs to the end of the composition.
+        const MediaItem* item = layer.type == LayerType::Media ? comp().findMedia(layer.media.mediaId) : nullptr;
+        const bool footage = item && item->kind != MediaKind::Image;
+        if (!footage) layer.outPoint = std::max(comp().duration, layer.inPoint + comp().frameDuration());
     }
     // New layers go right above the primary selection, or on top.
     const int index = std::max(0, comp().indexOf(primaryId()));
@@ -190,6 +193,23 @@ Layer& EditorContext::addCamera() {
 Layer& EditorContext::addPluginObject(const PluginObjectType& type, std::optional<Vec2> position) {
     Layer layer = PluginHost::get().createLayer(type, position.value_or(comp().center()), comp().duration);
     return insertLayer(std::move(layer));
+}
+
+Layer* EditorContext::addMedia(uint64_t mediaId, std::optional<Vec2> position, std::optional<double> start) {
+    const MediaItem* item = comp().findMedia(mediaId);
+    if (!item) return nullptr;
+    Layer layer = makeMediaLayer(*item, position.value_or(comp().center()), 0.0, comp().duration);
+    // Footage larger than the composition is scaled down to fit (like After Effects' "fit" on import).
+    if (item->width > 0 && item->height > 0) {
+        const float fit = std::min({1.0f, static_cast<float>(comp().width) / item->width,
+                                    static_cast<float>(comp().height) / item->height});
+        layer.transform.scale.base = {fit * 100.0f, fit * 100.0f};
+    }
+    const double saved = time;
+    if (start) time = std::clamp(*start, 0.0, comp().duration); // new layers start at `time`
+    Layer* added = &insertLayer(std::move(layer));
+    time = saved;
+    return added;
 }
 
 Layer* EditorContext::addObject(int kind, Vec2 position, double start) {

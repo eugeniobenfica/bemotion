@@ -4,6 +4,7 @@
 #include "app/PluginHost.h"
 #include "app/PresetLibrary.h"
 #include "core/Presets.h"
+#include "media/MediaManager.h"
 #include "render/Fonts.h"
 #include "ui/EditorContext.h"
 #include "ui/Theme.h"
@@ -310,6 +311,53 @@ void PropertiesPanel::drawComposition(EditorContext& ctx) {
     ImGui::EndTable();
 }
 
+void PropertiesPanel::drawMediaSource(EditorContext& ctx, Layer& layer) {
+    if (!ImGui::CollapsingHeader("Source", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    const MediaItem* item = ctx.comp().findMedia(layer.media.mediaId);
+    if (!item) {
+        ImGui::TextColored(theme::vec(theme::kDanger), "The media of this layer was removed.");
+        return;
+    }
+    const bool missing = media::MediaManager::get().fileMissing(*item);
+    ImGui::TextUnformatted(item->name.c_str());
+    char info[96];
+    if (item->kind == MediaKind::Image)
+        std::snprintf(info, sizeof info, "Image  ·  %d×%d", item->width, item->height);
+    else if (item->kind == MediaKind::Audio)
+        std::snprintf(info, sizeof info, "Audio  ·  %.2f s", item->duration);
+    else
+        std::snprintf(info, sizeof info, "Video  ·  %d×%d  ·  %.2f s  ·  %.4g fps%s", item->width, item->height, item->duration,
+                      item->fps, item->hasAudio ? "  ·  with audio" : "");
+    ImGui::TextColored(theme::vec(theme::kTextDim), "%s", info);
+    ImGui::PushStyleColor(ImGuiCol_Text, missing ? theme::kDanger : theme::kTextFaint);
+    ImGui::TextWrapped("%s%s", missing ? "Missing: " : "", item->path.c_str());
+    ImGui::PopStyleColor();
+    if (missing) {
+        ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
+        ImGui::TextWrapped("Relink it from the Media panel (right-click the item).");
+        ImGui::PopStyleColor();
+    }
+    const float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+    if (layer.media.hasVideo) {
+        if (ImGui::Button("Fit to Composition", ImVec2(w, 0)) && layer.media.size.x > 0 && layer.media.size.y > 0) {
+            // Like After Effects' Fit to Comp (keeping the aspect ratio): centered, as large as fits.
+            const Composition& c = ctx.comp();
+            const float fit = std::min(c.width / layer.media.size.x, c.height / layer.media.size.y) * 100.0f;
+            layer.transform.scale.base = {fit, fit};
+            layer.transform.position.base = c.center();
+            if (const Layer* parent = c.findLayer(layer.parent))
+                layer.transform.position.base = c.worldMatrix(*parent, ctx.time).inverse().apply(c.center());
+            ctx.touch();
+        }
+        ui::tooltip("Scale it to fill the composition, keeping its proportions");
+        ImGui::SameLine();
+    }
+    ImGui::BeginDisabled(missing);
+    if (ImGui::Button("Show in Folder", ImVec2(layer.media.hasVideo ? w : -FLT_MIN, 0)))
+        platform::revealInFileManager(std::filesystem::path(std::u8string(item->path.begin(), item->path.end())));
+    ImGui::EndDisabled();
+}
+
 void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
     // Header: type icon + editable name.
     {
@@ -358,6 +406,7 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
         ui::tooltip("Put the layers back where the compound is, keeping how they look (Ctrl+Shift+G)");
         if (pick) ctx.select(pick);
     }
+    if (layer.type == LayerType::Media) drawMediaSource(ctx, layer);
     ImGui::Dummy(ImVec2(0, 2));
 
     auto props = layer.properties();

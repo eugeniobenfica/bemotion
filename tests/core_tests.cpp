@@ -122,6 +122,58 @@ void testSerializationRoundTrip() {
     CHECK(serializeProject(p) == serializeProject(q));
 }
 
+void testMedia() {
+    Project p;
+    MediaItem video;
+    video.name = "clip.mp4";
+    video.path = "C:/footage/clip.mp4";
+    video.kind = MediaKind::Video;
+    video.width = 1280;
+    video.height = 720;
+    video.duration = 4.0;
+    video.fps = 25.0;
+    video.hasVideo = video.hasAudio = true;
+    const uint64_t id = p.comp.addMedia(video);
+    CHECK(p.comp.addMedia(video) == id); // same file: imported once
+    CHECK(p.comp.media.size() == 1);
+
+    // Footage lasts as long as its source; shifting moves where its frame 0 sits.
+    Layer& l = p.comp.addLayer(makeMediaLayer(*p.comp.findMedia(id), {10, 20}, 1.0, 10.0));
+    CHECK(near(static_cast<float>(l.outPoint - l.inPoint), 4.0f));
+    CHECK(near(static_cast<float>(l.media.sourceTime(1.5)), 0.5f));
+    l.shiftTime(2.0);
+    CHECK(near(static_cast<float>(l.media.start), 3.0f) && near(static_cast<float>(l.inPoint), 3.0f));
+    l.media.volume.setKey(3.0, 50.0f);
+    const uint64_t layerId = l.id; // `l` does not survive adding more layers
+
+    // Trimming stops at the source's ends; stills can be stretched freely.
+    p.comp.setOutPoint(l.id, 20.0);
+    CHECK(near(static_cast<float>(l.outPoint), 7.0f));
+    p.comp.setInPoint(l.id, 0.0);
+    CHECK(near(static_cast<float>(l.inPoint), 3.0f));
+
+    MediaItem image;
+    image.name = "logo.png";
+    image.path = "C:/footage/logo.png";
+    image.kind = MediaKind::Image;
+    image.width = image.height = 64;
+    image.hasVideo = true;
+    const Layer& still = p.comp.addLayer(makeMediaLayer(*p.comp.findMedia(p.comp.addMedia(image)), {0, 0}, 2.0, 10.0));
+    CHECK(near(static_cast<float>(still.outPoint), 10.0f));
+
+    Project q;
+    std::string err;
+    CHECK(deserializeProject(serializeProject(p), q, &err));
+    CHECK(q.comp.media.size() == 2);
+    const MediaItem* v = q.comp.findMedia(id);
+    CHECK(v && v->kind == MediaKind::Video && v->width == 1280 && near(static_cast<float>(v->fps), 25.0f) && v->hasAudio);
+    const Layer* ql = q.comp.findLayer(layerId);
+    CHECK(ql && ql->type == LayerType::Media && ql->media.mediaId == id);
+    CHECK(ql && near(static_cast<float>(ql->media.start), 3.0f) && ql->media.volume.keyCount() == 1);
+    CHECK(q.comp.nextMediaId == p.comp.nextMediaId);
+    CHECK(serializeProject(p) == serializeProject(q));
+}
+
 // Builds a composition with layers named "A".."E" from top to bottom.
 Composition makeStack() {
     Composition c;
@@ -534,6 +586,7 @@ int main() {
         {"compounds", testCompounds},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
+        {"media", testMedia},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

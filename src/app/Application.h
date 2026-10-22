@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 struct GLFWwindow;
 
@@ -45,6 +46,7 @@ private:
     HomeScreen home_;
     std::unique_ptr<EditorScreen> editor_;
     std::unique_ptr<DevScript> script_; // BEMOTION_SCRIPT developer aid
+    std::vector<std::filesystem::path> droppedFiles_; // dropped on the window, handled next frame
 };
 
 } // namespace bemotion

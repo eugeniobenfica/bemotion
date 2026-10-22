@@ -37,6 +37,11 @@ struct Composition {
     uint64_t nextLayerId = 1;
     uint64_t nextTrackId = 1;
     std::vector<Guide> guides;
+    std::vector<MediaItem> media; // imported footage (see core/Media.h)
+    uint64_t nextMediaId = 1;
+    MediaItem* findMedia(uint64_t id);
+    const MediaItem* findMedia(uint64_t id) const;
+    uint64_t addMedia(MediaItem item); // reuses an item already imported from the same path
 
     double frameDuration() const { return 1.0 / fps; }
     int frameCount() const;

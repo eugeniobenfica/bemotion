@@ -66,10 +66,16 @@ enum class Icon {
     Graph,  // timeline graph editor
     Compound, // layers grouped together
     Back,   // "go back" arrow
+    // Media
+    Film,
+    Image,
+    Audio,
+    Import,
 };
 
 Icon iconForLayer(const Layer& layer);
 Icon iconForShape(ShapeKind kind);
+Icon iconForMedia(MediaKind kind);
 // Icon named by a plugin object type ("bars", "line_chart", "pie", a shape name, ...).
 Icon iconForPlugin(const std::string& name);
 

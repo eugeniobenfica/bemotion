@@ -26,6 +26,10 @@ add_executable(bemotion WIN32
     app/Settings.cpp
     app/RecentProjects.cpp
     export/Export.cpp
+    media/AudioEngine.cpp
+    media/MediaIO.cpp
+    media/MediaManager.cpp
+    media/VideoReaderMF.cpp
     export/FfmpegEncoder.cpp
     export/MediaFoundationEncoder.cpp
     export/PngSequenceEncoder.cpp
@@ -47,16 +51,21 @@ add_executable(bemotion WIN32
     ui/Theme.cpp
     ui/Widgets.cpp
     ui/panels/EffectsPanel.cpp
+    ui/panels/MediaPanel.cpp
     ui/panels/ObjectsPanel.cpp
     ui/panels/PropertiesPanel.cpp
     ui/panels/TimelineGraph.cpp
     ui/panels/TimelinePanel.cpp
     ui/panels/ViewportPanel.cpp)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(bemotion PRIVATE bemotion_core imgui stb lua)
+target_link_libraries(bemotion PRIVATE bemotion_core imgui stb lua miniaudio)
 target_compile_definitions(bemotion PRIVATE
     BEMOTION_VERSION="${PROJECT_VERSION}"
     BEMOTION_SOURCE_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
+
+if(UNIX AND NOT APPLE)
+    target_link_libraries(bemotion PRIVATE ${CMAKE_DL_LIBS} pthread m) # miniaudio loads audio backends at runtime
+endif()
 
 if(WIN32)
     target_link_libraries(bemotion PRIVATE comdlg32 shell32 ole32 uuid winmm mfplat mfreadwrite mfuuid)

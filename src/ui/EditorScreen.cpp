@@ -31,6 +31,12 @@ std::string EditorScreen::windowTitle() const {
     return ctx_.project.name + (ctx_.isDirty() ? " •" : "") + "  —  bemotion";
 }
 
+void EditorScreen::dropFiles(const std::vector<std::filesystem::path>& files) {
+    // Like After Effects: dropped on the Media panel they are only imported; anywhere else they also
+    // become layers at the playhead.
+    media_.importFiles(ctx_, files, !media_.hovered());
+}
+
 EditorScreen::Request EditorScreen::draw(double dt) {
     ctx_.tick(dt);
     drawMenuBar();
@@ -43,6 +49,7 @@ EditorScreen::Request EditorScreen::draw(double dt) {
     ImGui::DockSpaceOverViewport(dockId, ImGui::GetMainViewport());
 
     objects_.draw(ctx_);
+    media_.draw(ctx_);
     viewport_.draw(ctx_);
     properties_.draw(ctx_);
     effects_.draw(ctx_);
@@ -70,6 +77,7 @@ void EditorScreen::buildDefaultLayout(unsigned int dockspaceId) {
     ImGui::DockBuilderSplitNode(rest, ImGuiDir_Right, 0.26f, &right, &center);
 
     ImGui::DockBuilderDockWindow(ObjectsPanel::kWindowName, left);
+    ImGui::DockBuilderDockWindow(MediaPanel::kWindowName, left); // a tab beside Objects
     ImGui::DockBuilderDockWindow(ViewportPanel::kWindowName, center);
     ImGui::DockBuilderDockWindow(PropertiesPanel::kWindowName, right);
     ImGui::DockBuilderDockWindow(EffectsPanel::kWindowName, right); // a tab beside Properties
@@ -108,6 +116,8 @@ void EditorScreen::drawMenuBar() {
     if (ImGui::BeginMenu("File")) {
         if (ImGui::MenuItem("Save", keys(ui::Action::Save))) save();
         if (ImGui::MenuItem("Save As...", keys(ui::Action::SaveAs))) saveAs();
+        if (ImGui::MenuItem("Import Media...", keys(ui::Action::ImportMedia))) media_.openImportDialog(ctx_);
+        ImGui::Separator();
         if (ImGui::MenuItem("Show in Folder", nullptr, false, !ctx_.path.empty()))
             platform::revealInFileManager(ctx_.path);
         ImGui::Separator();
@@ -186,6 +196,7 @@ void EditorScreen::drawMenuBar() {
         ImGui::Separator();
         if (ImGui::BeginMenu("Panels")) {
             ImGui::MenuItem(ObjectsPanel::kWindowName, nullptr, &objects_.open);
+            ImGui::MenuItem(MediaPanel::kWindowName, nullptr, &media_.open);
             ImGui::MenuItem(ViewportPanel::kWindowName, nullptr, &viewport_.open);
             ImGui::MenuItem(PropertiesPanel::kWindowName, nullptr, &properties_.open);
             ImGui::MenuItem(EffectsPanel::kWindowName, nullptr, &effects_.open);
@@ -194,7 +205,7 @@ void EditorScreen::drawMenuBar() {
         }
         if (ImGui::MenuItem("Reset Layout")) {
             resetLayout_ = true;
-            objects_.open = viewport_.open = properties_.open = effects_.open = timeline_.open = true;
+            objects_.open = media_.open = viewport_.open = properties_.open = effects_.open = timeline_.open = true;
         }
         ImGui::EndMenu();
     }
@@ -254,6 +265,7 @@ void EditorScreen::handleShortcuts() {
     if (pressed(Action::ZoomIn, true)) viewport_.zoomBy(1.25f);
     if (pressed(Action::ZoomOut, true)) viewport_.zoomBy(1.0f / 1.25f);
     if (pressed(Action::Export)) exportDialog_.open(ctx_);
+    if (pressed(Action::ImportMedia)) media_.openImportDialog(ctx_);
     if (pressed(Action::Split)) ctx_.splitSelectedAtPlayhead();
     if (pressed(Action::CreateCompound)) ctx_.createCompound();
     if (pressed(Action::ReleaseCompound)) ctx_.releaseSelectedCompounds();

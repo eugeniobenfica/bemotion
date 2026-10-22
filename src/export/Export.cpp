@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 
 namespace bemotion::exporting {
 
@@ -101,6 +102,39 @@ void outputSize(const Composition& comp, const Settings& s, int& width, int& hei
     }
 }
 
+bool formatHasAudio(Format f) { return f != Format::Gif; }
+
+bool writeWav(const std::filesystem::path& file, const std::vector<float>& stereo, int rate, std::string& error) {
+    std::ofstream out(file, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        error = "Could not write " + platform::toUtf8(file);
+        return false;
+    }
+    auto u32 = [&](uint32_t v) { out.put(char(v & 255)).put(char((v >> 8) & 255)).put(char((v >> 16) & 255)).put(char(v >> 24)); };
+    auto u16 = [&](uint16_t v) { out.put(char(v & 255)).put(char(v >> 8)); };
+    const uint32_t bytes = static_cast<uint32_t>(stereo.size() * 2);
+    out.write("RIFF", 4);
+    u32(36 + bytes);
+    out.write("WAVEfmt ", 8);
+    u32(16);
+    u16(1); // PCM
+    u16(2);
+    u32(static_cast<uint32_t>(rate));
+    u32(static_cast<uint32_t>(rate) * 4);
+    u16(4);
+    u16(16);
+    out.write("data", 4);
+    u32(bytes);
+    std::vector<int16_t> pcm(stereo.size());
+    for (size_t i = 0; i < stereo.size(); ++i) pcm[i] = static_cast<int16_t>(std::lround(std::clamp(stereo[i], -1.0f, 1.0f) * 32767.0f));
+    out.write(reinterpret_cast<const char*>(pcm.data()), static_cast<std::streamsize>(pcm.size() * 2));
+    if (!out) {
+        error = "Could not write " + platform::toUtf8(file);
+        return false;
+    }
+    return true;
+}
+
 std::unique_ptr<Encoder> createEncoder(Format format) {
     switch (format) {
     case Format::PngSequence: return makePngSequenceEncoder();
@@ -128,9 +162,13 @@ bool ExportJob::start(const Project& project, const Settings& settings, std::str
     outputSize(comp, settings_, w, h);
     if (!renderer_.init(w, h, error)) return false;
 
+    audio_.clear();
+    if (settings_.mixAudio && formatHasAudio(settings_.format))
+        audio_ = settings_.mixAudio(comp, comp.timeOfFrame(first_), comp.timeOfFrame(first_ + count_));
+
     encoder_ = createEncoder(settings_.format);
     EncoderParams params{settings_.format, settings_.output, w, h, comp.fps, settings_.quality,
-                         settings_.transparent && formatSupportsAlpha(settings_.format)};
+                         settings_.transparent && formatSupportsAlpha(settings_.format), audio_.empty() ? nullptr : &audio_};
     if (!encoder_->open(params, error)) {
         encoder_.reset();
         renderer_.release();

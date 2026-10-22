@@ -42,9 +42,18 @@ Icon iconForShape(ShapeKind kind) {
     return Icon::Rectangle;
 }
 
+Icon iconForMedia(MediaKind kind) {
+    switch (kind) {
+    case MediaKind::Image: return Icon::Image;
+    case MediaKind::Audio: return Icon::Audio;
+    default: return Icon::Film;
+    }
+}
+
 Icon iconForLayer(const Layer& layer) {
     if (layer.type == LayerType::Camera) return Icon::Camera;
     if (layer.type == LayerType::Compound) return Icon::Compound;
+    if (layer.type == LayerType::Media) return layer.media.hasVideo ? Icon::Film : Icon::Audio;
     if (layer.type == LayerType::Plugin) {
         const PluginObjectType* type = PluginHost::get().findType(layer.plugin.objectType);
         return type ? iconForPlugin(type->icon) : Icon::Plugin;
@@ -353,6 +362,45 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         dl->AddLine(ImVec2(c.x - h * 0.7f, c.y), ImVec2(c.x - h * 0.2f, c.y - h * 0.5f), col, th * 1.2f);
         dl->AddLine(ImVec2(c.x - h * 0.7f, c.y), ImVec2(c.x - h * 0.2f, c.y + h * 0.5f), col, th * 1.2f);
         break;
+    case Icon::Film: { // a frame with sprocket holes
+        const ImVec2 a(c.x - h * 0.8f, c.y - h * 0.6f), b(c.x + h * 0.8f, c.y + h * 0.6f);
+        dl->AddRect(a, b, col, 2.0f, 0, th);
+        dl->AddLine(ImVec2(a.x + h * 0.35f, a.y), ImVec2(a.x + h * 0.35f, b.y), col, th);
+        dl->AddLine(ImVec2(b.x - h * 0.35f, a.y), ImVec2(b.x - h * 0.35f, b.y), col, th);
+        for (int i = -1; i <= 1; ++i) {
+            const float y = c.y + i * h * 0.36f;
+            dl->AddRectFilled(ImVec2(a.x + h * 0.1f, y - h * 0.08f), ImVec2(a.x + h * 0.25f, y + h * 0.08f), col);
+            dl->AddRectFilled(ImVec2(b.x - h * 0.25f, y - h * 0.08f), ImVec2(b.x - h * 0.1f, y + h * 0.08f), col);
+        }
+        break;
+    }
+    case Icon::Image: { // a frame with a mountain and a sun
+        const ImVec2 a(c.x - h * 0.8f, c.y - h * 0.6f), b(c.x + h * 0.8f, c.y + h * 0.6f);
+        dl->AddRect(a, b, col, 2.0f, 0, th);
+        dl->AddCircleFilled(ImVec2(c.x + h * 0.35f, c.y - h * 0.22f), h * 0.14f, col);
+        dl->AddTriangleFilled(ImVec2(a.x + h * 0.15f, b.y - h * 0.12f), ImVec2(c.x - h * 0.25f, c.y - h * 0.15f),
+                              ImVec2(c.x + h * 0.3f, b.y - h * 0.12f), col);
+        dl->AddTriangleFilled(ImVec2(c.x, b.y - h * 0.12f), ImVec2(c.x + h * 0.35f, c.y + h * 0.1f),
+                              ImVec2(b.x - h * 0.15f, b.y - h * 0.12f), col);
+        break;
+    }
+    case Icon::Audio: { // a waveform
+        const float bars[] = {0.25f, 0.55f, 0.85f, 0.45f, 0.7f, 0.3f};
+        for (int i = 0; i < 6; ++i) {
+            const float x = c.x - h * 0.75f + i * h * 0.3f;
+            dl->AddLine(ImVec2(x, c.y - h * bars[i]), ImVec2(x, c.y + h * bars[i]), col, th * 1.3f);
+        }
+        break;
+    }
+    case Icon::Import: { // an arrow into a tray
+        dl->AddLine(ImVec2(c.x, c.y - h * 0.8f), ImVec2(c.x, c.y + h * 0.2f), col, th * 1.2f);
+        dl->AddLine(ImVec2(c.x - h * 0.4f, c.y - h * 0.2f), ImVec2(c.x, c.y + h * 0.2f), col, th * 1.2f);
+        dl->AddLine(ImVec2(c.x + h * 0.4f, c.y - h * 0.2f), ImVec2(c.x, c.y + h * 0.2f), col, th * 1.2f);
+        dl->AddLine(ImVec2(c.x - h * 0.8f, c.y + h * 0.15f), ImVec2(c.x - h * 0.8f, c.y + h * 0.75f), col, th);
+        dl->AddLine(ImVec2(c.x - h * 0.8f, c.y + h * 0.75f), ImVec2(c.x + h * 0.8f, c.y + h * 0.75f), col, th);
+        dl->AddLine(ImVec2(c.x + h * 0.8f, c.y + h * 0.75f), ImVec2(c.x + h * 0.8f, c.y + h * 0.15f), col, th);
+        break;
+    }
     case Icon::ZoomIn:
     case Icon::ZoomOut: {
         const ImVec2 lens(c.x - h * 0.15f, c.y - h * 0.15f);

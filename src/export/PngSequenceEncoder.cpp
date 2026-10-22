@@ -27,6 +27,9 @@ public:
             error = "Could not create the output folder: " + ec.message();
             return false;
         }
+        // Image sequences carry no sound: the audio goes next to the frames.
+        if (params.audio && !writeWav(folder_ / platform::fromUtf8(stem_ + ".wav"), *params.audio, kExportAudioRate, error))
+            return false;
         return true;
     }
 

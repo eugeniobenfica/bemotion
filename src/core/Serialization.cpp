@@ -194,6 +194,7 @@ json encodeLayer(const Layer& constLayer) {
                 : layer.type == LayerType::Camera ? "camera"
                 : layer.type == LayerType::Plugin   ? "plugin"
                 : layer.type == LayerType::Compound ? "compound"
+                : layer.type == LayerType::Media    ? "media"
                                                     : "shape";
     j["visible"] = layer.visible;
     j["locked"] = layer.locked;
@@ -206,6 +207,10 @@ json encodeLayer(const Layer& constLayer) {
                       {"stroke", layer.shape.strokeEnabled}};
     } else if (layer.type == LayerType::Plugin) {
         j["plugin"] = encodePlugin(layer.plugin);
+    } else if (layer.type == LayerType::Media) {
+        const MediaProps& m = layer.media;
+        j["media"] = {{"id", m.mediaId}, {"size", encode(m.size)}, {"start", m.start}, {"video", m.hasVideo},
+                      {"audio", m.hasAudio}};
     } else if (layer.type == LayerType::Text) {
         j["text"] = {{"text", layer.text.text},
                      {"font_family", layer.text.fontFamily},
@@ -247,8 +252,16 @@ Layer decodeLayer(const json& j) {
                  : type == "camera" ? LayerType::Camera
                  : type == "plugin"   ? LayerType::Plugin
                  : type == "compound" ? LayerType::Compound
+                 : type == "media"    ? LayerType::Media
                                       : LayerType::Shape;
     if (j.contains("plugin")) decodePlugin(j["plugin"], layer.plugin); // before properties: creates the params
+    if (const auto m = j.find("media"); m != j.end() && m->is_object()) { // before properties: decides which exist
+        layer.media.mediaId = m->value("id", uint64_t{0});
+        if (m->contains("size")) decode((*m)["size"], layer.media.size);
+        layer.media.start = m->value("start", 0.0);
+        layer.media.hasVideo = m->value("video", true);
+        layer.media.hasAudio = m->value("audio", false);
+    }
     layer.visible = j.value("visible", true);
     layer.locked = j.value("locked", false);
     layer.label = j.value("label", 0);
@@ -309,6 +322,13 @@ std::string serializeProject(const Project& project) {
     json guides = json::array();
     for (const Guide& g : c.guides) guides.push_back({{"vertical", g.vertical}, {"position", g.position}});
     comp["guides"] = std::move(guides);
+    json media = json::array();
+    for (const MediaItem& m : c.media)
+        media.push_back({{"id", m.id}, {"name", m.name}, {"path", m.path}, {"relative", m.relative},
+                         {"kind", mediaKindLabel(m.kind)}, {"width", m.width}, {"height", m.height},
+                         {"duration", m.duration}, {"fps", m.fps}, {"video", m.hasVideo}, {"audio", m.hasAudio}});
+    comp["media"] = std::move(media);
+    comp["next_media_id"] = c.nextMediaId;
     json layers = json::array();
     for (const auto& l : c.layers) layers.push_back(encodeLayer(l));
     comp["layers"] = std::move(layers);
@@ -358,6 +378,25 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
                 if (l.track == 0) l.track = c.nextTrackId++;
             c.normalizeTracks();
             c.syncCameras();
+            for (const auto& mj : cj.value("media", json::array())) {
+                if (!mj.is_object()) continue;
+                MediaItem m;
+                m.id = mj.value("id", uint64_t{0});
+                m.name = mj.value("name", std::string());
+                m.path = mj.value("path", std::string());
+                m.relative = mj.value("relative", std::string());
+                const std::string kind = mj.value("kind", std::string("Image"));
+                m.kind = kind == "Video" ? MediaKind::Video : kind == "Audio" ? MediaKind::Audio : MediaKind::Image;
+                m.width = mj.value("width", 0);
+                m.height = mj.value("height", 0);
+                m.duration = mj.value("duration", 0.0);
+                m.fps = mj.value("fps", 0.0);
+                m.hasVideo = mj.value("video", m.kind != MediaKind::Audio);
+                m.hasAudio = mj.value("audio", m.kind == MediaKind::Audio);
+                c.nextMediaId = std::max(c.nextMediaId, m.id + 1);
+                c.media.push_back(std::move(m));
+            }
+            c.nextMediaId = std::max(c.nextMediaId, cj.value("next_media_id", uint64_t{1}));
             for (const auto& gj : cj.value("guides", json::array()))
                 c.guides.push_back({gj.value("vertical", true), gj.value("position", 0.0f)});
         }
@@ -369,7 +408,22 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
     }
 }
 
-bool saveProject(const Project& project, const std::filesystem::path& path, std::string* error) {
+namespace {
+std::filesystem::path pathFromUtf8(const std::string& s) { return std::filesystem::path(std::u8string(s.begin(), s.end())); }
+std::string utf8FromPath(const std::filesystem::path& p) {
+    const std::u8string u = p.u8string();
+    return std::string(u.begin(), u.end());
+}
+} // namespace
+
+bool saveProject(const Project& source, const std::filesystem::path& path, std::string* error) {
+    // Media paths are also stored relative to the project, so a moved folder still finds its footage.
+    Project project = source;
+    for (MediaItem& m : project.comp.media) {
+        std::error_code rel;
+        const auto r = std::filesystem::relative(pathFromUtf8(m.path), path.parent_path(), rel);
+        m.relative = rel || r.empty() ? std::string() : utf8FromPath(r.generic_u8string());
+    }
     std::error_code ec;
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
 
@@ -404,7 +458,13 @@ bool loadProject(const std::filesystem::path& path, Project& out, std::string* e
     }
     std::stringstream ss;
     ss << f.rdbuf();
-    return deserializeProject(ss.str(), out, error);
+    if (!deserializeProject(ss.str(), out, error)) return false;
+    for (MediaItem& m : out.comp.media) { // the project's own folder first, then where the file was
+        std::error_code ec;
+        if (!m.relative.empty() && std::filesystem::exists(path.parent_path() / pathFromUtf8(m.relative), ec))
+            m.path = utf8FromPath((path.parent_path() / pathFromUtf8(m.relative)).lexically_normal());
+    }
+    return true;
 }
 
 } // namespace bemotion

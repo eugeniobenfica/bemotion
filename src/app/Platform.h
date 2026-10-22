@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace bemotion::platform {
 
@@ -22,6 +23,8 @@ fs::path assetsDir();
 void setMainWindowHandle(void* handle);
 
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const char* extension);
+// Several files at once; `extensions` without dots ("png", "mp4", ...). Empty when cancelled.
+std::vector<fs::path> openFilesDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions);
 std::optional<fs::path> saveFileDialog(const char* title, const fs::path& suggested, const char* filterName,
                                        const char* extension);
 

@@ -2,6 +2,8 @@
 
 #include "app/Settings.h"
 #include "core/Snapping.h"
+#include "media/MediaIO.h"
+#include "media/MediaManager.h"
 #include "render/Fonts.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -260,13 +262,40 @@ void TimelinePanel::draw(EditorContext& ctx) {
     ImGui::End();
 }
 
+void TimelinePanel::drawWaveform(ImDrawList* dl, const Layer& layer, ImVec2 a, ImVec2 b, ImU32 color) const {
+    const media::AudioData data = media::MediaManager::get().audio(layer.media.mediaId);
+    if (!data || data->empty()) return;
+    const std::vector<float>& s = *data;
+    const size_t frames = s.size() / 2;
+    const float x1 = std::max(a.x + 6, trackX0_), x2 = std::min(b.x - 6, trackX0_ + trackW_);
+    const float mid = (a.y + b.y) * 0.5f, half = (b.y - a.y) * 0.42f;
+    constexpr float kStep = 2.0f;
+    for (float x = x1; x < x2; x += kStep) {
+        // Peak of the source samples under this column (sparsely sampled: enough for a sketch).
+        const double t0 = layer.media.sourceTime(xToTime(x)), t1 = layer.media.sourceTime(xToTime(x + kStep));
+        if (t1 <= 0) continue;
+        const size_t i0 = static_cast<size_t>(std::max(0.0, t0) * media::kAudioRate);
+        const size_t i1 = std::min(frames, static_cast<size_t>(std::max(0.0, t1) * media::kAudioRate) + 1);
+        if (i0 >= frames) break;
+        const size_t stride = std::max<size_t>(1, (i1 - i0) / 48);
+        float peak = 0.0f;
+        for (size_t i = i0; i < i1; i += stride) peak = std::max({peak, std::fabs(s[i * 2]), std::fabs(s[i * 2 + 1])});
+        const float gain = std::clamp(layer.media.volume.valueAt(xToTime(x)) * 0.01f, 0.0f, 2.0f);
+        const float hh = std::max(0.5f, std::sqrt(std::min(1.0f, peak * gain)) * half); // sqrt: quiet audio stays visible
+        dl->AddRectFilled(ImVec2(x, mid - hh), ImVec2(x + kStep - 0.6f, mid + hh), color);
+    }
+}
+
 void TimelinePanel::handleObjectDrop(EditorContext& ctx, ImDrawList* dl, float x0, float width) {
     // Objects dragged from the Objects panel drop at a time (x) and between rows (y).
     const ImVec2 winPos = ImGui::GetWindowPos(), winSize = ImGui::GetWindowSize();
     const ImRect area(ImVec2(x0, winPos.y), ImVec2(x0 + width, winPos.y + winSize.y));
     if (!ImGui::BeginDragDropTargetCustom(area, ImGui::GetID("##objectDrop"))) return;
     constexpr ImGuiDragDropFlags flags = ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
-    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kObjectPayload, flags)) {
+    const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kObjectPayload, flags);
+    uint64_t mediaId = 0;
+    if (!payload && (payload = ImGui::AcceptDragDropPayload(kMediaPayload, flags))) mediaId = *static_cast<const uint64_t*>(payload->Data);
+    if (payload) {
         const ImVec2 m = ImGui::GetIO().MousePos;
         double t = std::max(0.0, xToTime(std::max(m.x, trackX0_)));
         if (ctx.snapping && !ImGui::GetIO().KeyCtrl) { // snaps to clips, keys and the playhead like everything else
@@ -285,14 +314,17 @@ void TimelinePanel::handleObjectDrop(EditorContext& ctx, ImDrawList* dl, float x
         // Where it lands: a new row at the gap, starting at t.
         const float tx = timeToX(t);
         dl->AddLine(ImVec2(x0, gy), ImVec2(x0 + width, gy), theme::kAccent, 2.0f);
-        dl->AddRectFilled(ImVec2(tx, gy - 9), ImVec2(std::max(tx + 60, timeToX(ctx.comp().duration)), gy + 9), theme::accent(60), 4.0f);
+        const MediaItem* item = mediaId ? ctx.comp().findMedia(mediaId) : nullptr;
+        const double end = item && item->kind != MediaKind::Image ? t + item->duration : ctx.comp().duration;
+        dl->AddRectFilled(ImVec2(tx, gy - 9), ImVec2(std::max(tx + 60, timeToX(end)), gy + 9), theme::accent(60), 4.0f);
         dl->AddLine(ImVec2(tx, winPos.y), ImVec2(tx, winPos.y + winSize.y), theme::kAccent, 1.0f);
         char label[48];
         std::snprintf(label, sizeof label, "  %s", ui::formatTimecode(t, ctx.comp().fps).c_str());
         dl->AddText(ImVec2(tx + 2, gy - 8), theme::kText, label);
         if (payload->IsDelivery()) {
-            const int kind = *static_cast<const int*>(payload->Data);
-            if (Layer* l = ctx.addObject(kind, ctx.comp().center(), t)) {
+            Layer* l = mediaId ? ctx.addMedia(mediaId, std::nullopt, t)
+                               : ctx.addObject(*static_cast<const int*>(payload->Data), ctx.comp().center(), t);
+            if (l) {
                 ctx.comp().moveTracks({l->track}, gap);
                 ctx.touch();
             }
@@ -675,6 +707,7 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
         dl->AddRectFilled(a, b, toU32(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
         if (selected)
             dl->AddRect(a, b, primary ? theme::kText : theme::ink(170), 5.0f, 0, primary ? 1.8f : 1.3f);
+        if (layer.type == LayerType::Media && layer.media.hasAudio) drawWaveform(dl, layer, a, b, toU32(lc, 0.75f));
         dl->AddRectFilled(ImVec2(bx1 + 3, y + 9), ImVec2(bx1 + 5, y + h - 9), toU32(lc, 0.8f), 1.0f);
         dl->AddRectFilled(ImVec2(bx2 - 5, y + 9), ImVec2(bx2 - 3, y + h - 9), toU32(lc, 0.8f), 1.0f);
         dl->PushClipRect(ImVec2(std::max(bx1, trackX0_), y), ImVec2(std::min(bx2, trackX0_ + trackW_), y + h), true);

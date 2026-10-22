@@ -214,9 +214,34 @@ void drawPlugin(ImDrawList* dl, const Layer& layer, double t, const Affine& toSc
     transformVertices(dl, start, toScreen * Affine::scale(1.0f / k));
 }
 
+MediaProvider& mediaProvider() {
+    static MediaProvider provider;
+    return provider;
+}
+
+// Footage: the frame as a textured quad through the layer transform.
+void drawMedia(ImDrawList* dl, const Composition* comp, const Layer& layer, double t, const Affine& toScreen, float opacity) {
+    if (!layer.media.hasVideo) return; // audio only
+    const Vec2 half = layer.media.size * 0.5f;
+    const Vec2 c[4] = {toScreen.apply({-half.x, -half.y}), toScreen.apply({half.x, -half.y}), toScreen.apply({half.x, half.y}),
+                       toScreen.apply({-half.x, half.y})};
+    const unsigned long long tex = comp && mediaProvider() ? mediaProvider()(*comp, layer, t) : 0;
+    const ImU32 tint = IM_COL32(255, 255, 255, static_cast<int>(std::clamp(opacity, 0.0f, 1.0f) * 255.0f + 0.5f));
+    if (!tex) { // not loaded or missing: a placeholder frame
+        dl->AddQuadFilled(ImVec2(c[0].x, c[0].y), ImVec2(c[1].x, c[1].y), ImVec2(c[2].x, c[2].y), ImVec2(c[3].x, c[3].y),
+                          IM_COL32(60, 60, 70, static_cast<int>(opacity * 200)));
+        dl->AddLine(ImVec2(c[0].x, c[0].y), ImVec2(c[2].x, c[2].y), IM_COL32(120, 120, 130, static_cast<int>(opacity * 200)));
+        dl->AddLine(ImVec2(c[1].x, c[1].y), ImVec2(c[3].x, c[3].y), IM_COL32(120, 120, 130, static_cast<int>(opacity * 200)));
+        return;
+    }
+    dl->AddImageQuad(ImTextureRef(static_cast<ImTextureID>(tex)), ImVec2(c[0].x, c[0].y), ImVec2(c[1].x, c[1].y),
+                     ImVec2(c[2].x, c[2].y), ImVec2(c[3].x, c[3].y), ImVec2(0, 0), ImVec2(1, 0), ImVec2(1, 1), ImVec2(0, 1), tint);
+}
+
 } // namespace
 
 void setPluginDrawer(PluginDrawer drawer) { pluginDrawer() = std::move(drawer); }
+void setMediaProvider(MediaProvider provider) { mediaProvider() = std::move(provider); }
 
 void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride,
                const Composition* comp, EffectRenderer* effects, float zoom) {
@@ -234,6 +259,10 @@ void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& la
             else
                 drawLayer(dl, *it, time, layerToScreen * it->matrixAt(time), own * opacity, comp, effects, zoom);
         }
+        return;
+    }
+    if (layer.type == LayerType::Media) {
+        drawMedia(dl, comp, layer, time, layerToScreen, opacity);
         return;
     }
     if (layer.type == LayerType::Text) drawText(dl, layer, time, layerToScreen, opacity);
@@ -290,6 +319,12 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
         const float zoom = std::max(0.01f, layer.camera.zoom.valueAt(time) * 0.01f);
         outMin = layer.camera.frameSize * (-0.5f / zoom);
         outMax = layer.camera.frameSize * (0.5f / zoom);
+        return true;
+    }
+    if (layer.type == LayerType::Media) { // audio has no picture to pick
+        if (!layer.media.hasVideo) return false;
+        outMin = layer.media.size * -0.5f;
+        outMax = layer.media.size * 0.5f;
         return true;
     }
     if (layer.type == LayerType::Plugin) {

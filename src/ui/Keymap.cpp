@@ -16,6 +16,7 @@ constexpr ImGuiKeyChord Ctrl = ImGuiMod_Ctrl, Shift = ImGuiMod_Shift;
 constexpr ActionInfo kActions[] = {
     {"save", "Save", "Files", Ctrl | ImGuiKey_S},
     {"save_as", "Save As", "Files", Ctrl | Shift | ImGuiKey_S},
+    {"import_media", "Import Media", "Files", Ctrl | ImGuiKey_I},
     {"export", "Export Video", "Files", Ctrl | ImGuiKey_M},
     {"close_project", "Close Project", "Files", Ctrl | ImGuiKey_W},
     {"quit", "Quit", "Files", Ctrl | ImGuiKey_Q},

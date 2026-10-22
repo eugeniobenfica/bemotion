@@ -19,6 +19,15 @@ common moves are one click away through *Quick Animations*.
   plugin objects (charts) — click to add at the center, **drag onto the
   canvas** to drop at an exact spot, or **onto the timeline** to start at a
   given time and row
+- **Media panel** (a tab next to Objects, like After Effects' *Project* panel):
+  import images (PNG, JPEG, BMP, TGA, GIF, PSD, HDR), audio (WAV, MP3, FLAC;
+  M4A/AAC/WMA on Windows) and video (MP4, MOV, M4V, WMV, AVI, MKV — Windows,
+  through Media Foundation) with *Import* (Ctrl+I) or by dropping files on the
+  window. Drag an item onto the canvas or the timeline (or double-click it) to
+  make a layer: media layers have transform, opacity, effects, keyframes and
+  compounds like any other layer, plus an animatable *Volume*. Audio plays
+  with the timeline, clips show their waveform, video and audio clips trim
+  only within their source, and missing files can be relinked
 - **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
   Space+drag or Alt+drag; click or **box-select** layers, drag to move, corner
   handles to scale (Shift = uniform), rotation handle (Shift = 15° snaps)
@@ -55,7 +64,9 @@ common moves are one click away through *Quick Animations*.
 - **Cut tool** (C) and split at playhead (Ctrl+K)
 - **Video export** (Ctrl+M, or the button in the top-right corner): MP4 / H.264
   (built in on Windows), PNG sequence with transparency, and — with
-  [FFmpeg](https://ffmpeg.org) installed — MOV ProRes 4444, WebM VP9 and GIF
+  [FFmpeg](https://ffmpeg.org) installed — MOV ProRes 4444, WebM VP9 and GIF.
+  The composition's audio is mixed in (AAC in MP4, PCM in MOV, Opus in WebM;
+  a `.wav` next to PNG sequences)
 - **Panels**: minimize / restore with the handle on their inner edge, maximize
   by double-clicking their tabs or pressing ` over them
 - **Settings** (Ctrl+, or the gear) with *Theme*, *Interface* (timeline row
@@ -121,6 +132,7 @@ The format follows the file extension (`.mp4`, `.png`, `.mov`, `.webm`, `.gif`).
 | Ctrl+G / Ctrl+Shift+G | Create / release a compound |
 | Delete | Delete selected keyframes, or the layers |
 | Ctrl+S / Ctrl+Shift+S | Save / save as |
+| Ctrl+I | Import media |
 | Ctrl+M | Export video |
 | S | Toggle snapping (hold Ctrl while dragging to skip it) |
 | Ctrl+, | Settings |
@@ -134,6 +146,7 @@ The format follows the file extension (`.mp4`, `.png`, `.mov`, `.webm`, `.gif`).
 src/core     document model (layers, keyframes, easing, file format, undo) — no UI code
 src/render   draws compositions (viewport, thumbnails, off-screen export)
 src/export   video / image-sequence encoders and the export job
+src/media    imported media: image / audio / video decoding, textures, audio playback and mixing
 src/ui       theme, widgets, home screen, editor, panels and dialogs
 src/app      window, main loop, OS integration, settings, preset/theme libraries, plugin host
 assets       fonts and bundled plugins (assets/plugins/charts)

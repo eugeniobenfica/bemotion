@@ -4,6 +4,8 @@
 #include "app/DevScript.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "media/AudioEngine.h"
+#include "media/MediaManager.h"
 #include "app/Settings.h"
 #include "core/Serialization.h"
 #include "export/Export.h"
@@ -161,6 +163,12 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     Fonts::processPending();
+    // Audio decodes in the background: wait for it too.
+    for (int tries = 0; !media::MediaManager::get().audioReady(project.comp) && tries < 60000; ++tries) {
+        media::MediaManager::get().update(project.comp);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    settings.mixAudio = media::AudioEngine::mix;
 
     exporting::ExportJob job;
     int result = 0;
@@ -219,6 +227,10 @@ bool Application::init(bool visible) {
     glfwSwapInterval(0);
     glfwSetWindowUserPointer(window_, this);
     glfwSetWindowCloseCallback(window_, &Application::onWindowClose);
+    glfwSetDropCallback(window_, [](GLFWwindow* w, int count, const char** paths) {
+        auto* app = static_cast<Application*>(glfwGetWindowUserPointer(w));
+        for (int i = 0; i < count; ++i) app->droppedFiles_.push_back(platform::fromUtf8(paths[i]));
+    });
     glfwSetWindowSizeLimits(window_, 960, 600, GLFW_DONT_CARE, GLFW_DONT_CARE);
     if (visible) glfwMaximizeWindow(window_);
 #ifdef _WIN32
@@ -250,6 +262,8 @@ bool Application::init(bool visible) {
     Fonts::load(platform::assetsDir());
     Fonts::startSystemScan(platform::appDataDir() / "fontcache.json");
     PluginHost::get().load();
+    media::MediaManager::get().install();
+    if (visible) media::AudioEngine::get().start(); // command-line exports play nothing
 
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -262,6 +276,8 @@ bool Application::init(bool visible) {
 
 void Application::shutdown() {
     editor_.reset();
+    media::AudioEngine::get().stop();
+    media::MediaManager::get().release();
     PluginHost::get().shutdown();
     render::screenEffects().release();
     ImGui_ImplOpenGL3_Shutdown();
@@ -281,8 +297,15 @@ void Application::frame(double dt) {
     Fonts::setUiFamily(settings().uiFont); // the interface font (Settings > Interface)
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
-    if (script_) script_->apply();
+    if (script_) {
+        script_->apply();
+        for (auto& f : script_->takeDrops()) droppedFiles_.push_back(std::move(f));
+    }
     ImGui::NewFrame();
+    if (!droppedFiles_.empty()) { // OS file drag & drop onto the window
+        if (editor_) editor_->dropFiles(droppedFiles_);
+        droppedFiles_.clear();
+    }
 
     if (editor_) {
         switch (editor_->draw(dt)) {
@@ -303,6 +326,14 @@ void Application::frame(double dt) {
     if (ui::shortcutPressed(ui::Action::Help)) ui::openHelp();
     ui::drawSettings();
     ui::drawHelp();
+
+    // Media: audio decoding jobs, and what the speakers play.
+    if (editor_) {
+        media::MediaManager::get().update(editor_->project().comp);
+        media::AudioEngine::get().update(editor_->project().comp, editor_->time(), editor_->playing());
+    } else {
+        media::AudioEngine::get().update(Composition{}, 0.0, false);
+    }
 
     ImGui::Render();
     int w = 0, h = 0;

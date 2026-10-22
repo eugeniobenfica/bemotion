@@ -10,6 +10,8 @@
 #include "core/Math.h"
 #include "core/Project.h"
 
+#include <functional>
+
 struct ImDrawList;
 
 namespace bemotion::render {
@@ -45,6 +47,10 @@ void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& la
 // Axis-aligned bounds of the layer content in its local space (a compound's
 // cover its children, which needs `comp`).
 bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp = nullptr);
+
+// Media layers get their picture (a GPU texture id; 0 if none) from the media module.
+using MediaProvider = std::function<unsigned long long(const Composition& comp, const Layer& layer, double time)>;
+void setMediaProvider(MediaProvider provider);
 
 // The direct child of a compound under a scene-space point (0 if none), for
 // picking a layer inside a compound.

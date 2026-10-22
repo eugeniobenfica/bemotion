@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -46,7 +47,16 @@ struct Settings {
     bool transparent = false; // only for formats with alpha
     double start = 0.0;       // seconds
     double end = 0.0;         // seconds, exclusive
+    // Mixes the composition's audio for [start, end) (interleaved stereo at kExportAudioRate);
+    // empty when nothing is heard. Unset: a silent export.
+    std::function<std::vector<float>(const Composition&, double start, double end)> mixAudio;
 };
+
+inline constexpr int kExportAudioRate = 48000;
+bool formatHasAudio(Format f); // GIF has no sound
+
+// Writes 16-bit PCM WAV (used for PNG sequences and to hand audio to FFmpeg).
+bool writeWav(const std::filesystem::path& file, const std::vector<float>& stereo, int rate, std::string& error);
 
 // Output pixel size for a composition and settings.
 void outputSize(const Composition& comp, const Settings& s, int& width, int& height);
@@ -59,6 +69,7 @@ struct EncoderParams {
     double fps = 30.0;
     Quality quality = Quality::High;
     bool alpha = false;
+    const std::vector<float>* audio = nullptr; // interleaved stereo at kExportAudioRate, or none
 };
 
 class Encoder {
@@ -97,6 +108,7 @@ private:
     render::OffscreenRenderer renderer_;
     std::unique_ptr<Encoder> encoder_;
     std::vector<uint8_t> pixels_;
+    std::vector<float> audio_;
     int first_ = 0;
     int count_ = 0;
     int frame_ = 0;
