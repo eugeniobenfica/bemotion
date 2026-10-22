@@ -31,6 +31,9 @@ private:
     void updateLayerDrag(EditorContext& ctx);
     void endLayerDrag(EditorContext& ctx);
     int dropGapAt(float y) const; // insertion gap (0..layerCount) under screen y
+    void applyPendingDrop(EditorContext& ctx);
+    void beginMarquee(EditorContext& ctx);
+    void updateMarquee(EditorContext& ctx, ImDrawList* dl);
     void drawDropIndicator(ImDrawList* dl, float x0, float width) const;
     void drawPropertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop, float x0, float width);
     void drawKeyContextMenu(EditorContext& ctx);
@@ -56,8 +59,11 @@ private:
 
     struct LayerRow {
         int index;    // position in the layer stack
+        uint64_t id;
         float top;    // screen y of the layer row
         float bottom; // screen y below the layer row (property rows excluded)
+        float barX1;  // screen x range of the layer bar
+        float barX2;
     };
 
     Drag drag_ = Drag::None;
@@ -66,6 +72,14 @@ private:
     uint64_t dragLayer_ = 0;
     double dragOrigIn_ = 0.0, dragOrigOut_ = 0.0, dragApplied_ = 0.0;
     bool restacking_ = false; // vertical drag past the threshold: show the drop gap
+    // A restack is applied after every row is laid out, so drops below the
+    // dragged layer see the rows that come after it.
+    bool pendingDrop_ = false;
+    float pendingDropY_ = 0.0f;
+    // Box selection by dragging on empty timeline space.
+    bool marquee_ = false;
+    ImVec2 marqueeStart_;
+    std::vector<uint64_t> marqueeBase_;
     std::vector<std::pair<KeySelection, double>> dragKeys_;
     std::vector<LayerRow> rows_; // rebuilt every frame
     float rowsBottom_ = 0.0f;

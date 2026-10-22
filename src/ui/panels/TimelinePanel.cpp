@@ -116,15 +116,16 @@ void TimelinePanel::draw(EditorContext& ctx) {
         ImGui::PopID();
     }
 
-    // Empty space below the rows: click to deselect.
+    // Empty space below the rows: click to deselect, drag to box-select.
     const float y = ImGui::GetCursorScreenPos().y;
     rowsBottom_ = y;
     const float rest = std::max(kLayerRowHeight, winPos.y + winSize.y - y);
     ImGui::SetCursorScreenPos(ImVec2(x0, y));
-    if (ImGui::InvisibleButton("##empty", ImVec2(avail.x, rest)) && !io.KeyCtrl && !io.KeyShift) {
-        ctx.select(0);
-        ctx.clearKeySelection();
-    }
+    ImGui::InvisibleButton("##empty", ImVec2(avail.x, rest));
+    if (ImGui::IsItemActivated()) beginMarquee(ctx);
+
+    applyPendingDrop(ctx);
+    updateMarquee(ctx, dl);
     if (layers.empty()) {
         const char* hint = "Add text or graphics from the Objects panel to start animating.";
         const ImVec2 ts = ImGui::CalcTextSize(hint);
@@ -152,7 +153,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
     }
     dl->PopClipRect();
 
-    if (restacking_) drawDropIndicator(dl, x0, avail.x);
+    if (restacking_ && drag_ != Drag::None) drawDropIndicator(dl, x0, avail.x);
 
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -286,10 +287,14 @@ void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, fl
     const float h = kLayerRowHeight;
     const bool selected = ctx.isSelected(layer.id);
     const bool primary = ctx.primaryId() == layer.id;
-    rows_.push_back({index, y, y + h});
+    rows_.push_back({index, layer.id, y, y + h, timeToX(layer.inPoint), timeToX(layer.outPoint)});
 
-    if (selected)
-        dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(232, 185, 49, primary ? 24 : 14));
+    // Every selected layer gets the same clear highlight; the primary one
+    // (shown in Properties) is a bit brighter.
+    if (selected) {
+        dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(232, 185, 49, primary ? 34 : 24));
+        dl->AddRectFilled(ImVec2(x0, y + 2), ImVec2(x0 + 3, y + h - 2), theme::kAccent, 1.5f);
+    }
     dl->AddLine(ImVec2(x0, y + h - 1), ImVec2(x0 + width, y + h - 1), IM_COL32(255, 255, 255, 10));
 
     // --- left column: controls and name ---------------------------------------
@@ -385,8 +390,8 @@ void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, fl
             if (mode != Drag::None) {
                 clickLayer(ctx, layer.id);
                 if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, mode, layer.id);
-            } else if (!io.KeyCtrl && !io.KeyShift) {
-                ctx.clearKeySelection();
+            } else {
+                beginMarquee(ctx); // empty track space: box selection
             }
         }
         const bool barDrag = drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut;
@@ -398,7 +403,7 @@ void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, fl
     const Color lc = labelColor(layer.label);
     const ImVec2 a(bx1, y + 5), b(bx2, y + h - 5);
     dl->AddRectFilled(a, b, toU32(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
-    if (selected) dl->AddRect(a, b, primary ? theme::kText : toU32(lc, 0.9f), 5.0f, 0, primary ? 1.5f : 1.2f);
+    if (selected) dl->AddRect(a, b, primary ? theme::kText : IM_COL32(255, 255, 255, 170), 5.0f, 0, primary ? 1.8f : 1.3f);
     dl->AddRectFilled(ImVec2(bx1 + 2, y + 9), ImVec2(bx1 + 4, y + h - 9), toU32(lc, 0.8f), 1.0f);
     dl->AddRectFilled(ImVec2(bx2 - 4, y + 9), ImVec2(bx2 - 2, y + h - 9), toU32(lc, 0.8f), 1.0f);
     dl->PushClipRect(ImVec2(std::max(bx1, trackX0_), y), ImVec2(std::min(bx2, trackX0_ + trackW_), y + h), true);
@@ -567,17 +572,58 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
 void TimelinePanel::endLayerDrag(EditorContext& ctx) {
     const ImGuiIO& io = ImGui::GetIO();
     if (restacking_) {
-        const int gap = dropGapAt(io.MousePos.y);
-        int selectedAbove = 0; // selected layers above the gap leave the list first
-        for (int i = 0; i < gap && i < static_cast<int>(ctx.comp().layers.size()); ++i)
-            if (ctx.isSelected(ctx.comp().layers[i].id)) ++selectedAbove;
-        ctx.moveSelectedTo(gap - selectedAbove);
+        // This runs while the dragged row is drawn, before the rows below it
+        // are laid out: finish the drop once the whole list is known.
+        pendingDrop_ = true;
+        pendingDropY_ = io.MousePos.y;
     } else if (std::fabs(io.MousePos.x - dragStartX_) < 3.0f && std::fabs(io.MousePos.y - dragStartY_) < 3.0f &&
                !io.KeyCtrl && !io.KeyShift) {
         ctx.select(dragLayer_); // plain click inside a multi-selection keeps just this layer
     }
     drag_ = Drag::None;
     restacking_ = false;
+}
+
+void TimelinePanel::applyPendingDrop(EditorContext& ctx) {
+    if (!pendingDrop_) return;
+    pendingDrop_ = false;
+    const int gap = dropGapAt(pendingDropY_);
+    int selectedAbove = 0; // selected layers above the gap leave the list first
+    for (int i = 0; i < gap && i < static_cast<int>(ctx.comp().layers.size()); ++i)
+        if (ctx.isSelected(ctx.comp().layers[i].id)) ++selectedAbove;
+    ctx.moveSelectedTo(gap - selectedAbove);
+}
+
+void TimelinePanel::beginMarquee(EditorContext& ctx) {
+    const ImGuiIO& io = ImGui::GetIO();
+    const bool additive = io.KeyCtrl || io.KeyShift;
+    marquee_ = true;
+    marqueeStart_ = io.MousePos;
+    marqueeBase_ = additive ? ctx.selection : std::vector<uint64_t>{};
+    if (!additive) ctx.select(0);
+    ctx.clearKeySelection();
+}
+
+void TimelinePanel::updateMarquee(EditorContext& ctx, ImDrawList* dl) {
+    if (!marquee_) return;
+    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        marquee_ = false;
+        return;
+    }
+    const ImVec2 m = ImGui::GetIO().MousePos;
+    const ImVec2 a(std::min(marqueeStart_.x, m.x), std::min(marqueeStart_.y, m.y));
+    const ImVec2 b(std::max(marqueeStart_.x, m.x), std::max(marqueeStart_.y, m.y));
+    if (b.x - a.x < 3.0f && b.y - a.y < 3.0f) return; // still a click
+
+    // Rows the box touches vertically; inside the track area the box must also touch the bar.
+    ctx.selection = marqueeBase_;
+    for (const LayerRow& r : rows_) {
+        const bool vertical = r.bottom > a.y && r.top < b.y;
+        const bool horizontal = a.x < trackX0_ || (r.barX2 > a.x && r.barX1 < b.x);
+        if (vertical && horizontal && !ctx.isSelected(r.id)) ctx.selection.push_back(r.id);
+    }
+    dl->AddRectFilled(a, b, IM_COL32(232, 185, 49, 22));
+    dl->AddRect(a, b, IM_COL32(232, 185, 49, 160));
 }
 
 int TimelinePanel::dropGapAt(float y) const {
