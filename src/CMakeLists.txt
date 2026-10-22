@@ -48,6 +48,8 @@ endif()
 if(MSVC)
     target_compile_options(bemotion PRIVATE /W4 /utf-8)
     target_compile_options(bemotion_core PRIVATE /W4 /utf-8)
+    # Portable C functions (fopen, getenv, ...) are fine here.
+    target_compile_definitions(bemotion PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_link_options(bemotion PRIVATE /ENTRY:mainCRTStartup)
 else()
     target_compile_options(bemotion PRIVATE -Wall -Wextra)

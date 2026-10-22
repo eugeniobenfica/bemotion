@@ -98,7 +98,7 @@ struct Layer {
 
     // All animatable properties that apply to this layer's type, in UI order.
     std::vector<PropertyRef> properties();
-    PropertyRef* findProperty(std::vector<PropertyRef>& props, const char* id);
+    PropertyRef* findProperty(std::vector<PropertyRef>& props, const char* propertyId);
 
     bool activeAt(double t) const { return visible && t >= inPoint && t < outPoint; }
 

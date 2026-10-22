@@ -83,9 +83,9 @@ std::vector<PropertyRef> Layer::properties() {
     return p;
 }
 
-PropertyRef* Layer::findProperty(std::vector<PropertyRef>& props, const char* id) {
+PropertyRef* Layer::findProperty(std::vector<PropertyRef>& props, const char* propertyId) {
     for (auto& p : props)
-        if (std::strcmp(p.id, id) == 0) return &p;
+        if (std::strcmp(p.id, propertyId) == 0) return &p;
     return nullptr;
 }
 
