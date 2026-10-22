@@ -48,10 +48,15 @@ enum class Icon {
     Gear,   // settings
     Camera,
     Plugin,
+    BarChart,
+    LineChart,
+    PieChart,
 };
 
 Icon iconForLayer(const Layer& layer);
 Icon iconForShape(ShapeKind kind);
+// Icon named by a plugin object type ("bars", "line_chart", "pie", a shape name, ...).
+Icon iconForPlugin(const std::string& name);
 
 void drawIcon(ImDrawList* dl, Icon icon, ImVec2 center, float size, ImU32 color);
 

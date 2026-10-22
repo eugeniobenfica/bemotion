@@ -385,6 +385,48 @@ void testMotionPath() {
     CHECK(near(q.comp.layers[0].transform.position.valueAt(1.5).x, l.transform.position.valueAt(1.5).x));
 }
 
+void testPluginLayerRoundTrip() {
+    PluginProps props;
+    props.objectType = "charts.bars";
+    props.defaultSize = {800, 400};
+    PluginParam progress;
+    progress.id = "progress";
+    progress.label = "Progress";
+    progress.defaultNumber = 100;
+    progress.max = 100;
+    PluginParam mode;
+    mode.id = "orientation";
+    mode.kind = PluginParamKind::Choice;
+    mode.choices = {"Columns", "Bars"};
+    mode.choice = 1;
+    PluginParam color;
+    color.id = "bar_color";
+    color.kind = PluginParamKind::Color;
+    color.defaultColor = Color::fromHex(0x336699);
+    props.params = {progress, mode, color};
+    props.hasRows = true;
+    props.rows = {{"A", 3, Color::fromHex(0xFF0000)}, {"B", 7.5f, Color::fromHex(0x00FF00)}};
+
+    Project p;
+    Layer& l = p.comp.addLayer(makePluginLayer("Chart", props, {960, 540}, 5.0));
+    l.plugin.find("progress")->number.setKey(0.0, 0.0f);
+    l.plugin.find("progress")->number.setKey(1.0, 100.0f);
+    auto lp = l.properties();
+    CHECK(l.findProperty(lp, "p.progress") != nullptr && l.findProperty(lp, "p.bar_color") != nullptr);
+    CHECK(l.findProperty(lp, "p.orientation") == nullptr); // choices are not animatable
+
+    Project q;
+    CHECK(deserializeProject(serializeProject(p), q));
+    if (q.comp.layers.empty()) return;
+    Layer& r = q.comp.layers[0];
+    CHECK(r.type == LayerType::Plugin && r.plugin.objectType == "charts.bars");
+    CHECK(r.plugin.params.size() == 3 && r.plugin.find("orientation")->choice == 1);
+    CHECK(near(r.plugin.find("progress")->number.valueAt(0.5), l.plugin.find("progress")->number.valueAt(0.5)));
+    CHECK(r.plugin.rows.size() == 2 && r.plugin.rows[1].label == "B" && near(r.plugin.rows[1].value, 7.5f));
+    CHECK(near(defaultPropertyValue(r, "p.bar_color", {960, 540})[2], Color::fromHex(0x336699).b));
+    CHECK(near(defaultPropertyValue(r, "size", {960, 540})[0], 800.0f));
+}
+
 void testTracksRoundTrip() {
     Project p;
     p.comp = makeSplitStack();
@@ -446,6 +488,7 @@ int main() {
         {"camera", testCamera},
         {"custom easing", testCustomEasing},
         {"motion path", testMotionPath},
+        {"plugin layer round trip", testPluginLayerRoundTrip},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };

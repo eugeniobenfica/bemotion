@@ -2,6 +2,7 @@
 
 #include "app/Platform.h"
 #include "app/RecentProjects.h"
+#include "ui/PluginsWindow.h"
 #include "ui/SettingsWindow.h"
 #include "core/Serialization.h"
 #include "render/Fonts.h"
@@ -203,6 +204,10 @@ void EditorScreen::drawMenuBar() {
             resetLayout_ = true;
             objects_.open = viewport_.open = properties_.open = timeline_.open = true;
         }
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Plugins")) {
+        ui::pluginsMenuItems();
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {

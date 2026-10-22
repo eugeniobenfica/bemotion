@@ -1,0 +1,9 @@
+{
+  "id": "charts",
+  "name": "Charts",
+  "version": "1.0.0",
+  "author": "bemotion",
+  "description": "Animated column, bar, line and donut charts driven by a data table.",
+  "main": "main.lua",
+  "api": 1
+}

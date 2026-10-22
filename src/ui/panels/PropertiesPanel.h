@@ -20,6 +20,7 @@ private:
     void drawComposition(EditorContext& ctx);
     void drawLayer(EditorContext& ctx, Layer& layer);
     void drawEffects(EditorContext& ctx, Layer& layer);
+    void drawPluginData(EditorContext& ctx, Layer& layer);
     void drawPresets(EditorContext& ctx, Layer& layer);
 
     std::string saveName_;

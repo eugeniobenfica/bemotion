@@ -1,5 +1,6 @@
 #include "ui/Widgets.h"
 
+#include "app/PluginHost.h"
 #include "core/Math.h"
 #include "render/Fonts.h"
 #include "ui/Theme.h"
@@ -7,11 +8,25 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 
 namespace bemotion::ui {
 
+
+Icon iconForPlugin(const std::string& name) {
+    if (name == "bars" || name == "chart") return Icon::BarChart;
+    if (name == "line_chart") return Icon::LineChart;
+    if (name == "pie" || name == "donut") return Icon::PieChart;
+    if (name == "text") return Icon::Text;
+    for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) {
+        std::string shape = shapeKindLabel(static_cast<ShapeKind>(i));
+        for (char& ch : shape) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if (shape == name) return iconForShape(static_cast<ShapeKind>(i));
+    }
+    return Icon::Plugin;
+}
 
 Icon iconForShape(ShapeKind kind) {
     switch (kind) {
@@ -27,6 +42,10 @@ Icon iconForShape(ShapeKind kind) {
 
 Icon iconForLayer(const Layer& layer) {
     if (layer.type == LayerType::Camera) return Icon::Camera;
+    if (layer.type == LayerType::Plugin) {
+        const PluginObjectType* type = PluginHost::get().findType(layer.plugin.objectType);
+        return type ? iconForPlugin(type->icon) : Icon::Plugin;
+    }
     return layer.type == LayerType::Text ? Icon::Text : iconForShape(layer.shape.kind);
 }
 
@@ -223,6 +242,30 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         dl->AddRect(ImVec2(c.x - h * 0.6f, c.y - h * 0.35f), ImVec2(c.x + h * 0.6f, c.y + h * 0.75f), col, 3.0f, 0, th);
         dl->AddLine(ImVec2(c.x - h * 0.28f, c.y - h * 0.35f), ImVec2(c.x - h * 0.28f, c.y - h * 0.85f), col, th * 1.4f);
         dl->AddLine(ImVec2(c.x + h * 0.28f, c.y - h * 0.35f), ImVec2(c.x + h * 0.28f, c.y - h * 0.85f), col, th * 1.4f);
+        break;
+    }
+    case Icon::BarChart: {
+        const float base = c.y + h * 0.75f;
+        dl->AddLine(ImVec2(c.x - h * 0.85f, base), ImVec2(c.x + h * 0.85f, base), col, th);
+        const float xs[3] = {-0.55f, 0.0f, 0.55f}, hs[3] = {0.7f, 1.35f, 1.0f};
+        for (int i = 0; i < 3; ++i)
+            dl->AddRectFilled(ImVec2(c.x + h * (xs[i] - 0.18f), base - h * hs[i]), ImVec2(c.x + h * (xs[i] + 0.18f), base - th),
+                              col, 1.5f);
+        break;
+    }
+    case Icon::LineChart: {
+        const ImVec2 pts[4] = {ImVec2(c.x - h * 0.85f, c.y + h * 0.45f), ImVec2(c.x - h * 0.25f, c.y - h * 0.15f),
+                               ImVec2(c.x + h * 0.2f, c.y + h * 0.2f), ImVec2(c.x + h * 0.85f, c.y - h * 0.6f)};
+        dl->AddPolyline(pts, 4, col, 0, th * 1.2f);
+        for (const ImVec2& p : pts) dl->AddCircleFilled(p, th * 1.3f, col);
+        dl->AddLine(ImVec2(c.x - h * 0.85f, c.y + h * 0.8f), ImVec2(c.x + h * 0.85f, c.y + h * 0.8f), col, th);
+        break;
+    }
+    case Icon::PieChart: {
+        dl->AddCircle(c, h * 0.8f, col, 0, th);
+        dl->PathLineTo(c);
+        dl->PathArcTo(c, h * 0.8f, -kPi * 0.5f, kPi * 0.15f);
+        dl->PathFillConvex(col);
         break;
     }
     case Icon::ZoomIn:

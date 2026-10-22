@@ -3,12 +3,14 @@
 #include "app/AppIcon.h"
 #include "app/DevScript.h"
 #include "app/Platform.h"
+#include "app/PluginHost.h"
 #include "app/Settings.h"
 #include "core/Serialization.h"
 #include "export/Export.h"
 #include "render/EffectRenderer.h"
 #include "render/Fonts.h"
 #include "ui/EditorScreen.h"
+#include "ui/PluginsWindow.h"
 #include "ui/SettingsWindow.h"
 #include "ui/Theme.h"
 
@@ -150,6 +152,7 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
             if (settings.output.extension() == exporting::formatExtension(static_cast<exporting::Format>(k)))
                 settings.format = static_cast<exporting::Format>(k);
     settings.end = project.comp.duration;
+    PluginHost::get().reconcile(project.comp);
 
     // Text layers may use system fonts: wait until they are in the atlas.
     for (int tries = 0; !Fonts::ensureLoaded(project.comp) && tries < 3000; ++tries) {
@@ -245,6 +248,7 @@ bool Application::init(bool visible) {
     ImGui::GetStyle().FontScaleDpi = scale;
     Fonts::load(platform::assetsDir());
     Fonts::startSystemScan(platform::appDataDir() / "fontcache.json");
+    PluginHost::get().load();
 
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -257,6 +261,7 @@ bool Application::init(bool visible) {
 
 void Application::shutdown() {
     editor_.reset();
+    PluginHost::get().shutdown();
     render::screenEffects().release();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
@@ -271,6 +276,7 @@ void Application::shutdown() {
 void Application::frame(double dt) {
     render::screenEffects().beginFrame(); // effect textures from the previous frame can be reused
     Fonts::processPending(); // faces requested by text layers last frame
+    PluginHost::get().processPendingReload();
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     if (script_) script_->apply();
@@ -293,6 +299,7 @@ void Application::frame(double dt) {
 
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, ImGuiInputFlags_RouteGlobal)) ui::openSettings();
     ui::drawSettings();
+    ui::drawPluginManager();
 
     ImGui::Render();
     int w = 0, h = 0;
@@ -329,6 +336,7 @@ void Application::openProject(const std::filesystem::path& path) {
         return;
     }
     recents_.touch(path, project.name);
+    PluginHost::get().reconcile(project.comp);
     editor_ = std::make_unique<EditorScreen>(std::move(project), path, recents_);
 }
 

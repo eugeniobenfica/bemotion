@@ -3,6 +3,7 @@
 #include "core/Geometry.h"
 #include "render/EffectRenderer.h"
 #include "render/Fonts.h"
+#include "render/PluginCanvas.h"
 
 #include <imgui.h>
 
@@ -193,13 +194,36 @@ void drawShape(ImDrawList* dl, const Layer& layer, double t, const Affine& toScr
     transformVertices(dl, start, toScreen * Affine::scale(1.0f / k));
 }
 
+// --- plugin objects ------------------------------------------------------------
+
+PluginDrawer& pluginDrawer() {
+    static PluginDrawer drawer;
+    return drawer;
+}
+
+void drawPlugin(ImDrawList* dl, const Layer& layer, double t, const Affine& toScreen, float opacity) {
+    const float k = std::clamp(densityOf(toScreen), 0.01f, 64.0f);
+    const int start = dl->VtxBuffer.Size;
+    PluginCanvas canvas(dl, k, opacity);
+    if (pluginDrawer()) {
+        pluginDrawer()(layer, t, canvas);
+    } else { // no plugin host (tests, tools): a placeholder frame
+        const Vec2 half = layer.plugin.size.valueAt(t) * 0.5f;
+        canvas.rectOutline(half * -1.0f, half, Color::fromHex(0x808080), 2.0f);
+    }
+    transformVertices(dl, start, toScreen * Affine::scale(1.0f / k));
+}
+
 } // namespace
+
+void setPluginDrawer(PluginDrawer drawer) { pluginDrawer() = std::move(drawer); }
 
 void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride) {
     const float opacity = opacityOverride >= 0.0f ? std::min(opacityOverride, 1.0f)
                                                   : std::clamp(layer.transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
     if (opacity <= 0.0f || layer.type == LayerType::Camera) return;
     if (layer.type == LayerType::Text) drawText(dl, layer, time, layerToScreen, opacity);
+    else if (layer.type == LayerType::Plugin) drawPlugin(dl, layer, time, layerToScreen, opacity);
     else drawShape(dl, layer, time, layerToScreen, opacity);
 }
 
@@ -229,6 +253,12 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax) {
     if (layer.type == LayerType::Camera) { // the camera frame
         outMin = layer.camera.frameSize * -0.5f;
         outMax = layer.camera.frameSize * 0.5f;
+        return true;
+    }
+    if (layer.type == LayerType::Plugin) {
+        const Vec2 half = layer.plugin.size.valueAt(time) * 0.5f;
+        outMin = half * -1.0f;
+        outMax = half;
         return true;
     }
     if (layer.type == LayerType::Text) {

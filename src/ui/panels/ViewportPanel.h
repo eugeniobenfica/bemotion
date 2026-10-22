@@ -12,9 +12,11 @@ namespace bemotion {
 class EditorContext;
 
 // Payload id for dragging objects from the Objects panel onto the canvas.
-// The payload is an int: -1 for text, kDropCamera for a camera, otherwise a ShapeKind.
+// The payload is an int: -1 for text, kDropCamera for a camera, kDropPlugin - i
+// for plugin object type i (PluginHost::objectTypes()), otherwise a ShapeKind.
 inline constexpr const char* kObjectPayload = "BEMOTION_OBJECT";
 inline constexpr int kDropCamera = -2;
+inline constexpr int kDropPlugin = -100;
 
 // Center panel: renders the composition and provides direct manipulation.
 //
@@ -51,6 +53,7 @@ private:
     void handleNavigation(bool hovered);
     void handleSelectionInput(EditorContext& ctx, bool hovered);
     void handleDrop(EditorContext& ctx);
+    const struct PluginObjectType* droppedPluginType() const; // null unless a plugin object is dragged in
     void drawOverlay(EditorContext& ctx, bool hovered);
     void drawHud(EditorContext& ctx);
 

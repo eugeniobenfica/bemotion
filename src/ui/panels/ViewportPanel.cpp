@@ -1,5 +1,6 @@
 #include "ui/panels/ViewportPanel.h"
 
+#include "app/PluginHost.h"
 #include "app/Settings.h"
 #include "core/Snapping.h"
 #include "render/Fonts.h"
@@ -196,6 +197,13 @@ void ViewportPanel::handleNavigation(bool hovered) {
     if (hovered && drag_ == Drag::None && (spaceHeld() || io.KeyAlt)) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 }
 
+const PluginObjectType* ViewportPanel::droppedPluginType() const {
+    if (dropKind_ > kDropPlugin) return nullptr;
+    const auto types = PluginHost::get().objectTypes();
+    const size_t i = static_cast<size_t>(kDropPlugin - dropKind_);
+    return i < types.size() ? types[i] : nullptr;
+}
+
 void ViewportPanel::handleDrop(EditorContext& ctx) {
     dropHover_ = false;
     if (!ImGui::BeginDragDropTarget()) return;
@@ -213,6 +221,7 @@ void ViewportPanel::handleDrop(EditorContext& ctx) {
         if (payload->IsDelivery()) {
             const Vec2 scenePos = world_.inverse().apply(dropPos_); // where the camera shows that point
             if (dropKind_ == kDropCamera) ctx.addCamera();
+            else if (const PluginObjectType* type = droppedPluginType()) ctx.addPluginObject(*type, scenePos);
             else if (dropKind_ < 0) ctx.addText(scenePos);
             else ctx.addShape(static_cast<ShapeKind>(dropKind_), scenePos);
             dropHover_ = false;
@@ -597,7 +606,9 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
     // Ghost of an object being dragged in from the Objects panel.
     if (dropHover_) {
         const Vec2 scenePos = world_.inverse().apply(dropPos_);
+        const PluginObjectType* type = droppedPluginType();
         Layer ghost = dropKind_ == kDropCamera ? makeCameraLayer(compSize_, comp.duration)
+                      : type                   ? makePluginLayer(type->name, type->prototype, scenePos, comp.duration)
                       : dropKind_ < 0          ? makeTextLayer("Your text", scenePos, comp.duration)
                                                : makeShapeLayer(static_cast<ShapeKind>(dropKind_), scenePos, comp.duration);
         ghost.transform.opacity.base = 55.0f;

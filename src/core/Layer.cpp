@@ -47,6 +47,12 @@ Color labelColor(int index) {
     return Color::fromHex(kColors[((index % kLabelColorCount) + kLabelColorCount) % kLabelColorCount]);
 }
 
+PluginParam* PluginProps::find(const std::string& id) {
+    for (auto& p : params)
+        if (p.id == id) return &p;
+    return nullptr;
+}
+
 std::vector<PropertyRef> Layer::properties() {
     std::vector<PropertyRef> p;
     auto& tr = transform;
@@ -78,6 +84,17 @@ std::vector<PropertyRef> Layer::properties() {
         p.push_back({"stroke_width", "Stroke", "Width", PropertyKind::Float, &s.strokeWidth, 0.25f, 0, 1000});
         p.push_back({"trim_start", "Stroke", "Trim Start", PropertyKind::Float, &s.trimStart, 0.5f, 0, 100, "%.0f%%"});
         p.push_back({"trim_end", "Stroke", "Trim End", PropertyKind::Float, &s.trimEnd, 0.5f, 0, 100, "%.0f%%"});
+    } else if (type == LayerType::Plugin) {
+        p.push_back({"size", "Object", "Size", PropertyKind::Vec2, &plugin.size, 1.0f, 0, 100000});
+        for (PluginParam& pp : plugin.params) {
+            pp.propertyId = "p." + pp.id;
+            const char* id = pp.propertyId.c_str();
+            if (pp.kind == PluginParamKind::Number)
+                p.push_back({id, pp.group.c_str(), pp.label.c_str(), PropertyKind::Float, &pp.number, pp.speed, pp.min,
+                             pp.max, pp.format.c_str()});
+            else if (pp.kind == PluginParamKind::Color)
+                p.push_back({id, pp.group.c_str(), pp.label.c_str(), PropertyKind::Color, &pp.color});
+        }
     } else {
         auto& t = text;
         p.push_back({"font_size", "Text", "Font Size", PropertyKind::Float, &t.fontSize, 0.5f, 1, 2000, "%.0f px"});
@@ -214,7 +231,28 @@ void setPropertyValue(const PropertyRef& p, double t, const std::vector<float>& 
     }
 }
 
+Layer makePluginLayer(const std::string& name, PluginProps props, Vec2 position, double duration) {
+    Layer l;
+    l.type = LayerType::Plugin;
+    l.name = name;
+    l.outPoint = duration;
+    l.transform.position.base = position;
+    l.plugin = std::move(props);
+    return l;
+}
+
 std::vector<float> defaultPropertyValue(const Layer& layer, const char* propertyId, Vec2 compCenter) {
+    if (layer.type == LayerType::Plugin) {
+        Layer fresh = makePluginLayer(layer.name, layer.plugin, compCenter, 1.0);
+        fresh.plugin.size = AnimVec2{layer.plugin.defaultSize};
+        for (PluginParam& pp : fresh.plugin.params) {
+            pp.number = AnimFloat{pp.defaultNumber};
+            pp.color = AnimColor{pp.defaultColor};
+        }
+        auto props = fresh.properties();
+        if (const PropertyRef* p = fresh.findProperty(props, propertyId)) return propertyValue(*p, 0.0);
+        return {};
+    }
     Layer fresh = layer.type == LayerType::Text     ? makeTextLayer(layer.text.text, compCenter, 1.0)
                   : layer.type == LayerType::Camera ? makeCameraLayer(compCenter * 2.0f, 1.0)
                                                     : makeShapeLayer(layer.shape.kind, compCenter, 1.0);

@@ -10,7 +10,7 @@
 
 namespace bemotion {
 
-enum class LayerType { Shape, Text, Camera };
+enum class LayerType { Shape, Text, Camera, Plugin };
 
 enum class ShapeKind { Rectangle, Ellipse, Polygon, Star, Line, Count };
 
@@ -88,6 +88,50 @@ struct TextProps {
     AnimFloat reveal{100.0f};    // percent of characters shown (typewriter)
 };
 
+// --- plugin objects ---------------------------------------------------------------
+// Object types registered by plugins (e.g. charts). The plugin declares a
+// parameter schema; the layer stores the parameters with their definitions so
+// projects stay readable (and editable) even when the plugin is missing.
+
+enum class PluginParamKind { Number, Color, Toggle, Choice, Text };
+
+struct PluginParam {
+    std::string id;
+    std::string label;
+    std::string group = "Parameters";
+    PluginParamKind kind = PluginParamKind::Number;
+    // Numbers and colors are animatable properties ("p.<id>").
+    AnimFloat number{0.0f};
+    AnimColor color{Color::fromHex(0xFFFFFF)};
+    float defaultNumber = 0.0f;
+    Color defaultColor = Color::fromHex(0xFFFFFF);
+    float min = 0.0f, max = 0.0f, speed = 0.5f; // min == max: unbounded
+    std::string format = "%.1f";
+    bool toggle = false;
+    int choice = 0;
+    std::vector<std::string> choices;
+    std::string text;
+    std::string propertyId; // "p.<id>", kept here so PropertyRef::id stays valid
+};
+
+// One data point (charts and other data-driven objects).
+struct DataRow {
+    std::string label;
+    float value = 0.0f;
+    Color color = Color::fromHex(0xE8B931);
+};
+
+struct PluginProps {
+    std::string objectType; // "<plugin id>.<object id>", e.g. "charts.bar"
+    AnimVec2 size{Vec2{900.0f, 540.0f}}; // the object frame; plugins draw inside +-size/2
+    Vec2 defaultSize{900.0f, 540.0f};
+    std::vector<PluginParam> params;
+    bool hasRows = false;
+    std::vector<DataRow> rows;
+
+    PluginParam* find(const std::string& id);
+};
+
 constexpr int kLabelColorCount = 8;
 Color labelColor(int index);
 
@@ -109,6 +153,7 @@ struct Layer {
     ShapeProps shape;
     TextProps text;
     CameraProps camera;
+    PluginProps plugin;
     std::vector<Effect> effects; // applied in order
 
     // All animatable properties that apply to this layer's type, in UI order.
@@ -127,6 +172,8 @@ struct Layer {
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
 Layer makeCameraLayer(Vec2 compSize, double duration);
+// A plugin object with the given parameters at their defaults (see PluginHost).
+Layer makePluginLayer(const std::string& name, PluginProps props, Vec2 position, double duration);
 
 // Generic access to a property value as 1 (float), 2 (vec2) or 4 (color) components.
 std::vector<float> propertyValue(const PropertyRef& p, double t);

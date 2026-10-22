@@ -15,33 +15,42 @@ common moves are one click away through *Quick Animations*.
 
 - **Home screen** with recent projects (live thumbnails), search and a
   *New Project* dialog with format presets (Full HD, 4K, Vertical/Reels, Square…)
-- **Objects panel**: Text, Rectangle, Ellipse, Polygon, Star and Line — click
-  to add at the center, or **drag onto the canvas** to drop at an exact spot
+- **Objects panel**: Text, Rectangle, Ellipse, Polygon, Star, Line, Camera and
+  plugin objects (charts) — click to add at the center, or **drag onto the
+  canvas** to drop at an exact spot
 - **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
-  Space+drag or Alt+drag, zoom presets (Fit, 25–400%); click or **box-select**
-  layers (Shift/Ctrl to add), drag to move every selected layer, corner
+  Space+drag or Alt+drag; click or **box-select** layers, drag to move, corner
   handles to scale (Shift = uniform), rotation handle (Shift = 15° snaps)
-- **Properties panel**: every property is animatable with a keyframe toggle —
-  transform, size, roundness, fill, stroke, trim paths, font weight, tracking,
-  line height and text *reveal* (typewriter)
-- **Quick Animations**: Fade In/Out, Pop In, Slide Up, Slide In, Spin,
-  Typewriter, Draw On — applied to all selected layers as normal keyframes
-- **Timeline**: playback with loop, frame-accurate scrubbing, layer bars
-  (move in time / trim in & out), **drag layers up and down to change the
-  stacking order**, multi-select (Shift/Ctrl), keyframe dragging, easing menu
-  (right click), zoom (Ctrl+Wheel)
-- **Tracks**: each timeline row is a track that can hold several clips. Drag a
-  clip into another row to move it to that track (it must not overlap), or
-  between rows to give it a new track; clips stop at their neighbors
-- **Cut tool**: the razor (C) splits a clip where you click, keeping both pieces
-  on the same track; Ctrl+K splits the
-  selected clips at the playhead
-- **Video export** (Ctrl+M): MP4 / H.264 (built in on Windows), PNG sequence
-  with transparency, and — with [FFmpeg](https://ffmpeg.org) installed — MOV
-  ProRes 4444 (alpha), WebM VP9 and animated GIF; any size from ¼× to 2×
-- **Easing**: Linear, Ease In/Out/In-Out, Back, Elastic, Bounce, Hold
+- **Snapping** (S, or the magnet button): canvas center and edges, other
+  layers' edges and centers, **rulers and custom guides** (drag them out of the
+  rulers); in the timeline clips snap to each other, keyframes and the playhead
+- **Motion paths**: position keyframes follow a curve drawn in the viewport —
+  drag the keys and their bezier handles (Alt breaks a handle into a corner)
+- **Properties panel**: every property is animatable, with a keyframe toggle
+  and a **reset** button; collapsible sections; any installed **font family**
+- **Effects**: outline, glow, drop shadow and motion blur (GPU), stackable,
+  animatable, with presets you can **import / save**
+- **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
+  Draw On… stack without breaking; **import** more or save your own
+- **Timeline**: tracks holding several clips, trim in/out (clamped to
+  neighbors), inline value editing on keyframe rows, keyframe dragging,
+  easing menu with a **custom cubic-bezier curve editor**, zoom (Ctrl+Wheel)
+- **Camera**: animate position, rotation and zoom; toggle the viewport between
+  the camera view and a free view showing the camera frame
+- **Cut tool** (C) and split at playhead (Ctrl+K)
+- **Video export** (Ctrl+M, or the button in the top-right corner): MP4 / H.264
+  (built in on Windows), PNG sequence with transparency, and — with
+  [FFmpeg](https://ffmpeg.org) installed — MOV ProRes 4444, WebM VP9 and GIF
+- **Settings** (Ctrl+, or the gear): Dark, Light and Midnight themes, any
+  accent color, and an *advanced mode* to edit every UI color, rounding and the
+  snap distance; **import, save and export themes** (JSON, see
+  [examples/themes](examples/themes))
+- **Plugins**: sandboxed Lua scripts that add new kinds of objects. The bundled
+  *Charts* plugin draws animated **column / bar, line / area and donut charts**
+  from an editable data table (paste from a spreadsheet). See
+  [docs/PLUGINS.md](docs/PLUGINS.md) to write your own
 - **Undo / redo** for everything, unsaved-changes protection
-- Dockable, rearrangeable panels; dark theme with a golden accent
+- Dockable, rearrangeable panels
 
 ## Building
 
@@ -90,6 +99,8 @@ The format follows the file extension (`.mp4`, `.png`, `.mov`, `.webm`, `.gif`).
 | Delete | Delete selected keyframes, or the layers |
 | Ctrl+S / Ctrl+Shift+S | Save / save as |
 | Ctrl+M | Export video |
+| S | Toggle snapping (hold Ctrl while dragging to skip it) |
+| Ctrl+, | Settings |
 | Wheel · Middle/right drag | Zoom · pan the viewport |
 | Ctrl+0 / Ctrl+1 / Ctrl+= / Ctrl+- | Fit / 100% / zoom in / zoom out |
 
@@ -100,7 +111,8 @@ src/core     document model (layers, keyframes, easing, file format, undo) — n
 src/render   draws compositions (viewport, thumbnails, off-screen export)
 src/export   video / image-sequence encoders and the export job
 src/ui       theme, widgets, home screen, editor, panels and dialogs
-src/app      window, main loop, OS integration, command line
+src/app      window, main loop, OS integration, settings, preset/theme libraries, plugin host
+assets       fonts and bundled plugins (assets/plugins/charts)
 tests        unit tests for the core
 ```
 

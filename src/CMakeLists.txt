@@ -21,6 +21,7 @@ add_executable(bemotion WIN32
     app/DevScript.cpp
     app/EffectLibrary.cpp
     app/Platform.cpp
+    app/PluginHost.cpp
     app/PresetLibrary.cpp
     app/Settings.cpp
     app/RecentProjects.cpp
@@ -33,11 +34,13 @@ add_executable(bemotion WIN32
     render/FontScan.cpp
     render/GL.cpp
     render/OffscreenRenderer.cpp
+    render/PluginCanvas.cpp
     render/SceneRenderer.cpp
     ui/EditorContext.cpp
     ui/EditorScreen.cpp
     ui/ExportDialog.cpp
     ui/HomeScreen.cpp
+    ui/PluginsWindow.cpp
     ui/SettingsWindow.cpp
     ui/Theme.cpp
     ui/Widgets.cpp
@@ -46,7 +49,7 @@ add_executable(bemotion WIN32
     ui/panels/TimelinePanel.cpp
     ui/panels/ViewportPanel.cpp)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(bemotion PRIVATE bemotion_core imgui stb)
+target_link_libraries(bemotion PRIVATE bemotion_core imgui stb lua)
 target_compile_definitions(bemotion PRIVATE
     BEMOTION_VERSION="${PROJECT_VERSION}"
     BEMOTION_SOURCE_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
@@ -71,10 +74,12 @@ if(MINGW)
     target_link_options(bemotion PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 
-# Copy runtime assets (fonts, ...) next to the executable.
-add_custom_command(TARGET bemotion POST_BUILD
+# Copy runtime assets (fonts, bundled plugins, ...) next to the executable on
+# every build, so edited assets show up even when nothing needs relinking.
+add_custom_target(bemotion_assets ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${PROJECT_SOURCE_DIR}/assets $<TARGET_FILE_DIR:bemotion>/assets)
+add_dependencies(bemotion bemotion_assets)
 
 install(TARGETS bemotion RUNTIME DESTINATION .)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/assets DESTINATION .)

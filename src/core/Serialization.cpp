@@ -105,6 +105,81 @@ E enumFromId(const char* const (&ids)[N], const std::string& id, E fallback) {
     return fallback;
 }
 
+// --- plugin objects --------------------------------------------------------------
+
+constexpr const char* kParamKindIds[] = {"number", "color", "toggle", "choice", "text"};
+
+// Animated values (numbers, colors) are saved with the layer's properties ("p.<id>").
+json encodePlugin(const PluginProps& p) {
+    json params = json::array();
+    for (const PluginParam& pp : p.params) {
+        json j = {{"id", pp.id}, {"kind", kParamKindIds[static_cast<int>(pp.kind)]}, {"label", pp.label}, {"group", pp.group}};
+        switch (pp.kind) {
+        case PluginParamKind::Number:
+            j["default"] = pp.defaultNumber;
+            j["min"] = pp.min;
+            j["max"] = pp.max;
+            j["speed"] = pp.speed;
+            j["format"] = pp.format;
+            break;
+        case PluginParamKind::Color: j["default"] = encode(pp.defaultColor); break;
+        case PluginParamKind::Toggle: j["value"] = pp.toggle; break;
+        case PluginParamKind::Choice:
+            j["value"] = pp.choice;
+            j["choices"] = pp.choices;
+            break;
+        case PluginParamKind::Text: j["value"] = pp.text; break;
+        }
+        params.push_back(std::move(j));
+    }
+    json j = {{"type", p.objectType}, {"default_size", encode(p.defaultSize)}, {"params", std::move(params)}};
+    if (p.hasRows) {
+        json rows = json::array();
+        for (const DataRow& r : p.rows) rows.push_back({{"label", r.label}, {"value", r.value}, {"color", encode(r.color)}});
+        j["rows"] = std::move(rows);
+    }
+    return j;
+}
+
+void decodePlugin(const json& j, PluginProps& p) {
+    p.objectType = j.value("type", std::string());
+    if (j.contains("default_size")) decode(j["default_size"], p.defaultSize);
+    p.size = AnimVec2{p.defaultSize};
+    p.params.clear();
+    for (const auto& pj : j.value("params", json::array())) {
+        PluginParam pp;
+        pp.id = pj.value("id", std::string());
+        if (pp.id.empty()) continue;
+        pp.kind = enumFromId(kParamKindIds, pj.value("kind", std::string()), PluginParamKind::Number);
+        pp.label = pj.value("label", pp.id);
+        pp.group = pj.value("group", std::string("Parameters"));
+        if (pj.contains("default") && pj["default"].is_number()) pp.defaultNumber = pj["default"].get<float>();
+        pp.min = pj.value("min", 0.0f);
+        pp.max = pj.value("max", 0.0f);
+        pp.speed = pj.value("speed", 0.5f);
+        pp.format = pj.value("format", std::string("%.1f"));
+        if (pp.kind == PluginParamKind::Color && pj.contains("default")) decode(pj["default"], pp.defaultColor);
+        pp.number = AnimFloat{pp.defaultNumber};
+        pp.color = AnimColor{pp.defaultColor};
+        pp.toggle = pp.kind == PluginParamKind::Toggle && pj.value("value", false);
+        if (pp.kind == PluginParamKind::Choice) {
+            pp.choices = pj.value("choices", std::vector<std::string>{});
+            pp.choice = std::clamp(pj.value("value", 0), 0, std::max(0, static_cast<int>(pp.choices.size()) - 1));
+        }
+        if (pp.kind == PluginParamKind::Text) pp.text = pj.value("value", std::string());
+        p.params.push_back(std::move(pp));
+    }
+    p.hasRows = j.contains("rows");
+    p.rows.clear();
+    for (const auto& rj : j.value("rows", json::array())) {
+        DataRow r;
+        r.label = rj.value("label", std::string());
+        r.value = rj.value("value", 0.0f);
+        if (rj.contains("color")) decode(rj["color"], r.color);
+        p.rows.push_back(std::move(r));
+    }
+}
+
 // --- layers ------------------------------------------------------------------
 
 json encodeLayer(const Layer& constLayer) {
@@ -114,7 +189,10 @@ json encodeLayer(const Layer& constLayer) {
     j["id"] = layer.id;
     j["track"] = layer.track;
     j["name"] = layer.name;
-    j["type"] = layer.type == LayerType::Text ? "text" : layer.type == LayerType::Camera ? "camera" : "shape";
+    j["type"] = layer.type == LayerType::Text     ? "text"
+                : layer.type == LayerType::Camera ? "camera"
+                : layer.type == LayerType::Plugin ? "plugin"
+                                                  : "shape";
     j["visible"] = layer.visible;
     j["locked"] = layer.locked;
     j["label"] = layer.label;
@@ -124,7 +202,9 @@ json encodeLayer(const Layer& constLayer) {
         j["shape"] = {{"kind", kShapeIds[static_cast<int>(layer.shape.kind)]},
                       {"fill", layer.shape.fillEnabled},
                       {"stroke", layer.shape.strokeEnabled}};
-    } else {
+    } else if (layer.type == LayerType::Plugin) {
+        j["plugin"] = encodePlugin(layer.plugin);
+    } else if (layer.type == LayerType::Text) {
         j["text"] = {{"text", layer.text.text},
                      {"font_family", layer.text.fontFamily},
                      {"font_style", layer.text.fontStyle},
@@ -157,7 +237,11 @@ Layer decodeLayer(const json& j) {
     layer.track = j.value("track", uint64_t{0});
     layer.name = j.value("name", std::string("Layer"));
     const std::string type = j.value("type", std::string("shape"));
-    layer.type = type == "text" ? LayerType::Text : type == "camera" ? LayerType::Camera : LayerType::Shape;
+    layer.type = type == "text"     ? LayerType::Text
+                 : type == "camera" ? LayerType::Camera
+                 : type == "plugin" ? LayerType::Plugin
+                                    : LayerType::Shape;
+    if (j.contains("plugin")) decodePlugin(j["plugin"], layer.plugin); // before properties: creates the params
     layer.visible = j.value("visible", true);
     layer.locked = j.value("locked", false);
     layer.label = j.value("label", 0);

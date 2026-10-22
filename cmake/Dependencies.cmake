@@ -35,7 +35,13 @@ FetchContent_Declare(stb
     GIT_REPOSITORY https://github.com/nothings/stb.git
     GIT_TAG        a7d4c2175630e1ea5b6f8dd00ab96fed0b97b96d)
 
-FetchContent_MakeAvailable(glfw json imgui stb)
+# --- Lua (plugin scripting) ---------------------------------------------------
+FetchContent_Declare(lua
+    URL      https://www.lua.org/ftp/lua-5.4.7.tar.gz
+    URL_HASH SHA256=9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+
+FetchContent_MakeAvailable(glfw json imgui stb lua)
 
 add_library(stb INTERFACE)
 target_include_directories(stb SYSTEM INTERFACE ${stb_SOURCE_DIR})
@@ -65,3 +71,13 @@ if(UNIX AND NOT APPLE)
     find_package(X11 REQUIRED)
     target_link_libraries(imgui PUBLIC X11::X11)
 endif()
+
+# Lua ships a Makefile only: build the library (no interpreter/compiler) here.
+# It is compiled as C++ so script errors unwind with exceptions (C++ destructors
+# run) instead of longjmp; include lua.h & co directly, not lua.hpp.
+file(GLOB LUA_SOURCES ${lua_SOURCE_DIR}/src/*.c)
+list(REMOVE_ITEM LUA_SOURCES ${lua_SOURCE_DIR}/src/lua.c ${lua_SOURCE_DIR}/src/luac.c)
+set_source_files_properties(${LUA_SOURCES} PROPERTIES LANGUAGE CXX)
+add_library(lua STATIC ${LUA_SOURCES})
+target_include_directories(lua SYSTEM PUBLIC ${lua_SOURCE_DIR}/src)
+set_target_properties(lua PROPERTIES LINKER_LANGUAGE CXX)

@@ -1,5 +1,6 @@
 #include "ui/EditorContext.h"
 
+#include "app/PluginHost.h"
 #include "core/Serialization.h"
 
 #include <algorithm>
@@ -154,6 +155,11 @@ Layer& EditorContext::addCamera() {
     const Vec2 size{static_cast<float>(comp().width), static_cast<float>(comp().height)};
     Layer& cam = insertLayer(makeCameraLayer(size, comp().duration));
     return cam;
+}
+
+Layer& EditorContext::addPluginObject(const PluginObjectType& type, std::optional<Vec2> position) {
+    Layer layer = PluginHost::get().createLayer(type, position.value_or(comp().center()), comp().duration);
+    return insertLayer(std::move(layer));
 }
 
 void EditorContext::deleteSelected() {

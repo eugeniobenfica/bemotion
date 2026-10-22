@@ -1,6 +1,7 @@
 #include "ui/panels/PropertiesPanel.h"
 
 #include "app/Platform.h"
+#include "app/PluginHost.h"
 #include "app/EffectLibrary.h"
 #include "app/PresetLibrary.h"
 #include "core/Presets.h"
@@ -15,7 +16,11 @@
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <sstream>
 
 namespace bemotion {
 
@@ -40,6 +45,79 @@ void plainRowLabel(const char* label) {
     ImGui::TextColored(theme::vec(theme::kTextDim), "%s", label);
     ImGui::TableSetColumnIndex(2);
     ImGui::SetNextItemWidth(-FLT_MIN);
+}
+
+// Non-animatable plugin parameters (toggles, choices, text) of one group.
+void pluginParamRows(EditorContext& ctx, Layer& layer, const std::string& group) {
+    for (PluginParam& p : layer.plugin.params) {
+        if (p.group != group || p.kind == PluginParamKind::Number || p.kind == PluginParamKind::Color) continue;
+        ImGui::PushID(p.id.c_str());
+        plainRowLabel(p.label.c_str());
+        switch (p.kind) {
+        case PluginParamKind::Toggle:
+            if (ImGui::Checkbox("##v", &p.toggle)) ctx.touch();
+            break;
+        case PluginParamKind::Choice:
+            if (ImGui::BeginCombo("##v", p.choice < static_cast<int>(p.choices.size()) ? p.choices[p.choice].c_str() : "")) {
+                for (int i = 0; i < static_cast<int>(p.choices.size()); ++i)
+                    if (ImGui::Selectable(p.choices[i].c_str(), i == p.choice)) {
+                        p.choice = i;
+                        ctx.touch();
+                    }
+                ImGui::EndCombo();
+            }
+            break;
+        case PluginParamKind::Text:
+            if (ImGui::InputText("##v", &p.text)) ctx.touch();
+            break;
+        default: break;
+        }
+        ImGui::PopID();
+    }
+}
+
+bool hasAnimatedParams(const Layer& layer, const std::string& group) {
+    return std::any_of(layer.plugin.params.begin(), layer.plugin.params.end(), [&](const PluginParam& p) {
+        return p.group == group && (p.kind == PluginParamKind::Number || p.kind == PluginParamKind::Color);
+    });
+}
+
+std::string colorHex(Color c) {
+    auto byte = [](float v) { return static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255)); };
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "#%02X%02X%02X", byte(c.r), byte(c.g), byte(c.b));
+    return buf;
+}
+
+// "label, value[, #RRGGBB]" per line; tabs (spreadsheet paste) and semicolons work too.
+std::vector<DataRow> parseRows(const std::string& text) {
+    std::vector<DataRow> rows;
+    std::stringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        for (char& c : line)
+            if (c == '\t' || c == ';') c = ',';
+        std::vector<std::string> cells;
+        std::stringstream ls(line);
+        std::string cell;
+        while (std::getline(ls, cell, ',')) {
+            const size_t a = cell.find_first_not_of(" \r\"");
+            const size_t b = cell.find_last_not_of(" \r\"");
+            cells.push_back(a == std::string::npos ? "" : cell.substr(a, b - a + 1));
+        }
+        if (cells.size() < 2) continue;
+        char* end = nullptr;
+        const float v = std::strtof(cells[1].c_str(), &end);
+        if (end == cells[1].c_str()) continue; // header line
+        DataRow r;
+        r.label = cells[0];
+        r.value = v;
+        r.color = labelColor(static_cast<int>(rows.size()));
+        if (cells.size() > 2 && cells[2].size() == 7 && cells[2][0] == '#')
+            r.color = Color::fromHex(static_cast<unsigned>(std::strtoul(cells[2].c_str() + 1, nullptr, 16)));
+        rows.push_back(std::move(r));
+    }
+    return rows;
 }
 
 bool containsNoCase(const std::string& hay, const std::string& needle) {
@@ -261,7 +339,9 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
 
             // Group-specific, non-animatable settings.
             const std::string group = prop.group;
-            if (group == "Shape") {
+            if (layer.type == LayerType::Plugin) {
+                pluginParamRows(ctx, layer, group);
+            } else if (group == "Shape") {
                 plainRowLabel("Type");
                 int kind = static_cast<int>(layer.shape.kind);
                 if (ImGui::BeginCombo("##kind", shapeKindLabel(layer.shape.kind))) {
@@ -278,7 +358,7 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
             } else if (group == "Stroke") {
                 plainRowLabel("Enabled");
                 if (ImGui::Checkbox("##stroke", &layer.shape.strokeEnabled)) ctx.touch();
-            } else if (group == "Text") {
+            } else if (group == "Text" && layer.type == LayerType::Text) {
                 plainRowLabel("Content");
                 if (ImGui::InputTextMultiline("##text", &layer.text.text,
                                               ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3.6f)))
@@ -345,6 +425,26 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
     }
     closeGroup();
 
+    if (layer.type == LayerType::Plugin) {
+        // Groups made only of toggles / choices / text never came up above.
+        std::vector<std::string> done;
+        for (const PluginParam& p : layer.plugin.params) {
+            if (hasAnimatedParams(layer, p.group) || std::find(done.begin(), done.end(), p.group) != done.end()) continue;
+            done.push_back(p.group);
+            if (ImGui::CollapsingHeader(p.group.c_str(), ImGuiTreeNodeFlags_DefaultOpen) && beginPropertyTable(p.group.c_str())) {
+                pluginParamRows(ctx, layer, p.group);
+                ImGui::EndTable();
+            }
+        }
+        if (layer.plugin.hasRows) drawPluginData(ctx, layer);
+        if (!PluginHost::get().findType(layer.plugin.objectType)) {
+            ImGui::PushStyleColor(ImGuiCol_Text, theme::kDanger);
+            ImGui::TextWrapped("The plugin for this object (%s) is not installed or failed to load.",
+                               layer.plugin.objectType.c_str());
+            ImGui::PopStyleColor();
+        }
+    }
+
     if (ImGui::CollapsingHeader("Layer", ImGuiTreeNodeFlags_DefaultOpen) && beginPropertyTable("layer")) {
         // In/out stay inside the composition, between neighboring clips, at least one frame long.
         const Composition& comp = ctx.comp();
@@ -387,6 +487,78 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
     if (layer.type == LayerType::Camera) return; // cameras are not drawn: no effects or animation presets
     drawEffects(ctx, layer);
     drawPresets(ctx, layer);
+}
+
+void PropertiesPanel::drawPluginData(EditorContext& ctx, Layer& layer) {
+    if (!ImGui::CollapsingHeader("Data", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    auto& rows = layer.plugin.rows;
+    int remove = -1, moveUp = -1;
+    constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_RowBg;
+    if (ImGui::BeginTable("##rows", 4, flags)) {
+        ImGui::TableSetupColumn("color", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
+        ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 1.4f);
+        ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+        ImGui::TableSetupColumn("tools", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight() * 2 + 4);
+        for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
+            DataRow& r = rows[i];
+            ImGui::PushID(i);
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            if (ImGui::ColorEdit4("##c", &r.color.r, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel |
+                                                         ImGuiColorEditFlags_AlphaPreviewHalf))
+                ctx.touch();
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::InputTextWithHint("##l", "Label", &r.label)) ctx.touch();
+            ImGui::TableNextColumn();
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::DragFloat("##v", &r.value, 0.5f, 0, 0, "%g")) ctx.touch();
+            ImGui::TableNextColumn();
+            if (ui::iconButton("##up", ui::Icon::ChevronUp, ImGui::GetFrameHeight(), "Move up") && i > 0) moveUp = i;
+            ImGui::SameLine(0, 4);
+            if (ui::iconButton("##del", ui::Icon::Trash, ImGui::GetFrameHeight(), "Remove row")) remove = i;
+            ImGui::PopID();
+        }
+        ImGui::EndTable();
+    }
+    if (moveUp > 0) {
+        std::swap(rows[moveUp], rows[moveUp - 1]);
+        ctx.touch();
+    }
+    if (remove >= 0) {
+        rows.erase(rows.begin() + remove);
+        ctx.touch();
+    }
+    if (ImGui::Button("+ Add Row")) {
+        DataRow r;
+        r.label = "Item " + std::to_string(rows.size() + 1);
+        r.value = rows.empty() ? 50.0f : rows.back().value;
+        r.color = labelColor(static_cast<int>(rows.size()));
+        rows.push_back(std::move(r));
+        ctx.touch();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Paste")) {
+        const char* clip = ImGui::GetClipboardText();
+        auto pasted = parseRows(clip ? clip : "");
+        if (!pasted.empty()) {
+            rows = std::move(pasted);
+            ctx.touch();
+        }
+    }
+    ui::tooltip("Replace the data with rows from the clipboard: \"label, value[, #color]\" per line.\n"
+                "Cells copied from a spreadsheet work too.");
+    ImGui::SameLine();
+    if (ImGui::Button("Copy")) {
+        std::string text;
+        for (const DataRow& r : rows) {
+            char value[32];
+            std::snprintf(value, sizeof value, "%g", r.value);
+            text += r.label + ", " + value + ", " + colorHex(r.color) + "\n";
+        }
+        ImGui::SetClipboardText(text.c_str());
+    }
+    ui::tooltip("Copy the data as CSV");
 }
 
 void PropertiesPanel::drawEffects(EditorContext& ctx, Layer& layer) {

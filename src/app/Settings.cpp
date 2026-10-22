@@ -67,6 +67,7 @@ void loadSettings() {
         s.accent = j.value("accent", s.accent);
         s.advanced = j.value("advanced", false);
         s.snapDistance = std::clamp(j.value("snap_distance", s.snapDistance), 2.0f, 30.0f);
+        s.disabledPlugins = j.value("disabled_plugins", std::vector<std::string>{});
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
     } catch (const std::exception&) {
         // Missing or unreadable settings: keep the defaults.
@@ -76,7 +77,7 @@ void loadSettings() {
 void saveSettings() {
     const Settings& s = settings();
     json j = {{"theme", s.theme},        {"custom_accent", s.customAccent}, {"accent", s.accent},
-              {"advanced", s.advanced}, {"snap_distance", s.snapDistance}};
+              {"advanced", s.advanced}, {"snap_distance", s.snapDistance}, {"disabled_plugins", s.disabledPlugins}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);
 }

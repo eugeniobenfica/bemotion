@@ -21,6 +21,7 @@ struct Settings {
     bool customPalette = false;
     theme::Palette palette;
     float snapDistance = 8.0f; // screen pixels
+    std::vector<std::string> disabledPlugins; // plugin ids
 };
 
 Settings& settings();
