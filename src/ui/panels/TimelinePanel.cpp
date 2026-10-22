@@ -108,6 +108,9 @@ void TimelinePanel::draw(EditorContext& ctx) {
         return;
     }
     snapLineTime_ = -1.0;
+    if (pendingCompound_ == 1) ctx.createCompound();
+    if (pendingCompound_ == 2) ctx.releaseSelectedCompounds();
+    pendingCompound_ = 0;
     Composition& comp = ctx.comp();
     drawToolbar(ctx);
 
@@ -161,6 +164,11 @@ void TimelinePanel::draw(EditorContext& ctx) {
     const auto trackRows = comp.trackRows();
     for (int r = 0; r < static_cast<int>(trackRows.size()); ++r) {
         const TrackRow& row = trackRows[r];
+        // Rows of layers inside a collapsed compound are hidden.
+        bool hidden = false;
+        for (uint64_t c : collapsedCompounds_)
+            if (const Layer* cl = comp.findLayer(c); cl && comp.isInside(layers[row.first], c)) hidden = true;
+        if (hidden) continue;
         ImGui::PushID(static_cast<int>(row.track));
         drawTrackRow(ctx, row, r, x0, avail.x);
         if (expanded_.count(row.track)) {
@@ -457,10 +465,33 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
         ctx.touch();
     }
     ImGui::SameLine();
-    const ImVec2 chip = ImGui::GetCursorScreenPos();
+    ImVec2 chip = ImGui::GetCursorScreenPos();
+    // Layers inside compounds are indented under them, with a guide line.
+    int depth = 0;
+    for (const Layer* p = focus; p->parent && depth < 16; ++depth) {
+        p = ctx.comp().findLayer(p->parent);
+        if (!p) break;
+    }
+    if (depth > 0) {
+        chip.x += 14.0f * depth;
+        dl->AddLine(ImVec2(chip.x - 8, y), ImVec2(chip.x - 8, y + h * 0.5f), theme::kTextFaint);
+        dl->AddLine(ImVec2(chip.x - 8, y + h * 0.5f), ImVec2(chip.x - 2, y + h * 0.5f), theme::kTextFaint);
+    }
     dl->AddRectFilled(ImVec2(chip.x + 2, y + 8), ImVec2(chip.x + 5, y + h - 8), toU32(labelColor(focus->label)), 2.0f);
     ui::drawIcon(dl, ui::iconForLayer(*focus), ImVec2(chip.x + 18, y + h * 0.5f), 14.0f,
                  anySelected ? theme::kAccent : theme::kTextDim);
+    if (focus->type == LayerType::Compound) { // the icon folds / unfolds its contents
+        const bool folded = collapsedCompounds_.count(focus->id) > 0;
+        const ImVec2 back = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(ImVec2(chip.x + 8, y + (h - 20) * 0.5f));
+        if (ImGui::InvisibleButton("##fold", ImVec2(20, 20))) {
+            if (folded) collapsedCompounds_.erase(focus->id);
+            else collapsedCompounds_.insert(focus->id);
+        }
+        ui::tooltip(folded ? "Show the layers inside" : "Hide the layers inside");
+        if (folded) dl->AddCircleFilled(ImVec2(chip.x + 26, y + h * 0.5f - 6), 3.0f, theme::kAccent);
+        ImGui::SetCursorScreenPos(back);
+    }
 
     const float nameX = chip.x + 32;
     const float nameW = std::max(10.0f, x0 + leftWidth_ - nameX - 8);
@@ -495,6 +526,9 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
             if (ImGui::MenuItem("Duplicate", "Ctrl+D")) ctx.duplicateSelected();
             if (ImGui::MenuItem("Split at Playhead", "Ctrl+K")) ctx.splitSelectedAtPlayhead();
             ImGui::Separator();
+            // Deferred to the next frame: these add / remove layers while rows are being drawn.
+            if (ImGui::MenuItem("Create Compound", "Ctrl+G")) pendingCompound_ = 1;
+            if (ImGui::MenuItem("Release Compound", "Ctrl+Shift+G", false, ctx.selectionHasCompound())) pendingCompound_ = 2;
             if (ImGui::BeginMenu("Effect")) {
                 effectMenuItems(ctx);
                 ImGui::EndMenu();
@@ -762,7 +796,9 @@ void TimelinePanel::beginLayerDrag(EditorContext& ctx, Drag mode, uint64_t id) {
     dragApplied_ = 0.0;
     restacking_ = false;
     dragClips_.clear();
-    std::vector<uint64_t> moving = mode == Drag::LayerMove ? ctx.selection : std::vector<uint64_t>{id};
+    // A compound moving in time brings everything inside it along.
+    std::vector<uint64_t> moving = mode == Drag::LayerMove ? ctx.selectionWithContents() : std::vector<uint64_t>{id};
+    dragMoving_ = moving;
     for (uint64_t m : moving)
         if (const Layer* l = ctx.comp().findLayer(m)) dragClips_.push_back({m, l->inPoint, l->outPoint});
     collectTimeSnapTargets(ctx, moving, false);
@@ -819,10 +855,11 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
         const double delta = frozen ? 0.0 : snappedDelta(ctx, edges, raw);
         // Clips never overlap others on their track: stop at the neighbors.
         double lo = 0, hi = 0;
-        comp.timeShiftLimits(ctx.selection, lo, hi);
+        comp.timeShiftLimits(dragMoving_, lo, hi);
         const double step = std::clamp(delta - dragApplied_, lo, hi);
         if (std::fabs(step) > 1e-9) {
-            for (Layer* l : ctx.selectedLayers()) l->shiftTime(step);
+            for (uint64_t id : dragMoving_)
+                if (Layer* l = comp.findLayer(id)) l->shiftTime(step);
             dragApplied_ += step;
             ctx.touch();
         }

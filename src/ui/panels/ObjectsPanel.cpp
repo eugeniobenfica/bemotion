@@ -75,6 +75,12 @@ void ObjectsPanel::draw(EditorContext& ctx) {
     if (ui::objectTile("##camera", ui::Icon::Camera, "Camera", tile)) ctx.addCamera();
     ui::tooltip("A camera frames the scene: animate its position, rotation and zoom");
     dragSource(kDropCamera, ui::Icon::Camera, "Camera");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(ctx.selection.empty());
+    if (ui::objectTile("##compound", ui::Icon::Compound, "Compound", tile)) ctx.createCompound();
+    ImGui::EndDisabled();
+    ui::tooltip("Group the selected layers into a compound (Ctrl+G): they move, scale, fade and take effects "
+                "together, and each stays editable (double-click to go inside)");
 
     // Object types from plugins (charts, ...), grouped by plugin.
     const auto types = PluginHost::get().objectTypes();

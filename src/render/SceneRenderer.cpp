@@ -218,10 +218,24 @@ void drawPlugin(ImDrawList* dl, const Layer& layer, double t, const Affine& toSc
 
 void setPluginDrawer(PluginDrawer drawer) { pluginDrawer() = std::move(drawer); }
 
-void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride) {
+void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride,
+               const Composition* comp, EffectRenderer* effects, float zoom) {
     const float opacity = opacityOverride >= 0.0f ? std::min(opacityOverride, 1.0f)
                                                   : std::clamp(layer.transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
     if (opacity <= 0.0f || layer.type == LayerType::Camera) return;
+    if (layer.type == LayerType::Compound) {
+        if (!comp) return;
+        // Children, bottom first, in the compound's space; its opacity multiplies theirs.
+        for (auto it = comp->layers.rbegin(); it != comp->layers.rend(); ++it) {
+            if (it->parent != layer.id || !it->activeAt(time) || it->type == LayerType::Camera) continue;
+            const float own = std::clamp(it->transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
+            if (effects && hasActiveEffects(*it))
+                effects->drawLayer(dl, *it, time, comp->frameDuration(), layerToScreen, zoom, comp, opacity);
+            else
+                drawLayer(dl, *it, time, layerToScreen * it->matrixAt(time), own * opacity, comp, effects, zoom);
+        }
+        return;
+    }
     if (layer.type == LayerType::Text) drawText(dl, layer, time, layerToScreen, opacity);
     else if (layer.type == LayerType::Plugin) drawPlugin(dl, layer, time, layerToScreen, opacity);
     else drawShape(dl, layer, time, layerToScreen, opacity);
@@ -243,13 +257,35 @@ void drawComposition(ImDrawList* dl, const Composition& comp, double time, const
                               (throughCamera ? comp.cameraAt(time) : Affine{});
     for (auto it = comp.layers.rbegin(); it != comp.layers.rend(); ++it) {
         if (!it->activeAt(time) || it->type == LayerType::Camera) continue;
-        if (hasActiveEffects(*it)) effects->drawLayer(dl, *it, time, comp.frameDuration(), viewMatrix, view.zoom);
-        else drawLayer(dl, *it, time, viewMatrix * it->matrixAt(time));
+        if (it->parent && comp.findLayer(it->parent)) continue; // drawn by its compound
+        if (hasActiveEffects(*it)) effects->drawLayer(dl, *it, time, comp.frameDuration(), viewMatrix, view.zoom, &comp);
+        else drawLayer(dl, *it, time, viewMatrix * it->matrixAt(time), -1.0f, &comp, effects, view.zoom);
     }
     dl->PopClipRect();
 }
 
-bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax) {
+bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp) {
+    if (layer.type == LayerType::Compound) { // everything inside, in the compound's space
+        outMin = {1e9f, 1e9f};
+        outMax = {-1e9f, -1e9f};
+        bool any = false;
+        if (comp)
+            for (const Layer& child : comp->layers) {
+                Vec2 mn, mx;
+                if (child.parent != layer.id || child.type == LayerType::Camera || !child.activeAt(time) ||
+                    !localBounds(child, time, mn, mx, comp))
+                    continue;
+                const Affine m = child.matrixAt(time);
+                for (const Vec2& c : {mn, Vec2{mx.x, mn.y}, mx, Vec2{mn.x, mx.y}}) {
+                    const Vec2 p = m.apply(c);
+                    outMin = {std::min(outMin.x, p.x), std::min(outMin.y, p.y)};
+                    outMax = {std::max(outMax.x, p.x), std::max(outMax.y, p.y)};
+                }
+                any = true;
+            }
+        if (!any) outMin = {-20, -20}, outMax = {20, 20}; // empty: still something to grab
+        return true;
+    }
     if (layer.type == LayerType::Camera) { // the camera frame: what it sees at its zoom
         const float zoom = std::max(0.01f, layer.camera.zoom.valueAt(time) * 0.01f);
         outMin = layer.camera.frameSize * (-0.5f / zoom);
@@ -278,12 +314,24 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax) {
     return true;
 }
 
+uint64_t hitTestInside(const Composition& comp, double time, Vec2 scenePoint, uint64_t compoundId) {
+    for (const auto& layer : comp.layers) {
+        if (layer.parent != compoundId || !comp.visibleAt(layer, time) || layer.locked || layer.type == LayerType::Camera) continue;
+        Vec2 mn, mx;
+        if (!localBounds(layer, time, mn, mx, &comp)) continue;
+        const Vec2 p = comp.worldMatrix(layer, time).inverse().apply(scenePoint);
+        if (p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y) return layer.id;
+    }
+    return 0;
+}
+
 uint64_t hitTest(const Composition& comp, double time, Vec2 scenePoint, bool includeCameras) {
     for (const auto& layer : comp.layers) {
         if (!layer.activeAt(time) || layer.locked) continue;
+        if (layer.parent && comp.findLayer(layer.parent)) continue; // picked through its compound
         if (layer.type == LayerType::Camera && !includeCameras) continue;
         Vec2 mn, mx;
-        if (!localBounds(layer, time, mn, mx)) continue;
+        if (!localBounds(layer, time, mn, mx, &comp)) continue;
         const Vec2 p = layer.matrixAt(time).inverse().apply(scenePoint);
         if (p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y) return layer.id;
     }

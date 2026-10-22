@@ -36,11 +36,19 @@ struct View {
 // throughCamera: render the scene as the active camera sees it (the default).
 void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background = true,
                      EffectRenderer* effects = nullptr, bool throughCamera = true);
-// Draws the layer without its effects. opacityOverride >= 0 replaces its opacity.
-void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride = -1.0f);
+// Draws the layer without its own effects. opacityOverride >= 0 replaces its opacity.
+// Compounds draw their children (which needs `comp`; children with effects use
+// `effects`, with `zoom` = composition pixels -> output pixels).
+void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride = -1.0f,
+               const Composition* comp = nullptr, EffectRenderer* effects = nullptr, float zoom = 1.0f);
 
-// Axis-aligned bounds of the layer content in its local space.
-bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax);
+// Axis-aligned bounds of the layer content in its local space (a compound's
+// cover its children, which needs `comp`).
+bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp = nullptr);
+
+// The direct child of a compound under a scene-space point (0 if none), for
+// picking a layer inside a compound.
+uint64_t hitTestInside(const Composition& comp, double time, Vec2 scenePoint, uint64_t compoundId);
 
 // Top-most visible, unlocked layer under a scene-space point. Cameras only
 // count with includeCameras (their frame is their body).

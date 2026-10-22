@@ -43,6 +43,7 @@ Icon iconForShape(ShapeKind kind) {
 
 Icon iconForLayer(const Layer& layer) {
     if (layer.type == LayerType::Camera) return Icon::Camera;
+    if (layer.type == LayerType::Compound) return Icon::Compound;
     if (layer.type == LayerType::Plugin) {
         const PluginObjectType* type = PluginHost::get().findType(layer.plugin.objectType);
         return type ? iconForPlugin(type->icon) : Icon::Plugin;
@@ -339,6 +340,13 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         dl->AddBezierCubic(p0, ImVec2(c.x + h * 0.1f, p0.y), ImVec2(c.x - h * 0.1f, p3.y), p3, col, th * 1.2f);
         break;
     }
+    case Icon::Compound: // two stacked frames
+        dl->AddRect(ImVec2(c.x - h * 0.85f, c.y - h * 0.35f), ImVec2(c.x + h * 0.35f, c.y + h * 0.85f), col, 2.5f, 0, th);
+        dl->AddLine(ImVec2(c.x - h * 0.4f, c.y - h * 0.35f), ImVec2(c.x - h * 0.4f, c.y - h * 0.85f), col, th);
+        dl->AddLine(ImVec2(c.x - h * 0.4f, c.y - h * 0.85f), ImVec2(c.x + h * 0.85f, c.y - h * 0.85f), col, th);
+        dl->AddLine(ImVec2(c.x + h * 0.85f, c.y - h * 0.85f), ImVec2(c.x + h * 0.85f, c.y + h * 0.4f), col, th);
+        dl->AddLine(ImVec2(c.x + h * 0.85f, c.y + h * 0.4f), ImVec2(c.x + h * 0.35f, c.y + h * 0.4f), col, th);
+        break;
     case Icon::Back:
         dl->AddLine(ImVec2(c.x - h * 0.7f, c.y), ImVec2(c.x + h * 0.7f, c.y), col, th * 1.2f);
         dl->AddLine(ImVec2(c.x - h * 0.7f, c.y), ImVec2(c.x - h * 0.2f, c.y - h * 0.5f), col, th * 1.2f);

@@ -86,6 +86,12 @@ public:
     Layer& addPluginObject(const struct PluginObjectType& type, std::optional<Vec2> position = {});
     void deleteSelected();
     void duplicateSelected();
+    // Compounds: group the selection (Ctrl+G) / put selected compounds' contents back (Ctrl+Shift+G).
+    void createCompound();
+    void releaseSelectedCompounds();
+    bool selectionHasCompound();
+    // The selection plus everything inside selected compounds (what moves when they move in time).
+    std::vector<uint64_t> selectionWithContents();
     std::vector<uint64_t> selectedTracks(); // tracks holding selected clips, top first
     void moveSelectedTracksTo(int targetRow);        // whole tracks, see Composition::moveTracks
     void moveSelectedClipsToNewTrack(int gapRow);    // clips onto a new track at a row gap

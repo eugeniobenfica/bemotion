@@ -68,14 +68,17 @@ bool themeCard(const theme::Palette& p, bool selected) {
 }
 
 bool swatch(const char* id, ImU32 color, bool selected) {
-    const float d = 24.0f;
+    // The item is a little larger than the dot so the selection ring (and its
+    // anti-aliasing) always stays inside it and never gets clipped.
+    const float d = std::max(26.0f, ImGui::GetFrameHeight());
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const bool clicked = ImGui::InvisibleButton(id, ImVec2(d, d));
     const ImVec2 c(a.x + d * 0.5f, a.y + d * 0.5f);
+    const float r = d * 0.5f - 2.0f;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (selected) dl->AddCircle(c, d * 0.5f, theme::kText, 0, 2.0f);
-    dl->AddCircleFilled(c, d * 0.5f - (selected ? 4.0f : 2.0f), color);
-    if (ImGui::IsItemHovered() && !selected) dl->AddCircle(c, d * 0.5f - 1.0f, theme::ink(90), 0, 1.0f);
+    if (selected) dl->AddCircle(c, r, theme::kText, 0, 2.0f);
+    dl->AddCircleFilled(c, r - (selected ? 3.5f : 1.0f), color);
+    if (ImGui::IsItemHovered() && !selected) dl->AddCircle(c, r, theme::ink(90), 0, 1.0f);
     return clicked;
 }
 

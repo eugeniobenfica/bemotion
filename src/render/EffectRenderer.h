@@ -15,9 +15,10 @@
 // it composites like any other primitive (and is clipped the same way).
 // Render targets live in a pool that is recycled once per frame.
 
-#include "core/Layer.h"
+#include "core/Project.h"
 #include "core/Math.h"
 
+#include <deque>
 #include <vector>
 
 struct ImDrawList;
@@ -38,8 +39,9 @@ public:
     // Draws `layer` with its effects. `viewMatrix` maps composition pixels to
     // output pixels and `compToScreen` is its scale (effect sizes are in
     // composition pixels).
+    // `comp` lets compounds draw their children; `opacityScale` is an enclosing compound's opacity.
     void drawLayer(ImDrawList* dl, const Layer& layer, double t, double frameDuration, const Affine& viewMatrix,
-                   float compToScreen);
+                   float compToScreen, const Composition* comp = nullptr, float opacityScale = 1.0f);
 
 private:
     struct Target {
@@ -50,7 +52,7 @@ private:
     };
     Target& acquire(int width, int height);
 
-    std::vector<Target> pool_;
+    std::deque<Target> pool_; // a deque: nested draws (compounds) add targets while outer ones are in use
     size_t used_ = 0;
 };
 

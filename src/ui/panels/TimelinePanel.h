@@ -74,6 +74,9 @@ private:
     BezierEase curveEdit_; // curve being edited in the key menu
 
     std::set<uint64_t> expanded_; // track ids showing their property rows
+    std::set<uint64_t> collapsedCompounds_; // compound ids whose contents' rows are hidden
+    std::vector<uint64_t> dragMoving_;      // clips moving in time (a compound brings its contents)
+    int pendingCompound_ = 0;               // 1: create, 2: release (from the row menu, next frame)
     std::set<std::string> collapsedGroups_; // "track/group"
     uint64_t renaming_ = 0;       // layer id being renamed
     bool focusRename_ = false;

@@ -262,6 +262,7 @@ uint64_t Composition::splitLayer(uint64_t id, double t) {
     const int index = indexOf(id);
     if (index < 0) return 0;
     Layer& original = layers[index];
+    if (original.type == LayerType::Compound) return 0; // its contents would have to be split too
     const double eps = frameDuration() * 0.5;
     if (t <= original.inPoint + eps || t >= original.outPoint - eps) return 0;
     Layer tail = original; // same track; keyframes kept on both halves so motion stays continuous
@@ -279,6 +280,138 @@ Affine Composition::cameraAt(double t) const {
         return Affine::translate(center()) * frame.inverse();
     }
     return {};
+}
+
+// --- compounds -----------------------------------------------------------------------
+
+Affine Composition::parentMatrix(const Layer& layer, double t) const {
+    Affine m;
+    const Layer* p = layer.parent ? findLayer(layer.parent) : nullptr;
+    for (int depth = 0; p && depth < 32; ++depth) { // depth guard: never loops on a damaged file
+        m = p->matrixAt(t) * m;
+        p = p->parent ? findLayer(p->parent) : nullptr;
+    }
+    return m;
+}
+
+Affine Composition::worldMatrix(const Layer& layer, double t) const { return parentMatrix(layer, t) * layer.matrixAt(t); }
+
+bool Composition::visibleAt(const Layer& layer, double t) const {
+    if (!layer.activeAt(t)) return false;
+    const Layer* p = layer.parent ? findLayer(layer.parent) : nullptr;
+    for (int depth = 0; p && depth < 32; ++depth) {
+        if (!p->activeAt(t)) return false;
+        p = p->parent ? findLayer(p->parent) : nullptr;
+    }
+    return true;
+}
+
+bool Composition::isInside(const Layer& layer, uint64_t compoundId) const {
+    const Layer* p = layer.parent ? findLayer(layer.parent) : nullptr;
+    for (int depth = 0; p && depth < 32; ++depth) {
+        if (p->id == compoundId) return true;
+        p = p->parent ? findLayer(p->parent) : nullptr;
+    }
+    return false;
+}
+
+std::vector<uint64_t> Composition::descendantsOf(uint64_t compoundId) const {
+    std::vector<uint64_t> out;
+    for (const Layer& l : layers)
+        if (isInside(l, compoundId)) out.push_back(l.id);
+    return out;
+}
+
+uint64_t Composition::createCompound(const std::vector<uint64_t>& layerIds, double t) {
+    // Only the outermost selected layers move in (the contents of a selected compound go along with it).
+    std::vector<uint64_t> members;
+    for (uint64_t id : layerIds) {
+        const Layer* l = findLayer(id);
+        if (!l || l->type == LayerType::Camera) continue;
+        bool insideSelected = false;
+        for (uint64_t other : layerIds)
+            if (other != id && isInside(*l, other)) insideSelected = true;
+        if (!insideSelected) members.push_back(id);
+    }
+    if (members.empty()) return 0;
+    // The new compound lives where the first member lives, centered on the members.
+    const uint64_t outerParent = findLayer(members.front())->parent;
+    std::vector<uint64_t> grouped;
+    for (uint64_t id : members)
+        if (findLayer(id)->parent == outerParent) grouped.push_back(id); // one level at a time
+    Vec2 center{0, 0};
+    double in = 1e30, out = -1e30;
+    int top = static_cast<int>(layers.size());
+    for (uint64_t id : grouped) {
+        const Layer& l = *findLayer(id);
+        center = center + l.transform.position.valueAt(t);
+        in = std::min(in, l.inPoint);
+        out = std::max(out, l.outPoint);
+        top = std::min(top, indexOf(id));
+    }
+    center = center / static_cast<float>(grouped.size());
+    Layer compound = makeCompoundLayer(center, duration);
+    compound.inPoint = in;
+    compound.outPoint = out;
+    compound.parent = outerParent;
+    const uint64_t cid = addLayer(std::move(compound), top).id;
+    // Children keep their look: positions become relative to the compound's center.
+    for (uint64_t id : grouped) {
+        Layer& l = *findLayer(id);
+        l.parent = cid;
+        l.transform.position.base = l.transform.position.base - center;
+        for (auto& k : l.transform.position.keys) k.value = k.value - center;
+    }
+    std::vector<uint64_t> tracks;
+    for (uint64_t id : grouped) tracks.push_back(findLayer(id)->track);
+    const uint64_t compoundTrack = findLayer(cid)->track;
+    std::vector<TrackRow> rows = trackRows();
+    int below = 0, removedAbove = 0;
+    for (int r = 0; r < static_cast<int>(rows.size()); ++r) {
+        if (rows[r].track == compoundTrack) below = r + 1;
+        else if (std::find(tracks.begin(), tracks.end(), rows[r].track) != tracks.end() && below == 0) ++removedAbove;
+    }
+    moveTracks(tracks, below - removedAbove);
+    return cid;
+}
+
+void Composition::releaseCompound(uint64_t compoundId, double t) {
+    const Layer* found = findLayer(compoundId);
+    if (!found || found->type != LayerType::Compound) return;
+    const Layer compound = *found;
+    for (Layer& l : layers) {
+        if (l.parent != compoundId) continue;
+        // Bake the compound's transform (at each key's time) into the child.
+        auto& pos = l.transform.position;
+        pos.base = compound.matrixAt(t).apply(pos.base);
+        for (auto& k : pos.keys) {
+            const Affine m = compound.matrixAt(k.time);
+            k.value = m.apply(k.value);
+            k.inTangent = m.applyVector(k.inTangent);
+            k.outTangent = m.applyVector(k.outTangent);
+        }
+        auto& rot = l.transform.rotation;
+        rot.base += compound.transform.rotation.valueAt(t);
+        for (auto& k : rot.keys) k.value += compound.transform.rotation.valueAt(k.time);
+        auto& scl = l.transform.scale;
+        scl.base = scl.base * (compound.transform.scale.valueAt(t) * 0.01f);
+        for (auto& k : scl.keys) k.value = k.value * (compound.transform.scale.valueAt(k.time) * 0.01f);
+        auto& op = l.transform.opacity;
+        op.base *= compound.transform.opacity.valueAt(t) * 0.01f;
+        for (auto& k : op.keys) k.value *= compound.transform.opacity.valueAt(k.time) * 0.01f;
+        // The compound's clip hid its children outside it: keep them hidden there.
+        l.inPoint = std::max(l.inPoint, compound.inPoint);
+        l.outPoint = std::min(l.outPoint, compound.outPoint);
+        if (l.outPoint <= l.inPoint) l.outPoint = l.inPoint + frameDuration();
+        l.parent = compound.parent;
+        l.effects.insert(l.effects.end(), compound.effects.begin(), compound.effects.end());
+    }
+    removeLayer(compoundId);
+}
+
+void Composition::removeLayerTree(uint64_t id) {
+    for (uint64_t child : descendantsOf(id)) removeLayer(child);
+    removeLayer(id);
 }
 
 void Composition::syncCameras() {

@@ -50,6 +50,25 @@ struct Composition {
     // Gives every camera the current composition size as its frame.
     void syncCameras();
 
+    // --- compounds -----------------------------------------------------------------
+    // A compound groups layers (its children, Layer::parent): they move, scale,
+    // rotate, fade and take effects together, and stay editable one by one.
+    // Layer -> scene transform, through every enclosing compound.
+    Affine worldMatrix(const Layer& layer, double t) const;
+    Affine parentMatrix(const Layer& layer, double t) const; // identity for top-level layers
+    // Visible at `t`: active, and so is every enclosing compound.
+    bool visibleAt(const Layer& layer, double t) const;
+    bool isInside(const Layer& layer, uint64_t compoundId) const; // directly or nested
+    std::vector<uint64_t> descendantsOf(uint64_t compoundId) const;
+    // Groups layers into a new compound centered on them; returns its id (0 if none).
+    // Their tracks move right below the compound's.
+    uint64_t createCompound(const std::vector<uint64_t>& layerIds, double t);
+    // Puts the children back where the compound was, keeping how they look (its
+    // transform, clip and effects are baked into them), and removes the compound.
+    void releaseCompound(uint64_t compoundId, double t);
+    // Removes a layer and, for a compound, everything inside it.
+    void removeLayerTree(uint64_t id);
+
     // Inserts a layer, assigning it a fresh id (and a fresh track when its
     // track is 0). `index` is rounded to a track boundary so tracks stay
     // contiguous; the default puts it on top.

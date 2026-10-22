@@ -124,6 +124,10 @@ void EditorScreen::drawMenuBar() {
     if (ImGui::BeginMenu("Layer")) {
         const bool any = !ctx_.selection.empty();
         if (ImGui::MenuItem("Split at Playhead", "Ctrl+K")) ctx_.splitSelectedAtPlayhead();
+        ImGui::Separator();
+        if (ImGui::MenuItem("Create Compound", "Ctrl+G", false, any)) ctx_.createCompound();
+        if (ImGui::MenuItem("Release Compound", "Ctrl+Shift+G", false, ctx_.selectionHasCompound()))
+            ctx_.releaseSelectedCompounds();
         if (ImGui::BeginMenu("Effect", any)) {
             effectMenuItems(ctx_);
             ImGui::EndMenu();
@@ -245,6 +249,8 @@ void EditorScreen::handleShortcuts() {
         viewport_.zoomBy(1.0f / 1.25f);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_M, global)) exportDialog_.open(ctx_);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_K, global)) ctx_.splitSelectedAtPlayhead();
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_G, global)) ctx_.createCompound();
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_G, global)) ctx_.releaseSelectedCompounds();
     // Keyframe easing, as in After Effects.
     if (ImGui::Shortcut(ImGuiKey_F9, global)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EasyEase);
     if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_F9, global)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseIn);

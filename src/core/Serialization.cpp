@@ -188,11 +188,13 @@ json encodeLayer(const Layer& constLayer) {
     json j;
     j["id"] = layer.id;
     j["track"] = layer.track;
+    if (layer.parent) j["parent"] = layer.parent;
     j["name"] = layer.name;
     j["type"] = layer.type == LayerType::Text     ? "text"
                 : layer.type == LayerType::Camera ? "camera"
-                : layer.type == LayerType::Plugin ? "plugin"
-                                                  : "shape";
+                : layer.type == LayerType::Plugin   ? "plugin"
+                : layer.type == LayerType::Compound ? "compound"
+                                                    : "shape";
     j["visible"] = layer.visible;
     j["locked"] = layer.locked;
     j["label"] = layer.label;
@@ -238,12 +240,14 @@ Layer decodeLayer(const json& j) {
     Layer layer;
     layer.id = j.value("id", uint64_t{0});
     layer.track = j.value("track", uint64_t{0});
+    layer.parent = j.value("parent", uint64_t{0});
     layer.name = j.value("name", std::string("Layer"));
     const std::string type = j.value("type", std::string("shape"));
     layer.type = type == "text"     ? LayerType::Text
                  : type == "camera" ? LayerType::Camera
-                 : type == "plugin" ? LayerType::Plugin
-                                    : LayerType::Shape;
+                 : type == "plugin"   ? LayerType::Plugin
+                 : type == "compound" ? LayerType::Compound
+                                      : LayerType::Shape;
     if (j.contains("plugin")) decodePlugin(j["plugin"], layer.plugin); // before properties: creates the params
     layer.visible = j.value("visible", true);
     layer.locked = j.value("locked", false);

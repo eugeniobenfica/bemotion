@@ -427,6 +427,48 @@ void testPluginLayerRoundTrip() {
     CHECK(near(defaultPropertyValue(r, "size", {960, 540})[0], 800.0f));
 }
 
+void testCompounds() {
+    Composition c; // 1920x1080, 10 s
+    Layer& a = c.addLayer(makeShapeLayer(ShapeKind::Rectangle, {400, 300}, 10.0));
+    const uint64_t aId = a.id;
+    a.transform.position.setKey(1.0, {400, 300});
+    a.transform.position.setKey(2.0, {800, 300});
+    const uint64_t bId = c.addLayer(makeTextLayer("B", {600, 500}, 10.0)).id;
+    const uint64_t other = c.addLayer(makeShapeLayer(ShapeKind::Star, {100, 100}, 10.0)).id;
+    auto worldPos = [&](uint64_t id, double t) { return c.worldMatrix(*c.findLayer(id), t).apply({0, 0}); };
+    const Vec2 a15 = worldPos(aId, 1.5), b0 = worldPos(bId, 0.0);
+
+    const uint64_t cid = c.createCompound({aId, bId}, 0.0);
+    CHECK(cid != 0 && c.findLayer(cid)->type == LayerType::Compound);
+    CHECK(c.findLayer(aId)->parent == cid && c.findLayer(bId)->parent == cid && c.findLayer(other)->parent == 0);
+    CHECK(near(worldPos(aId, 1.5).x, a15.x) && near(worldPos(bId, 0.0).y, b0.y)); // nothing moved on screen
+    CHECK(c.trackRowOf(aId) > c.trackRowOf(cid) && c.trackRowOf(bId) > c.trackRowOf(cid));
+    CHECK(c.splitLayer(cid, 5.0) == 0); // compounds are not split
+
+    // Moving / scaling the compound moves its contents.
+    Layer& g = *c.findLayer(cid);
+    g.transform.position.base = g.transform.position.base + Vec2{100, 0};
+    g.transform.scale.base = {200, 200};
+    const Vec2 moved = worldPos(bId, 0.0);
+    CHECK(near(moved.x, g.transform.position.base.x + (b0.x - (g.transform.position.base.x - 100)) * 2));
+
+    // Release keeps the look and removes the compound.
+    const Vec2 before = worldPos(aId, 1.5);
+    c.releaseCompound(cid, 0.0);
+    CHECK(c.findLayer(cid) == nullptr && c.findLayer(aId)->parent == 0);
+    CHECK(near(worldPos(aId, 1.5).x, before.x, 0.05f) && near(worldPos(aId, 1.5).y, before.y, 0.05f));
+
+    // Deleting a compound deletes its contents; the link survives save / load.
+    const uint64_t c2 = c.createCompound({aId, bId}, 0.0);
+    Project p;
+    p.comp = c;
+    Project q;
+    CHECK(deserializeProject(serializeProject(p), q));
+    CHECK(q.comp.findLayer(aId) && q.comp.findLayer(aId)->parent == c2);
+    c.removeLayerTree(c2);
+    CHECK(c.layers.size() == 1 && c.findLayer(other));
+}
+
 void testTracksRoundTrip() {
     Project p;
     p.comp = makeSplitStack();
@@ -489,6 +531,7 @@ int main() {
         {"custom easing", testCustomEasing},
         {"motion path", testMotionPath},
         {"plugin layer round trip", testPluginLayerRoundTrip},
+        {"compounds", testCompounds},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };

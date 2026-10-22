@@ -172,7 +172,7 @@ void EditorContext::deleteSelected() {
     if (selection.empty()) return;
     int index = static_cast<int>(comp().layers.size());
     for (uint64_t id : selection) index = std::min(index, comp().indexOf(id));
-    for (uint64_t id : selection) comp().removeLayer(id);
+    for (uint64_t id : selection) comp().removeLayerTree(id); // a compound takes its contents along
     selectedKeys.clear();
     auto& layers = comp().layers;
     select(layers.empty() ? 0 : layers[std::clamp<size_t>(index, 0, layers.size() - 1)].id);
@@ -180,6 +180,41 @@ void EditorContext::deleteSelected() {
 }
 
 void EditorContext::duplicateSelected() {
+    // Selected compounds are copied with their contents, re-linked to the copies.
+    std::vector<uint64_t> trees;
+    for (uint64_t id : selection)
+        if (const Layer* l = comp().findLayer(id); l && l->type == LayerType::Compound) trees.push_back(id);
+    if (!trees.empty()) {
+        std::vector<uint64_t> copies;
+        for (uint64_t root : trees) {
+            std::vector<uint64_t> ids = comp().descendantsOf(root);
+            ids.insert(ids.begin(), root);
+            std::vector<Layer> layers;
+            for (uint64_t id : ids) layers.push_back(*comp().findLayer(id));
+            std::vector<std::pair<uint64_t, uint64_t>> remap; // old id -> new id
+            uint64_t rootCopy = 0;
+            // Bottom-up, each copy goes above the original compound: the copies keep their order.
+            for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
+                Layer l = *it;
+                const uint64_t old = l.id;
+                l.track = 0;
+                if (old == root) l.name = comp().uniqueLayerName(l.name);
+                const uint64_t fresh = comp().addLayer(std::move(l), comp().indexOf(root)).id;
+                remap.emplace_back(old, fresh);
+                if (old == root) rootCopy = fresh;
+            }
+            for (auto [old, fresh] : remap) {
+                Layer* l = comp().findLayer(fresh);
+                for (auto [o, f] : remap)
+                    if (l->parent == o) l->parent = f;
+            }
+            copies.push_back(rootCopy);
+        }
+        selection = copies;
+        selectedKeys.clear();
+        touch();
+        return;
+    }
     const auto sources = selectedLayers();
     if (sources.empty()) return;
     // Copy first: adding layers invalidates the pointers.
@@ -221,6 +256,42 @@ bool EditorContext::moveSelectedClipsToTrack(uint64_t trackId) {
     if (selection.empty() || !comp().moveClipsToTrack(selection, trackId)) return false;
     touch();
     return true;
+}
+
+void EditorContext::createCompound() {
+    if (selection.empty()) return;
+    if (const uint64_t id = comp().createCompound(selection, time)) {
+        select(id);
+        touch();
+    }
+}
+
+void EditorContext::releaseSelectedCompounds() {
+    std::vector<uint64_t> released;
+    for (uint64_t id : selection)
+        if (const Layer* l = comp().findLayer(id); l && l->type == LayerType::Compound) {
+            for (const Layer& c : comp().layers)
+                if (c.parent == id) released.push_back(c.id);
+            comp().releaseCompound(id, time);
+        }
+    if (released.empty() && !selectionHasCompound()) return;
+    selection = released;
+    selectedKeys.clear();
+    touch();
+}
+
+bool EditorContext::selectionHasCompound() {
+    for (const Layer* l : selectedLayers())
+        if (l->type == LayerType::Compound) return true;
+    return false;
+}
+
+std::vector<uint64_t> EditorContext::selectionWithContents() {
+    std::vector<uint64_t> out = selection;
+    for (uint64_t id : selection)
+        for (uint64_t d : comp().descendantsOf(id))
+            if (std::find(out.begin(), out.end(), d) == out.end()) out.push_back(d);
+    return out;
 }
 
 void EditorContext::shiftSelected(int delta) {

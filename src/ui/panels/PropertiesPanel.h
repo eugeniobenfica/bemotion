@@ -25,6 +25,7 @@ private:
     std::string saveName_;
     std::string presetMessage_;
     std::string fontFilter_;
+    bool releaseRequested_ = false; // "Release Compound" clicked: done before the next draw
 };
 
 // Building blocks shared with the timeline's property rows. Each returns true

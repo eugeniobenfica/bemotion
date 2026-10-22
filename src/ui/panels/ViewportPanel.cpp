@@ -36,9 +36,24 @@ struct Handles {
     Vec2 pivot;     // layer position on screen
 };
 
-bool computeHandles(const Layer& layer, double t, const render::View& view, Handles& h) {
+// The composition being edited, for the helpers below (set at the start of every frame):
+// layers inside compounds live in their compound's space.
+const Composition* g_comp = nullptr;
+
+// `view` extended with the layer's enclosing compounds: maps the layer's
+// parent space (where its position lives) to the screen.
+render::View parentView(const render::View& view, const Layer& layer, double t) {
+    render::View v = view;
+    if (g_comp && layer.parent) v.camera = view.camera * g_comp->parentMatrix(layer, t);
+    return v;
+}
+
+Affine parentOf(const Layer& layer, double t) { return g_comp ? g_comp->parentMatrix(layer, t) : Affine{}; }
+
+bool computeHandles(const Layer& layer, double t, const render::View& sceneView, Handles& h) {
+    const render::View view = parentView(sceneView, layer, t);
     Vec2 mn, mx;
-    if (!render::localBounds(layer, t, mn, mx)) return false;
+    if (!render::localBounds(layer, t, mn, mx, g_comp)) return false;
     h.local[0] = {mn.x, mn.y};
     h.local[1] = {mx.x, mn.y};
     h.local[2] = {mx.x, mx.y};
@@ -88,8 +103,8 @@ bool near(Vec2 a, Vec2 b, float r) { return (a - b).length() <= r; }
 // Axis-aligned bounds of a layer in composition pixels (as seen through `camera`).
 bool compBox(const Layer& layer, double t, const Affine& camera, Vec2& mn, Vec2& mx) {
     Vec2 lmn, lmx;
-    if (!render::localBounds(layer, t, lmn, lmx)) return false;
-    const Affine m = camera * layer.matrixAt(t);
+    if (!render::localBounds(layer, t, lmn, lmx, g_comp)) return false;
+    const Affine m = camera * parentOf(layer, t) * layer.matrixAt(t);
     const Vec2 corners[4] = {m.apply(lmn), m.apply({lmx.x, lmn.y}), m.apply(lmx), m.apply({lmn.x, lmx.y})};
     mn = mx = corners[0];
     for (const Vec2& c : corners) {
@@ -115,6 +130,7 @@ void ViewportPanel::draw(EditorContext& ctx) {
     }
 
     Composition& c = ctx.comp();
+    g_comp = &c;
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
     ImVec2 size = ImGui::GetContentRegionAvail();
     size.x = std::max(size.x, 1.0f);
@@ -292,12 +308,22 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                     dragStartPosition_ = single->transform.position.valueAt(t);
                     dragStartScale_ = single->transform.scale.valueAt(t);
                     dragStartRotation_ = single->transform.rotation.valueAt(t);
-                    const Vec2 d = mouse - view.sceneToScreen(dragStartPosition_);
+                    const Vec2 d = mouse - parentView(view, *single, t).sceneToScreen(dragStartPosition_);
                     dragStartAngle_ = radToDeg(std::atan2(d.y, d.x));
                 }
             }
             if (drag_ == Drag::None) {
-                const uint64_t hit = render::hitTest(comp, t, view.screenToScene(mouse), !throughCamera_);
+                const Vec2 scenePoint = view.screenToScene(mouse);
+                uint64_t hit = render::hitTest(comp, t, scenePoint, !throughCamera_);
+                // Inside a compound, clicks pick among its layers; a double-click on a
+                // compound goes one level in (like After Effects / Figma groups).
+                if (const Layer* cur = ctx.selected(); cur && !additive) {
+                    uint64_t inner = 0;
+                    if (cur->parent) inner = render::hitTestInside(comp, t, scenePoint, cur->parent);
+                    if (!inner && cur->type == LayerType::Compound && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                        inner = render::hitTestInside(comp, t, scenePoint, cur->id);
+                    if (inner) hit = inner;
+                }
                 if (hit) {
                     if (additive) ctx.toggleSelected(hit);
                     else if (!ctx.isSelected(hit)) ctx.select(hit);
@@ -352,7 +378,8 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
         const Vec2 b{std::max(dragStartScreen_.x, mouse.x), std::max(dragStartScreen_.y, mouse.y)};
         ctx.selection = marqueeBase_;
         for (const Layer& l : comp.layers)
-            if (l.activeAt(t) && !l.locked && !ctx.isSelected(l.id) && layerOverlapsRect(l, t, view, a, b))
+            if (l.activeAt(t) && !l.locked && !ctx.isSelected(l.id) && !(l.parent && comp.findLayer(l.parent)) &&
+                layerOverlapsRect(l, t, view, a, b))
                 ctx.selection.push_back(l.id);
         ctx.clearKeySelection();
         return;
@@ -368,14 +395,15 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
         if (ctx.snapping && !io.KeyCtrl) delta = delta + snapMove(dragBoxMin_, dragBoxMax_, delta);
         const Vec2 sceneDelta = world_.inverse().applyVector(delta); // the camera may zoom or rotate the view
         for (const auto& [id, start] : dragStartPositions_)
-            if (Layer* l = ctx.comp().findLayer(id)) l->transform.position.set(t, start + sceneDelta);
+            if (Layer* l = ctx.comp().findLayer(id)) // inside a compound: in its (scaled, rotated) space
+                l->transform.position.set(t, start + parentOf(*l, t).inverse().applyVector(sceneDelta));
         break;
     }
     case Drag::Scale: {
         Layer* layer = ctx.comp().findLayer(dragLayer_);
         if (!layer) break;
         auto& tr = layer->transform;
-        const Affine pre = Affine::translate(dragStartPosition_) * Affine::rotateDeg(dragStartRotation_);
+        const Affine pre = parentOf(*layer, t) * Affine::translate(dragStartPosition_) * Affine::rotateDeg(dragStartRotation_);
         const Vec2 q = pre.inverse().apply(view.screenToScene(mouse));
         const Vec2 v = dragCorner_ - tr.anchor.valueAt(t);
         Vec2 s = dragStartScale_;
@@ -393,7 +421,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
     case Drag::Rotate: {
         Layer* layer = ctx.comp().findLayer(dragLayer_);
         if (!layer) break;
-        const Vec2 d = mouse - view.sceneToScreen(dragStartPosition_);
+        const Vec2 d = mouse - parentView(view, *layer, t).sceneToScreen(dragStartPosition_);
         float r = dragStartRotation_ + radToDeg(std::atan2(d.y, d.x)) - dragStartAngle_;
         if (io.KeyShift) r = std::round(r / 15.0f) * 15.0f;
         layer->transform.rotation.set(t, r);
@@ -405,7 +433,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
         if (!layer || pathKey_ < 0 || pathKey_ >= layer->transform.position.keyCount()) break;
         auto& keys = layer->transform.position.keys;
         auto& k = keys[pathKey_];
-        const Vec2 p = view.screenToScene(mouse);
+        const Vec2 p = parentView(view, *layer, t).screenToScene(mouse);
         if (drag_ == Drag::PathKey) {
             k.value = p;
         } else {
@@ -446,7 +474,7 @@ Layer* ViewportPanel::pathLayer(EditorContext& ctx) const {
 bool ViewportPanel::pathHit(EditorContext& ctx, Vec2 screen, int& key, int& part) const {
     Layer* l = pathLayer(ctx);
     if (!l) return false;
-    const render::View view = sceneView();
+    const render::View view = parentView(sceneView(), *l, ctx.time);
     const auto& keys = l->transform.position.keys;
     const int n = static_cast<int>(keys.size());
     for (int i = 0; i < n; ++i) {
@@ -467,7 +495,7 @@ void ViewportPanel::drawMotionPath(EditorContext& ctx) {
     Layer* l = pathLayer(ctx);
     if (!l) return;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const render::View view = sceneView();
+    const render::View view = parentView(sceneView(), *l, ctx.time);
     const Composition& comp = ctx.comp();
     const auto& keys = l->transform.position.keys;
     const int n = static_cast<int>(keys.size());

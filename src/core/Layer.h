@@ -10,7 +10,7 @@
 
 namespace bemotion {
 
-enum class LayerType { Shape, Text, Camera, Plugin };
+enum class LayerType { Shape, Text, Camera, Plugin, Compound };
 
 enum class ShapeKind { Rectangle, Ellipse, Polygon, Star, Line, Count };
 
@@ -140,6 +140,9 @@ struct Layer {
     // Timeline row. Several layers ("clips") may share a track as long as
     // they do not overlap in time; 0 means "give me a new track".
     uint64_t track = 0;
+    // The compound this layer belongs to (0: none). Children are drawn by their
+    // compound, through its transform: their own transform is in its space.
+    uint64_t parent = 0;
     std::string name;
     LayerType type = LayerType::Shape;
     bool visible = true;
@@ -172,6 +175,7 @@ struct Layer {
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
 Layer makeCameraLayer(Vec2 compSize, double duration);
+Layer makeCompoundLayer(Vec2 position, double duration);
 // A plugin object with the given parameters at their defaults (see PluginHost).
 Layer makePluginLayer(const std::string& name, PluginProps props, Vec2 position, double duration);
 

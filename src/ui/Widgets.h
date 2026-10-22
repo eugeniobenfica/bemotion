@@ -64,6 +64,7 @@ enum class Icon {
     Palette,
     Sliders,
     Graph,  // timeline graph editor
+    Compound, // layers grouped together
     Back,   // "go back" arrow
 };
 

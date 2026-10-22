@@ -47,6 +47,8 @@ const std::vector<ShortcutGroup>& shortcutGroups() {
         {"Editing",
          {{"Ctrl+Z / Ctrl+Shift+Z", "Undo / redo"},
           {"Ctrl+D", "Duplicate layers"},
+          {"Ctrl+G / Ctrl+Shift+G", "Create / release a compound (group)"},
+          {"Double Click", "Go inside a compound to select a layer in it"},
           {"Delete", "Delete keyframes, or the layers"},
           {"Ctrl+A", "Select all layers"},
           {"Shift+Click / Ctrl+Click", "Add to / toggle the selection"},

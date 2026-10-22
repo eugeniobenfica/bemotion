@@ -302,11 +302,11 @@ EffectRenderer::Target& EffectRenderer::acquire(int width, int height) {
 }
 
 void EffectRenderer::drawLayer(ImDrawList* dl, const Layer& layer, double t, double frameDuration,
-                               const Affine& viewMatrix, float compToScreen) {
-    const float opacity = std::clamp(layer.transform.opacity.valueAt(t) * 0.01f, 0.0f, 1.0f);
+                               const Affine& viewMatrix, float compToScreen, const Composition* comp, float opacityScale) {
+    const float opacity = std::clamp(layer.transform.opacity.valueAt(t) * 0.01f * opacityScale, 0.0f, 1.0f);
     if (opacity <= 0.0f) return;
     if (!ensurePrograms()) { // no shader support: draw the plain layer
-        render::drawLayer(dl, layer, t, viewMatrix * layer.matrixAt(t));
+        render::drawLayer(dl, layer, t, viewMatrix * layer.matrixAt(t), opacity, comp, this, compToScreen);
         return;
     }
 
@@ -325,7 +325,7 @@ void EffectRenderer::drawLayer(ImDrawList* dl, const Layer& layer, double t, dou
     Vec2 mn{1e9f, 1e9f}, mx{-1e9f, -1e9f};
     for (double ti : times) {
         Vec2 lmn, lmx;
-        if (!localBounds(layer, ti, lmn, lmx)) continue;
+        if (!localBounds(layer, ti, lmn, lmx, comp)) continue;
         const Affine m = viewMatrix * layer.matrixAt(ti);
         for (const Vec2& c : {lmn, Vec2{lmx.x, lmn.y}, lmx, Vec2{lmn.x, lmx.y}}) {
             const Vec2 p = m.apply(c);
@@ -344,8 +344,6 @@ void EffectRenderer::drawLayer(ImDrawList* dl, const Layer& layer, double t, dou
     const int h = std::min(kMaxTarget, static_cast<int>(std::ceil(y1 - origin.y)));
     if (w <= 0 || h <= 0) return;
 
-    // References into the pool are held across acquire() calls: make sure it never reallocates meanwhile.
-    pool_.reserve(used_ + 8 + 4 * layer.effects.size());
     const auto& gl = gl::api();
     const Programs& prog = programs();
     StateGuard guard;
@@ -357,7 +355,8 @@ void EffectRenderer::drawLayer(ImDrawList* dl, const Layer& layer, double t, dou
         list._ResetForNewFrame();
         list.PushClipRect(ImVec2(0, 0), ImVec2(static_cast<float>(w), static_cast<float>(h)));
         list.PushTexture(ImGui::GetIO().Fonts->TexRef);
-        render::drawLayer(&list, layer, ti, Affine::translate(origin * -1.0f) * viewMatrix * layer.matrixAt(ti), 1.0f);
+        render::drawLayer(&list, layer, ti, Affine::translate(origin * -1.0f) * viewMatrix * layer.matrixAt(ti), 1.0f, comp, this,
+                          compToScreen);
         ImDrawData data;
         data.Valid = true;
         data.DisplayPos = ImVec2(0, 0);

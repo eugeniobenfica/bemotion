@@ -264,6 +264,10 @@ void PropertiesPanel::draw(EditorContext& ctx) {
         ImGui::End();
         return;
     }
+    if (releaseRequested_) {
+        releaseRequested_ = false;
+        ctx.releaseSelectedCompounds();
+    }
     if (Layer* layer = ctx.selected()) drawLayer(ctx, *layer);
     else drawComposition(ctx);
     ui::panelMinimizeButton();
@@ -319,6 +323,33 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
         ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
         ImGui::TextWrapped("Properties below belong to this layer. Quick animations apply to all selected layers.");
         ImGui::PopStyleColor();
+    }
+    // Compounds: where this layer lives, and what a compound contains.
+    if (const Layer* parent = layer.parent ? ctx.comp().findLayer(layer.parent) : nullptr) {
+        ImGui::TextColored(theme::vec(theme::kTextDim), "Inside \"%s\"", parent->name.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Select Compound")) ctx.select(parent->id);
+    }
+    if (layer.type == LayerType::Compound && ImGui::CollapsingHeader("Contents", ImGuiTreeNodeFlags_DefaultOpen)) {
+        uint64_t pick = 0;
+        for (const Layer& child : ctx.comp().layers) {
+            if (child.parent != layer.id) continue;
+            ImGui::PushID(static_cast<int>(child.id));
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            if (ImGui::Selectable("##child", false, 0, ImVec2(0, ImGui::GetFrameHeight()))) pick = child.id;
+            ui::drawIcon(ImGui::GetWindowDrawList(), ui::iconForLayer(child),
+                         ImVec2(p.x + 12, p.y + ImGui::GetFrameHeight() * 0.5f), 13.0f, theme::kTextDim);
+            ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + 28, p.y + (ImGui::GetFrameHeight() - ImGui::GetFontSize()) * 0.5f),
+                                                theme::kText, child.name.c_str());
+            ImGui::PopID();
+        }
+        ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
+        ImGui::TextWrapped("Double-click the compound in the viewport, or a layer here, to edit what is inside.");
+        ImGui::PopStyleColor();
+        // Deferred: releasing removes the layer this panel is drawing.
+        if (ImGui::Button("Release Compound", ImVec2(-FLT_MIN, 0))) releaseRequested_ = true;
+        ui::tooltip("Put the layers back where the compound is, keeping how they look (Ctrl+Shift+G)");
+        if (pick) ctx.select(pick);
     }
     ImGui::Dummy(ImVec2(0, 2));
 

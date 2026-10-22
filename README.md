@@ -44,6 +44,10 @@ common moves are one click away through *Quick Animations*.
 - **Timeline**: tracks holding several clips, trim in/out (clamped to
   neighbors), inline value editing on keyframe rows, keyframe dragging,
   easing menu with a **custom cubic-bezier curve editor**, zoom (Ctrl+Wheel)
+- **Compounds** (Ctrl+G): group any layers - text, shapes, charts, other
+  compounds - into one object that moves, scales, rotates, fades, takes quick
+  animations and effects as a whole; double-click to edit what is inside;
+  Ctrl+Shift+G releases them keeping their look
 - **Camera**: animate position, rotation and zoom; toggle the viewport between
   the camera view and a free view showing the camera frame
 - **Cut tool** (C) and split at playhead (Ctrl+K)
@@ -109,6 +113,7 @@ The format follows the file extension (`.mp4`, `.png`, `.mov`, `.webm`, `.gif`).
 | Ctrl+] / Ctrl+[ (Shift: to front / back) | Bring forward / send backward |
 | Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
 | Ctrl+D | Duplicate layers |
+| Ctrl+G / Ctrl+Shift+G | Create / release a compound |
 | Delete | Delete selected keyframes, or the layers |
 | Ctrl+S / Ctrl+Shift+S | Save / save as |
 | Ctrl+M | Export video |

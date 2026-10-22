@@ -84,6 +84,8 @@ std::vector<PropertyRef> Layer::properties() {
         p.push_back({"stroke_width", "Stroke", "Width", PropertyKind::Float, &s.strokeWidth, 0.25f, 0, 1000});
         p.push_back({"trim_start", "Stroke", "Trim Start", PropertyKind::Float, &s.trimStart, 0.5f, 0, 100, "%.0f%%"});
         p.push_back({"trim_end", "Stroke", "Trim End", PropertyKind::Float, &s.trimEnd, 0.5f, 0, 100, "%.0f%%"});
+    } else if (type == LayerType::Compound) {
+        // Only a transform: its contents are other layers.
     } else if (type == LayerType::Plugin) {
         p.push_back({"size", "Object", "Size", PropertyKind::Vec2, &plugin.size, 1.0f, 0, 100000});
         for (PluginParam& pp : plugin.params) {
@@ -168,6 +170,16 @@ Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration) {
         break;
     case ShapeKind::Count: break;
     }
+    return l;
+}
+
+Layer makeCompoundLayer(Vec2 position, double duration) {
+    Layer l;
+    l.type = LayerType::Compound;
+    l.name = "Compound";
+    l.outPoint = duration;
+    l.label = 4;
+    l.transform.position.base = position;
     return l;
 }
 
