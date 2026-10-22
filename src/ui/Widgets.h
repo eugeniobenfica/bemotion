@@ -71,6 +71,12 @@ enum class Icon {
     Image,
     Audio,
     Import,
+    // Tools
+    Duplicate,
+    Ungroup,
+    Ease,
+    LayerUp,
+    LayerDown,
 };
 
 Icon iconForLayer(const Layer& layer);
@@ -107,9 +113,15 @@ void tooltip(const char* text);
 // Call right before Begin() of a dockable panel: one close button (on its tab), no extra one on the dock node.
 void nextPanelWindowClass();
 
-// Minimizing docked panels: a panel calls panelIsMinimized() right after Begin
-// (and skips its content when true) and panelMinimizeButton() just before End.
-// Minimizing shrinks the panel's dock node to its tab; restoring brings back its size.
+// Minimizing docked panels: a panel skips its whole Begin/End while
+// panelHidden(name) and calls panelIsMinimized() right after Begin (skipping
+// its content when true) and panelMinimizeButton() just before End.
+// Minimizing hides the panel (and the tabs sharing its place): its neighbors
+// take the space and only a restore handle stays on that edge of the window
+// (drawHiddenPanelHandles, once per frame). Restoring docks it back in place.
+bool panelHidden(const char* windowName);
+void drawHiddenPanelHandles();
+void restoreHiddenPanels();
 bool panelIsMinimized();
 void panelMinimizeButton();
 

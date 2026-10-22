@@ -59,7 +59,7 @@ void applyToSelection(EditorContext& ctx, const std::vector<Effect>& effects) {
 } // namespace
 
 void EffectsPanel::draw(EditorContext& ctx) {
-    if (!open) return;
+    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
     // New in this version: existing layouts get the tab next to Properties.
     if (ImGuiWindow* props = ImGui::FindWindowByName(PropertiesPanel::kWindowName); props && props->DockId)
         ImGui::SetNextWindowDockID(props->DockId, ImGuiCond_FirstUseEver);

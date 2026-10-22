@@ -12,10 +12,15 @@ constexpr float kPi = 3.14159265358979f;
 float len(Vec2 v) { return std::sqrt(v.x * v.x + v.y * v.y); }
 Vec2 onCircle(Vec2 c, float r, float angle) { return {c.x + std::cos(angle) * r, c.y + std::sin(angle) * r}; }
 
-// Points along a circle from angle a0 to a1 (either direction), endpoints included.
+// Points along a circle from angle a0 to a1 (either direction), endpoints included. A point that
+// repeats the previous one (where two arcs meet) is skipped: polygon fills choke on duplicates.
 void arc(std::vector<Vec2>& out, Vec2 c, float r, float a0, float a1, int segments) {
     const int n = std::max(2, static_cast<int>(std::ceil(std::fabs(a1 - a0) / (2.0f * kPi) * segments)));
-    for (int i = 0; i <= n; ++i) out.push_back(onCircle(c, r, a0 + (a1 - a0) * static_cast<float>(i) / n));
+    for (int i = 0; i <= n; ++i) {
+        const Vec2 p = onCircle(c, r, a0 + (a1 - a0) * static_cast<float>(i) / n);
+        if (!out.empty() && len(p - out.back()) < 1e-4f) continue;
+        out.push_back(p);
+    }
 }
 
 float angleOf(Vec2 c, Vec2 p) { return std::atan2(p.y - c.y, p.x - c.x); }

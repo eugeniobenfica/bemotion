@@ -15,7 +15,7 @@ A minimal, open source 2D motion graphics animator — fast, focused and free.
 <img src="docs/media/intro.gif" width="720" alt="The bemotion intro animation">
 
 <sub>The intro above is an ordinary bemotion project, built from four shapes and two texts —<br>
-open it from <b>Home › Welcome Project</b> and take it apart.</sub>
+open <b>Welcome to bemotion</b> from the home screen and take it apart.</sub>
 
 [Features](#features) · [Getting started](#getting-started) · [Shortcuts](#keyboard-shortcuts) · [Plugins](docs/PLUGINS.md) · [Contributing](CONTRIBUTING.md)
 
@@ -73,6 +73,8 @@ first minute.
 ### ✦ Edit
 - **Timeline** with multi-clip tracks, trimming, cut tool (C), split at
   playhead (Ctrl+K), snapping to clips, keys and the playhead
+- **Your own toolbar**: drag tools and actions from the *Tools* panel into
+  the timeline's toolbar, reorder them, drag them out to remove
 - **No fixed length**: the composition ends where its last clip ends and grows
   as you add objects or extend clips
 - **Viewport** with box selection, rulers, guides and smart snapping
@@ -98,7 +100,8 @@ first minute.
   every UI color; import / export themes ([example](examples/themes))
 - Rebind every shortcut, pick the interface font and text size, timeline
   densities, frames per arrow press
-- Dockable panels that minimize to an edge handle or maximize with <kbd>`</kbd>
+- Dockable panels: minimize one and it steps aside (only a restore handle
+  stays on the edge), maximize with <kbd>`</kbd>
 
 </td>
 <td valign="top">
@@ -117,8 +120,9 @@ first minute.
 <summary><b>All the details</b></summary>
 
 - **Home screen** with recent projects (live thumbnails), search, the Welcome
-  project and a *New Project* dialog with format presets (Full HD, 4K,
-  Vertical/Reels, Square…)
+  project, a *⋯* menu on each card (show in folder, remove from the list,
+  delete to the Recycle Bin / Trash) and a *New Project* dialog with format
+  presets (Full HD, 4K, Vertical/Reels, Square…)
 - **Media panel** (like After Effects' *Project* panel): images (PNG, JPEG,
   BMP, TGA, GIF, PSD, HDR), audio (WAV, MP3, FLAC; M4A/AAC/WMA on Windows) and
   video (MP4, MOV, M4V, WMV, AVI, MKV — Windows, through Media Foundation).

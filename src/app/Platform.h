@@ -30,5 +30,7 @@ std::optional<fs::path> saveFileDialog(const char* title, const fs::path& sugges
 
 void revealInFileManager(const fs::path& path);
 void openWithDefaultApp(const fs::path& path);
+// Moves a file to the Recycle Bin / Trash (never deletes it outright).
+bool moveToTrash(const fs::path& path, std::string* error = nullptr);
 
 } // namespace bemotion::platform

@@ -3,6 +3,7 @@
 #include "app/PluginHost.h"
 #include "core/Math.h"
 #include "render/Fonts.h"
+#include "render/GL.h"
 #include "render/LogoMark.h"
 #include "ui/Theme.h"
 
@@ -16,7 +17,6 @@
 #include <cstdio>
 
 namespace bemotion::ui {
-
 
 Icon iconForPlugin(const std::string& name) {
     if (name == "bars" || name == "chart") return Icon::BarChart;
@@ -43,14 +43,44 @@ Icon iconForShape(ShapeKind kind) {
     return Icon::Rectangle;
 }
 
-void drawLogoMark(ImDrawList* dl, ImVec2 center, float radius, ImU32 color) {
-    static const std::vector<std::vector<Vec2>> shapes = logo::outlines(96);
-    std::vector<ImVec2> pts;
-    for (const auto& shape : shapes) {
-        pts.clear();
-        for (const Vec2& p : shape) pts.emplace_back(center.x + p.x * radius, center.y + p.y * radius);
-        dl->AddConcavePolyFilled(pts.data(), static_cast<int>(pts.size()), color);
+namespace {
+
+// The mark as a white texture with coverage in alpha, every mip level rasterized from the
+// exact shape (render/LogoMark.h) so it stays crisp from 12 px to full screen.
+constexpr float kLogoFill = 0.46f; // mark radius / texture size: leaves room for antialiasing
+
+ImTextureID logoTexture() {
+    static GLuint tex = 0;
+    if (tex) return static_cast<ImTextureID>(static_cast<uintptr_t>(tex));
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    std::vector<unsigned char> px;
+    for (int level = 0, size = 256; size >= 1; ++level, size /= 2) {
+        px.assign(static_cast<size_t>(size) * size * 4, 255);
+        const float r = size * kLogoFill;
+        for (int y = 0; y < size; ++y)
+            for (int x = 0; x < size; ++x) {
+                const Vec2 p{(x + 0.5f - size * 0.5f) / r, (y + 0.5f - size * 0.5f) / r};
+                const float d = logo::distance(p) * r; // in texels
+                px[(static_cast<size_t>(y) * size + x) * 4 + 3] =
+                    static_cast<unsigned char>(std::clamp(0.5f - d, 0.0f, 1.0f) * 255.0f);
+            }
+        glTexImage2D(GL_TEXTURE_2D, level, GL_RGBA, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
     }
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, gl::kClampToEdge);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gl::kClampToEdge);
+    return static_cast<ImTextureID>(static_cast<uintptr_t>(tex));
+}
+
+} // namespace
+
+void drawLogoMark(ImDrawList* dl, ImVec2 center, float radius, ImU32 color) {
+    const float half = radius * 0.5f / kLogoFill;
+    dl->AddImage(logoTexture(), ImVec2(center.x - half, center.y - half), ImVec2(center.x + half, center.y + half),
+                 ImVec2(0, 0), ImVec2(1, 1), color);
 }
 
 Icon iconForMedia(MediaKind kind) {
@@ -405,6 +435,43 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         dl->AddLine(ImVec2(c.x + h * 0.8f, c.y + h * 0.75f), ImVec2(c.x + h * 0.8f, c.y + h * 0.15f), col, th);
         break;
     }
+    case Icon::Duplicate: { // two overlapping sheets
+        dl->AddRect(ImVec2(c.x - h * 0.75f, c.y - h * 0.75f), ImVec2(c.x + h * 0.25f, c.y + h * 0.25f), col, 2.0f, 0, th);
+        dl->AddRectFilled(ImVec2(c.x - h * 0.25f, c.y - h * 0.25f), ImVec2(c.x + h * 0.75f, c.y + h * 0.75f), col, 2.0f);
+        break;
+    }
+    case Icon::Ungroup: { // a frame with its corners breaking apart
+        const float g = h * 0.3f;
+        const ImVec2 corners[4] = {ImVec2(c.x - h * 0.8f, c.y - h * 0.8f), ImVec2(c.x + h * 0.8f, c.y - h * 0.8f),
+                                   ImVec2(c.x + h * 0.8f, c.y + h * 0.8f), ImVec2(c.x - h * 0.8f, c.y + h * 0.8f)};
+        for (int i = 0; i < 4; ++i) {
+            const float sx = (i == 1 || i == 2) ? -1.0f : 1.0f, sy = i >= 2 ? -1.0f : 1.0f;
+            dl->AddLine(corners[i], ImVec2(corners[i].x + sx * g * 1.6f, corners[i].y), col, th);
+            dl->AddLine(corners[i], ImVec2(corners[i].x, corners[i].y + sy * g * 1.6f), col, th);
+        }
+        dl->AddRectFilled(ImVec2(c.x - h * 0.22f, c.y - h * 0.22f), ImVec2(c.x + h * 0.22f, c.y + h * 0.22f), col, 1.5f);
+        break;
+    }
+    case Icon::Ease: { // an S-curve between two keyframes
+        dl->AddBezierCubic(ImVec2(c.x - h * 0.75f, c.y + h * 0.6f), ImVec2(c.x + h * 0.1f, c.y + h * 0.6f),
+                           ImVec2(c.x - h * 0.1f, c.y - h * 0.6f), ImVec2(c.x + h * 0.75f, c.y - h * 0.6f), col, th * 1.2f);
+        drawDiamond(dl, ImVec2(c.x - h * 0.75f, c.y + h * 0.6f), h * 0.22f, col, 0);
+        drawDiamond(dl, ImVec2(c.x + h * 0.75f, c.y - h * 0.6f), h * 0.22f, col, 0);
+        break;
+    }
+    case Icon::LayerUp:
+    case Icon::LayerDown: { // two stacked layers and an arrow
+        const float dir = icon == Icon::LayerUp ? -1.0f : 1.0f;
+        dl->AddRect(ImVec2(c.x - h * 0.8f, c.y - h * 0.15f), ImVec2(c.x + h * 0.2f, c.y + h * 0.75f), col, 2.0f, 0, th);
+        dl->AddRectFilled(ImVec2(c.x - h * 0.55f, c.y - h * 0.4f + dir * h * 0.25f),
+                          ImVec2(c.x + h * 0.0f, c.y + h * 0.1f + dir * h * 0.25f), col, 1.5f);
+        const float ax = c.x + h * 0.6f;
+        dl->AddLine(ImVec2(ax, c.y - h * 0.7f), ImVec2(ax, c.y + h * 0.7f), col, th);
+        const float tip = c.y + dir * h * 0.75f;
+        dl->AddTriangleFilled(ImVec2(ax, tip), ImVec2(ax - h * 0.28f, tip - dir * h * 0.38f),
+                              ImVec2(ax + h * 0.28f, tip - dir * h * 0.38f), col);
+        break;
+    }
     case Icon::ZoomIn:
     case Icon::ZoomOut: {
         const ImVec2 lens(c.x - h * 0.15f, c.y - h * 0.15f);
@@ -509,14 +576,6 @@ std::string formatTimecode(double seconds, double fps) {
 
 namespace {
 
-// Minimized = the dock node is (about) as small as its tab bar. The state is
-// derived from the size, so it survives restarts and is shared by every tab
-// of the node; only the size to restore to is remembered (per node).
-std::unordered_map<ImGuiID, float>& savedSizes() {
-    static std::unordered_map<ImGuiID, float> sizes;
-    return sizes;
-}
-
 // The split that decides the node's size along `axis` (the closest ancestor split).
 ImGuiDockNode* splitChild(ImGuiDockNode* node, int& axis) {
     while (node && node->ParentNode) {
@@ -529,11 +588,13 @@ ImGuiDockNode* splitChild(ImGuiDockNode* node, int& axis) {
     return nullptr;
 }
 
+// How small a node gets when a neighbor is maximized (just its tab bar).
 float minimizedSize(const ImGuiDockNode* node, int axis) {
     const float bar = node->TabBar ? node->TabBar->BarRect.GetHeight() : ImGui::GetFrameHeight() + 4.0f;
     return axis == ImGuiAxis_Y ? bar + 4.0f : 46.0f;
 }
 
+// Shrunk to its tab bar (how older versions minimized).
 bool nodeMinimized(ImGuiDockNode* node) {
     int axis = 0;
     ImGuiDockNode* child = splitChild(node, axis);
@@ -551,11 +612,91 @@ void resizeDockNode(ImGuiDockNode* node, int axis, float size) {
     node->WantLockSizeOnce = true;
 }
 
+// Hidden (minimized) panels: the windows of one dock node, and where their restore handle goes.
+enum class Edge { Left, Right, Top, Bottom };
+struct HiddenPanel {
+    std::vector<std::string> windows;
+    Edge edge = Edge::Left;
+    float along = 0.5f; // handle position along that edge (0..1 of the work area)
+};
+std::vector<HiddenPanel>& hiddenPanels() {
+    static std::vector<HiddenPanel> hidden;
+    return hidden;
+}
+
 } // namespace
 
+bool panelHidden(const char* windowName) {
+    for (const HiddenPanel& h : hiddenPanels())
+        for (const std::string& w : h.windows)
+            if (w == windowName) return true;
+    return false;
+}
+
+void restoreHiddenPanels() { hiddenPanels().clear(); }
+
+void drawHiddenPanelHandles() {
+    auto& hidden = hiddenPanels();
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const ImVec2 wp = vp->WorkPos, ws = vp->WorkSize;
+    const float len = 56.0f, thick = 18.0f;
+    for (size_t i = 0; i < hidden.size(); ++i) {
+        const HiddenPanel& h = hidden[i];
+        const bool vertical = h.edge == Edge::Left || h.edge == Edge::Right; // the handle stands upright
+        const ImVec2 size = vertical ? ImVec2(thick, len) : ImVec2(len, thick);
+        ImVec2 pos;
+        if (vertical) {
+            pos.x = h.edge == Edge::Left ? wp.x + 2.0f : wp.x + ws.x - thick - 2.0f;
+            pos.y = std::clamp(wp.y + ws.y * h.along - len * 0.5f, wp.y + 4.0f, wp.y + ws.y - len - 4.0f);
+        } else {
+            pos.y = h.edge == Edge::Top ? wp.y + 2.0f : wp.y + ws.y - thick - 2.0f;
+            pos.x = std::clamp(wp.x + ws.x * h.along - len * 0.5f, wp.x + 4.0f, wp.x + ws.x - len - 4.0f);
+        }
+        // A tiny window of its own, kept above the panels, so the click does not reach them.
+        char id[32];
+        std::snprintf(id, sizeof id, "##restorePanel%d", static_cast<int>(i));
+        ImGui::SetNextWindowPos(pos);
+        ImGui::SetNextWindowSize(size);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1, 1));
+        ImGui::Begin(id, nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoFocusOnAppearing |
+                         ImGuiWindowFlags_NoNav);
+        ImGui::PopStyleVar(2);
+        ImGui::BringWindowToDisplayFront(ImGui::GetCurrentWindow());
+        const bool clicked = ImGui::InvisibleButton("##restore", size);
+        const bool hot = ImGui::IsItemHovered();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(pos, ImVec2(pos.x + size.x, pos.y + size.y), hot ? theme::kAccent : theme::withAlpha(theme::kBgHover, 240), 5.0f);
+        dl->AddRect(pos, ImVec2(pos.x + size.x, pos.y + size.y), hot ? theme::kAccent : theme::kBorder, 5.0f);
+        // The chevron points to where the panel comes back from.
+        const Icon icon = h.edge == Edge::Left ? Icon::ChevronRight : h.edge == Edge::Right ? Icon::Back
+                          : h.edge == Edge::Top ? Icon::ChevronDown : Icon::ChevronUp;
+        drawIcon(dl, icon, ImVec2(pos.x + size.x * 0.5f, pos.y + size.y * 0.5f), 12.0f, hot ? theme::kOnAccent : theme::kText);
+        if (hot) {
+            std::string names;
+            for (const std::string& w : h.windows) names += (names.empty() ? "" : ", ") + w.substr(0, w.find('#'));
+            ImGui::SetTooltip("Restore %s", names.c_str());
+        }
+        ImGui::End();
+        if (clicked) {
+            hidden.erase(hidden.begin() + static_cast<std::ptrdiff_t>(i));
+            break; // indices changed; the rest draw next frame
+        }
+    }
+}
+
 bool panelIsMinimized() {
+    // Layouts saved by older versions minimized by shrinking the node to its tab bar:
+    // give such a node a usable size again (minimizing now hides the panel instead).
     ImGuiWindow* window = ImGui::GetCurrentWindow();
-    return window->DockNode && nodeMinimized(window->DockNode);
+    if (window->DockNode && nodeMinimized(window->DockNode)) {
+        int axis = 0;
+        if (ImGuiDockNode* child = splitChild(window->DockNode, axis))
+            resizeDockNode(child, axis, std::max(axis == ImGuiAxis_Y ? 180.0f : 280.0f, child->ParentNode->Size[axis] * 0.25f));
+    }
+    return false;
 }
 
 namespace {
@@ -620,22 +761,23 @@ void panelMinimizeButton() {
     int axis = 0;
     ImGuiDockNode* child = splitChild(node, axis);
     if (!child) return; // alone in the dockspace
-    const bool minimized = nodeMinimized(node);
     // The handle sits on the edge facing the neighbor panel, centered on it.
     const bool farSide = child->ParentNode->ChildNodes[1] == child; // right of / below its sibling
     const Icon toEdge = axis == ImGuiAxis_Y ? Icon::ChevronDown : (farSide ? Icon::ChevronRight : Icon::Back);
-    const Icon fromEdge = axis == ImGuiAxis_Y ? Icon::ChevronUp : (farSide ? Icon::Back : Icon::ChevronRight);
     auto toggle = [&] {
-        float& saved = savedSizes()[child->ID];
-        if (minimized) {
-            // Back to the last size, never to something too narrow to use.
-            const float usable = axis == ImGuiAxis_Y ? 180.0f : 280.0f;
-            const float fallback = std::max(usable, child->ParentNode->Size[axis] * (axis == ImGuiAxis_Y ? 0.35f : 0.24f));
-            resizeDockNode(child, axis, saved >= usable ? saved : fallback);
+        // Hide every tab of this place; the restore handle goes on the window edge the panel came from.
+        HiddenPanel h;
+        for (ImGuiWindow* w : node->Windows) h.windows.emplace_back(w->Name);
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        const ImVec2 c(node->Pos.x + node->Size.x * 0.5f, node->Pos.y + node->Size.y * 0.5f);
+        if (axis == ImGuiAxis_X) {
+            h.edge = farSide ? Edge::Right : Edge::Left;
+            h.along = (c.y - vp->WorkPos.y) / std::max(1.0f, vp->WorkSize.y);
         } else {
-            saved = child->Size[axis];
-            resizeDockNode(child, axis, minimizedSize(node, axis));
+            h.edge = farSide ? Edge::Bottom : Edge::Top;
+            h.along = (c.x - vp->WorkPos.x) / std::max(1.0f, vp->WorkSize.x);
         }
+        hiddenPanels().push_back(std::move(h));
         maximized() = {};
     };
 
@@ -651,37 +793,18 @@ void panelMinimizeButton() {
         const float cx = r.GetCenter().x;
         a = ImVec2(cx - len * 0.5f, y), b = ImVec2(cx + len * 0.5f, y + thick);
     }
-    // Shown when the mouse is near that edge (or always while minimized), like editors' collapse handles.
+    // Shown when the mouse is near that edge, like editors' collapse handles.
     const float reach = 60.0f;
     const bool nearEdge = ImGui::IsMouseHoveringRect(ImVec2(a.x - reach, a.y - reach), ImVec2(b.x + reach, b.y + reach), false);
     const bool hovered = !popup && overHost && ImGui::IsMouseHoveringRect(a, b, false);
-    if (!(nearEdge || minimized || hovered) || (popup && !minimized)) return; // never over menus
+    if (!(nearEdge || hovered) || popup) return; // never over menus
     ImDrawList* dl = ImGui::GetForegroundDrawList(node->HostWindow->Viewport);
     dl->AddRectFilled(a, b, hovered ? theme::kAccent : theme::withAlpha(theme::kBgHover, 235), 5.0f);
     dl->AddRect(a, b, hovered ? theme::kAccent : theme::kBorder, 5.0f);
-    drawIcon(dl, minimized ? fromEdge : toEdge, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), 12.0f,
-             hovered ? theme::kOnAccent : theme::kText);
+    drawIcon(dl, toEdge, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), 12.0f, hovered ? theme::kOnAccent : theme::kText);
     if (hovered) {
-        ImGui::SetTooltip(minimized ? "Restore panel" : "Minimize panel  (double-click its tabs to maximize)");
+        ImGui::SetTooltip("Minimize panel  (double-click its tabs to maximize)");
         if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) toggle();
-    }
-    if (minimized && axis == ImGuiAxis_X) {
-        // The narrow strip itself also restores: the panel name written downwards.
-        const ImVec2 p = window->InnerRect.Min;
-        const ImVec2 size(window->InnerRect.GetWidth(), window->InnerRect.GetHeight());
-        ImGui::SetCursorScreenPos(p);
-        const bool clicked = ImGui::InvisibleButton("##restore", ImVec2(std::max(1.0f, size.x), std::max(1.0f, size.y)));
-        const bool hot = ImGui::IsItemHovered();
-        ImDrawList* wl = window->DrawList;
-        if (hot) wl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), theme::kBgHover);
-        const float cx = p.x + size.x * 0.5f;
-        float y = p.y + 12;
-        for (const char* c = window->Name; *c && *c != '#'; ++c, y += ImGui::GetFontSize()) {
-            const char ch[2] = {*c, 0};
-            wl->AddText(ImVec2(cx - ImGui::CalcTextSize(ch).x * 0.5f, y), hot ? theme::kText : theme::kTextFaint, ch);
-        }
-        if (hot) ImGui::SetTooltip("Restore panel");
-        if (clicked) toggle();
     }
 }
 

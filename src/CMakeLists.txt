@@ -51,6 +51,7 @@ add_executable(bemotion WIN32
     ui/PluginsWindow.cpp
     ui/SettingsWindow.cpp
     ui/Theme.cpp
+    ui/Tools.cpp
     ui/Widgets.cpp
     ui/panels/EffectsPanel.cpp
     ui/panels/MediaPanel.cpp
@@ -58,6 +59,7 @@ add_executable(bemotion WIN32
     ui/panels/PropertiesPanel.cpp
     ui/panels/TimelineGraph.cpp
     ui/panels/TimelinePanel.cpp
+    ui/panels/ToolsPanel.cpp
     ui/panels/ViewportPanel.cpp)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion PRIVATE bemotion_core imgui stb lua miniaudio)

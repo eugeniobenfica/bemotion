@@ -7,6 +7,7 @@
 #include "ui/panels/MediaPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "ui/panels/TimelinePanel.h"
+#include "ui/panels/ToolsPanel.h"
 #include "ui/panels/ViewportPanel.h"
 
 #include <filesystem>
@@ -53,6 +54,7 @@ private:
 
     ObjectsPanel objects_;
     MediaPanel media_;
+    ToolsPanel tools_;
     ViewportPanel viewport_;
     PropertiesPanel properties_;
     EffectsPanel effects_;

@@ -17,6 +17,7 @@ class TimelinePanel {
 public:
     static constexpr const char* kWindowName = "Timeline";
     bool open = true; // closed with the tab's x, reopened from View > Panels
+    bool wantToolsPanel = false; // the toolbar asked to show the Tools panel
     void draw(EditorContext& ctx);
 
 private:
@@ -39,6 +40,7 @@ private:
     void drawToolbar(EditorContext& ctx);
     void drawBreadcrumb(EditorContext& ctx); // inside a compound: the path back to the composition
     void drawWaveform(ImDrawList* dl, const Layer& layer, ImVec2 a, ImVec2 b, ImU32 color) const;
+    void drawToolGroup(EditorContext& ctx, float buttonSize);
     void handleObjectDrop(EditorContext& ctx, ImDrawList* dl, float x0, float width);
     void drawRuler(EditorContext& ctx, float x0, float y0, float width);
     void drawTrackRow(EditorContext& ctx, const TrackRow& row, int rowIndex, float x0, float width);
@@ -78,6 +80,8 @@ private:
 
     std::set<uint64_t> expanded_; // track ids showing their property rows
     std::vector<uint64_t> dragMoving_;      // clips moving in time (a compound brings its contents)
+    int pendingTool_ = -1;                  // toolbar tool clicked (runs next frame, before the rows)
+    int draggingTool_ = -1;                 // toolbar button being dragged (to reorder or remove)
     int pendingCompound_ = 0;               // 1: create, 2: release (from the row menu, next frame)
     bool pendingDelete_ = false;            // delete button / menu: applied next frame
     std::set<std::string> collapsedGroups_; // "track/group"

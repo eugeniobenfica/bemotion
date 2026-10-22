@@ -254,7 +254,7 @@ bool propertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop) {
 }
 
 void PropertiesPanel::draw(EditorContext& ctx) {
-    if (!open) return;
+    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
     ui::nextPanelWindowClass();
     if (!ImGui::Begin(kWindowName, &open)) {
         ImGui::End();

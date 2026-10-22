@@ -50,10 +50,18 @@ EditorScreen::Request EditorScreen::draw(double dt) {
 
     objects_.draw(ctx_);
     media_.draw(ctx_);
+    tools_.draw(ctx_);
     viewport_.draw(ctx_);
     properties_.draw(ctx_);
     effects_.draw(ctx_);
     timeline_.draw(ctx_);
+    ui::drawHiddenPanelHandles();
+    if (timeline_.wantToolsPanel) { // the toolbar's "+": show the Tools tab
+        timeline_.wantToolsPanel = false;
+        tools_.open = true;
+        if (ui::panelHidden(ToolsPanel::kWindowName)) ui::restoreHiddenPanels();
+        ImGui::SetWindowFocus(ToolsPanel::kWindowName);
+    }
 
     handleShortcuts();
     drawUnsavedModal();
@@ -78,6 +86,7 @@ void EditorScreen::buildDefaultLayout(unsigned int dockspaceId) {
 
     ImGui::DockBuilderDockWindow(ObjectsPanel::kWindowName, left);
     ImGui::DockBuilderDockWindow(MediaPanel::kWindowName, left); // a tab beside Objects
+    ImGui::DockBuilderDockWindow(ToolsPanel::kWindowName, left);
     ImGui::DockBuilderDockWindow(ViewportPanel::kWindowName, center);
     ImGui::DockBuilderDockWindow(PropertiesPanel::kWindowName, right);
     ImGui::DockBuilderDockWindow(EffectsPanel::kWindowName, right); // a tab beside Properties
@@ -168,6 +177,20 @@ void EditorScreen::drawMenuBar() {
         ImGui::Separator();
         for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i)
             if (ImGui::MenuItem(shapeKindLabel(static_cast<ShapeKind>(i)))) ctx_.addShape(static_cast<ShapeKind>(i));
+        ImGui::Separator();
+        // Imported media (the Media panel's items) become layers at the playhead.
+        if (ImGui::BeginMenu("Media")) {
+            if (ImGui::MenuItem("Import Media...", keys(ui::Action::ImportMedia))) media_.openImportDialog(ctx_);
+            if (!ctx_.comp().media.empty()) ImGui::Separator();
+            for (const MediaItem& item : ctx_.comp().media) {
+                ImGui::PushID(static_cast<int>(item.id));
+                const std::string label = item.name + "  (" + mediaKindLabel(item.kind) + ")";
+                if (ImGui::MenuItem(label.c_str())) ctx_.addMedia(item.id);
+                ImGui::PopID();
+            }
+            if (ctx_.comp().media.empty()) ImGui::TextDisabled("Nothing imported yet");
+            ImGui::EndMenu();
+        }
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
@@ -197,6 +220,7 @@ void EditorScreen::drawMenuBar() {
         if (ImGui::BeginMenu("Panels")) {
             ImGui::MenuItem(ObjectsPanel::kWindowName, nullptr, &objects_.open);
             ImGui::MenuItem(MediaPanel::kWindowName, nullptr, &media_.open);
+            ImGui::MenuItem(ToolsPanel::kWindowName, nullptr, &tools_.open);
             ImGui::MenuItem(ViewportPanel::kWindowName, nullptr, &viewport_.open);
             ImGui::MenuItem(PropertiesPanel::kWindowName, nullptr, &properties_.open);
             ImGui::MenuItem(EffectsPanel::kWindowName, nullptr, &effects_.open);
@@ -205,7 +229,8 @@ void EditorScreen::drawMenuBar() {
         }
         if (ImGui::MenuItem("Reset Layout")) {
             resetLayout_ = true;
-            objects_.open = media_.open = viewport_.open = properties_.open = effects_.open = timeline_.open = true;
+            ui::restoreHiddenPanels();
+            objects_.open = media_.open = tools_.open = viewport_.open = properties_.open = effects_.open = timeline_.open = true;
         }
         ImGui::EndMenu();
     }

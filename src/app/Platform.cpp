@@ -250,6 +250,26 @@ void revealInFileManager(const fs::path& path) {
 #endif
 }
 
+bool moveToTrash(const fs::path& path, std::string* error) {
+#ifdef _WIN32
+    std::wstring from = path.wstring();
+    from.push_back(L'\0'); // the list ends with an empty name
+    SHFILEOPSTRUCTW op{};
+    op.hwnd = static_cast<HWND>(g_window);
+    op.wFunc = FO_DELETE;
+    op.pFrom = from.c_str();
+    op.fFlags = FOF_ALLOWUNDO | FOF_NOCONFIRMATION | FOF_SILENT | FOF_NOERRORUI;
+    const bool ok = SHFileOperationW(&op) == 0 && !op.fAnyOperationsAborted;
+#elif defined(__APPLE__)
+    const bool ok = std::system(("osascript -e 'tell application \"Finder\" to delete POSIX file \"" + toUtf8(path) +
+                                 "\"' >/dev/null 2>&1").c_str()) == 0;
+#else
+    const bool ok = std::system(("gio trash \"" + toUtf8(path) + "\" >/dev/null 2>&1").c_str()) == 0;
+#endif
+    if (!ok && error) *error = "the file could not be moved to the trash.";
+    return ok;
+}
+
 void openWithDefaultApp(const fs::path& path) {
 #ifdef _WIN32
     ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);

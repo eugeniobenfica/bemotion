@@ -6,6 +6,7 @@
 #include "media/MediaManager.h"
 #include "render/Fonts.h"
 #include "ui/Theme.h"
+#include "ui/Tools.h"
 #include "ui/Widgets.h"
 #include "ui/panels/EffectsPanel.h"
 #include "ui/panels/ViewportPanel.h"
@@ -100,7 +101,7 @@ void drawKeyGlyph(ImDrawList* dl, ImVec2 c, float r, Easing easing, ImU32 fill, 
 } // namespace
 
 void TimelinePanel::draw(EditorContext& ctx) {
-    if (!open) return;
+    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
     ui::nextPanelWindowClass();
     if (!ImGui::Begin(kWindowName, &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         ImGui::End();
@@ -112,6 +113,8 @@ void TimelinePanel::draw(EditorContext& ctx) {
         return;
     }
     snapLineTime_ = -1.0;
+    if (pendingTool_ >= 0) ui::runTool(ctx, ui::toolCatalog()[pendingTool_]); // clicked in the toolbar last frame
+    pendingTool_ = -1;
     if (pendingCompound_ == 1) ctx.createCompound();
     if (pendingCompound_ == 2) ctx.releaseSelectedCompounds();
     pendingCompound_ = 0;
@@ -368,25 +371,17 @@ void TimelinePanel::drawToolbar(EditorContext& ctx) {
     Composition& comp = ctx.comp();
     const float s = 26.0f;
     const float toolbarRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+    drawToolGroup(ctx, s);
+
+    // Timeline functions, set apart from the tools by a divider.
+    ImGui::SameLine(0, 10);
+    {
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y + 4), ImVec2(p.x, p.y + s - 4), theme::kBorder, 1.0f);
+        ImGui::Dummy(ImVec2(1, s));
+    }
+    ImGui::SameLine(0, 10);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
-    if (ui::iconButton("##toolSelect", ui::Icon::Pointer, s, "Selection tool (V)", ctx.tool == Tool::Select))
-        ctx.tool = Tool::Select;
-    ImGui::SameLine();
-    if (ui::iconButton("##toolRazor", ui::Icon::Razor, s, "Cut tool (C): click a layer to split it",
-                       ctx.tool == Tool::Razor))
-        ctx.tool = Tool::Razor;
-    ImGui::SameLine();
-    if (ui::iconButton("##split", ui::Icon::SplitPlayhead, s, "Split selected layers at the playhead (Ctrl+K)"))
-        ctx.splitSelectedAtPlayhead();
-    ImGui::SameLine();
-    ImGui::BeginDisabled(ctx.selection.empty());
-    if (ui::iconButton("##compound", ui::Icon::Compound, s,
-                       "Combine the selected layers into a compound (Ctrl+G). Double-click it to open its timeline"))
-        pendingCompound_ = 1;
-    ImGui::SameLine();
-    if (ui::iconButton("##delete", ui::Icon::Trash, s, "Delete the selected keyframes, or layers (Delete)")) pendingDelete_ = true;
-    ImGui::EndDisabled();
-    ImGui::SameLine();
     if (ui::iconButton("##snap", ui::Icon::Magnet, s, "Snapping (S): clips, keyframes and objects snap. Hold Ctrl to bypass", ctx.snapping))
         ctx.snapping = !ctx.snapping;
     ImGui::SameLine(0, 14);
@@ -457,6 +452,96 @@ void TimelinePanel::drawToolbar(EditorContext& ctx) {
     ImGui::SameLine();
     if (ui::iconButton("##fit", ui::Icon::Reset, s, "Fit the whole composition")) pxPerSec_ = 0.0;
     ImGui::PopStyleVar();
+}
+
+void TimelinePanel::drawToolGroup(EditorContext& ctx, float s) {
+    // The user's tools (Settings::toolbar, filled from the Tools panel) on a pill of their own.
+    auto& bar = settings().toolbar;
+    const auto& catalog = ui::toolCatalog();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float pad = 3.0f;
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    dl->ChannelsSplit(2);
+    dl->ChannelsSetCurrent(1);
+    ImGui::SetCursorScreenPos(ImVec2(start.x + pad, start.y));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
+    std::vector<float> centers; // screen x of each button, for drop positions
+    int removeAt = -1;
+    for (int i = 0; i < static_cast<int>(bar.size()); ++i) {
+        const int index = ui::toolIndex(bar[i]);
+        if (index < 0) continue;
+        const ui::ToolInfo& tool = catalog[index];
+        if (i > 0) ImGui::SameLine();
+        ImGui::PushID(i);
+        centers.push_back(ImGui::GetCursorScreenPos().x + s * 0.5f);
+        const bool enabled = ui::toolEnabled(ctx, tool);
+        ImGui::BeginDisabled(!enabled);
+        if (ui::iconButton("##tool", tool.icon, s, nullptr, ui::toolActive(ctx, tool))) pendingTool_ = index;
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort))
+            ImGui::SetTooltip("%s", ui::toolTooltip(tool).c_str());
+        if (ImGui::BeginPopupContextItem("##toolctx")) {
+            if (ImGui::MenuItem("Remove from Toolbar")) removeAt = i;
+            if (ImGui::MenuItem("Customize...")) wantToolsPanel = true;
+            ImGui::EndPopup();
+        }
+        // Drag along the bar to reorder, out of it to remove.
+        if (ImGui::BeginDragDropSource()) {
+            ImGui::SetDragDropPayload(ui::kToolPayload, &index, sizeof(index));
+            draggingTool_ = i;
+            ImGui::TextUnformatted(tool.label);
+            ImGui::EndDragDropSource();
+        }
+        ImGui::PopID();
+    }
+    // Opens the Tools panel, where more tools wait.
+    if (!bar.empty()) ImGui::SameLine();
+    if (ui::iconButton("##moreTools", ui::Icon::Plus, s * 0.8f, "Add tools: drag them here from the Tools panel"))
+        wantToolsPanel = true;
+    ImGui::PopStyleVar();
+    ImGui::SameLine(0, 0);
+    const ImVec2 end(ImGui::GetCursorScreenPos().x + pad, start.y + s);
+    ImGui::Dummy(ImVec2(pad, s));
+    dl->ChannelsSetCurrent(0);
+    const ImRect pill(ImVec2(start.x, start.y - 1), ImVec2(end.x, end.y + 1));
+    dl->AddRectFilled(pill.Min, pill.Max, theme::kBgDeep, 7.0f);
+    dl->ChannelsMerge();
+
+    // Dropping tools (from the Tools panel or the bar itself).
+    const ImRect target(ImVec2(pill.Min.x - 6, pill.Min.y - 4), ImVec2(pill.Max.x + 24, pill.Max.y + 4));
+    bool overBar = ImGui::IsMouseHoveringRect(target.Min, target.Max, false);
+    if (ImGui::BeginDragDropTargetCustom(target, ImGui::GetID("##toolDrop"))) {
+        constexpr ImGuiDragDropFlags flags = ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ui::kToolPayload, flags)) {
+            const float mx = ImGui::GetIO().MousePos.x;
+            int at = 0;
+            while (at < static_cast<int>(centers.size()) && mx > centers[at]) ++at;
+            const float x = at < static_cast<int>(centers.size()) ? centers[at] - s * 0.5f - 1.0f
+                                                                   : (centers.empty() ? pill.Min.x + pad : centers.back() + s * 0.5f + 1.0f);
+            dl->AddLine(ImVec2(x, pill.Min.y - 2), ImVec2(x, pill.Max.y + 2), theme::kAccent, 2.0f);
+            if (payload->IsDelivery()) {
+                const std::string id = catalog[*static_cast<const int*>(payload->Data)].id;
+                // Already there (a move, or the same tool dropped again): take it out first.
+                if (auto it = std::find(bar.begin(), bar.end(), id); it != bar.end()) {
+                    if (static_cast<int>(it - bar.begin()) < at) --at;
+                    bar.erase(it);
+                }
+                bar.insert(bar.begin() + std::clamp(at, 0, static_cast<int>(bar.size())), id);
+                saveSettings();
+                draggingTool_ = -1;
+            }
+        }
+        ImGui::EndDragDropTarget();
+    }
+    // A toolbar button dropped anywhere else leaves the bar.
+    if (draggingTool_ >= 0 && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+        if (!overBar && draggingTool_ < static_cast<int>(bar.size())) removeAt = draggingTool_;
+        draggingTool_ = -1;
+    }
+    if (removeAt >= 0 && removeAt < static_cast<int>(bar.size())) {
+        bar.erase(bar.begin() + removeAt);
+        saveSettings();
+    }
 }
 
 void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float width) {

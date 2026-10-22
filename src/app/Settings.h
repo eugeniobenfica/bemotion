@@ -5,6 +5,7 @@
 // user themes in <app data>/themes (one JSON file each).
 
 #include "ui/Theme.h"
+#include "ui/Tools.h"
 
 #include <filesystem>
 #include <string>
@@ -30,6 +31,8 @@ struct Settings {
     int arrowFrames = 1;               // frames stepped by the arrow keys
     int bigArrowFrames = 10;           // ... with Shift (big step)
     bool showIntro = true;             // the opening animation at startup
+    bool welcomeAdded = false;         // the Welcome project was put in the projects list once
+    std::vector<std::string> toolbar = ui::defaultToolbar(); // tool ids in the timeline's toolbar (ui/Tools.h)
     std::vector<std::string> disabledPlugins; // plugin ids
 };
 

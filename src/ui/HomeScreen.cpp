@@ -135,20 +135,6 @@ HomeScreen::Result HomeScreen::draw(RecentProjects& recents) {
     return result;
 }
 
-void HomeScreen::openWelcomeProject(Result& result) {
-    // A copy in the projects folder, so the bundled one stays as shipped.
-    const auto copy = platform::defaultProjectsDir() / platform::fromUtf8(std::string("Welcome to bemotion") + kProjectExtension);
-    std::error_code ec;
-    if (!std::filesystem::exists(copy, ec))
-        std::filesystem::copy_file(platform::assetsDir() / "welcome" / "Welcome.bemotion", copy, ec);
-    if (ec) {
-        error_ = "Could not copy the Welcome project: " + ec.message();
-        return;
-    }
-    result.action = Result::Action::Open;
-    result.path = copy;
-}
-
 void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float width) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::kBgPanel);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22, 26));
@@ -176,9 +162,6 @@ void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float widt
             result.path = *file;
         }
     }
-    ImGui::Dummy(ImVec2(0, 2));
-    if (ImGui::Button("Welcome Project", ImVec2(w, 34))) openWelcomeProject(result);
-    ui::tooltip("The intro animation, made in bemotion: open it to see how it is built");
 
     // Footer.
     // Separator + button row + count line, sized from the current text size.
@@ -240,9 +223,6 @@ void HomeScreen::drawProjects(Result& result, RecentProjects& recents) {
         ImGui::Dummy(ImVec2(0, 12));
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - 200) * 0.5f);
         if (ui::accentButton("Create a project", ImVec2(200, 40))) openNewProjectModal();
-        ImGui::Dummy(ImVec2(0, 2));
-        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - 200) * 0.5f);
-        if (ImGui::Button("Open the Welcome project", ImVec2(200, 34))) openWelcomeProject(result);
         ImGui::EndChild();
         return;
     }
@@ -264,12 +244,24 @@ void HomeScreen::drawProjects(Result& result, RecentProjects& recents) {
         ImGui::PushID(platform::toUtf8(item.path).c_str());
         const ImVec2 a = ImGui::GetCursorScreenPos();
         const ImVec2 b(a.x + cardW, a.y + cardH);
+        ImGui::SetNextItemAllowOverlap(); // the "..." button sits on top
         if (ImGui::InvisibleButton("##card", ImVec2(cardW, cardH))) {
             result.action = Result::Action::Open;
             result.path = item.path;
         }
-        const bool hovered = ImGui::IsItemHovered();
-        if (ImGui::BeginPopupContextItem("##cardctx")) {
+        bool hovered = ImGui::IsItemHovered();
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("##cardmenu");
+
+        // "..." menu in the card's corner (also on right-click).
+        const float dot = 28.0f;
+        const ImVec2 da(b.x - dot - 8, a.y + 8);
+        ImGui::SetCursorScreenPos(da);
+        if (ImGui::InvisibleButton("##more", ImVec2(dot, dot))) ImGui::OpenPopup("##cardmenu");
+        const bool dotsHovered = ImGui::IsItemHovered();
+        ui::tooltip("More");
+        hovered = hovered || dotsHovered;
+        const bool menuOpen = ImGui::IsPopupOpen("##cardmenu");
+        if (ImGui::BeginPopup("##cardmenu")) {
             if (ImGui::MenuItem("Open")) {
                 result.action = Result::Action::Open;
                 result.path = item.path;
@@ -277,6 +269,13 @@ void HomeScreen::drawProjects(Result& result, RecentProjects& recents) {
             if (ImGui::MenuItem("Show in Folder")) platform::revealInFileManager(item.path);
             ImGui::Separator();
             if (ImGui::MenuItem("Remove from List")) toRemove = item.path;
+            ImGui::PushStyleColor(ImGuiCol_Text, theme::kDanger);
+            if (ImGui::MenuItem("Delete Project...")) {
+                deleting_ = item.path;
+                deletingName_ = item.name;
+                openDeleteModal_ = true;
+            }
+            ImGui::PopStyleColor();
             ImGui::EndPopup();
         }
 
@@ -286,6 +285,11 @@ void HomeScreen::drawProjects(Result& result, RecentProjects& recents) {
         const Project* preview = (it != previews_.end() && it->second) ? &*it->second : nullptr;
         drawThumbnail(dl, preview, a, ImVec2(b.x, a.y + thumbH));
         dl->AddRect(a, b, hovered ? theme::kAccent : theme::kBorder, 8.0f, 0, hovered ? 1.5f : 1.0f);
+        if (hovered || menuOpen) {
+            dl->AddRectFilled(da, ImVec2(da.x + dot, da.y + dot), dotsHovered || menuOpen ? theme::kBgHover : theme::shade(160), 6.0f);
+            for (int i = -1; i <= 1; ++i)
+                dl->AddCircleFilled(ImVec2(da.x + dot * 0.5f + i * 6.0f, da.y + dot * 0.5f), 2.0f, theme::kText);
+        }
 
         ImGui::PushFont(Fonts::uiBold(), 0.0f);
         dl->PushClipRect(ImVec2(a.x + 12, a.y), ImVec2(b.x - 12, b.y), true);
@@ -306,7 +310,45 @@ void HomeScreen::drawProjects(Result& result, RecentProjects& recents) {
         recents.remove(toRemove);
         previews_.erase(toRemove);
     }
+    drawDeleteModal(recents);
     ImGui::EndChild();
+}
+
+void HomeScreen::drawDeleteModal(RecentProjects& recents) {
+    if (openDeleteModal_) {
+        ImGui::OpenPopup("Delete Project?");
+        openDeleteModal_ = false;
+    }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (!ImGui::BeginPopupModal("Delete Project?", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
+        return;
+#ifdef _WIN32
+    const char* bin = "Recycle Bin";
+#else
+    const char* bin = "Trash";
+#endif
+    ImGui::Text("Delete \"%s\"?", deletingName_.c_str());
+    ImGui::TextColored(theme::vec(theme::kTextDim), "The project file goes to the %s. Media files it uses are not touched.", bin);
+    ImGui::Dummy(ImVec2(0, 8));
+    ImGui::PushStyleColor(ImGuiCol_Button, theme::kDanger);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, theme::kDanger);
+    const bool confirm = ImGui::Button("Delete", ImVec2(120, 34));
+    ImGui::PopStyleColor(2);
+    ImGui::SameLine(0, 8);
+    if (ImGui::Button("Cancel", ImVec2(120, 34)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
+    if (confirm) {
+        std::string err;
+        std::error_code ec;
+        // A file that is already gone just leaves the list.
+        if (!std::filesystem::exists(deleting_, ec) || platform::moveToTrash(deleting_, &err)) {
+            recents.remove(deleting_);
+            previews_.erase(deleting_);
+        } else {
+            error_ = "Could not delete \"" + deletingName_ + "\": " + err;
+        }
+        ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
 }
 
 void HomeScreen::openNewProjectModal() {

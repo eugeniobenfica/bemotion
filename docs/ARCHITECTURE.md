@@ -102,6 +102,11 @@ trimmed clips stay in sync with their source.
   rearrange them; *View → Reset Layout* restores the default. Objects are
   dragged onto the viewport with an ImGui drag-and-drop payload
   (`kObjectPayload`).
+- **`ToolsPanel`** lists the tools and actions of `ui/Tools.h`; the user drags
+  them into the timeline's toolbar (saved as `Settings::toolbar`).
+- Minimized panels are not drawn at all (`ui::panelHidden`): their neighbors
+  take the space and `drawHiddenPanelHandles` leaves a restore handle on the
+  window edge they came from.
 - **`ExportDialog`** — settings, progress and result of an export.
 - **`IntroScreen`** plays `assets/welcome/Welcome.bemotion` full-window at
   startup (skippable, can be turned off in Settings). The same file is the

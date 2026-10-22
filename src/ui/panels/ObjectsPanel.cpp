@@ -33,7 +33,7 @@ void dragSource(int kind, ui::Icon icon, const char* label) {
 } // namespace
 
 void ObjectsPanel::draw(EditorContext& ctx) {
-    if (!open) return;
+    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
     ui::nextPanelWindowClass();
     if (!ImGui::Begin(kWindowName, &open)) {
         ImGui::End();

@@ -30,11 +30,14 @@ private:
     void drawProjects(Result& result, RecentProjects& recents);
     void drawNewProjectModal(Result& result);
     void openNewProjectModal();
-    void openWelcomeProject(Result& result);
+    void drawDeleteModal(RecentProjects& recents);
 
     std::map<std::filesystem::path, std::optional<Project>> previews_;
     std::string search_;
     std::string error_;
+    std::filesystem::path deleting_; // waiting for the confirmation
+    std::string deletingName_;
+    bool openDeleteModal_ = false;
 
     // New project form.
     bool openModal_ = false;

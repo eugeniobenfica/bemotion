@@ -106,7 +106,7 @@ void MediaPanel::openImportDialog(EditorContext& ctx) {
 
 void MediaPanel::draw(EditorContext& ctx) {
     hovered_ = false;
-    if (!open) return;
+    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
     // New in this version: existing layouts get the tab next to Objects.
     if (ImGuiWindow* objects = ImGui::FindWindowByName(ObjectsPanel::kWindowName); objects && objects->DockId)
         ImGui::SetNextWindowDockID(objects->DockId, ImGuiCond_FirstUseEver);
