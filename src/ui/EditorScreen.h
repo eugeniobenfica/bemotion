@@ -35,7 +35,6 @@ private:
     void handleShortcuts();
     void buildDefaultLayout(unsigned int dockspaceId);
     void drawUnsavedModal();
-    void drawAboutModal();
     void askLeave(Request request);
 
     bool save();
@@ -55,7 +54,6 @@ private:
     Request pendingLeave_ = Request::None;
     Request confirmedLeave_ = Request::None;
     bool openUnsavedModal_ = false;
-    bool openAboutModal_ = false;
     bool resetLayout_ = false;
     std::string error_;
 };

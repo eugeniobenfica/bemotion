@@ -1,6 +1,7 @@
 #include "ui/HomeScreen.h"
 
 #include "app/Platform.h"
+#include "ui/HelpWindow.h"
 #include "ui/SettingsWindow.h"
 #include "core/Serialization.h"
 #include "render/Fonts.h"
@@ -149,8 +150,8 @@ void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float widt
     ImGui::PushFont(Fonts::uiBold(), 22.0f);
     ImGui::TextUnformatted("bemotion");
     ImGui::PopFont();
-    ImGui::SetCursorScreenPos(ImVec2(p.x + 52, p.y + 26));
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "Motion graphics  ·  v%s", BEMOTION_VERSION);
+    ImGui::SetCursorScreenPos(ImVec2(p.x + 52, ImGui::GetCursorScreenPos().y - 4)); // follows the title's height
+    ImGui::TextColored(theme::vec(theme::kTextFaint), "v%s", BEMOTION_VERSION);
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + 64));
 
     const float w = ImGui::GetContentRegionAvail().x;
@@ -164,14 +165,20 @@ void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float widt
     }
 
     // Footer.
-    const float footerH = 74.0f;
+    // Separator + button row + count line, sized from the current text size.
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float footerH = 8.0f + ImGui::GetFrameHeightWithSpacing() + ImGui::GetTextLineHeightWithSpacing() + st.WindowPadding.y + 12.0f;
     ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY() + 12, ImGui::GetWindowHeight() - footerH));
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0, 4));
-    if (ImGui::Button("Show Projects Folder", ImVec2(w - 34, 0)))
+    const float fh = ImGui::GetFrameHeight();
+    if (ImGui::Button("Projects Folder", ImVec2(w - (fh + 6) * 2, 0)))
         platform::revealInFileManager(platform::defaultProjectsDir());
     ImGui::SameLine(0, 6);
-    if (ui::iconButton("##settings", ui::Icon::Gear, ImGui::GetFrameHeight(), "Settings (Ctrl+,)")) ui::openSettings();
+    if (ui::iconButton("##settings", ui::Icon::Gear, fh, "Settings (Ctrl+,)")) ui::openSettings();
+    ImGui::SameLine(0, 6);
+    if (ImGui::Button("?", ImVec2(fh, fh))) ui::openHelp(ui::HelpTab::About);
+    ui::tooltip("Help, shortcuts, credits and license (F1)");
     ImGui::TextColored(theme::vec(theme::kTextFaint), "%d recent project%s", static_cast<int>(recents.items().size()),
                        recents.items().size() == 1 ? "" : "s");
 

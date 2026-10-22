@@ -19,6 +19,9 @@ ImGuiKey keyFromName(const std::string& name) {
     if (name == "Alt") return ImGuiKey_LeftAlt;
     if (name.size() == 1 && name[0] >= 'A' && name[0] <= 'Z') return static_cast<ImGuiKey>(ImGuiKey_A + (name[0] - 'A'));
     if (name.size() == 1 && name[0] >= '0' && name[0] <= '9') return static_cast<ImGuiKey>(ImGuiKey_0 + (name[0] - '0'));
+    // Any other key by its ImGui name ("F1", "Comma", "LeftArrow", ...).
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k)
+        if (name == ImGui::GetKeyName(static_cast<ImGuiKey>(k))) return static_cast<ImGuiKey>(k);
     return ImGuiKey_None;
 }
 

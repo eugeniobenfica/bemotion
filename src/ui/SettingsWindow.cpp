@@ -2,6 +2,8 @@
 
 #include "app/Platform.h"
 #include "app/Settings.h"
+#include "render/Fonts.h"
+#include "app/PluginHost.h"
 #include "ui/PluginsWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -10,6 +12,7 @@
 #include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <string>
 
 namespace bemotion::ui {
@@ -40,7 +43,8 @@ void changed() {
 
 // Theme card: a tiny preview of panel, raised surface, text and accent.
 bool themeCard(const theme::Palette& p, bool selected) {
-    const ImVec2 size(112, 74);
+    const float fs = ImGui::GetFontSize();
+    const ImVec2 size(std::max(112.0f, fs * 7.5f), 50.0f + fs + 12.0f); // preview + a name row that fits the text
     const ImVec2 a = ImGui::GetCursorScreenPos();
     const ImVec2 b(a.x + size.x, a.y + size.y);
     ImGui::PushID(p.name.c_str());
@@ -49,12 +53,14 @@ bool themeCard(const theme::Palette& p, bool selected) {
     ImGui::PopID();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(a, b, p.bgDeep, 8.0f);
-    dl->AddRectFilled(ImVec2(a.x + 8, a.y + 8), ImVec2(a.x + 52, b.y - 24), p.bgPanel, 4.0f);
+    dl->AddRectFilled(ImVec2(a.x + 8, a.y + 8), ImVec2(a.x + 52, a.y + 46), p.bgPanel, 4.0f);
     dl->AddRectFilled(ImVec2(a.x + 58, a.y + 8), ImVec2(b.x - 8, a.y + 24), p.bgRaised, 4.0f);
     dl->AddRectFilled(ImVec2(a.x + 58, a.y + 30), ImVec2(b.x - 24, a.y + 42), p.accent, 3.0f);
     dl->AddRectFilled(ImVec2(a.x + 14, a.y + 16), ImVec2(a.x + 44, a.y + 20), p.textDim, 2.0f);
     dl->AddRectFilled(ImVec2(a.x + 14, a.y + 26), ImVec2(a.x + 36, a.y + 30), p.textFaint, 2.0f);
-    dl->AddText(ImVec2(a.x + 8, b.y - 20), p.text, p.name.c_str());
+    dl->PushClipRect(a, b, true);
+    dl->AddText(ImVec2(a.x + 8, b.y - fs - 7), p.text, p.name.c_str());
+    dl->PopClipRect();
     if (selected || hovered)
         dl->AddRect(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2), selected ? theme::kAccent : theme::kBorder, 9.0f, 0,
                     selected ? 2.0f : 1.0f);
@@ -83,15 +89,16 @@ void drawAppearance(Settings& s) {
     sectionLabel("THEME");
     const float avail = ImGui::GetContentRegionAvail().x;
     float x = 0;
+    const float cardW = std::max(112.0f, ImGui::GetFontSize() * 7.5f) + 10.0f;
     for (const LibraryTheme& t : ThemeLibrary::all()) {
-        if (x > 0 && x + 120 <= avail) ImGui::SameLine(0, 10);
+        if (x > 0 && x + cardW <= avail) ImGui::SameLine(0, 10);
         else if (x > 0) x = 0;
         if (themeCard(t.palette, !s.customPalette && s.theme == t.palette.name)) {
             s.theme = t.palette.name;
             s.customPalette = false;
             changed();
         }
-        x += 122;
+        x += cardW;
     }
     if (ImGui::Button("Import Theme...")) {
         if (auto file = platform::openFileDialog("Import Theme", "bemotion theme", "json")) {
@@ -293,6 +300,51 @@ bool sidebarItem(const char* label, Icon icon, bool selected) {
 
 } // namespace
 
+namespace {
+
+// Page title with a quick "Reset" to that page's defaults on the right.
+bool pageHeader(const char* title) {
+    ImGui::PushFont(Fonts::uiBold(), ImGui::GetFontSize() * 1.15f);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(title);
+    ImGui::PopFont();
+    const float w = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2 + 22.0f;
+    ImGui::SameLine();
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const bool clicked = ImGui::Button("    Reset");
+    drawIcon(ImGui::GetWindowDrawList(), Icon::Reset, ImVec2(p.x + 14, p.y + ImGui::GetFrameHeight() * 0.5f), 12.0f,
+             theme::kTextDim);
+    tooltip("Restore this page's defaults");
+    ImGui::Spacing();
+    return clicked;
+}
+
+void enableAllPlugins() {
+    for (const Plugin& p : PluginHost::get().plugins()) PluginHost::get().setEnabled(p.id, true);
+    settings().disabledPlugins.clear();
+}
+
+void resetPage(SettingsTab tab) {
+    Settings& s = settings();
+    const Settings d; // defaults
+    switch (tab) {
+    case SettingsTab::Theme:
+        s.theme = d.theme, s.customAccent = d.customAccent, s.accent = d.accent;
+        s.customPalette = false, s.advanced = d.advanced;
+        break;
+    case SettingsTab::Interface:
+        s.timelineLayerRow = d.timelineLayerRow, s.timelinePropertyRow = d.timelinePropertyRow;
+        s.keyframeSize = d.keyframeSize, s.textScale = d.textScale;
+        break;
+    case SettingsTab::Editor: s.snapDistance = d.snapDistance; break;
+    case SettingsTab::Plugins: enableAllPlugins(); break;
+    }
+    changed();
+}
+
+} // namespace
+
 void drawSettings() {
     if (!g_open) return;
     Settings& s = settings();
@@ -326,6 +378,22 @@ void drawSettings() {
     ImGui::BeginChild("##sidebar", ImVec2(170, 0), ImGuiChildFlags_None);
     for (const Page& p : kPages)
         if (sidebarItem(p.label, p.icon, g_tab == p.tab)) g_tab = p.tab;
+    // Everything back to how bemotion ships.
+    ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - ImGui::GetFrameHeight() - 8));
+    if (ImGui::Button("Reset All", ImVec2(-FLT_MIN, 0))) ImGui::OpenPopup("##resetAll");
+    tooltip("Restore every setting to its default");
+    if (ImGui::BeginPopup("##resetAll")) {
+        ImGui::TextUnformatted("Reset every setting to its default?");
+        if (accentButton("Reset All")) {
+            settings() = Settings{};
+            enableAllPlugins();
+            changed();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
     ImGui::EndChild();
     ImGui::SameLine(0, 0);
     {
@@ -336,6 +404,8 @@ void drawSettings() {
         ImGui::SameLine(0, 0);
     }
     ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_None);
+    const char* titles[] = {"Theme", "Interface", "Editor", "Plugins"};
+    if (pageHeader(titles[static_cast<int>(g_tab)])) resetPage(g_tab);
     switch (g_tab) {
     case SettingsTab::Theme:
         drawAppearance(s);

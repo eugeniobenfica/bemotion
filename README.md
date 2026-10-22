@@ -54,12 +54,14 @@ common moves are one click away through *Quick Animations*.
 - **Settings** (Ctrl+, or the gear) with *Theme*, *Interface* (timeline row
   heights, keyframe size, text size), *Editor* and *Plugins* pages: Dark, Light and Midnight themes, any
   accent color, and an *advanced mode* to edit every UI color, rounding and the
-  snap distance; **import, save and export themes** (JSON, see
+  snap distance; a *Reset* on every page and *Reset All*; **import, save and export themes** (JSON, see
   [examples/themes](examples/themes))
 - **Plugins**: sandboxed Lua scripts that add new kinds of objects. The bundled
   *Charts* plugin draws animated **column / bar, line / area and donut charts**
-  from an editable data table (paste from a spreadsheet). See
+  from an editable data table (paste from a spreadsheet), with trim start / end,
+  sorting, highlighting, compact numbers, outlines and smooth lines. See
   [docs/PLUGINS.md](docs/PLUGINS.md) to write your own
+- **Help** (F1): every shortcut drawn as key caps, plus About, Credits and License
 - **Undo / redo** for everything, unsaved-changes protection
 - Dockable, rearrangeable panels
 

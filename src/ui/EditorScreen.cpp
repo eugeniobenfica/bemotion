@@ -2,6 +2,7 @@
 
 #include "app/Platform.h"
 #include "app/RecentProjects.h"
+#include "ui/HelpWindow.h"
 #include "ui/SettingsWindow.h"
 #include "core/Serialization.h"
 #include "render/Fonts.h"
@@ -17,36 +18,6 @@ namespace bemotion {
 
 namespace {
 
-struct ShortcutHelp {
-    const char* keys;
-    const char* action;
-};
-
-constexpr ShortcutHelp kShortcuts[] = {
-    {"Space", "Play / pause (hold and drag: pan the viewport)"},
-    {"Left / Right", "Previous / next frame (Shift: 10 frames)"},
-    {"Home / End", "Go to start / end"},
-    {"J / K", "Previous / next keyframe"},
-    {"V / C", "Selection tool / Cut tool"},
-    {"Ctrl+K", "Split selected layers at the playhead"},
-    {"S", "Snapping on / off (hold Ctrl while dragging to bypass)"},
-    {"Shift + scrub", "Snap the playhead to clip edges and keyframes"},
-    {"T", "Add text"},
-    {"Ctrl+A", "Select all layers"},
-    {"Shift / Ctrl + click", "Add to / toggle the selection"},
-    {"Ctrl+] / Ctrl+[", "Bring forward / send backward (Shift: to front / back)"},
-    {"Ctrl+Z / Ctrl+Shift+Z", "Undo / redo"},
-    {"Ctrl+D", "Duplicate layers"},
-    {"Delete", "Delete keyframes or layers"},
-    {"Ctrl+S", "Save"},
-    {"Ctrl+M", "Export video"},
-    {"Wheel", "Zoom the viewport around the cursor"},
-    {"Middle / right drag", "Pan the viewport (also Alt+drag)"},
-    {"Ctrl+0 / Ctrl+1", "Fit / 100% zoom"},
-    {"Ctrl+= / Ctrl+-", "Zoom in / out"},
-    {"Ctrl+Wheel", "Zoom the timeline"},
-    {"Shift (while dragging)", "Constrain move / uniform scale / snap rotation"},
-};
 
 } // namespace
 
@@ -77,7 +48,6 @@ EditorScreen::Request EditorScreen::draw(double dt) {
 
     handleShortcuts();
     drawUnsavedModal();
-    drawAboutModal();
     exportDialog_.draw(ctx_);
 
     ctx_.commitIfIdle(ImGui::IsAnyItemActive() || ImGui::IsMouseDown(ImGuiMouseButton_Left));
@@ -214,7 +184,11 @@ void EditorScreen::drawMenuBar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {
-        if (ImGui::MenuItem("Keyboard Shortcuts & About")) openAboutModal_ = true;
+        if (ImGui::MenuItem("Keyboard Shortcuts", "F1")) ui::openHelp(ui::HelpTab::Shortcuts);
+        ImGui::Separator();
+        if (ImGui::MenuItem("About bemotion")) ui::openHelp(ui::HelpTab::About);
+        if (ImGui::MenuItem("Credits")) ui::openHelp(ui::HelpTab::Credits);
+        if (ImGui::MenuItem("License")) ui::openHelp(ui::HelpTab::License);
         ImGui::EndMenu();
     }
 
@@ -395,38 +369,6 @@ void EditorScreen::drawUnsavedModal() {
             if (save()) confirmedLeave_ = pendingLeave_;
             ImGui::CloseCurrentPopup();
         }
-        ImGui::EndPopup();
-    }
-    ImGui::PopStyleVar();
-}
-
-void EditorScreen::drawAboutModal() {
-    if (openAboutModal_) {
-        ImGui::OpenPopup("About bemotion");
-        openAboutModal_ = false;
-    }
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24, 20));
-    bool open = true;
-    if (ImGui::BeginPopupModal("About bemotion", &open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::PushFont(Fonts::uiBold(), 22.0f);
-        ImGui::TextColored(theme::vec(theme::kAccent), "bemotion");
-        ImGui::PopFont();
-        ImGui::TextColored(theme::vec(theme::kTextDim), "Version %s  ·  Free and open source (MIT)", BEMOTION_VERSION);
-        ImGui::Dummy(ImVec2(0, 8));
-        ui::sectionLabel("KEYBOARD SHORTCUTS");
-        if (ImGui::BeginTable("##keys", 2, ImGuiTableFlags_SizingFixedFit)) {
-            for (const auto& s : kShortcuts) {
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::TextColored(theme::vec(theme::kAccent), "%s", s.keys);
-                ImGui::TableSetColumnIndex(1);
-                ImGui::TextUnformatted(s.action);
-            }
-            ImGui::EndTable();
-        }
-        ImGui::Dummy(ImVec2(0, 6));
-        if (ImGui::Button("Close", ImVec2(100, 30)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
     }
     ImGui::PopStyleVar();

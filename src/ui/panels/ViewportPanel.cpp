@@ -113,11 +113,6 @@ void ViewportPanel::draw(EditorContext& ctx) {
         ImGui::End();
         return;
     }
-    if (ui::panelIsMinimized()) { // only the tab shows
-        ui::panelMinimizeButton();
-        ImGui::End();
-        return;
-    }
 
     Composition& c = ctx.comp();
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -164,8 +159,7 @@ void ViewportPanel::draw(EditorContext& ctx) {
 
     handleGuides(ctx); // rulers are items on top of the canvas
     drawRulers(ctx);
-    drawHud(ctx);
-    ui::panelMinimizeButton();
+    drawHud(ctx); // the viewport is the work area: it is never minimized
     ImGui::End();
 }
 
@@ -641,7 +635,12 @@ void ViewportPanel::drawHud(EditorContext& ctx) {
 
     char info[64];
     std::snprintf(info, sizeof(info), "%d × %d", c.width, c.height);
-    dl->AddText(ImVec2(canvasMin_.x + 12, y + (lineH - ImGui::GetTextLineHeight()) * 0.5f), theme::kTextFaint, info);
+    // A pill clear of the ruler, so guides and the ruler never run through the text.
+    const ImVec2 ts = ImGui::CalcTextSize(info);
+    const float left = canvasMin_.x + (ctx.showRulers ? kRuler : 0.0f) + 10.0f;
+    dl->AddRectFilled(ImVec2(left, y), ImVec2(left + ts.x + 16, y + lineH), theme::withAlpha(theme::kBgRaised, 220),
+                      ImGui::GetStyle().FrameRounding);
+    dl->AddText(ImVec2(left + 8, y + (lineH - ts.y) * 0.5f), theme::kTextDim, info);
 
     // Zoom controls, bottom right: [-] [ 50% v ] [+] [Fit]
     const float comboW = 76.0f, btn = lineH;

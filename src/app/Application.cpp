@@ -10,6 +10,7 @@
 #include "render/EffectRenderer.h"
 #include "render/Fonts.h"
 #include "ui/EditorScreen.h"
+#include "ui/HelpWindow.h"
 #include "ui/SettingsWindow.h"
 #include "ui/Theme.h"
 
@@ -297,7 +298,9 @@ void Application::frame(double dt) {
     }
 
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, ImGuiInputFlags_RouteGlobal)) ui::openSettings();
+    if (ImGui::Shortcut(ImGuiKey_F1, ImGuiInputFlags_RouteGlobal)) ui::openHelp();
     ui::drawSettings();
+    ui::drawHelp();
 
     ImGui::Render();
     int w = 0, h = 0;
