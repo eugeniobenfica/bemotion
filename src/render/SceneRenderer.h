@@ -14,6 +14,8 @@ struct ImDrawList;
 
 namespace bemotion::render {
 
+class EffectRenderer;
+
 // Maps composition pixels to screen pixels.
 struct View {
     Vec2 origin; // screen position of the composition's top-left corner
@@ -25,8 +27,11 @@ struct View {
 };
 
 // `background` = false leaves the frame transparent (for exports with alpha).
-void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background = true);
-void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen);
+// Layers with effects go through `effects` (default: the on-screen instance).
+void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background = true,
+                     EffectRenderer* effects = nullptr);
+// Draws the layer without its effects. opacityOverride >= 0 replaces its opacity.
+void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride = -1.0f);
 
 // Axis-aligned bounds of the layer content in its local space.
 bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax);

@@ -8,6 +8,7 @@
 // current (fonts are rasterized through ImGui's atlas).
 
 #include "core/Project.h"
+#include "render/EffectRenderer.h"
 
 #include <cstdint>
 #include <string>
@@ -33,6 +34,7 @@ public:
     int height() const { return height_; }
 
 private:
+    EffectRenderer effects_; // separate pool: exporting must not reuse the preview's textures
     unsigned int fbo_ = 0;
     unsigned int texture_ = 0;
     int width_ = 0;

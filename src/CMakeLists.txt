@@ -1,6 +1,7 @@
 # --- bemotion_core: document model, no UI dependencies -------------------------
 add_library(bemotion_core STATIC
     core/Easing.cpp
+    core/Effects.cpp
     core/Geometry.cpp
     core/History.cpp
     core/Layer.cpp
@@ -17,6 +18,7 @@ add_executable(bemotion WIN32
     app/Application.cpp
     app/AppIcon.cpp
     app/DevScript.cpp
+    app/EffectLibrary.cpp
     app/Platform.cpp
     app/PresetLibrary.cpp
     app/RecentProjects.cpp
@@ -24,7 +26,9 @@ add_executable(bemotion WIN32
     export/FfmpegEncoder.cpp
     export/MediaFoundationEncoder.cpp
     export/PngSequenceEncoder.cpp
+    render/EffectRenderer.cpp
     render/Fonts.cpp
+    render/GL.cpp
     render/OffscreenRenderer.cpp
     render/SceneRenderer.cpp
     ui/EditorContext.cpp

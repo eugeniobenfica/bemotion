@@ -297,6 +297,35 @@ void testGuidesRoundTrip() {
     CHECK(q.comp.guides.size() == 2 && !q.comp.guides[1].vertical && near(q.comp.guides[1].position, 270.5f));
 }
 
+void testEffectsRoundTrip() {
+    Project p;
+    Layer& l = p.comp.addLayer(makeTextLayer("Hi", {0, 0}, 5.0));
+    l.effects.push_back(makeEffect(EffectType::DropShadow));
+    l.effects.push_back(makeEffect(EffectType::Glow));
+    l.effects[1].size.setKey(1.0, 10.0f);
+    l.effects[1].size.setKey(2.0, 40.0f);
+    // Effect parameters are regular properties (keyframes, timeline rows).
+    auto props = l.properties();
+    CHECK(l.findProperty(props, "fx1.size") != nullptr);
+    CHECK(l.findProperty(props, "fx1.size")->effectIndex == 1);
+    Project q;
+    CHECK(deserializeProject(serializeProject(p), q));
+    const Layer& m = q.comp.layers[0];
+    CHECK(m.effects.size() == 2 && m.effects[0].type == EffectType::DropShadow && m.effects[1].type == EffectType::Glow);
+    CHECK(near(m.effects[1].size.valueAt(1.5), 25.0f));
+    CHECK(serializeProject(p) == serializeProject(q));
+}
+
+void testEffectPresets() {
+    for (const auto& preset : builtinEffectPresets()) {
+        EffectPreset again;
+        CHECK(parseEffectPreset(effectPresetToJson(preset), again));
+        CHECK(again.effects.size() == preset.effects.size());
+    }
+    Effect shadow = makeEffect(EffectType::DropShadow);
+    CHECK(effectMargin(shadow, 0) > shadow.offset.base.length());
+}
+
 void testTracksRoundTrip() {
     Project p;
     p.comp = makeSplitStack();
@@ -353,6 +382,8 @@ int main() {
         {"default values", testDefaultValues},
         {"snapping", testSnapping},
         {"guides round trip", testGuidesRoundTrip},
+        {"effects round trip", testEffectsRoundTrip},
+        {"effect presets", testEffectPresets},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };

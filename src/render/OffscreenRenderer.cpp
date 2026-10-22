@@ -1,66 +1,22 @@
 #include "render/OffscreenRenderer.h"
 
+#include "render/GL.h"
 #include "render/SceneRenderer.h"
 
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
 
-#include <GLFW/glfw3.h>
 
 #include <algorithm>
 #include <cstring>
 
 namespace bemotion::render {
 
-namespace {
-
-// Framebuffer objects are OpenGL 3.0 entry points, so they are loaded at
-// runtime (opengl32 only exports OpenGL 1.1 on Windows).
-#ifdef _WIN32
-#define BEMOTION_GL_CALL __stdcall
-#else
-#define BEMOTION_GL_CALL
-#endif
-constexpr GLenum kFramebuffer = 0x8D40;         // GL_FRAMEBUFFER
-constexpr GLenum kColorAttachment0 = 0x8CE0;    // GL_COLOR_ATTACHMENT0
-constexpr GLenum kFramebufferComplete = 0x8CD5; // GL_FRAMEBUFFER_COMPLETE
-
-using GenFramebuffersFn = void(BEMOTION_GL_CALL*)(GLsizei, GLuint*);
-using DeleteFramebuffersFn = void(BEMOTION_GL_CALL*)(GLsizei, const GLuint*);
-using BindFramebufferFn = void(BEMOTION_GL_CALL*)(GLenum, GLuint);
-using FramebufferTexture2DFn = void(BEMOTION_GL_CALL*)(GLenum, GLenum, GLenum, GLuint, GLint);
-using CheckFramebufferStatusFn = GLenum(BEMOTION_GL_CALL*)(GLenum);
-
-struct FboApi {
-    GenFramebuffersFn gen = nullptr;
-    DeleteFramebuffersFn del = nullptr;
-    BindFramebufferFn bind = nullptr;
-    FramebufferTexture2DFn texture2D = nullptr;
-    CheckFramebufferStatusFn status = nullptr;
-
-    bool load() {
-        if (gen) return true;
-        gen = reinterpret_cast<GenFramebuffersFn>(glfwGetProcAddress("glGenFramebuffers"));
-        del = reinterpret_cast<DeleteFramebuffersFn>(glfwGetProcAddress("glDeleteFramebuffers"));
-        bind = reinterpret_cast<BindFramebufferFn>(glfwGetProcAddress("glBindFramebuffer"));
-        texture2D = reinterpret_cast<FramebufferTexture2DFn>(glfwGetProcAddress("glFramebufferTexture2D"));
-        status = reinterpret_cast<CheckFramebufferStatusFn>(glfwGetProcAddress("glCheckFramebufferStatus"));
-        return gen && del && bind && texture2D && status;
-    }
-};
-
-FboApi& fbo() {
-    static FboApi api;
-    return api;
-}
-
-} // namespace
-
 OffscreenRenderer::~OffscreenRenderer() { release(); }
 
 bool OffscreenRenderer::init(int width, int height, std::string& error) {
     release();
-    if (!fbo().load()) {
+    if (!gl::load()) {
         error = "This graphics driver does not support off-screen rendering (OpenGL 3.0).";
         return false;
     }
@@ -80,11 +36,11 @@ bool OffscreenRenderer::init(int width, int height, std::string& error) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    fbo().gen(1, &fbo_);
-    fbo().bind(kFramebuffer, fbo_);
-    fbo().texture2D(kFramebuffer, kColorAttachment0, GL_TEXTURE_2D, texture_, 0);
-    const bool complete = fbo().status(kFramebuffer) == kFramebufferComplete;
-    fbo().bind(kFramebuffer, 0);
+    gl::api().GenFramebuffers(1, &fbo_);
+    gl::api().BindFramebuffer(gl::kFramebuffer, fbo_);
+    gl::api().FramebufferTexture2D(gl::kFramebuffer, gl::kColorAttachment0, GL_TEXTURE_2D, texture_, 0);
+    const bool complete = gl::api().CheckFramebufferStatus(gl::kFramebuffer) == gl::kFramebufferComplete;
+    gl::api().BindFramebuffer(gl::kFramebuffer, 0);
     if (!complete) {
         error = "Could not create the off-screen framebuffer.";
         release();
@@ -94,7 +50,8 @@ bool OffscreenRenderer::init(int width, int height, std::string& error) {
 }
 
 void OffscreenRenderer::release() {
-    if (fbo_) fbo().del(1, &fbo_);
+    effects_.release();
+    if (fbo_) gl::api().DeleteFramebuffers(1, &fbo_);
     if (texture_) glDeleteTextures(1, &texture_);
     fbo_ = texture_ = 0;
 }
@@ -106,7 +63,8 @@ void OffscreenRenderer::render(const Composition& comp, double t, float scale, b
     dl._ResetForNewFrame();
     dl.PushClipRect(ImVec2(0, 0), size);
     dl.PushTexture(ImGui::GetIO().Fonts->TexRef);
-    drawComposition(&dl, comp, t, View{{0.0f, 0.0f}, scale}, background);
+    effects_.beginFrame();
+    drawComposition(&dl, comp, t, View{{0.0f, 0.0f}, scale}, background, &effects_);
 
     ImDrawData data;
     data.Valid = true;
@@ -116,7 +74,7 @@ void OffscreenRenderer::render(const Composition& comp, double t, float scale, b
     data.Textures = &ImGui::GetPlatformIO().Textures; // uploads glyphs baked for this frame
     data.AddDrawList(&dl);
 
-    fbo().bind(kFramebuffer, fbo_);
+    gl::api().BindFramebuffer(gl::kFramebuffer, fbo_);
     glViewport(0, 0, width_, height_);
     glClearColor(0, 0, 0, 0);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -126,7 +84,7 @@ void OffscreenRenderer::render(const Composition& comp, double t, float scale, b
     std::vector<uint8_t> flipped(rgba.size());
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_BYTE, flipped.data());
-    fbo().bind(kFramebuffer, 0);
+    gl::api().BindFramebuffer(gl::kFramebuffer, 0);
 
     // GL rows are bottom-up; the blend mode leaves color premultiplied by alpha.
     const size_t stride = static_cast<size_t>(width_) * 4;

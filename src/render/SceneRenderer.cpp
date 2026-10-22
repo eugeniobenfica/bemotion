@@ -1,6 +1,7 @@
 #include "render/SceneRenderer.h"
 
 #include "core/Geometry.h"
+#include "render/EffectRenderer.h"
 #include "render/Fonts.h"
 
 #include <imgui.h>
@@ -194,14 +195,17 @@ void drawShape(ImDrawList* dl, const Layer& layer, double t, const Affine& toScr
 
 } // namespace
 
-void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen) {
-    const float opacity = std::clamp(layer.transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
+void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride) {
+    const float opacity = opacityOverride >= 0.0f ? std::min(opacityOverride, 1.0f)
+                                                  : std::clamp(layer.transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
     if (opacity <= 0.0f) return;
     if (layer.type == LayerType::Text) drawText(dl, layer, time, layerToScreen, opacity);
     else drawShape(dl, layer, time, layerToScreen, opacity);
 }
 
-void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background) {
+void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background,
+                     EffectRenderer* effects) {
+    if (!effects) effects = &screenEffects();
     const Vec2 a = view.toScreen({0, 0});
     const Vec2 b = view.toScreen({static_cast<float>(comp.width), static_cast<float>(comp.height)});
     const Color bg = comp.background;
@@ -214,7 +218,8 @@ void drawComposition(ImDrawList* dl, const Composition& comp, double time, const
     const Affine viewMatrix = view.matrix();
     for (auto it = comp.layers.rbegin(); it != comp.layers.rend(); ++it) {
         if (!it->activeAt(time)) continue;
-        drawLayer(dl, *it, time, viewMatrix * it->matrixAt(time));
+        if (hasActiveEffects(*it)) effects->drawLayer(dl, *it, time, comp.frameDuration(), viewMatrix, view.zoom);
+        else drawLayer(dl, *it, time, viewMatrix * it->matrixAt(time));
     }
     dl->PopClipRect();
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Animated.h"
+#include "core/Effects.h"
 #include "core/Math.h"
 
 #include <cstdint>
@@ -37,6 +38,7 @@ struct PropertyRef {
     float min = 0.0f;
     float max = 0.0f; // min == max means unbounded
     const char* format = "%.1f";
+    int effectIndex = -1; // >= 0: parameter of Layer::effects[effectIndex]
 
     AnimFloat& asFloat() const { return *static_cast<AnimFloat*>(anim); }
     AnimVec2& asVec2() const { return *static_cast<AnimVec2*>(anim); }
@@ -98,6 +100,7 @@ struct Layer {
     TransformProps transform;
     ShapeProps shape;
     TextProps text;
+    std::vector<Effect> effects; // applied in order
 
     // All animatable properties that apply to this layer's type, in UI order.
     std::vector<PropertyRef> properties();

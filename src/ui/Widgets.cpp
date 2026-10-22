@@ -130,6 +130,10 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         dl->AddTriangleFilled(ImVec2(c.x - h * 0.4f, c.y - h * 0.2f), ImVec2(c.x + h * 0.4f, c.y - h * 0.2f),
                               ImVec2(c.x, c.y + h * 0.32f), col);
         break;
+    case Icon::ChevronUp:
+        dl->AddTriangleFilled(ImVec2(c.x - h * 0.4f, c.y + h * 0.2f), ImVec2(c.x, c.y - h * 0.32f),
+                              ImVec2(c.x + h * 0.4f, c.y + h * 0.2f), col);
+        break;
     case Icon::Diamond: drawDiamond(dl, c, h * 0.6f, col, col); break;
     case Icon::Trash: {
         dl->AddLine(ImVec2(c.x - h * 0.7f, c.y - h * 0.5f), ImVec2(c.x + h * 0.7f, c.y - h * 0.5f), col, th);

@@ -33,6 +33,7 @@ enum class Icon {
     Folder,
     ChevronRight,
     ChevronDown,
+    ChevronUp,
     Diamond,
     Trash,
     Logo,

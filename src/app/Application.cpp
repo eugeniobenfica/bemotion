@@ -5,6 +5,7 @@
 #include "app/Platform.h"
 #include "core/Serialization.h"
 #include "export/Export.h"
+#include "render/EffectRenderer.h"
 #include "render/Fonts.h"
 #include "ui/EditorScreen.h"
 #include "ui/Theme.h"
@@ -244,6 +245,7 @@ bool Application::init(bool visible) {
 
 void Application::shutdown() {
     editor_.reset();
+    render::screenEffects().release();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -255,6 +257,7 @@ void Application::shutdown() {
 }
 
 void Application::frame(double dt) {
+    render::screenEffects().beginFrame(); // effect textures from the previous frame can be reused
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     if (script_) script_->apply();

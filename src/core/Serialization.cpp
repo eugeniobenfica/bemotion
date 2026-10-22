@@ -2,6 +2,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 
@@ -108,8 +109,23 @@ json encodeLayer(const Layer& constLayer) {
                      {"align", kAlignIds[static_cast<int>(layer.text.align)]}};
     }
     json props = json::object();
-    for (const auto& p : layer.properties()) props[p.id] = encodeProperty(p);
+    for (const auto& p : layer.properties())
+        if (p.effectIndex < 0) props[p.id] = encodeProperty(p); // effect parameters live in "effects"
     j["properties"] = std::move(props);
+    if (!layer.effects.empty()) {
+        json effects = json::array();
+        for (const Effect& e : layer.effects)
+            effects.push_back({{"type", effectId(e.type)},
+                               {"enabled", e.enabled},
+                               {"samples", e.samples},
+                               {"params",
+                                {{"color", encodeAnimated(e.color)},
+                                 {"opacity", encodeAnimated(e.opacity)},
+                                 {"size", encodeAnimated(e.size)},
+                                 {"offset", encodeAnimated(e.offset)},
+                                 {"shutter", encodeAnimated(e.shutter)}}}});
+        j["effects"] = std::move(effects);
+    }
     return j;
 }
 
@@ -140,6 +156,20 @@ Layer decodeLayer(const json& j) {
         const auto& props = j["properties"];
         for (auto& p : layer.properties())
             if (props.contains(p.id)) decodeProperty(props[p.id], p);
+    }
+    for (const auto& ej : j.value("effects", json::array())) {
+        const EffectType type = effectFromId(ej.value("type", std::string()));
+        if (type == EffectType::Count) continue; // effect from a newer version: skip
+        Effect e = makeEffect(type);
+        e.enabled = ej.value("enabled", true);
+        e.samples = std::clamp(ej.value("samples", e.samples), 2, 64);
+        const json params = ej.value("params", json::object());
+        if (params.contains("color")) decodeAnimated(params["color"], e.color);
+        if (params.contains("opacity")) decodeAnimated(params["opacity"], e.opacity);
+        if (params.contains("size")) decodeAnimated(params["size"], e.size);
+        if (params.contains("offset")) decodeAnimated(params["offset"], e.offset);
+        if (params.contains("shutter")) decodeAnimated(params["shutter"], e.shutter);
+        layer.effects.push_back(std::move(e));
     }
     return layer;
 }

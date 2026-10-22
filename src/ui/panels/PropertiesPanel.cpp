@@ -1,6 +1,7 @@
 #include "ui/panels/PropertiesPanel.h"
 
 #include "app/Platform.h"
+#include "app/EffectLibrary.h"
 #include "app/PresetLibrary.h"
 #include "core/Presets.h"
 #include "render/Fonts.h"
@@ -240,6 +241,7 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
     };
 
     for (const PropertyRef& prop : props) {
+        if (prop.effectIndex >= 0) continue; // shown in the Effects section
         if (!currentGroup || std::strcmp(currentGroup, prop.group) != 0) {
             closeGroup();
             currentGroup = prop.group;
@@ -343,7 +345,123 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
         ImGui::EndTable();
     }
 
+    drawEffects(ctx, layer);
     drawPresets(ctx, layer);
+}
+
+void PropertiesPanel::drawEffects(EditorContext& ctx, Layer& layer) {
+    if (!ImGui::CollapsingHeader("Effects", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    auto props = layer.properties();
+    int removeIndex = -1, moveFrom = -1, moveTo = -1;
+    const float b = ImGui::GetFrameHeight();
+    for (int i = 0; i < static_cast<int>(layer.effects.size()); ++i) {
+        Effect& e = layer.effects[i];
+        ImGui::PushID(i);
+        const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
+        if (ImGui::Checkbox("##on", &e.enabled)) ctx.touch();
+        ui::tooltip(e.enabled ? "Turn this effect off" : "Turn this effect on");
+        ImGui::SameLine();
+        ImGui::SetNextItemAllowOverlap();
+        const bool open = ImGui::TreeNodeEx("##fx", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth, "%s",
+                                            e.group.c_str());
+        ImGui::SameLine(right - b * 3 - 4);
+        ImGui::BeginDisabled(i == 0);
+        if (ui::iconButton("##up", ui::Icon::ChevronUp, b, "Move up (applied earlier)")) moveFrom = i, moveTo = i - 1;
+        ImGui::EndDisabled();
+        ImGui::SameLine(0, 2);
+        ImGui::BeginDisabled(i + 1 == static_cast<int>(layer.effects.size()));
+        if (ui::iconButton("##down", ui::Icon::ChevronDown, b, "Move down (applied later)")) moveFrom = i, moveTo = i + 1;
+        ImGui::EndDisabled();
+        ImGui::SameLine(0, 2);
+        if (ui::iconButton("##del", ui::Icon::Trash, b, "Remove effect")) removeIndex = i;
+        if (open) {
+            if (beginPropertyTable("fxprops")) {
+                for (const PropertyRef& p : props)
+                    if (p.effectIndex == i) propertyRow(ctx, layer, p);
+                if (e.type == EffectType::MotionBlur) {
+                    plainRowLabel("Samples");
+                    if (ImGui::SliderInt("##samples", &e.samples, 2, 64)) ctx.touch();
+                    ui::tooltip("More samples: smoother blur, slower preview");
+                }
+                ImGui::EndTable();
+            }
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    if (removeIndex >= 0) {
+        layer.effects.erase(layer.effects.begin() + removeIndex);
+        ctx.clearKeySelection();
+        ctx.touch();
+    } else if (moveFrom >= 0) {
+        std::swap(layer.effects[moveFrom], layer.effects[moveTo]);
+        ctx.clearKeySelection();
+        ctx.touch();
+    }
+    if (layer.effects.empty())
+        ImGui::TextColored(theme::vec(theme::kTextFaint), "Outline, glow, shadow and motion blur.");
+
+    const float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+    if (ImGui::Button("+ Add Effect", ImVec2(w, 0))) ImGui::OpenPopup("##addEffect");
+    ImGui::SameLine();
+    ImGui::BeginDisabled(layer.effects.empty());
+    if (ImGui::Button("Save as Preset##fx", ImVec2(w, 0))) {
+        effectSaveName_ = layer.name + " effects";
+        ImGui::OpenPopup("Save Effect Preset");
+    }
+    ImGui::EndDisabled();
+
+    if (ImGui::BeginPopup("##addEffect")) {
+        for (int t = 0; t < static_cast<int>(EffectType::Count); ++t)
+            if (ImGui::MenuItem(effectLabel(static_cast<EffectType>(t)))) {
+                for (Layer* l : ctx.selectedLayers()) l->effects.push_back(makeEffect(static_cast<EffectType>(t)));
+                ctx.touch();
+            }
+        ImGui::Separator();
+        ui::sectionLabel("PRESETS");
+        std::filesystem::path toRemove;
+        for (const auto& lp : EffectLibrary::all()) {
+            ImGui::PushID(&lp);
+            if (ImGui::MenuItem(lp.preset.name.c_str())) {
+                for (Layer* l : ctx.selectedLayers())
+                    l->effects.insert(l->effects.end(), lp.preset.effects.begin(), lp.preset.effects.end());
+                ctx.touch();
+            }
+            if (!lp.file.empty() && ImGui::BeginPopupContextItem("##fxpresetctx")) {
+                if (ImGui::MenuItem("Delete Preset")) toRemove = lp.file;
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
+        }
+        if (!toRemove.empty()) EffectLibrary::remove(toRemove);
+        ImGui::Separator();
+        if (ImGui::MenuItem("Import Preset...")) {
+            if (auto file = platform::openFileDialog("Import Effect Preset", "Effect preset", ".json")) {
+                effectMessage_.clear();
+                if (!EffectLibrary::importFile(*file, &effectMessage_)) effectMessage_ = "Import failed: " + effectMessage_;
+                else effectMessage_ = "Imported. Find it under + Add Effect > Presets.";
+            }
+        }
+        ImGui::EndPopup();
+    }
+
+    if (ImGui::BeginPopup("Save Effect Preset")) {
+        ImGui::TextUnformatted("Preset name");
+        ImGui::SetNextItemWidth(260);
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        const bool enter = ImGui::InputText("##fxPresetName", &effectSaveName_, ImGuiInputTextFlags_EnterReturnsTrue);
+        if ((ui::accentButton("Save", ImVec2(120, 0)) || enter) && !effectSaveName_.empty()) {
+            EffectPreset preset{effectSaveName_, layer.effects};
+            if (EffectLibrary::save(preset, &effectMessage_)) effectMessage_ = "Saved \"" + effectSaveName_ + "\".";
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+    if (!effectMessage_.empty()) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(theme::vec(theme::kTextDim), "%s", effectMessage_.c_str());
+        ImGui::PopTextWrapPos();
+    }
 }
 
 void PropertiesPanel::drawPresets(EditorContext& ctx, Layer& layer) {
