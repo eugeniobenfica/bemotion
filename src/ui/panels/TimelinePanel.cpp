@@ -27,6 +27,53 @@ constexpr float kKeyRadius = 5.0f;
 
 ImU32 toU32(Color c, float alpha = 1.0f) { return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, c.a * alpha)); }
 
+// Cubic-bezier timing editor: drag the two handles. Returns true while edited.
+bool curveEditor(BezierEase& c, float size) {
+    const ImVec2 pad(10.0f, 34.0f); // vertical room for overshoot
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const ImVec2 total(size + pad.x * 2, size + pad.y * 2);
+    ImGui::InvisibleButton("##curve", total);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 p0(origin.x + pad.x, origin.y + pad.y + size); // (0,0) bottom-left
+    auto toScreen = [&](float x, float y) { return ImVec2(p0.x + x * size, p0.y - y * size); };
+    dl->AddRectFilled(origin, ImVec2(origin.x + total.x, origin.y + total.y), theme::kBgDeep, 4.0f);
+    dl->AddRect(toScreen(0, 1), toScreen(1, 0), IM_COL32(255, 255, 255, 30));
+    for (int i = 1; i < 4; ++i) {
+        const float g = i / 4.0f;
+        dl->AddLine(toScreen(g, 0), toScreen(g, 1), IM_COL32(255, 255, 255, 12));
+        dl->AddLine(toScreen(0, g), toScreen(1, g), IM_COL32(255, 255, 255, 12));
+    }
+    const ImVec2 a = toScreen(0, 0), b = toScreen(1, 1);
+    const ImVec2 h1 = toScreen(c.x1, c.y1), h2 = toScreen(c.x2, c.y2);
+    dl->AddLine(a, h1, theme::kTextFaint, 1.0f);
+    dl->AddLine(b, h2, theme::kTextFaint, 1.0f);
+    dl->AddBezierCubic(a, h1, h2, b, theme::kAccent, 2.5f);
+
+    // Handle dragging: the grabbed handle is remembered in window storage.
+    ImGuiStorage* st = ImGui::GetStateStorage();
+    const ImGuiID key = ImGui::GetID("##curvegrab");
+    int grab = st->GetInt(key, 0);
+    const ImVec2 m = ImGui::GetIO().MousePos;
+    auto dist = [&](ImVec2 p) { return std::hypot(p.x - m.x, p.y - m.y); };
+    if (ImGui::IsItemActivated()) grab = dist(h1) <= dist(h2) ? 1 : 2;
+    if (!ImGui::IsItemActive()) grab = 0;
+    st->SetInt(key, grab);
+    bool changed = false;
+    if (grab) {
+        const float x = std::clamp((m.x - p0.x) / size, 0.0f, 1.0f);
+        const float y = std::clamp((p0.y - m.y) / size, -0.5f, 1.5f);
+        (grab == 1 ? c.x1 : c.x2) = x;
+        (grab == 1 ? c.y1 : c.y2) = y;
+        changed = true;
+    }
+    for (int i = 1; i <= 2; ++i) {
+        const ImVec2 h = i == 1 ? h1 : h2;
+        const bool hot = grab == i || (grab == 0 && ImGui::IsItemHovered() && dist(h) < 9.0f);
+        dl->AddCircleFilled(h, hot ? 6.0f : 5.0f, hot ? theme::kText : theme::kAccent);
+    }
+    return changed;
+}
+
 double snapDelta(double seconds, double fps) { return std::round(seconds * fps) / fps; }
 
 // Keyframe glyph: the shape hints at the easing of the outgoing segment.
@@ -930,7 +977,37 @@ void TimelinePanel::drawKeyContextMenu(EditorContext& ctx) {
     ImGui::Separator();
     for (int i = 0; i < static_cast<int>(Easing::Count); ++i) {
         const auto e = static_cast<Easing>(i);
+        if (e == Easing::Custom) continue;
         if (ImGui::MenuItem(easingLabel(e))) ctx.setSelectedKeysEasing(e);
+    }
+    if (ImGui::BeginMenu("Custom Curve")) {
+        if (ImGui::IsWindowAppearing()) curveEdit_ = ctx.selectedKeysCurve();
+        if (curveEditor(curveEdit_, 180.0f)) ctx.setSelectedKeysCurve(curveEdit_);
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::DragFloat4("##bez", &curveEdit_.x1, 0.005f, -1.0f, 2.0f, "%.2f")) {
+            curveEdit_.x1 = std::clamp(curveEdit_.x1, 0.0f, 1.0f);
+            curveEdit_.x2 = std::clamp(curveEdit_.x2, 0.0f, 1.0f);
+            ctx.setSelectedKeysCurve(curveEdit_);
+        }
+        ImGui::TextColored(theme::vec(theme::kTextFaint), "Start from:");
+        const Easing starts[] = {Easing::Linear, Easing::EaseIn, Easing::EaseOut, Easing::EaseInOut, Easing::BackOut};
+        for (Easing e : starts) {
+            if (e != starts[0]) ImGui::SameLine();
+            const char* label = e == Easing::EaseInOut ? "In Out" : e == Easing::BackOut ? "Back" : e == Easing::EaseIn ? "In"
+                              : e == Easing::EaseOut ? "Out" : "Lin";
+            if (ImGui::SmallButton(label)) {
+                curveEdit_ = bezierFor(e);
+                ctx.setSelectedKeysCurve(curveEdit_);
+            }
+        }
+        ImGui::EndMenu();
+    }
+    if (ctx.selectionHasPathKeys()) {
+        ImGui::Separator();
+        ImGui::TextColored(theme::vec(theme::kTextFaint), "Motion path");
+        if (ImGui::MenuItem("Auto Bezier")) ctx.setSelectedKeysPath(PathMode::Auto);
+        if (ImGui::MenuItem("Linear (corner)")) ctx.setSelectedKeysPath(PathMode::Linear);
+        if (ImGui::MenuItem("Custom Handles")) ctx.setSelectedKeysPath(PathMode::Custom);
     }
     ImGui::Separator();
     if (ImGui::MenuItem("Delete", "Del")) ctx.deleteSelectedKeys();

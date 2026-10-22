@@ -22,17 +22,45 @@ constexpr double kTimeEpsilon = 1e-4;
 
 uint32_t nextKeyframeUid();
 
+// How a spatial (Vec2) motion path bends through a keyframe.
+enum class PathMode {
+    Auto,   // smooth curve through the neighbors (auto bezier)
+    Linear, // straight segments, a corner at the key
+    Custom, // user-dragged handles (inTangent / outTangent)
+};
+
 template <typename T>
 struct Keyframe {
     double time = 0.0;
     T value{};
     Easing easing = Easing::EaseInOut; // curve of the segment that starts here
-    uint32_t uid = nextKeyframeUid();  // runtime identity, not persisted
+    BezierEase curve;                  // timing curve when easing == Custom
+    // Spatial path (Vec2 properties only); tangents are relative to `value`.
+    PathMode path = PathMode::Auto;
+    Vec2 inTangent{}, outTangent{};
+    uint32_t uid = nextKeyframeUid(); // runtime identity, not persisted
 };
 
 inline float interpolate(float a, float b, float t) { return lerp(a, b, t); }
 inline Vec2 interpolate(Vec2 a, Vec2 b, float t) { return lerp(a, b, t); }
 inline Color interpolate(Color a, Color b, float t) { return lerp(a, b, t); }
+
+// Value of the segment from keys[i] to keys[i + 1] at eased progress u.
+template <typename T>
+T segmentValue(const std::vector<Keyframe<T>>& keys, size_t i, float u) {
+    return interpolate(keys[i].value, keys[i + 1].value, u);
+}
+// Positions follow a bezier motion path, at constant speed along the curve.
+Vec2 segmentValue(const std::vector<Keyframe<Vec2>>& keys, size_t i, float u);
+
+// Absolute bezier control points of the motion path segment keys[i] -> keys[i + 1].
+struct PathSegment {
+    Vec2 p0, p1, p2, p3;
+    Vec2 at(float s) const;
+};
+PathSegment pathSegment(const std::vector<Keyframe<Vec2>>& keys, size_t i);
+// Effective tangents of keys[i] (what Auto / Linear resolve to), relative to its value.
+void pathTangents(const std::vector<Keyframe<Vec2>>& keys, size_t i, Vec2& in, Vec2& out);
 
 class AnimatedBase {
 public:
@@ -43,6 +71,8 @@ public:
     virtual void setKeyTime(int i, double t) = 0;
     virtual Easing keyEasing(int i) const = 0;
     virtual void setKeyEasing(int i, Easing e) = 0;
+    virtual BezierEase keyCurve(int i) const = 0;
+    virtual void setKeyCurve(int i, const BezierEase& c) = 0;
     virtual uint32_t keyUid(int i) const = 0;
     virtual void removeKey(int i) = 0;
     virtual void sortKeys() = 0;           // safe while dragging keys around
@@ -85,7 +115,7 @@ public:
         auto prev = next - 1;
         const double span = next->time - prev->time;
         const float u = span > 0.0 ? static_cast<float>((t - prev->time) / span) : 1.0f;
-        return interpolate(prev->value, next->value, applyEasing(prev->easing, u));
+        return segmentValue(keys, static_cast<size_t>(prev - keys.begin()), applyEasing(prev->easing, prev->curve, u));
     }
 
     // Edits the property at time `t`: updates/creates a key if animated,
@@ -114,6 +144,8 @@ public:
     void setKeyTime(int i, double t) override { keys[i].time = std::max(0.0, t); }
     Easing keyEasing(int i) const override { return keys[i].easing; }
     void setKeyEasing(int i, Easing e) override { keys[i].easing = e; }
+    BezierEase keyCurve(int i) const override { return keys[i].curve; }
+    void setKeyCurve(int i, const BezierEase& c) override { keys[i].curve = c; }
     uint32_t keyUid(int i) const override { return keys[i].uid; }
 
     void removeKey(int i) override {

@@ -46,13 +46,22 @@ public:
     }
 
 private:
-    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee };
+    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle };
 
     void handleNavigation(bool hovered);
     void handleSelectionInput(EditorContext& ctx, bool hovered);
     void handleDrop(EditorContext& ctx);
     void drawOverlay(EditorContext& ctx, bool hovered);
     void drawHud(EditorContext& ctx);
+
+    // --- motion path ---------------------------------------------------------------
+    // The single selected layer's position keyframes, drawn as an editable curve.
+    Layer* pathLayer(EditorContext& ctx) const;
+    // Point under the screen position: key index and part (0 = key, 1 = in handle, 2 = out handle).
+    bool pathHit(EditorContext& ctx, Vec2 screen, int& key, int& part) const;
+    void drawMotionPath(EditorContext& ctx);
+    int pathKey_ = -1;  // key being dragged
+    int pathPart_ = 0;
     void zoomAround(Vec2 screenPoint, float newZoom);
 
     float zoom_ = 0.5f;

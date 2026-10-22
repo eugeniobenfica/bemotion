@@ -345,6 +345,46 @@ void testCamera() {
     CHECK(q.comp.layers[0].type == LayerType::Camera && near(q.comp.layers[0].camera.zoom.base, 200.0f));
 }
 
+void testCustomEasing() {
+    CHECK(near(applyBezierEase({0, 0, 1, 1}, 0.3f), 0.3f));
+    const BezierEase ease = bezierFor(Easing::EaseInOut);
+    CHECK(near(applyBezierEase(ease, 0.0f), 0.0f) && near(applyBezierEase(ease, 1.0f), 1.0f));
+    CHECK(std::fabs(applyBezierEase(ease, 0.5f) - 0.5f) < 0.03f);
+    CHECK(applyBezierEase(ease, 0.25f) < 0.25f); // slow start
+    AnimFloat a{0.0f};
+    a.setKey(0.0, 0.0f, Easing::Custom);
+    a.setKey(1.0, 10.0f);
+    a.keys[0].curve = {0, 0, 1, 1};
+    CHECK(near(a.valueAt(0.5), 5.0f));
+}
+
+void testMotionPath() {
+    AnimVec2 p{Vec2{0, 0}};
+    p.setKey(0.0, {0, 0}, Easing::Linear);
+    p.setKey(1.0, {100, 0}, Easing::Linear);
+    CHECK(near(p.valueAt(0.5).x, 50.0f) && near(p.valueAt(0.5).y, 0.0f)); // two keys: straight, even speed
+    p.setKey(2.0, {100, 100}, Easing::Linear);
+    const Vec2 auto1 = p.valueAt(0.5);
+    CHECK(auto1.y < -1.0f); // auto bezier bows out before the corner
+    p.keys[1].path = PathMode::Linear;
+    CHECK(near(p.valueAt(0.5).y, 0.0f)); // corner: straight segments
+    CHECK(near(p.valueAt(1.0).x, 100.0f) && near(p.valueAt(1.0).y, 0.0f));
+    p.keys[1].path = PathMode::Custom;
+    p.keys[1].inTangent = {0, -60};
+    p.keys[1].outTangent = {0, 60};
+    Project proj;
+    Layer& l = proj.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {0, 0}, 3.0));
+    l.transform.position = p;
+    l.transform.position.keys[0].easing = Easing::Custom;
+    l.transform.position.keys[0].curve = {0.1f, 0.7f, 0.2f, 1.0f};
+    Project q;
+    CHECK(deserializeProject(serializeProject(proj), q));
+    const auto& keys = q.comp.layers[0].transform.position.keys;
+    CHECK(keys.size() == 3 && keys[1].path == PathMode::Custom && near(keys[1].outTangent.y, 60.0f));
+    CHECK(keys[0].easing == Easing::Custom && near(keys[0].curve.y1, 0.7f));
+    CHECK(near(q.comp.layers[0].transform.position.valueAt(1.5).x, l.transform.position.valueAt(1.5).x));
+}
+
 void testTracksRoundTrip() {
     Project p;
     p.comp = makeSplitStack();
@@ -404,6 +444,8 @@ int main() {
         {"effects round trip", testEffectsRoundTrip},
         {"effect presets", testEffectPresets},
         {"camera", testCamera},
+        {"custom easing", testCustomEasing},
+        {"motion path", testMotionPath},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };

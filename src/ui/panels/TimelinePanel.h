@@ -71,6 +71,7 @@ private:
     float trackW_ = 0.0f;
     bool animatedOnly_ = false;
     bool openKeyMenu_ = false;
+    BezierEase curveEdit_; // curve being edited in the key menu
 
     std::set<uint64_t> expanded_; // track ids showing their property rows
     std::set<std::string> collapsedGroups_; // "track/group"

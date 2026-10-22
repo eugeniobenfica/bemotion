@@ -4,6 +4,7 @@ add_library(bemotion_core STATIC
     core/Effects.cpp
     core/Geometry.cpp
     core/History.cpp
+    core/Animated.cpp
     core/Layer.cpp
     core/Presets.cpp
     core/Project.cpp

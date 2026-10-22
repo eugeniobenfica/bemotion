@@ -94,8 +94,14 @@ public:
     void splitLayerAt(uint64_t id, double t);
     void deleteSelectedKeys();
     void setSelectedKeysEasing(Easing easing);
+    void setSelectedKeysCurve(const BezierEase& curve); // also switches them to Easing::Custom
+    void setSelectedKeysPath(PathMode mode);            // position-like (Vec2) keys only
+    bool selectionHasPathKeys();
+    BezierEase selectedKeysCurve(); // the first selected key's timing as a cubic-bezier
 
 private:
+    template <typename Fn>
+    void forEachSelectedKey(Fn&& fn); // fn(PropertyRef&, keyIndex)
     Layer& insertLayer(Layer layer);
     void pruneSelection();
     bool pendingCommit_ = false;

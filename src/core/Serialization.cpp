@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <type_traits>
 
 namespace bemotion {
 
@@ -32,7 +33,19 @@ json encodeAnimated(const Animated<T>& a) {
     j["value"] = encode(a.base);
     if (!a.keys.empty()) {
         json keys = json::array();
-        for (const auto& k : a.keys) keys.push_back({{"t", k.time}, {"v", encode(k.value)}, {"ease", easingId(k.easing)}});
+        for (const auto& k : a.keys) {
+            json kj = {{"t", k.time}, {"v", encode(k.value)}, {"ease", easingId(k.easing)}};
+            if (k.easing == Easing::Custom) kj["curve"] = {k.curve.x1, k.curve.y1, k.curve.x2, k.curve.y2};
+            if constexpr (std::is_same_v<T, Vec2>) {
+                if (k.path == PathMode::Linear) kj["path"] = "linear";
+                if (k.path == PathMode::Custom) {
+                    kj["path"] = "custom";
+                    kj["ti"] = encode(k.inTangent);
+                    kj["to"] = encode(k.outTangent);
+                }
+            }
+            keys.push_back(std::move(kj));
+        }
         j["keys"] = std::move(keys);
     }
     return j;
@@ -48,6 +61,14 @@ void decodeAnimated(const json& j, Animated<T>& a) {
             k.time = kj.value("t", 0.0);
             if (kj.contains("v")) decode(kj["v"], k.value);
             k.easing = easingFromId(kj.value("ease", "linear").c_str());
+            if (const auto c = kj.find("curve"); c != kj.end() && c->is_array() && c->size() == 4)
+                k.curve = {(*c)[0].get<float>(), (*c)[1].get<float>(), (*c)[2].get<float>(), (*c)[3].get<float>()};
+            if constexpr (std::is_same_v<T, Vec2>) {
+                const std::string path = kj.value("path", std::string("auto"));
+                k.path = path == "linear" ? PathMode::Linear : path == "custom" ? PathMode::Custom : PathMode::Auto;
+                if (kj.contains("ti")) decode(kj["ti"], k.inTangent);
+                if (kj.contains("to")) decode(kj["to"], k.outTangent);
+            }
             a.keys.push_back(k);
         }
         a.removeDuplicateKeys();

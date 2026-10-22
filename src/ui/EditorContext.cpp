@@ -260,4 +260,50 @@ void EditorContext::setSelectedKeysEasing(Easing easing) {
     touch();
 }
 
+template <typename Fn>
+void EditorContext::forEachSelectedKey(Fn&& fn) {
+    for (const auto& sel : selectedKeys) {
+        Layer* layer = comp().findLayer(sel.layerId);
+        if (!layer) continue;
+        auto props = layer->properties();
+        if (PropertyRef* p = layer->findProperty(props, sel.propertyId.c_str()))
+            if (const int i = p->anim->findKeyByUid(sel.keyUid); i >= 0) fn(*p, i);
+    }
+}
+
+void EditorContext::setSelectedKeysCurve(const BezierEase& curve) {
+    forEachSelectedKey([&](PropertyRef& p, int i) {
+        p.anim->setKeyEasing(i, Easing::Custom);
+        p.anim->setKeyCurve(i, curve);
+    });
+    touch();
+}
+
+void EditorContext::setSelectedKeysPath(PathMode mode) {
+    forEachSelectedKey([&](PropertyRef& p, int i) {
+        if (p.kind != PropertyKind::Vec2) return;
+        auto& keys = p.asVec2().keys;
+        Vec2 in, out;
+        pathTangents(keys, static_cast<size_t>(i), in, out); // custom starts from the current shape
+        keys[i].path = mode;
+        keys[i].inTangent = in;
+        keys[i].outTangent = out;
+    });
+    touch();
+}
+
+BezierEase EditorContext::selectedKeysCurve() {
+    std::optional<BezierEase> curve;
+    forEachSelectedKey([&](PropertyRef& p, int i) {
+        if (!curve) curve = p.anim->keyEasing(i) == Easing::Custom ? p.anim->keyCurve(i) : bezierFor(p.anim->keyEasing(i));
+    });
+    return curve.value_or(BezierEase{});
+}
+
+bool EditorContext::selectionHasPathKeys() {
+    bool any = false;
+    forEachSelectedKey([&](PropertyRef& p, int) { any = any || p.kind == PropertyKind::Vec2; });
+    return any;
+}
+
 } // namespace bemotion

@@ -245,6 +245,8 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                 ImGui::SetMouseCursor(i % 2 == 0 ? ImGuiMouseCursor_ResizeNWSE : ImGuiMouseCursor_ResizeNESW);
         if (near(mouse, h.rotate, kHandleRadius + 4)) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
     }
+    if (int key = -1, part = 0; hovered && drag_ == Drag::None && !spaceHeld() && pathHit(ctx, mouse, key, part))
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
 
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
         drag_ = Drag::None;
@@ -261,6 +263,11 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                 guideEdit_ = guide;
                 ImGui::OpenPopup("##guideEdit");
             }
+        } else if (int key = -1, part = 0; !additive && pathHit(ctx, mouse, key, part)) {
+            drag_ = part == 0 ? Drag::PathKey : Drag::PathHandle;
+            pathKey_ = key;
+            pathPart_ = part;
+            dragLayer_ = ctx.selected()->id;
         } else {
             if (haveHandles && !additive) {
                 for (int i = 0; i < 4; ++i)
@@ -381,9 +388,111 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
         layer->transform.rotation.set(t, r);
         break;
     }
+    case Drag::PathKey:
+    case Drag::PathHandle: {
+        Layer* layer = ctx.comp().findLayer(dragLayer_);
+        if (!layer || pathKey_ < 0 || pathKey_ >= layer->transform.position.keyCount()) break;
+        auto& keys = layer->transform.position.keys;
+        auto& k = keys[pathKey_];
+        const Vec2 p = view.screenToScene(mouse);
+        if (drag_ == Drag::PathKey) {
+            k.value = p;
+        } else {
+            Vec2 in, out;
+            pathTangents(keys, static_cast<size_t>(pathKey_), in, out);
+            const Vec2 handle = p - k.value;
+            // Handles stay mirrored (smooth) unless Alt breaks them into a corner.
+            const auto mirror = [&](Vec2 other) {
+                const float hl = handle.length(), ol = other.length();
+                if (io.KeyAlt || hl < 1e-4f) return other;
+                return handle * (-(ol > 1e-4f ? ol : hl) / hl); // opposite direction, own length
+            };
+            if (pathPart_ == 1) {
+                k.inTangent = handle;
+                k.outTangent = mirror(out);
+            } else {
+                k.outTangent = handle;
+                k.inTangent = mirror(in);
+            }
+            k.path = PathMode::Custom;
+        }
+        break;
+    }
     default: break;
     }
     ctx.touch();
+}
+
+// --- motion path ------------------------------------------------------------------
+
+Layer* ViewportPanel::pathLayer(EditorContext& ctx) const {
+    if (ctx.selection.size() != 1) return nullptr;
+    Layer* l = ctx.selected();
+    if (!l || l->locked || !l->visible || l->transform.position.keyCount() < 2) return nullptr;
+    return l;
+}
+
+bool ViewportPanel::pathHit(EditorContext& ctx, Vec2 screen, int& key, int& part) const {
+    Layer* l = pathLayer(ctx);
+    if (!l) return false;
+    const render::View view = sceneView();
+    const auto& keys = l->transform.position.keys;
+    const int n = static_cast<int>(keys.size());
+    for (int i = 0; i < n; ++i) {
+        Vec2 in, out;
+        pathTangents(keys, static_cast<size_t>(i), in, out);
+        if (i > 0 && near(screen, view.sceneToScreen(keys[i].value + in), kHandleRadius + 2)) return key = i, part = 1, true;
+        if (i + 1 < n && near(screen, view.sceneToScreen(keys[i].value + out), kHandleRadius + 2)) return key = i, part = 2, true;
+    }
+    for (int i = 0; i < n; ++i) {
+        // A key at the playhead sits on the layer itself: let the normal move handle it.
+        if (std::fabs(keys[i].time - ctx.time) < kTimeEpsilon) continue;
+        if (near(screen, view.sceneToScreen(keys[i].value), kHandleRadius + 2)) return key = i, part = 0, true;
+    }
+    return false;
+}
+
+void ViewportPanel::drawMotionPath(EditorContext& ctx) {
+    Layer* l = pathLayer(ctx);
+    if (!l) return;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const render::View view = sceneView();
+    const Composition& comp = ctx.comp();
+    const auto& keys = l->transform.position.keys;
+    const int n = static_cast<int>(keys.size());
+    const ImU32 line = IM_COL32(232, 185, 49, 150);
+
+    // The curve itself.
+    for (int i = 0; i + 1 < n; ++i) {
+        const PathSegment seg = pathSegment(keys, static_cast<size_t>(i));
+        constexpr int kSteps = 32;
+        ImVec2 pts[kSteps + 1];
+        for (int s = 0; s <= kSteps; ++s) pts[s] = im(view.sceneToScreen(seg.at(static_cast<float>(s) / kSteps)));
+        dl->AddPolyline(pts, kSteps + 1, line, 0, 1.5f);
+    }
+    // One dot per frame: the spacing shows the speed.
+    const int f0 = comp.frameAt(keys.front().time), f1 = comp.frameAt(keys.back().time);
+    for (int f = f0; f <= f1; ++f)
+        dl->AddCircleFilled(im(view.sceneToScreen(l->transform.position.valueAt(comp.timeOfFrame(f)))), 1.6f,
+                            IM_COL32(255, 255, 255, 120));
+    // Keys and their handles.
+    for (int i = 0; i < n; ++i) {
+        const Vec2 k = view.sceneToScreen(keys[i].value);
+        Vec2 in, out;
+        pathTangents(keys, static_cast<size_t>(i), in, out);
+        const bool custom = keys[i].path == PathMode::Custom;
+        const ImU32 handleCol = custom ? theme::kAccent : IM_COL32(255, 255, 255, 140);
+        for (int side = 0; side < 2; ++side) {
+            if ((side == 0 && i == 0) || (side == 1 && i + 1 == n)) continue;
+            const Vec2 h = view.sceneToScreen(keys[i].value + (side == 0 ? in : out));
+            dl->AddLine(im(k), im(h), IM_COL32(255, 255, 255, 70), 1.0f);
+            dl->AddCircleFilled(im(h), 3.5f, handleCol);
+        }
+        const bool current = std::fabs(keys[i].time - ctx.time) < kTimeEpsilon;
+        const ImVec2 a(k.x - 4, k.y - 4), b(k.x + 4, k.y + 4);
+        dl->AddRectFilled(a, b, current ? theme::kAccent : theme::kBgDeep);
+        dl->AddRect(a, b, theme::kAccent, 0.0f, 0, 1.5f);
+    }
 }
 
 // --- drawing ------------------------------------------------------------------------
@@ -396,7 +505,8 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
     Composition& comp = ctx.comp();
 
     // Hover outline for the layer under the cursor.
-    if (drag_ == Drag::None && hovered && !spaceHeld()) {
+    int pathKey = -1, pathPart = 0;
+    if (drag_ == Drag::None && hovered && !spaceHeld() && !pathHit(ctx, vec(io.MousePos), pathKey, pathPart)) {
         const uint64_t hover = render::hitTest(comp, t, view.screenToScene(vec(io.MousePos)), !throughCamera_);
         Handles h{};
         if (hover && !ctx.isSelected(hover) && computeHandles(*comp.findLayer(hover), t, view, h))
@@ -412,6 +522,8 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
             const ImVec2 at(std::max(h.screen[0].x + 6, canvasMin_.x + kRuler + 6), std::max(h.screen[0].y + 4, canvasMin_.y + kRuler + 4));
             dl->AddText(at, IM_COL32(64, 196, 255, 255), l.name.c_str()); // kept clear of the rulers
         }
+
+    drawMotionPath(ctx);
 
     // Selection outlines.
     const auto selected = ctx.selectedLayers();

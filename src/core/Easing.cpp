@@ -2,6 +2,7 @@
 
 #include "core/Math.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -33,6 +34,7 @@ constexpr EasingInfo kInfo[] = {
     {"elastic", "Elastic"},
     {"bounce", "Bounce"},
     {"hold", "Hold"},
+    {"custom", "Custom Curve"},
 };
 static_assert(sizeof(kInfo) / sizeof(kInfo[0]) == static_cast<int>(Easing::Count));
 
@@ -59,9 +61,51 @@ float applyEasing(Easing easing, float t) {
     }
     case Easing::Bounce: return easeOutBounce(t);
     case Easing::Hold: return t >= 1.0f ? 1.0f : 0.0f;
+    case Easing::Custom: return applyBezierEase(BezierEase{}, t);
     case Easing::Count: break;
     }
     return t;
+}
+
+float applyEasing(Easing easing, const BezierEase& curve, float t) {
+    return easing == Easing::Custom ? applyBezierEase(curve, t) : applyEasing(easing, t);
+}
+
+float applyBezierEase(const BezierEase& c, float t) {
+    t = clamp01(t);
+    const float x1 = std::clamp(c.x1, 0.0f, 1.0f), x2 = std::clamp(c.x2, 0.0f, 1.0f);
+    auto bez = [](float a, float b, float s) {
+        const float u = 1.0f - s;
+        return 3.0f * u * u * s * a + 3.0f * u * s * s * b + s * s * s;
+    };
+    // Solve x(s) = t: Newton steps, falling back to bisection (x is monotonic).
+    float s = t;
+    for (int i = 0; i < 6; ++i) {
+        const float u = 1.0f - s;
+        const float dx = 3.0f * u * u * x1 + 6.0f * u * s * (x2 - x1) + 3.0f * s * s * (1.0f - x2);
+        if (std::fabs(dx) < 1e-5f) break;
+        s = std::clamp(s - (bez(x1, x2, s) - t) / dx, 0.0f, 1.0f);
+    }
+    if (std::fabs(bez(x1, x2, s) - t) > 1e-4f) {
+        float lo = 0.0f, hi = 1.0f;
+        for (int i = 0; i < 30; ++i) {
+            s = (lo + hi) * 0.5f;
+            (bez(x1, x2, s) < t ? lo : hi) = s;
+        }
+    }
+    return bez(c.y1, c.y2, s);
+}
+
+BezierEase bezierFor(Easing easing) {
+    switch (easing) {
+    case Easing::Linear: return {0.0f, 0.0f, 1.0f, 1.0f};
+    case Easing::EaseIn: return {0.55f, 0.055f, 0.675f, 0.19f};
+    case Easing::EaseOut: return {0.215f, 0.61f, 0.355f, 1.0f};
+    case Easing::EaseInOut: return {0.645f, 0.045f, 0.355f, 1.0f};
+    case Easing::BackIn: return {0.6f, -0.28f, 0.735f, 0.045f};
+    case Easing::BackOut: return {0.175f, 0.885f, 0.32f, 1.275f};
+    default: return {};
+    }
 }
 
 const char* easingLabel(Easing easing) {

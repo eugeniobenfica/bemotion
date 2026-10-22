@@ -46,14 +46,17 @@ constexpr const char* kBuiltinPresets[] = {
 };
 
 
-void setKey(const PropertyRef& p, double t, const std::vector<float>& v, Easing easing) {
+void setKey(const PropertyRef& p, double t, const std::vector<float>& v, Easing easing, const BezierEase& curve) {
     switch (p.kind) {
     case PropertyKind::Float: p.asFloat().setKey(t, v[0], easing); break;
     case PropertyKind::Vec2: p.asVec2().setKey(t, {v[0], v[1]}, easing); break;
     case PropertyKind::Color: p.asColor().setKey(t, {v[0], v[1], v[2], v[3]}, easing); break;
     }
     // setKey keeps an existing key's easing: make the preset's curve win.
-    if (const int i = p.anim->findKey(t); i >= 0) p.anim->setKeyEasing(i, easing);
+    if (const int i = p.anim->findKey(t); i >= 0) {
+        p.anim->setKeyEasing(i, easing);
+        p.anim->setKeyCurve(i, curve);
+    }
 }
 
 // A rest value that would leave the layer invisible (e.g. after a previous
@@ -118,6 +121,10 @@ bool parsePreset(const std::string& text, AnimationPreset& out, std::string* err
                 PresetKey k;
                 k.t = std::clamp(kj.value("t", 0.0), 0.0, 1.0);
                 k.easing = easingFromId(kj.value("ease", std::string("ease_in_out")).c_str());
+                if (const auto c = kj.find("curve"); c != kj.end()) {
+                    const std::vector<float> f = readFloats(*c);
+                    if (f.size() == 4) k.curve = {f[0], f[1], f[2], f[3]};
+                }
                 const json& v = kj.contains("v") ? kj["v"] : json("rest");
                 if (v.is_string()) k.kind = PresetKey::Kind::Rest;
                 else if (v.is_object() && v.contains("offset")) k.kind = PresetKey::Kind::Offset, k.value = readFloats(v["offset"]);
@@ -156,7 +163,9 @@ std::string presetToJson(const AnimationPreset& p) {
             case PresetKey::Kind::Mul: v = {{"mul", writeFloats(k.value)}}; break;
             case PresetKey::Kind::Absolute: v = writeFloats(k.value); break;
             }
-            keys.push_back({{"t", k.t}, {"v", v}, {"ease", easingId(k.easing)}});
+            json kj = {{"t", k.t}, {"v", v}, {"ease", easingId(k.easing)}};
+            if (k.easing == Easing::Custom) kj["curve"] = {k.curve.x1, k.curve.y1, k.curve.x2, k.curve.y2};
+            keys.push_back(std::move(kj));
         }
         tracks.push_back({{"property", t.property}, {"keys", keys}});
     }
@@ -208,7 +217,7 @@ void applyPreset(const AnimationPreset& preset, Layer& layer, double time) {
                 else if (k.kind == PresetKey::Kind::Offset) v[c] = rest[c] + arg[c];
                 else if (k.kind == PresetKey::Kind::Mul) v[c] = rest[c] * arg[c];
             }
-            setKey(*p, t0 + k.t * dur, v, k.easing);
+            setKey(*p, t0 + k.t * dur, v, k.easing, k.curve);
         }
     }
 }
@@ -238,6 +247,7 @@ AnimationPreset presetFromLayer(Layer& layer, double start, double end, const st
             k.t = (kt - first) / preset.duration;
             k.value = propertyValue(p, kt);
             k.easing = p.anim->keyEasing(i);
+            k.curve = p.anim->keyCurve(i);
             track.keys.push_back(std::move(k));
         }
         if (!track.keys.empty()) preset.tracks.push_back(std::move(track));

@@ -32,6 +32,7 @@ struct PresetKey {
     Kind kind = Kind::Absolute;
     std::vector<float> value; // 1, 2 or 4 components
     Easing easing = Easing::EaseInOut;
+    BezierEase curve; // when easing is Custom ("curve": [x1, y1, x2, y2])
 };
 
 struct PresetTrack {
