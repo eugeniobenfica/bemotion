@@ -26,6 +26,7 @@ inline constexpr const char* kObjectPayload = "BEMOTION_OBJECT";
 class ViewportPanel {
 public:
     static constexpr const char* kWindowName = "Viewport";
+    bool open = true; // closed with the tab's x, reopened from View > Panels
 
     void draw(EditorContext& ctx);
 

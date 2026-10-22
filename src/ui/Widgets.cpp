@@ -4,6 +4,8 @@
 #include "render/Fonts.h"
 #include "ui/Theme.h"
 
+#include <imgui_internal.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -176,6 +178,48 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         dl->AddPolyline(tray, 4, col, ImDrawFlags_None, th);
         break;
     }
+    case Icon::Reset: {
+        const float r = h * 0.62f;
+        dl->PathArcTo(c, r, kPi * 0.15f, kPi * 1.75f);
+        dl->PathStroke(col, 0, th);
+        const ImVec2 tip(c.x + std::cos(kPi * 1.75f) * r, c.y + std::sin(kPi * 1.75f) * r);
+        dl->AddTriangleFilled(ImVec2(tip.x + h * 0.38f, tip.y - h * 0.05f), ImVec2(tip.x - h * 0.08f, tip.y - h * 0.38f),
+                              ImVec2(tip.x - h * 0.02f, tip.y + h * 0.3f), col);
+        break;
+    }
+    case Icon::Magnet: {
+        const float r = h * 0.5f;
+        dl->PathArcTo(ImVec2(c.x, c.y + h * 0.05f), r, 0.0f, kPi);
+        dl->PathStroke(col, 0, th * 1.8f);
+        dl->AddLine(ImVec2(c.x - r, c.y + h * 0.05f), ImVec2(c.x - r, c.y - h * 0.75f), col, th * 1.8f);
+        dl->AddLine(ImVec2(c.x + r, c.y + h * 0.05f), ImVec2(c.x + r, c.y - h * 0.75f), col, th * 1.8f);
+        dl->AddLine(ImVec2(c.x - r - th, c.y - h * 0.42f), ImVec2(c.x - r + th, c.y - h * 0.42f), theme::kBgPanel, th);
+        dl->AddLine(ImVec2(c.x + r - th, c.y - h * 0.42f), ImVec2(c.x + r + th, c.y - h * 0.42f), theme::kBgPanel, th);
+        break;
+    }
+    case Icon::Gear: {
+        for (int i = 0; i < 8; ++i) {
+            const float a = kPi * 2.0f * i / 8.0f;
+            dl->AddLine(ImVec2(c.x + std::cos(a) * h * 0.45f, c.y + std::sin(a) * h * 0.45f),
+                        ImVec2(c.x + std::cos(a) * h * 0.85f, c.y + std::sin(a) * h * 0.85f), col, th * 1.6f);
+        }
+        dl->AddCircle(c, h * 0.52f, col, 0, th * 1.4f);
+        dl->AddCircleFilled(c, h * 0.18f, col);
+        break;
+    }
+    case Icon::Camera: {
+        dl->AddRect(ImVec2(c.x - h * 0.85f, c.y - h * 0.45f), ImVec2(c.x + h * 0.35f, c.y + h * 0.5f), col, 2.0f, 0, th);
+        dl->AddTriangleFilled(ImVec2(c.x + h * 0.4f, c.y), ImVec2(c.x + h * 0.9f, c.y - h * 0.4f),
+                              ImVec2(c.x + h * 0.9f, c.y + h * 0.45f), col);
+        dl->AddCircle(ImVec2(c.x - h * 0.25f, c.y + h * 0.02f), h * 0.2f, col, 0, th);
+        break;
+    }
+    case Icon::Plugin: {
+        dl->AddRect(ImVec2(c.x - h * 0.6f, c.y - h * 0.35f), ImVec2(c.x + h * 0.6f, c.y + h * 0.75f), col, 3.0f, 0, th);
+        dl->AddLine(ImVec2(c.x - h * 0.28f, c.y - h * 0.35f), ImVec2(c.x - h * 0.28f, c.y - h * 0.85f), col, th * 1.4f);
+        dl->AddLine(ImVec2(c.x + h * 0.28f, c.y - h * 0.35f), ImVec2(c.x + h * 0.28f, c.y - h * 0.85f), col, th * 1.4f);
+        break;
+    }
     case Icon::ZoomIn:
     case Icon::ZoomOut: {
         const ImVec2 lens(c.x - h * 0.15f, c.y - h * 0.15f);
@@ -274,6 +318,12 @@ std::string formatTimecode(double seconds, double fps) {
     std::snprintf(buf, sizeof(buf), "%02lld:%02lld:%02lld:%02lld", totalSec / 3600, (totalSec / 60) % 60, totalSec % 60,
                   frames);
     return buf;
+}
+
+void nextPanelWindowClass() {
+    ImGuiWindowClass wc;
+    wc.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoCloseButton;
+    ImGui::SetNextWindowClass(&wc);
 }
 
 } // namespace bemotion::ui

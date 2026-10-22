@@ -87,10 +87,12 @@ bool spaceHeld() { return ImGui::IsKeyDown(ImGuiKey_Space) && !ImGui::GetIO().Wa
 } // namespace
 
 void ViewportPanel::draw(EditorContext& ctx) {
+    if (!open) return;
+    ui::nextPanelWindowClass();
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    const bool open = ImGui::Begin(kWindowName, nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    const bool visible = ImGui::Begin(kWindowName, &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleVar();
-    if (!open) {
+    if (!visible) {
         ImGui::End();
         return;
     }

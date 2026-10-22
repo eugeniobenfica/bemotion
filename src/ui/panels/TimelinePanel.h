@@ -16,6 +16,7 @@ namespace bemotion {
 class TimelinePanel {
 public:
     static constexpr const char* kWindowName = "Timeline";
+    bool open = true; // closed with the tab's x, reopened from View > Panels
     void draw(EditorContext& ctx);
 
 private:
@@ -51,6 +52,8 @@ private:
     void beginMarquee(EditorContext& ctx);
     void updateMarquee(EditorContext& ctx, ImDrawList* dl);
     void drawDropIndicator(ImDrawList* dl, const DropTarget& target, float x0, float width) const;
+    // Collapsible "Transform" / "Shape" / ... header; returns whether it is open.
+    bool drawGroupRow(uint64_t track, const char* group, float x0, float width);
     void drawPropertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop, float x0, float width);
     void drawKeyContextMenu(EditorContext& ctx);
 
@@ -70,6 +73,7 @@ private:
     bool openKeyMenu_ = false;
 
     std::set<uint64_t> expanded_; // track ids showing their property rows
+    std::set<std::string> collapsedGroups_; // "track/group"
     uint64_t renaming_ = 0;       // layer id being renamed
     bool focusRename_ = false;
 

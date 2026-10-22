@@ -138,4 +138,35 @@ Layer makeTextLayer(const std::string& text, Vec2 position, double duration) {
     return l;
 }
 
+std::vector<float> propertyValue(const PropertyRef& p, double t) {
+    switch (p.kind) {
+    case PropertyKind::Float: return {p.asFloat().valueAt(t)};
+    case PropertyKind::Vec2: {
+        const Vec2 v = p.asVec2().valueAt(t);
+        return {v.x, v.y};
+    }
+    case PropertyKind::Color: {
+        const Color c = p.asColor().valueAt(t);
+        return {c.r, c.g, c.b, c.a};
+    }
+    }
+    return {};
+}
+
+void setPropertyValue(const PropertyRef& p, double t, const std::vector<float>& v) {
+    switch (p.kind) {
+    case PropertyKind::Float: p.asFloat().set(t, v.at(0)); break;
+    case PropertyKind::Vec2: p.asVec2().set(t, {v.at(0), v.at(1)}); break;
+    case PropertyKind::Color: p.asColor().set(t, {v.at(0), v.at(1), v.at(2), v.at(3)}); break;
+    }
+}
+
+std::vector<float> defaultPropertyValue(const Layer& layer, const char* propertyId, Vec2 compCenter) {
+    Layer fresh = layer.type == LayerType::Text ? makeTextLayer(layer.text.text, compCenter, 1.0)
+                                                : makeShapeLayer(layer.shape.kind, compCenter, 1.0);
+    auto props = fresh.properties();
+    if (const PropertyRef* p = fresh.findProperty(props, propertyId)) return propertyValue(*p, 0.0);
+    return {};
+}
+
 } // namespace bemotion

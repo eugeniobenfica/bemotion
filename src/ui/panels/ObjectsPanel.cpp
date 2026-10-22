@@ -31,7 +31,9 @@ void dragSource(int kind, ui::Icon icon, const char* label) {
 } // namespace
 
 void ObjectsPanel::draw(EditorContext& ctx) {
-    if (!ImGui::Begin(kWindowName)) {
+    if (!open) return;
+    ui::nextPanelWindowClass();
+    if (!ImGui::Begin(kWindowName, &open)) {
         ImGui::End();
         return;
     }

@@ -3,6 +3,7 @@
 #include "core/Animated.h"
 #include "core/Geometry.h"
 #include "core/History.h"
+#include "core/Presets.h"
 #include "core/Project.h"
 #include "core/Serialization.h"
 
@@ -219,7 +220,7 @@ void testTimeShiftLimits() {
     Composition c = makeSplitStack(); // A: 0..5, a: 5..10 on one track
     double lo = 0, hi = 0;
     c.timeShiftLimits({idOf(c, "A")}, lo, hi);
-    CHECK(std::isinf(lo) && lo < 0);
+    CHECK(near(static_cast<float>(lo), 0.0f)); // A starts at 0: cannot move earlier
     CHECK(near(static_cast<float>(hi), 0.0f)); // touching "a" already
     c.findLayer(idOf(c, "a"))->inPoint = 7.0;
     c.timeShiftLimits({idOf(c, "A")}, lo, hi);
@@ -227,6 +228,57 @@ void testTimeShiftLimits() {
     double prevOut = 0, nextIn = 0;
     c.neighborBounds(idOf(c, "a"), prevOut, nextIn);
     CHECK(near(static_cast<float>(prevOut), 5.0f) && std::isinf(nextIn));
+}
+
+const AnimationPreset& builtin(const char* name) {
+    static const auto presets = builtinPresets();
+    for (const auto& p : presets)
+        if (p.name == name) return p;
+    static AnimationPreset none;
+    return none;
+}
+
+void testPresetsStack() {
+    Layer l = makeShapeLayer(ShapeKind::Rectangle, {500, 500}, 10.0);
+    // Fade in, then fade out later: the fade in must still reach 100%.
+    applyPreset(builtin("Fade In"), l, 1.0);
+    applyPreset(builtin("Fade Out"), l, 5.0);
+    CHECK(near(l.transform.opacity.valueAt(1.0), 0.0f));
+    CHECK(near(l.transform.opacity.valueAt(3.0), 100.0f));
+    CHECK(near(l.transform.opacity.valueAt(9.0), 0.0f));
+    // Applying a fade in after a fade out (opacity rests at 0) still fades to 100%.
+    applyPreset(builtin("Fade In"), l, 7.0);
+    CHECK(near(l.transform.opacity.valueAt(7.6), 100.0f));
+    // Re-applying at the same time replaces instead of piling up keys.
+    const int keys = l.transform.opacity.keyCount();
+    applyPreset(builtin("Fade In"), l, 7.0);
+    CHECK(l.transform.opacity.keyCount() == keys);
+    // Pop In after Pop Out keeps a visible scale.
+    applyPreset(builtin("Pop Out"), l, 2.0);
+    applyPreset(builtin("Pop In"), l, 4.0);
+    CHECK(near(l.transform.scale.valueAt(4.6).x, 100.0f));
+    // Presets stay inside the clip.
+    l.outPoint = 5.0;
+    Layer m = l;
+    applyPreset(builtin("Spin"), m, 4.9);
+    CHECK(m.transform.rotation.keyTime(m.transform.rotation.keyCount() - 1) <= 5.0 + 1e-6);
+}
+
+void testPresetJsonRoundTrip() {
+    for (const auto& p : builtinPresets()) {
+        AnimationPreset q;
+        CHECK(parsePreset(presetToJson(p), q));
+        CHECK(presetToJson(q) == presetToJson(p));
+    }
+    AnimationPreset bad;
+    std::string err;
+    CHECK(!parsePreset("{\"name\":\"x\"}", bad, &err) && !err.empty());
+}
+
+void testDefaultValues() {
+    Layer l = makeShapeLayer(ShapeKind::Star, {10, 10}, 5.0);
+    CHECK(defaultPropertyValue(l, "opacity", {960, 540}) == std::vector<float>{100.0f});
+    CHECK((defaultPropertyValue(l, "position", {960, 540}) == std::vector<float>{960.0f, 540.0f}));
 }
 
 void testTracksRoundTrip() {
@@ -280,6 +332,9 @@ int main() {
         {"clips between tracks", testClipsBetweenTracks},
         {"time shift limits", testTimeShiftLimits},
         {"tracks round trip", testTracksRoundTrip},
+        {"presets stack", testPresetsStack},
+        {"preset json round trip", testPresetJsonRoundTrip},
+        {"default values", testDefaultValues},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };

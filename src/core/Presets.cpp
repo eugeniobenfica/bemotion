@@ -1,97 +1,248 @@
 #include "core/Presets.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace bemotion {
 
-namespace {
-constexpr double kDuration = 0.6; // seconds
+using json = nlohmann::json;
 
-// Value the property should land on: what it shows at `t` right now.
-template <typename T>
-T restingValue(const Animated<T>& a, double t) {
-    return a.valueAt(t);
+namespace {
+
+// --- built-in presets (same format as imported files) --------------------------
+
+constexpr const char* kBuiltinPresets[] = {
+    R"({"name":"Fade In","category":"Entrance","duration":0.6,"tracks":[
+        {"property":"opacity","keys":[{"t":0,"v":0,"ease":"ease_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Pop In","category":"Entrance","duration":0.6,"tracks":[
+        {"property":"scale","keys":[{"t":0,"v":{"mul":0},"ease":"back_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Slide Up","category":"Entrance","duration":0.6,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":{"offset":[0,160]},"ease":"ease_out"},{"t":1,"v":"rest"}]},
+        {"property":"opacity","keys":[{"t":0,"v":0,"ease":"ease_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Slide In","category":"Entrance","duration":0.6,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":{"offset":[-240,0]},"ease":"ease_out"},{"t":1,"v":"rest"}]},
+        {"property":"opacity","keys":[{"t":0,"v":0,"ease":"ease_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Drop In","category":"Entrance","duration":0.9,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":{"offset":[0,-220]},"ease":"bounce"},{"t":1,"v":"rest"}]},
+        {"property":"opacity","keys":[{"t":0,"v":0,"ease":"ease_out"},{"t":0.3,"v":"rest"}]}]})",
+    R"({"name":"Typewriter","category":"Entrance","applies_to":"text","duration":0.3,"per_glyph":0.05,"tracks":[
+        {"property":"reveal","keys":[{"t":0,"v":0,"ease":"linear"},{"t":1,"v":100}]}]})",
+    R"({"name":"Draw On","category":"Entrance","applies_to":"shape","duration":1.2,"enable_stroke":true,"tracks":[
+        {"property":"trim_end","keys":[{"t":0,"v":0,"ease":"ease_in_out"},{"t":1,"v":100}]}]})",
+    R"({"name":"Pulse","category":"Emphasis","duration":0.5,"tracks":[
+        {"property":"scale","keys":[{"t":0,"v":"rest","ease":"ease_in_out"},{"t":0.5,"v":{"mul":1.15},"ease":"ease_in_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Spin","category":"Emphasis","duration":1.2,"tracks":[
+        {"property":"rotation","keys":[{"t":0,"v":"rest","ease":"ease_in_out"},{"t":1,"v":{"offset":360}}]}]})",
+    R"({"name":"Fade Out","category":"Exit","duration":0.6,"tracks":[
+        {"property":"opacity","keys":[{"t":0,"v":"rest","ease":"ease_in"},{"t":1,"v":0}]}]})",
+    R"({"name":"Pop Out","category":"Exit","duration":0.5,"tracks":[
+        {"property":"scale","keys":[{"t":0,"v":"rest","ease":"back_in"},{"t":1,"v":{"mul":0}}]}]})",
+    R"({"name":"Slide Out","category":"Exit","duration":0.6,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":"rest","ease":"ease_in"},{"t":1,"v":{"offset":[240,0]}}]},
+        {"property":"opacity","keys":[{"t":0,"v":"rest","ease":"ease_in"},{"t":1,"v":0}]}]})",
+};
+
+
+void setKey(const PropertyRef& p, double t, const std::vector<float>& v, Easing easing) {
+    switch (p.kind) {
+    case PropertyKind::Float: p.asFloat().setKey(t, v[0], easing); break;
+    case PropertyKind::Vec2: p.asVec2().setKey(t, {v[0], v[1]}, easing); break;
+    case PropertyKind::Color: p.asColor().setKey(t, {v[0], v[1], v[2], v[3]}, easing); break;
+    }
+    // setKey keeps an existing key's easing: make the preset's curve win.
+    if (const int i = p.anim->findKey(t); i >= 0) p.anim->setKeyEasing(i, easing);
 }
+
+// A rest value that would leave the layer invisible (e.g. after a previous
+// fade/pop out) is useless as a target: fall back to the natural one.
+std::vector<float> usableRest(const char* id, std::vector<float> v) {
+    if ((!std::strcmp(id, "opacity") || !std::strcmp(id, "reveal") || !std::strcmp(id, "trim_end")) && v[0] < 1.0f)
+        v[0] = 100.0f;
+    if (!std::strcmp(id, "scale") && std::fabs(v[0]) < 1.0f && std::fabs(v[1]) < 1.0f) v = {100.0f, 100.0f};
+    return v;
+}
+
+std::vector<float> broadcast(std::vector<float> v, int n) {
+    if (v.empty()) v.push_back(0.0f);
+    while (static_cast<int>(v.size()) < n) v.push_back(v.size() == 3 && n == 4 ? 1.0f : v.back());
+    v.resize(n);
+    return v;
+}
+
+std::vector<float> readFloats(const json& j) {
+    std::vector<float> v;
+    if (j.is_number()) v.push_back(j.get<float>());
+    else if (j.is_array())
+        for (const auto& x : j)
+            if (x.is_number()) v.push_back(x.get<float>());
+    return v;
+}
+
+json writeFloats(const std::vector<float>& v) {
+    if (v.size() == 1) return v[0];
+    return json(v);
+}
+
 } // namespace
 
-const char* presetLabel(Preset preset) {
-    switch (preset) {
-    case Preset::FadeIn: return "Fade In";
-    case Preset::FadeOut: return "Fade Out";
-    case Preset::PopIn: return "Pop In";
-    case Preset::SlideUp: return "Slide Up";
-    case Preset::SlideLeft: return "Slide In";
-    case Preset::Spin: return "Spin";
-    case Preset::Typewriter: return "Typewriter";
-    case Preset::DrawOn: return "Draw On";
-    case Preset::Count: break;
-    }
-    return "?";
+std::vector<AnimationPreset> builtinPresets() {
+    static const std::vector<AnimationPreset> presets = [] {
+        std::vector<AnimationPreset> out;
+        for (const char* text : kBuiltinPresets) {
+            AnimationPreset p;
+            if (parsePreset(text, p)) out.push_back(std::move(p));
+        }
+        return out;
+    }();
+    return presets;
 }
 
-bool presetAppliesTo(Preset preset, const Layer& layer) {
-    switch (preset) {
-    case Preset::Typewriter: return layer.type == LayerType::Text;
-    case Preset::DrawOn: return layer.type == LayerType::Shape;
-    default: return true;
+bool parsePreset(const std::string& text, AnimationPreset& out, std::string* error) {
+    try {
+        const json j = json::parse(text);
+        AnimationPreset p;
+        p.name = j.value("name", std::string());
+        if (p.name.empty()) throw std::runtime_error("The preset has no name.");
+        p.category = j.value("category", std::string("Custom"));
+        p.appliesTo = j.value("applies_to", std::string("any"));
+        p.duration = std::max(0.01, j.value("duration", 0.6));
+        p.perGlyph = std::max(0.0, j.value("per_glyph", 0.0));
+        p.enableStroke = j.value("enable_stroke", false);
+        for (const auto& tj : j.value("tracks", json::array())) {
+            PresetTrack track;
+            track.property = tj.value("property", std::string());
+            for (const auto& kj : tj.value("keys", json::array())) {
+                PresetKey k;
+                k.t = std::clamp(kj.value("t", 0.0), 0.0, 1.0);
+                k.easing = easingFromId(kj.value("ease", std::string("ease_in_out")).c_str());
+                const json& v = kj.contains("v") ? kj["v"] : json("rest");
+                if (v.is_string()) k.kind = PresetKey::Kind::Rest;
+                else if (v.is_object() && v.contains("offset")) k.kind = PresetKey::Kind::Offset, k.value = readFloats(v["offset"]);
+                else if (v.is_object() && v.contains("mul")) k.kind = PresetKey::Kind::Mul, k.value = readFloats(v["mul"]);
+                else k.value = readFloats(v);
+                track.keys.push_back(std::move(k));
+            }
+            std::sort(track.keys.begin(), track.keys.end(), [](const PresetKey& a, const PresetKey& b) { return a.t < b.t; });
+            if (!track.property.empty() && !track.keys.empty()) p.tracks.push_back(std::move(track));
+        }
+        if (p.tracks.empty()) throw std::runtime_error("The preset has no keyframes.");
+        out = std::move(p);
+        return true;
+    } catch (const std::exception& e) {
+        if (error) *error = e.what();
+        return false;
     }
 }
 
-void applyPreset(Preset preset, Layer& layer, double t) {
-    auto& tr = layer.transform;
-    const double t1 = t + kDuration;
-    switch (preset) {
-    case Preset::FadeIn: {
-        const float target = std::max(1.0f, restingValue(tr.opacity, t1));
-        tr.opacity.setKey(t, 0.0f, Easing::EaseOut);
-        tr.opacity.setKey(t1, target);
-        break;
+std::string presetToJson(const AnimationPreset& p) {
+    json j;
+    j["name"] = p.name;
+    j["category"] = p.category;
+    j["applies_to"] = p.appliesTo;
+    j["duration"] = p.duration;
+    if (p.perGlyph > 0) j["per_glyph"] = p.perGlyph;
+    if (p.enableStroke) j["enable_stroke"] = true;
+    json tracks = json::array();
+    for (const auto& t : p.tracks) {
+        json keys = json::array();
+        for (const auto& k : t.keys) {
+            json v;
+            switch (k.kind) {
+            case PresetKey::Kind::Rest: v = "rest"; break;
+            case PresetKey::Kind::Offset: v = {{"offset", writeFloats(k.value)}}; break;
+            case PresetKey::Kind::Mul: v = {{"mul", writeFloats(k.value)}}; break;
+            case PresetKey::Kind::Absolute: v = writeFloats(k.value); break;
+            }
+            keys.push_back({{"t", k.t}, {"v", v}, {"ease", easingId(k.easing)}});
+        }
+        tracks.push_back({{"property", t.property}, {"keys", keys}});
     }
-    case Preset::FadeOut: {
-        const float from = restingValue(tr.opacity, t);
-        tr.opacity.setKey(t, from, Easing::EaseIn);
-        tr.opacity.setKey(t1, 0.0f);
-        break;
-    }
-    case Preset::PopIn: {
-        const Vec2 target = restingValue(tr.scale, t1);
-        tr.scale.setKey(t, {0.0f, 0.0f}, Easing::BackOut);
-        tr.scale.setKey(t1, target);
-        break;
-    }
-    case Preset::SlideUp:
-    case Preset::SlideLeft: {
-        const Vec2 target = restingValue(tr.position, t1);
-        const Vec2 offset = preset == Preset::SlideUp ? Vec2{0.0f, 160.0f} : Vec2{-240.0f, 0.0f};
-        tr.position.setKey(t, target + offset, Easing::EaseOut);
-        tr.position.setKey(t1, target);
-        const float opacity = std::max(1.0f, restingValue(tr.opacity, t1));
-        tr.opacity.setKey(t, 0.0f, Easing::EaseOut);
-        tr.opacity.setKey(t1, opacity);
-        break;
-    }
-    case Preset::Spin: {
-        const float from = restingValue(tr.rotation, t);
-        tr.rotation.setKey(t, from, Easing::EaseInOut);
-        tr.rotation.setKey(t + kDuration * 2.0, from + 360.0f);
-        break;
-    }
-    case Preset::Typewriter: {
+    j["tracks"] = tracks;
+    return j.dump(2);
+}
+
+bool presetAppliesTo(const AnimationPreset& p, const Layer& layer) {
+    if (p.appliesTo == "text") return layer.type == LayerType::Text;
+    if (p.appliesTo == "shape") return layer.type == LayerType::Shape;
+    return true;
+}
+
+double presetDuration(const AnimationPreset& p, const Layer& layer) {
+    double d = p.duration;
+    if (p.perGlyph > 0 && layer.type == LayerType::Text) {
         int glyphs = 0;
         for (unsigned char c : layer.text.text)
             if ((c & 0xC0) != 0x80 && c != '\n') ++glyphs;
-        layer.text.reveal.setKey(t, 0.0f, Easing::Linear);
-        layer.text.reveal.setKey(t + std::max(0.3, glyphs * 0.05), 100.0f);
-        break;
+        d = std::max(d, glyphs * p.perGlyph);
     }
-    case Preset::DrawOn: {
-        layer.shape.strokeEnabled = true;
-        layer.shape.trimEnd.setKey(t, 0.0f, Easing::EaseInOut);
-        layer.shape.trimEnd.setKey(t + kDuration * 2.0, 100.0f);
-        break;
+    return d;
+}
+
+void applyPreset(const AnimationPreset& preset, Layer& layer, double time) {
+    if (!presetAppliesTo(preset, layer)) return;
+    const double dur = presetDuration(preset, layer);
+    // Keep the animation inside the clip.
+    const double t0 = std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - dur));
+    const double t1 = t0 + dur;
+    if (preset.enableStroke && layer.type == LayerType::Shape) layer.shape.strokeEnabled = true;
+
+    auto props = layer.properties();
+    for (const PresetTrack& track : preset.tracks) {
+        const PropertyRef* p = layer.findProperty(props, track.property.c_str());
+        if (!p) continue;
+        // Replace whatever this property was doing inside the preset window.
+        for (int i = p->anim->keyCount() - 1; i >= 0; --i) {
+            const double kt = p->anim->keyTime(i);
+            if (kt >= t0 - kTimeEpsilon && kt <= t1 + kTimeEpsilon) p->anim->removeKey(i);
+        }
+        const int n = static_cast<int>(propertyValue(*p, t1).size());
+        const std::vector<float> rest = usableRest(p->id, propertyValue(*p, t1));
+        for (const PresetKey& k : track.keys) {
+            std::vector<float> v = rest;
+            const std::vector<float> arg = broadcast(k.value, n);
+            for (int c = 0; c < n; ++c) {
+                if (k.kind == PresetKey::Kind::Absolute) v[c] = arg[c];
+                else if (k.kind == PresetKey::Kind::Offset) v[c] = rest[c] + arg[c];
+                else if (k.kind == PresetKey::Kind::Mul) v[c] = rest[c] * arg[c];
+            }
+            setKey(*p, t0 + k.t * dur, v, k.easing);
+        }
     }
-    case Preset::Count: break;
+}
+
+AnimationPreset presetFromLayer(Layer& layer, double start, double end, const std::string& name) {
+    AnimationPreset preset;
+    preset.name = name;
+    preset.appliesTo = layer.type == LayerType::Text ? "text" : "any";
+    double first = end, last = start;
+    auto props = layer.properties();
+    for (const PropertyRef& p : props)
+        for (int i = 0; i < p.anim->keyCount(); ++i) {
+            const double kt = p.anim->keyTime(i);
+            if (kt < start - kTimeEpsilon || kt > end + kTimeEpsilon) continue;
+            first = std::min(first, kt);
+            last = std::max(last, kt);
+        }
+    if (last <= first) return preset; // no keyframes: empty preset
+    preset.duration = last - first;
+    for (const PropertyRef& p : props) {
+        PresetTrack track;
+        track.property = p.id;
+        for (int i = 0; i < p.anim->keyCount(); ++i) {
+            const double kt = p.anim->keyTime(i);
+            if (kt < first - kTimeEpsilon || kt > last + kTimeEpsilon) continue;
+            PresetKey k;
+            k.t = (kt - first) / preset.duration;
+            k.value = propertyValue(p, kt);
+            k.easing = p.anim->keyEasing(i);
+            track.keys.push_back(std::move(k));
+        }
+        if (!track.keys.empty()) preset.tracks.push_back(std::move(track));
     }
+    return preset;
 }
 
 } // namespace bemotion

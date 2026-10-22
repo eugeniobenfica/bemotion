@@ -17,6 +17,7 @@ add_executable(bemotion WIN32
     app/AppIcon.cpp
     app/DevScript.cpp
     app/Platform.cpp
+    app/PresetLibrary.cpp
     app/RecentProjects.cpp
     export/Export.cpp
     export/FfmpegEncoder.cpp

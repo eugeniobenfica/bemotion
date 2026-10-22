@@ -8,6 +8,7 @@ class EditorContext;
 class ObjectsPanel {
 public:
     static constexpr const char* kWindowName = "Objects";
+    bool open = true; // closed with the tab's x, reopened from View > Panels
     void draw(EditorContext& ctx);
 };
 

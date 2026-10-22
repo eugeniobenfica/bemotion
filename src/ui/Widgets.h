@@ -42,6 +42,11 @@ enum class Icon {
     Export,
     ZoomIn,
     ZoomOut,
+    Reset,  // circular arrow
+    Magnet, // snapping
+    Gear,   // settings
+    Camera,
+    Plugin,
 };
 
 Icon iconForLayer(const Layer& layer);
@@ -69,6 +74,9 @@ bool keyframeButton(const char* id, bool hasKeyHere, bool animated);
 void drawDiamond(ImDrawList* dl, ImVec2 center, float radius, ImU32 fill, ImU32 outline);
 
 void tooltip(const char* text);
+
+// Call right before Begin() of a dockable panel: one close button (on its tab), no extra one on the dock node.
+void nextPanelWindowClass();
 
 // "HH:MM:SS:FF" timecode.
 std::string formatTimecode(double seconds, double fps);

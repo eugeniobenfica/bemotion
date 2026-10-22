@@ -115,4 +115,12 @@ struct Layer {
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
 
+// Generic access to a property value as 1 (float), 2 (vec2) or 4 (color) components.
+std::vector<float> propertyValue(const PropertyRef& p, double t);
+// Edits the value at `t`: updates/creates a key when animated, else the static value.
+void setPropertyValue(const PropertyRef& p, double t, const std::vector<float>& v);
+// The value a property has on a freshly created layer of the same kind
+// (position: the composition center). Used by the reset buttons.
+std::vector<float> defaultPropertyValue(const Layer& layer, const char* propertyId, Vec2 compCenter);
+
 } // namespace bemotion

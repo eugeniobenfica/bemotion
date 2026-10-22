@@ -64,11 +64,13 @@ struct Composition {
     bool clipsFitTrack(const std::vector<uint64_t>& layerIds, uint64_t trackId) const;
     // Moves the clips onto an existing track. Returns false (and changes nothing) if they don't fit.
     bool moveClipsToTrack(const std::vector<uint64_t>& layerIds, uint64_t trackId);
-    // How far the clips may be shifted in time without overlapping other
-    // clips on their tracks.
+    // How far the clips may be shifted in time without leaving the
+    // composition or overlapping other clips on their tracks.
     void timeShiftLimits(const std::vector<uint64_t>& layerIds, double& minDelta, double& maxDelta) const;
     // End of the previous clip and start of the next clip on the same track.
     void neighborBounds(uint64_t layerId, double& prevOut, double& nextIn) const;
+    // Where a clip may start/end: inside the composition and between its neighbors.
+    void clipLimits(uint64_t layerId, double& minIn, double& maxOut) const;
 
     // Cuts a layer in two at time `t`. The original keeps [in, t), a copy on
     // the same track gets [t, out). Returns the copy's id, or 0 when `t` is

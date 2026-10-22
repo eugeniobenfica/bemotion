@@ -3,6 +3,7 @@
 #include "render/Fonts.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
+#include "ui/panels/PropertiesPanel.h"
 
 #include <imgui.h>
 #include <imgui_stdlib.h>
@@ -10,14 +11,16 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace bemotion {
 
 namespace {
 
 constexpr float kRulerHeight = 26.0f;
-constexpr float kLayerRowHeight = 30.0f;
-constexpr float kPropRowHeight = 24.0f;
+constexpr float kLayerRowHeight = 36.0f;
+constexpr float kPropRowHeight = 30.0f;
+constexpr float kGroupRowHeight = 24.0f;
 constexpr float kEdgeGrab = 6.0f;
 constexpr float kKeyRadius = 5.0f;
 
@@ -39,24 +42,12 @@ void drawKeyGlyph(ImDrawList* dl, ImVec2 c, float r, Easing easing, ImU32 fill, 
     }
 }
 
-std::string formatValue(const PropertyRef& p, double t) {
-    char buf[64];
-    switch (p.kind) {
-    case PropertyKind::Float: std::snprintf(buf, sizeof(buf), "%.1f", p.asFloat().valueAt(t)); break;
-    case PropertyKind::Vec2: {
-        const Vec2 v = p.asVec2().valueAt(t);
-        std::snprintf(buf, sizeof(buf), "%.1f, %.1f", v.x, v.y);
-        break;
-    }
-    case PropertyKind::Color: return {};
-    }
-    return buf;
-}
-
 } // namespace
 
 void TimelinePanel::draw(EditorContext& ctx) {
-    if (!ImGui::Begin(kWindowName, nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+    if (!open) return;
+    ui::nextPanelWindowClass();
+    if (!ImGui::Begin(kWindowName, &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         ImGui::End();
         return;
     }
@@ -115,9 +106,15 @@ void TimelinePanel::draw(EditorContext& ctx) {
             for (int i = row.first; i < row.first + row.count; ++i)
                 if (layers[i].id == ctx.primaryId()) focus = &layers[i];
             ImGui::PushID(static_cast<int>(focus->id));
+            const char* group = nullptr;
+            bool groupOpen = true;
             for (const PropertyRef& prop : focus->properties()) {
                 if (animatedOnly_ && !prop.anim->isAnimated()) continue;
-                drawPropertyRow(ctx, *focus, prop, x0, avail.x);
+                if (!group || std::strcmp(group, prop.group) != 0) {
+                    group = prop.group;
+                    groupOpen = drawGroupRow(row.track, group, x0, avail.x);
+                }
+                if (groupOpen) drawPropertyRow(ctx, *focus, prop, x0, avail.x);
             }
             ImGui::PopID();
         }
@@ -442,7 +439,7 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
         clips_.push_back({layer.id, y, y + h, bx1, bx2});
 
         const Color lc = labelColor(layer.label);
-        const ImVec2 a(bx1 + 1, y + 5), b(bx2 - 1, y + h - 5); // 1px gap shows cut points
+        const ImVec2 a(bx1 + 1, y + 4), b(bx2 - 1, y + h - 4); // 1px gap shows cut points
         dl->AddRectFilled(a, b, toU32(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
         if (selected)
             dl->AddRect(a, b, primary ? theme::kText : IM_COL32(255, 255, 255, 170), 5.0f, 0, primary ? 1.8f : 1.3f);
@@ -469,6 +466,32 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
     ImGui::Dummy(ImVec2(0, 0));
 }
 
+bool TimelinePanel::drawGroupRow(uint64_t track, const char* group, float x0, float width) {
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float y = ImGui::GetCursorScreenPos().y;
+    const float h = kGroupRowHeight;
+    const std::string key = std::to_string(track) + "/" + group;
+    const bool open = !collapsedGroups_.count(key);
+
+    dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(0, 0, 0, 60));
+    ImGui::SetCursorScreenPos(ImVec2(x0 + 24, y));
+    ImGui::PushID(group);
+    if (ImGui::InvisibleButton("##group", ImVec2(leftWidth_ - 30, h))) {
+        if (open) collapsedGroups_.insert(key);
+        else collapsedGroups_.erase(key);
+    }
+    ImGui::PopID();
+    const ImU32 col = ImGui::IsItemHovered() ? theme::kText : theme::kTextDim;
+    ui::drawIcon(dl, open ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, ImVec2(x0 + 36, y + h * 0.5f), 12.0f, col);
+    ImGui::PushFont(Fonts::uiBold(), Fonts::kUiSize * 0.82f);
+    dl->AddText(ImVec2(x0 + 48, y + (h - ImGui::GetFontSize()) * 0.5f), col, group);
+    ImGui::PopFont();
+
+    ImGui::SetCursorScreenPos(ImVec2(x0, y + h));
+    ImGui::Dummy(ImVec2(0, 0));
+    return open;
+}
+
 void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop, float x0, float width) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImGuiIO& io = ImGui::GetIO();
@@ -477,29 +500,32 @@ void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const Prop
     AnimatedBase& anim = *prop.anim;
     ImGui::PushID(prop.id);
 
-    dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(0, 0, 0, 40));
+    // Selection tint: light for rows of the selected layer, stronger where keys are selected.
+    const bool hasSelectedKey = std::any_of(ctx.selectedKeys.begin(), ctx.selectedKeys.end(), [&](const KeySelection& k) {
+        return k.layerId == layer.id && k.propertyId == prop.id;
+    });
+    const ImU32 rowBg = hasSelectedKey ? IM_COL32(232, 185, 49, 40)
+                        : ctx.isSelected(layer.id) ? IM_COL32(232, 185, 49, 14)
+                                                   : IM_COL32(0, 0, 0, 40);
+    dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), rowBg);
+    if (hasSelectedKey) dl->AddRectFilled(ImVec2(x0, y + 2), ImVec2(x0 + 3, y + h - 2), theme::kAccent, 1.5f);
 
-    // --- left: keyframe toggle, label, current value ---------------------------
-    ImGui::SetCursorScreenPos(ImVec2(x0 + 36, y + (h - ImGui::GetFrameHeight()) * 0.5f));
-    const int keyHere = anim.findKey(ctx.time);
-    if (ui::keyframeButton("##key", keyHere >= 0, anim.isAnimated())) {
-        if (keyHere >= 0) anim.removeKey(keyHere);
-        else anim.addKeyAt(ctx.time);
-        ctx.touch();
-    }
+    // --- left: keyframe toggle, label, editable value, reset ---------------------
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 2));
+    const float frameH = ImGui::GetFrameHeight();
+    const float widgetY = y + (h - frameH) * 0.5f;
+    ImGui::SetCursorScreenPos(ImVec2(x0 + 30, widgetY));
+    keyframeToggle(ctx, layer, prop);
     const float textY = y + (h - ImGui::GetTextLineHeight()) * 0.5f;
-    char label[96];
-    std::snprintf(label, sizeof(label), "%s  %s", prop.group, prop.label);
-    dl->AddText(ImVec2(x0 + 62, textY), anim.isAnimated() ? theme::kText : theme::kTextDim, label);
-    const float valueRight = x0 + leftWidth_ - 12;
-    if (prop.kind == PropertyKind::Color) {
-        const Color c = prop.asColor().valueAt(ctx.time);
-        dl->AddRectFilled(ImVec2(valueRight - 22, y + 6), ImVec2(valueRight, y + h - 6), toU32(c), 3.0f);
-    } else {
-        const std::string v = formatValue(prop, ctx.time);
-        const float w = ImGui::CalcTextSize(v.c_str()).x;
-        dl->AddText(ImVec2(valueRight - w, textY), theme::kTextFaint, v.c_str());
-    }
+    dl->AddText(ImVec2(x0 + 56, textY), anim.isAnimated() ? theme::kText : theme::kTextDim, prop.label);
+
+    const float resetX = x0 + leftWidth_ - 8 - frameH;
+    const float valueW = prop.kind == PropertyKind::Vec2 ? 128.0f : prop.kind == PropertyKind::Color ? 110.0f : 72.0f;
+    ImGui::SetCursorScreenPos(ImVec2(resetX - 4 - valueW, widgetY));
+    propertyValueWidget(ctx, prop, valueW);
+    ImGui::SetCursorScreenPos(ImVec2(resetX, widgetY));
+    resetButton(ctx, layer, prop);
+    ImGui::PopStyleVar();
 
     // --- track: keyframes ------------------------------------------------------
     ImGui::SetCursorScreenPos(ImVec2(trackX0_, y));
@@ -534,6 +560,10 @@ void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const Prop
     if (ImGui::IsItemDeactivated() && drag_ == Drag::Keys) endKeyDrag(ctx);
 
     dl->PushClipRect(ImVec2(trackX0_, y), ImVec2(trackX0_ + trackW_, y + h), true);
+    // Shade time where the clip does not exist: keyframes can't go there.
+    const float clipX1 = timeToX(layer.inPoint), clipX2 = timeToX(layer.outPoint);
+    dl->AddRectFilled(ImVec2(trackX0_, y), ImVec2(clipX1, y + h), IM_COL32(0, 0, 0, 70));
+    dl->AddRectFilled(ImVec2(clipX2, y), ImVec2(trackX0_ + trackW_, y + h), IM_COL32(0, 0, 0, 70));
     for (int k = 0; k + 1 < anim.keyCount(); ++k) {
         const float xa = timeToX(anim.keyTime(k)), xb = timeToX(anim.keyTime(k + 1));
         const ImU32 lineCol = anim.keyEasing(k) == Easing::Hold ? IM_COL32(255, 255, 255, 25) : IM_COL32(232, 185, 49, 70);
@@ -632,16 +662,16 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
         break;
     }
     case Drag::LayerIn: {
-        double prevOut = 0, nextIn = 0;
-        comp.neighborBounds(layer->id, prevOut, nextIn);
-        layer->inPoint = std::clamp(dragOrigIn_ + delta, std::max(prevOut, -1e9), layer->outPoint - fd);
+        double minIn = 0, maxOut = 0;
+        comp.clipLimits(layer->id, minIn, maxOut);
+        layer->inPoint = std::clamp(dragOrigIn_ + delta, minIn, std::max(minIn, layer->outPoint - fd));
         ctx.touch();
         break;
     }
     case Drag::LayerOut: {
-        double prevOut = 0, nextIn = 0;
-        comp.neighborBounds(layer->id, prevOut, nextIn);
-        layer->outPoint = std::clamp(dragOrigOut_ + delta, layer->inPoint + fd, std::min(nextIn, 1e9));
+        double minIn = 0, maxOut = 0;
+        comp.clipLimits(layer->id, minIn, maxOut);
+        layer->outPoint = std::clamp(dragOrigOut_ + delta, std::min(maxOut, layer->inPoint + fd), maxOut);
         ctx.touch();
         break;
     }
@@ -802,7 +832,8 @@ void TimelinePanel::updateKeyDrag(EditorContext& ctx) {
         auto props = layer->properties();
         if (PropertyRef* p = layer->findProperty(props, sel.propertyId.c_str()))
             if (const int i = p->anim->findKeyByUid(sel.keyUid); i >= 0) {
-                p->anim->setKeyTime(i, std::max(0.0, orig + delta));
+                // Keys stay where the clip exists.
+                p->anim->setKeyTime(i, std::clamp(orig + delta, layer->inPoint, layer->outPoint));
                 p->anim->sortKeys();
             }
     }

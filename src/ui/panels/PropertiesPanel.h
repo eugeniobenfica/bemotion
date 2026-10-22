@@ -2,6 +2,8 @@
 
 #include "core/Layer.h"
 
+#include <string>
+
 namespace bemotion {
 
 class EditorContext;
@@ -11,16 +13,25 @@ class EditorContext;
 class PropertiesPanel {
 public:
     static constexpr const char* kWindowName = "Properties";
+    bool open = true; // closed with the tab's x, reopened from View > Panels
     void draw(EditorContext& ctx);
 
 private:
     void drawComposition(EditorContext& ctx);
     void drawLayer(EditorContext& ctx, Layer& layer);
     void drawPresets(EditorContext& ctx, Layer& layer);
+
+    std::string saveName_;
+    std::string presetMessage_;
 };
 
-// Value editor + keyframe toggle for one animatable property. Shared with the
-// timeline. Returns true when the property changed.
-bool propertyRow(EditorContext& ctx, const PropertyRef& prop);
+// Building blocks shared with the timeline's property rows. Each returns true
+// when the property changed.
+bool propertyValueWidget(EditorContext& ctx, const PropertyRef& prop, float width);
+bool keyframeToggle(EditorContext& ctx, const Layer& layer, const PropertyRef& prop);
+bool resetButton(EditorContext& ctx, const Layer& layer, const PropertyRef& prop);
+
+// Full table row: keyframe toggle, label, value editor, reset button.
+bool propertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop);
 
 } // namespace bemotion

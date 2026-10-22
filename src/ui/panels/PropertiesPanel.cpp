@@ -1,5 +1,7 @@
 #include "ui/panels/PropertiesPanel.h"
 
+#include "app/Platform.h"
+#include "app/PresetLibrary.h"
 #include "core/Presets.h"
 #include "render/Fonts.h"
 #include "ui/EditorContext.h"
@@ -20,10 +22,11 @@ namespace {
 constexpr ImGuiTableFlags kTableFlags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings;
 
 bool beginPropertyTable(const char* id) {
-    if (!ImGui::BeginTable(id, 3, kTableFlags)) return false;
+    if (!ImGui::BeginTable(id, 4, kTableFlags)) return false;
     ImGui::TableSetupColumn("key", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight() * 0.8f);
     ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 92.0f);
     ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("reset", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
     return true;
 }
 
@@ -49,28 +52,10 @@ void jumpToKey(EditorContext& ctx, const AnimatedBase& anim, int direction) {
 
 } // namespace
 
-bool propertyRow(EditorContext& ctx, const PropertyRef& prop) {
-    bool changed = false;
+bool propertyValueWidget(EditorContext& ctx, const PropertyRef& prop, float width) {
     const double t = ctx.time;
-    AnimatedBase& anim = *prop.anim;
-    ImGui::PushID(prop.id);
-    ImGui::TableNextRow();
-
-    ImGui::TableSetColumnIndex(0);
-    const int keyHere = anim.findKey(t);
-    if (ui::keyframeButton("##key", keyHere >= 0, anim.isAnimated())) {
-        if (keyHere >= 0) anim.removeKey(keyHere);
-        else anim.addKeyAt(t);
-        ctx.touch();
-        changed = true;
-    }
-
-    ImGui::TableSetColumnIndex(1);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(theme::vec(anim.isAnimated() ? theme::kText : theme::kTextDim), "%s", prop.label);
-
-    ImGui::TableSetColumnIndex(2);
-    ImGui::SetNextItemWidth(-FLT_MIN);
+    bool changed = false;
+    ImGui::SetNextItemWidth(width);
     const ImGuiSliderFlags clampFlags = prop.min < prop.max ? ImGuiSliderFlags_AlwaysClamp : ImGuiSliderFlags_None;
     switch (prop.kind) {
     case PropertyKind::Float: {
@@ -98,7 +83,59 @@ bool propertyRow(EditorContext& ctx, const PropertyRef& prop) {
         break;
     }
     }
+    if (changed) ctx.touch();
+    return changed;
+}
 
+bool keyframeToggle(EditorContext& ctx, const Layer& layer, const PropertyRef& prop) {
+    AnimatedBase& anim = *prop.anim;
+    const int keyHere = anim.findKey(ctx.time);
+    // Keyframes only make sense where the clip exists.
+    const bool inClip = ctx.time >= layer.inPoint - kTimeEpsilon && ctx.time <= layer.outPoint + kTimeEpsilon;
+    ImGui::BeginDisabled(!inClip && keyHere < 0);
+    const bool pressed = ui::keyframeButton("##key", keyHere >= 0, anim.isAnimated());
+    ImGui::EndDisabled();
+    if (!inClip && keyHere < 0) ui::tooltip("The playhead is outside this clip");
+    if (!pressed) return false;
+    if (keyHere >= 0) anim.removeKey(keyHere);
+    else anim.addKeyAt(ctx.time);
+    ctx.touch();
+    return true;
+}
+
+bool resetButton(EditorContext& ctx, const Layer& layer, const PropertyRef& prop) {
+    const std::vector<float> def = defaultPropertyValue(layer, prop.id, ctx.comp().center());
+    if (def.empty()) return false;
+    const std::vector<float> cur = propertyValue(prop, ctx.time);
+    bool differs = false;
+    for (size_t i = 0; i < def.size() && i < cur.size(); ++i) differs |= std::fabs(def[i] - cur[i]) > 1e-4f;
+    ImGui::BeginDisabled(!differs);
+    const bool pressed = ui::iconButton("##reset", ui::Icon::Reset, ImGui::GetFrameHeight(), "Reset to the original value");
+    ImGui::EndDisabled();
+    if (!pressed) return false;
+    setPropertyValue(prop, ctx.time, def);
+    ctx.touch();
+    return true;
+}
+
+bool propertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop) {
+    bool changed = false;
+    const double t = ctx.time;
+    AnimatedBase& anim = *prop.anim;
+    ImGui::PushID(prop.id);
+    ImGui::TableNextRow();
+
+    ImGui::TableSetColumnIndex(0);
+    changed |= keyframeToggle(ctx, layer, prop);
+
+    ImGui::TableSetColumnIndex(1);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextColored(theme::vec(anim.isAnimated() ? theme::kText : theme::kTextDim), "%s", prop.label);
+
+    ImGui::TableSetColumnIndex(2);
+    changed |= propertyValueWidget(ctx, prop, -FLT_MIN);
+
+    const int keyHere = anim.findKey(t);
     if (ImGui::BeginPopupContextItem("##ctx")) {
         if (ImGui::MenuItem(keyHere >= 0 ? "Remove Keyframe" : "Add Keyframe")) {
             if (keyHere >= 0) anim.removeKey(keyHere);
@@ -112,8 +149,16 @@ bool propertyRow(EditorContext& ctx, const PropertyRef& prop) {
             anim.clearKeys(t);
             changed = true;
         }
+        if (ImGui::MenuItem("Reset and Clear Animation")) {
+            anim.clearKeys(t);
+            setPropertyValue(prop, t, defaultPropertyValue(layer, prop.id, ctx.comp().center()));
+            changed = true;
+        }
         ImGui::EndPopup();
     }
+
+    ImGui::TableSetColumnIndex(3);
+    changed |= resetButton(ctx, layer, prop);
 
     if (changed) ctx.touch();
     ImGui::PopID();
@@ -121,7 +166,9 @@ bool propertyRow(EditorContext& ctx, const PropertyRef& prop) {
 }
 
 void PropertiesPanel::draw(EditorContext& ctx) {
-    if (!ImGui::Begin(kWindowName)) {
+    if (!open) return;
+    ui::nextPanelWindowClass();
+    if (!ImGui::Begin(kWindowName, &open)) {
         ImGui::End();
         return;
     }
@@ -253,22 +300,28 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
                 }
             }
         }
-        if (groupOpen && tableOpen) propertyRow(ctx, prop);
+        if (groupOpen && tableOpen) propertyRow(ctx, layer, prop);
     }
     closeGroup();
 
     if (ImGui::CollapsingHeader("Layer", ImGuiTreeNodeFlags_DefaultOpen) && beginPropertyTable("layer")) {
-        const double frame = ctx.comp().frameDuration();
+        // In/out stay inside the composition, between neighboring clips, at least one frame long.
+        const Composition& comp = ctx.comp();
+        const double frame = comp.frameDuration();
+        double minIn = 0, maxOut = 0;
+        comp.clipLimits(layer.id, minIn, maxOut);
         plainRowLabel("In");
         float in = static_cast<float>(layer.inPoint);
-        if (ImGui::DragFloat("##in", &in, 0.01f, -3600.0f, static_cast<float>(layer.outPoint - frame), "%.2f s")) {
-            layer.inPoint = ctx.comp().snapToFrame(std::max(0.0, static_cast<double>(in)));
+        if (ImGui::DragFloat("##in", &in, 0.01f, static_cast<float>(minIn), static_cast<float>(layer.outPoint - frame),
+                             "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
+            layer.inPoint = std::clamp(comp.snapToFrame(in), minIn, layer.outPoint - frame);
             ctx.touch();
         }
         plainRowLabel("Out");
         float out = static_cast<float>(layer.outPoint);
-        if (ImGui::DragFloat("##out", &out, 0.01f, static_cast<float>(layer.inPoint + frame), 3600.0f, "%.2f s")) {
-            layer.outPoint = std::max(layer.inPoint + frame, static_cast<double>(out));
+        if (ImGui::DragFloat("##out", &out, 0.01f, static_cast<float>(layer.inPoint + frame), static_cast<float>(maxOut),
+                             "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
+            layer.outPoint = std::clamp(static_cast<double>(out), layer.inPoint + frame, maxOut);
             ctx.touch();
         }
         plainRowLabel("Label");
@@ -295,19 +348,72 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
 
 void PropertiesPanel::drawPresets(EditorContext& ctx, Layer& layer) {
     if (!ImGui::CollapsingHeader("Quick Animations", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "Adds keyframes at the playhead.");
+    ImGui::TextColored(theme::vec(theme::kTextFaint), "Adds keyframes at the playhead (replacing overlapping ones).");
     const float spacing = ImGui::GetStyle().ItemSpacing.x;
     const float w = (ImGui::GetContentRegionAvail().x - spacing) * 0.5f;
-    int column = 0;
-    for (int i = 0; i < static_cast<int>(Preset::Count); ++i) {
-        const auto preset = static_cast<Preset>(i);
-        if (!presetAppliesTo(preset, layer)) continue;
-        if (column++ % 2 == 1) ImGui::SameLine();
-        if (ImGui::Button(presetLabel(preset), ImVec2(w, 0))) {
-            for (Layer* l : ctx.selectedLayers())
-                if (presetAppliesTo(preset, *l)) applyPreset(preset, *l, ctx.time);
-            ctx.touch();
+
+    // Built-in categories first, then whatever imported presets use.
+    std::vector<std::string> categories = {"Entrance", "Emphasis", "Exit"};
+    for (const auto& lp : PresetLibrary::all())
+        if (std::find(categories.begin(), categories.end(), lp.preset.category) == categories.end())
+            categories.push_back(lp.preset.category);
+
+    std::filesystem::path toRemove;
+    for (const std::string& category : categories) {
+        int column = 0;
+        for (const auto& lp : PresetLibrary::all()) {
+            if (lp.preset.category != category || !presetAppliesTo(lp.preset, layer)) continue;
+            if (column == 0) ui::sectionLabel(category.c_str());
+            if (column++ % 2 == 1) ImGui::SameLine();
+            ImGui::PushID(&lp);
+            if (ImGui::Button(lp.preset.name.c_str(), ImVec2(w, 0))) {
+                for (Layer* l : ctx.selectedLayers())
+                    if (presetAppliesTo(lp.preset, *l)) applyPreset(lp.preset, *l, ctx.time);
+                ctx.touch();
+            }
+            if (!lp.file.empty() && ImGui::BeginPopupContextItem("##presetctx")) {
+                if (ImGui::MenuItem("Show File")) platform::revealInFileManager(lp.file);
+                if (ImGui::MenuItem("Delete Preset")) toRemove = lp.file;
+                ImGui::EndPopup();
+            }
+            ImGui::PopID();
         }
+    }
+    if (!toRemove.empty()) PresetLibrary::remove(toRemove);
+
+    ImGui::Dummy(ImVec2(0, 4));
+    if (ImGui::Button("Import...", ImVec2(w, 0))) {
+        if (auto file = platform::openFileDialog("Import Quick Animation", "Quick Animation preset", ".json")) {
+            presetMessage_.clear();
+            if (!PresetLibrary::importFile(*file, &presetMessage_)) presetMessage_ = "Import failed: " + presetMessage_;
+        }
+    }
+    ui::tooltip("Add a Quick Animation from a .json preset file");
+    ImGui::SameLine();
+    if (ImGui::Button("Save as Preset...", ImVec2(w, 0))) {
+        saveName_ = layer.name + " animation";
+        ImGui::OpenPopup("Save Quick Animation");
+    }
+    ui::tooltip("Turn this layer's keyframes into a reusable Quick Animation");
+    if (!presetMessage_.empty()) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(theme::vec(theme::kTextDim), "%s", presetMessage_.c_str());
+        ImGui::PopTextWrapPos();
+    }
+
+    if (ImGui::BeginPopup("Save Quick Animation")) {
+        ImGui::TextUnformatted("Preset name");
+        ImGui::SetNextItemWidth(260);
+        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+        const bool enter = ImGui::InputText("##presetName", &saveName_, ImGuiInputTextFlags_EnterReturnsTrue);
+        if ((ui::accentButton("Save", ImVec2(120, 0)) || enter) && !saveName_.empty()) {
+            AnimationPreset preset = presetFromLayer(layer, layer.inPoint, layer.outPoint, saveName_);
+            if (preset.tracks.empty()) presetMessage_ = "This layer has no keyframes to save.";
+            else if (PresetLibrary::save(preset, &presetMessage_))
+                presetMessage_ = "Saved \"" + saveName_ + "\" to Quick Animations (Custom).";
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 }
 

@@ -168,7 +168,17 @@ void EditorScreen::drawMenuBar() {
         if (ImGui::MenuItem("Zoom In", "Ctrl+=")) viewport_.zoomBy(1.25f);
         if (ImGui::MenuItem("Zoom Out", "Ctrl+-")) viewport_.zoomBy(1.0f / 1.25f);
         ImGui::Separator();
-        if (ImGui::MenuItem("Reset Layout")) resetLayout_ = true;
+        if (ImGui::BeginMenu("Panels")) {
+            ImGui::MenuItem(ObjectsPanel::kWindowName, nullptr, &objects_.open);
+            ImGui::MenuItem(ViewportPanel::kWindowName, nullptr, &viewport_.open);
+            ImGui::MenuItem(PropertiesPanel::kWindowName, nullptr, &properties_.open);
+            ImGui::MenuItem(TimelinePanel::kWindowName, nullptr, &timeline_.open);
+            ImGui::EndMenu();
+        }
+        if (ImGui::MenuItem("Reset Layout")) {
+            resetLayout_ = true;
+            objects_.open = viewport_.open = properties_.open = timeline_.open = true;
+        }
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {
@@ -188,6 +198,18 @@ void EditorScreen::drawMenuBar() {
         ImGui::SameLine();
         ImGui::TextColored(theme::vec(theme::kDanger), "  %s", error_.c_str());
     }
+
+    // Export, always one click away in the top-right corner.
+    const float exportW = 104.0f;
+    ImGui::SameLine(ImGui::GetWindowWidth() - exportW - 10);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 4));
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3);
+    const ImVec2 bp = ImGui::GetCursorScreenPos();
+    if (ui::accentButton("     Export", ImVec2(exportW, 0))) exportDialog_.open(ctx_);
+    ui::drawIcon(ImGui::GetWindowDrawList(), ui::Icon::Export, ImVec2(bp.x + 20, bp.y + ImGui::GetFrameHeight() * 0.5f),
+                 14.0f, theme::kOnAccent);
+    ui::tooltip("Export video (Ctrl+M)");
+    ImGui::PopStyleVar();
     ImGui::EndMainMenuBar();
 }
 
