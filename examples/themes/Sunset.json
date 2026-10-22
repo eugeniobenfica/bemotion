@@ -1,0 +1,20 @@
+{
+  "name": "Sunset",
+  "light": false,
+  "rounding": 7,
+  "colors": {
+    "background": "#1A1016",
+    "panel": "#22151D",
+    "raised": "#2E1C27",
+    "hover": "#3B2532",
+    "border": "#3F2835",
+    "text": "#F6E9EE",
+    "text_dim": "#B8A0AB",
+    "text_faint": "#7D6571",
+    "accent": "#FF7A59",
+    "danger": "#FF4D6D",
+    "snap": "#FFD166",
+    "guide": "#7BDFF2C8",
+    "canvas": "#2A1A23"
+  }
+}

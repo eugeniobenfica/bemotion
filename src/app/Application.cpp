@@ -3,11 +3,13 @@
 #include "app/AppIcon.h"
 #include "app/DevScript.h"
 #include "app/Platform.h"
+#include "app/Settings.h"
 #include "core/Serialization.h"
 #include "export/Export.h"
 #include "render/EffectRenderer.h"
 #include "render/Fonts.h"
 #include "ui/EditorScreen.h"
+#include "ui/SettingsWindow.h"
 #include "ui/Theme.h"
 
 #include <imgui.h>
@@ -236,8 +238,10 @@ bool Application::init(bool visible) {
     iniPath_ = platform::toUtf8(platform::appDataDir() / "layout.ini");
     io.IniFilename = iniPath_.c_str();
 
-    theme::apply();
+    loadSettings();
+    theme::applyStyle();
     ImGui::GetStyle().ScaleAllSizes(scale);
+    applySettings(scale);
     ImGui::GetStyle().FontScaleDpi = scale;
     Fonts::load(platform::assetsDir());
     Fonts::startSystemScan(platform::appDataDir() / "fontcache.json");
@@ -286,6 +290,9 @@ void Application::frame(double dt) {
         if (r.action == HomeScreen::Result::Action::Open) openProject(r.path);
         else if (r.action == HomeScreen::Result::Action::Create) createProject(std::move(r.project), r.path);
     }
+
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, ImGuiInputFlags_RouteGlobal)) ui::openSettings();
+    ui::drawSettings();
 
     ImGui::Render();
     int w = 0, h = 0;

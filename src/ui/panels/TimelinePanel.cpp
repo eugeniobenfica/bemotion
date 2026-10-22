@@ -1,5 +1,6 @@
 #include "ui/panels/TimelinePanel.h"
 
+#include "app/Settings.h"
 #include "core/Snapping.h"
 #include "render/Fonts.h"
 #include "ui/Theme.h"
@@ -37,11 +38,11 @@ bool curveEditor(BezierEase& c, float size) {
     const ImVec2 p0(origin.x + pad.x, origin.y + pad.y + size); // (0,0) bottom-left
     auto toScreen = [&](float x, float y) { return ImVec2(p0.x + x * size, p0.y - y * size); };
     dl->AddRectFilled(origin, ImVec2(origin.x + total.x, origin.y + total.y), theme::kBgDeep, 4.0f);
-    dl->AddRect(toScreen(0, 1), toScreen(1, 0), IM_COL32(255, 255, 255, 30));
+    dl->AddRect(toScreen(0, 1), toScreen(1, 0), theme::ink(30));
     for (int i = 1; i < 4; ++i) {
         const float g = i / 4.0f;
-        dl->AddLine(toScreen(g, 0), toScreen(g, 1), IM_COL32(255, 255, 255, 12));
-        dl->AddLine(toScreen(0, g), toScreen(1, g), IM_COL32(255, 255, 255, 12));
+        dl->AddLine(toScreen(g, 0), toScreen(g, 1), theme::ink(12));
+        dl->AddLine(toScreen(0, g), toScreen(1, g), theme::ink(12));
     }
     const ImVec2 a = toScreen(0, 0), b = toScreen(1, 1);
     const ImVec2 h1 = toScreen(c.x1, c.y1), h2 = toScreen(c.x2, c.y2);
@@ -192,7 +193,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
     dl->PushClipRect(ImVec2(trackX0_, bodyTop), ImVec2(trackX0_ + trackW_, bodyBottom), true);
     const float endX = timeToX(comp.duration);
     if (endX < trackX0_ + trackW_)
-        dl->AddRectFilled(ImVec2(endX, bodyTop), ImVec2(trackX0_ + trackW_, bodyBottom), IM_COL32(0, 0, 0, 80));
+        dl->AddRectFilled(ImVec2(endX, bodyTop), ImVec2(trackX0_ + trackW_, bodyBottom), theme::shade(80));
     const float ph = timeToX(ctx.time);
     dl->AddLine(ImVec2(ph, bodyTop), ImVec2(ph, bodyBottom), theme::kAccent, 1.5f);
     if (snapLineTime_ >= 0.0) { // what the dragged item snapped to
@@ -337,7 +338,7 @@ void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float widt
     }
 
     const float endX = timeToX(comp.duration);
-    dl->AddRectFilled(ImVec2(endX, y0), ImVec2(trackX0_ + trackW_, y0 + kRulerHeight), IM_COL32(0, 0, 0, 90));
+    dl->AddRectFilled(ImVec2(endX, y0), ImVec2(trackX0_ + trackW_, y0 + kRulerHeight), theme::shade(90));
 
     // Playhead handle.
     const float ph = timeToX(ctx.time);
@@ -367,10 +368,10 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
     const bool hasPrimary = focus->id == ctx.primaryId();
 
     if (anySelected) {
-        dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(232, 185, 49, hasPrimary ? 34 : 24));
+        dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), theme::accent(hasPrimary ? 34 : 24));
         dl->AddRectFilled(ImVec2(x0, y + 2), ImVec2(x0 + 3, y + h - 2), theme::kAccent, 1.5f);
     }
-    dl->AddLine(ImVec2(x0, y + h - 1), ImVec2(x0 + width, y + h - 1), IM_COL32(255, 255, 255, 10));
+    dl->AddLine(ImVec2(x0, y + h - 1), ImVec2(x0 + width, y + h - 1), theme::ink(10));
 
     // --- left column: controls and name ---------------------------------------
     const float btn = 20.0f;
@@ -504,12 +505,12 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
         const ImVec2 a(bx1 + 1, y + 4), b(bx2 - 1, y + h - 4); // 1px gap shows cut points
         dl->AddRectFilled(a, b, toU32(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
         if (selected)
-            dl->AddRect(a, b, primary ? theme::kText : IM_COL32(255, 255, 255, 170), 5.0f, 0, primary ? 1.8f : 1.3f);
+            dl->AddRect(a, b, primary ? theme::kText : theme::ink(170), 5.0f, 0, primary ? 1.8f : 1.3f);
         dl->AddRectFilled(ImVec2(bx1 + 3, y + 9), ImVec2(bx1 + 5, y + h - 9), toU32(lc, 0.8f), 1.0f);
         dl->AddRectFilled(ImVec2(bx2 - 5, y + 9), ImVec2(bx2 - 3, y + h - 9), toU32(lc, 0.8f), 1.0f);
         dl->PushClipRect(ImVec2(std::max(bx1, trackX0_), y), ImVec2(std::min(bx2, trackX0_ + trackW_), y + h), true);
         dl->AddText(ImVec2(std::max(bx1, trackX0_) + 10, y + (h - ImGui::GetTextLineHeight()) * 0.5f),
-                    IM_COL32(255, 255, 255, 150), layer.name.c_str());
+                    theme::ink(150), layer.name.c_str());
         dl->PopClipRect();
 
         // Summary of the clip's keyframes (within the clip only, e.g. after a cut).
@@ -518,7 +519,7 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
                 for (int k = 0; k < p.anim->keyCount(); ++k) {
                     const double kt = p.anim->keyTime(k);
                     if (kt < layer.inPoint - kTimeEpsilon || kt > layer.outPoint + kTimeEpsilon) continue;
-                    ui::drawDiamond(dl, ImVec2(timeToX(kt), y + h - 7), 3.0f, IM_COL32(230, 230, 235, 200), 0);
+                    ui::drawDiamond(dl, ImVec2(timeToX(kt), y + h - 7), 3.0f, theme::ink(200), 0);
                 }
         }
     }
@@ -535,7 +536,7 @@ bool TimelinePanel::drawGroupRow(uint64_t track, const char* group, float x0, fl
     const std::string key = std::to_string(track) + "/" + group;
     const bool open = !collapsedGroups_.count(key);
 
-    dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(0, 0, 0, 60));
+    dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), theme::shade(60));
     ImGui::SetCursorScreenPos(ImVec2(x0 + 24, y));
     ImGui::PushID(group);
     if (ImGui::InvisibleButton("##group", ImVec2(leftWidth_ - 30, h))) {
@@ -566,9 +567,9 @@ void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const Prop
     const bool hasSelectedKey = std::any_of(ctx.selectedKeys.begin(), ctx.selectedKeys.end(), [&](const KeySelection& k) {
         return k.layerId == layer.id && k.propertyId == prop.id;
     });
-    const ImU32 rowBg = hasSelectedKey ? IM_COL32(232, 185, 49, 40)
-                        : ctx.isSelected(layer.id) ? IM_COL32(232, 185, 49, 14)
-                                                   : IM_COL32(0, 0, 0, 40);
+    const ImU32 rowBg = hasSelectedKey ? theme::accent(40)
+                        : ctx.isSelected(layer.id) ? theme::accent(14)
+                                                   : theme::shade(40);
     dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), rowBg);
     if (hasSelectedKey) dl->AddRectFilled(ImVec2(x0, y + 2), ImVec2(x0 + 3, y + h - 2), theme::kAccent, 1.5f);
 
@@ -624,17 +625,17 @@ void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const Prop
     dl->PushClipRect(ImVec2(trackX0_, y), ImVec2(trackX0_ + trackW_, y + h), true);
     // Shade time where the clip does not exist: keyframes can't go there.
     const float clipX1 = timeToX(layer.inPoint), clipX2 = timeToX(layer.outPoint);
-    dl->AddRectFilled(ImVec2(trackX0_, y), ImVec2(clipX1, y + h), IM_COL32(0, 0, 0, 70));
-    dl->AddRectFilled(ImVec2(clipX2, y), ImVec2(trackX0_ + trackW_, y + h), IM_COL32(0, 0, 0, 70));
+    dl->AddRectFilled(ImVec2(trackX0_, y), ImVec2(clipX1, y + h), theme::shade(70));
+    dl->AddRectFilled(ImVec2(clipX2, y), ImVec2(trackX0_ + trackW_, y + h), theme::shade(70));
     for (int k = 0; k + 1 < anim.keyCount(); ++k) {
         const float xa = timeToX(anim.keyTime(k)), xb = timeToX(anim.keyTime(k + 1));
-        const ImU32 lineCol = anim.keyEasing(k) == Easing::Hold ? IM_COL32(255, 255, 255, 25) : IM_COL32(232, 185, 49, 70);
+        const ImU32 lineCol = anim.keyEasing(k) == Easing::Hold ? theme::ink(25) : theme::accent(70);
         dl->AddLine(ImVec2(xa, cy), ImVec2(xb, cy), lineCol, 1.5f);
     }
     for (int k = 0; k < anim.keyCount(); ++k) {
         const bool sel = ctx.isKeySelected({layer.id, prop.id, anim.keyUid(k)});
-        const ImU32 fill = sel ? theme::kAccent : (k == hoveredKey ? theme::kText : IM_COL32(190, 190, 200, 255));
-        const ImU32 outline = sel ? theme::kAccentHover : IM_COL32(20, 20, 24, 255);
+        const ImU32 fill = sel ? theme::kAccent : (k == hoveredKey ? theme::kText : theme::kTextDim);
+        const ImU32 outline = sel ? theme::kAccentHover : theme::kBgDeep;
         drawKeyGlyph(dl, ImVec2(timeToX(anim.keyTime(k)), cy), kKeyRadius + (sel ? 1.0f : 0.0f), anim.keyEasing(k), fill,
                      outline);
     }
@@ -726,7 +727,7 @@ double TimelinePanel::snappedDelta(EditorContext& ctx, const std::vector<double>
     if (ctx.snapping && !ImGui::GetIO().KeyCtrl) {
         std::vector<double> edges;
         for (double b : base) edges.push_back(b + rawDelta);
-        if (const SnapResult r = snap1D(edges, timeTargets_, 8.0 / pxPerSec_); r.snapped) { // 8 screen pixels
+        if (const SnapResult r = snap1D(edges, timeTargets_, settings().snapDistance / pxPerSec_); r.snapped) { // screen pixels
             snapLineTime_ = r.target;
             return rawDelta + r.offset;
         }
@@ -884,8 +885,8 @@ void TimelinePanel::updateMarquee(EditorContext& ctx, ImDrawList* dl) {
         const bool horizontal = a.x < trackX0_ || (c.x2 > a.x && c.x1 < b.x);
         if (vertical && horizontal && !ctx.isSelected(c.id)) ctx.selection.push_back(c.id);
     }
-    dl->AddRectFilled(a, b, IM_COL32(232, 185, 49, 22));
-    dl->AddRect(a, b, IM_COL32(232, 185, 49, 160));
+    dl->AddRectFilled(a, b, theme::accent(22));
+    dl->AddRect(a, b, theme::accent(160));
 }
 
 int TimelinePanel::dropGapAt(float y) const {
@@ -902,7 +903,7 @@ void TimelinePanel::drawDropIndicator(ImDrawList* dl, const DropTarget& target, 
             if (r.track != target.track) continue;
             const ImU32 col = target.fits ? theme::kAccent : theme::kDanger;
             dl->AddRectFilled(ImVec2(trackX0_, r.top + 1), ImVec2(x0 + width - 2, r.bottom - 1),
-                              target.fits ? IM_COL32(232, 185, 49, 30) : IM_COL32(229, 96, 77, 30), 4.0f);
+                              target.fits ? theme::accent(30) : theme::withAlpha(theme::kDanger, 30), 4.0f);
             dl->AddRect(ImVec2(trackX0_, r.top + 1), ImVec2(x0 + width - 2, r.bottom - 1), col, 4.0f, 0, 2.0f);
         }
         return;

@@ -2,6 +2,7 @@
 
 #include "app/Platform.h"
 #include "app/RecentProjects.h"
+#include "ui/SettingsWindow.h"
 #include "core/Serialization.h"
 #include "render/Fonts.h"
 #include "ui/Theme.h"
@@ -143,6 +144,8 @@ void EditorScreen::drawMenuBar() {
         ImGui::Separator();
         if (ImGui::MenuItem("Select All", "Ctrl+A")) ctx_.selectAll();
         if (ImGui::MenuItem("Deselect", "Esc")) ctx_.select(0);
+        ImGui::Separator();
+        if (ImGui::MenuItem("Settings...", "Ctrl+,")) ui::openSettings();
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Layer")) {
@@ -222,6 +225,8 @@ void EditorScreen::drawMenuBar() {
 
     // Export, always one click away in the top-right corner.
     const float exportW = 104.0f;
+    ImGui::SameLine(ImGui::GetWindowWidth() - exportW - 10 - 34);
+    if (ui::iconButton("##settings", ui::Icon::Gear, 26.0f, "Settings (Ctrl+,)")) ui::openSettings();
     ImGui::SameLine(ImGui::GetWindowWidth() - exportW - 10);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 4));
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3);

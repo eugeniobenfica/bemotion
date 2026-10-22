@@ -1,5 +1,6 @@
 #include "ui/panels/ViewportPanel.h"
 
+#include "app/Settings.h"
 #include "core/Snapping.h"
 #include "render/Fonts.h"
 #include "render/SceneRenderer.h"
@@ -22,8 +23,6 @@ constexpr float kMaxZoom = 32.0f;
 constexpr float kHandleRadius = 5.0f;
 constexpr float kRotateOffset = 26.0f;
 constexpr float kRuler = 20.0f; // ruler band thickness
-// Neutral gray around the frame so the composition edge is always visible.
-constexpr ImU32 kCanvasColor = IM_COL32(30, 30, 34, 255);
 
 ImVec2 im(Vec2 v) { return ImVec2(v.x, v.y); }
 Vec2 vec(ImVec2 v) { return Vec2(v.x, v.y); }
@@ -132,7 +131,7 @@ void ViewportPanel::draw(EditorContext& ctx) {
     world_ = throughCamera_ ? c.cameraAt(ctx.time) : Affine{};
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p0, p1, kCanvasColor);
+    dl->AddRectFilled(p0, p1, theme::kCanvas);
 
     ImGui::SetNextItemAllowOverlap();
     ImGui::InvisibleButton("##canvas", size,
@@ -150,7 +149,7 @@ void ViewportPanel::draw(EditorContext& ctx) {
     dl->PushClipRect(p0, p1, true);
     const render::View view = sceneView();
     const Vec2 compMax = view.toScreen(compSize_);
-    dl->AddRectFilled(ImVec2(origin_.x + 4, origin_.y + 6), ImVec2(compMax.x + 4, compMax.y + 6), IM_COL32(0, 0, 0, 90), 2);
+    dl->AddRectFilled(ImVec2(origin_.x + 4, origin_.y + 6), ImVec2(compMax.x + 4, compMax.y + 6), theme::shade(90), 2);
     render::drawComposition(dl, c, ctx.time, view, true, nullptr, throughCamera_);
     dl->AddRect(im(origin_), im(compMax), theme::kBorder);
     drawGuides(ctx);
@@ -460,7 +459,7 @@ void ViewportPanel::drawMotionPath(EditorContext& ctx) {
     const Composition& comp = ctx.comp();
     const auto& keys = l->transform.position.keys;
     const int n = static_cast<int>(keys.size());
-    const ImU32 line = IM_COL32(232, 185, 49, 150);
+    const ImU32 line = theme::accent(150);
 
     // The curve itself.
     for (int i = 0; i + 1 < n; ++i) {
@@ -510,7 +509,7 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
         const uint64_t hover = render::hitTest(comp, t, view.screenToScene(vec(io.MousePos)), !throughCamera_);
         Handles h{};
         if (hover && !ctx.isSelected(hover) && computeHandles(*comp.findLayer(hover), t, view, h))
-            outline(dl, h, IM_COL32(232, 185, 49, 110), 1.0f);
+            outline(dl, h, theme::accent(110), 1.0f);
     }
 
     // Free view: show what each camera sees.
@@ -518,9 +517,9 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
         for (const Layer& l : comp.layers) {
             Handles h{};
             if (l.type != LayerType::Camera || !l.activeAt(t) || !computeHandles(l, t, view, h)) continue;
-            outline(dl, h, IM_COL32(64, 196, 255, 220), 1.5f);
+            outline(dl, h, theme::withAlpha(theme::kGuide, 220), 1.5f);
             const ImVec2 at(std::max(h.screen[0].x + 6, canvasMin_.x + kRuler + 6), std::max(h.screen[0].y + 4, canvasMin_.y + kRuler + 4));
-            dl->AddText(at, IM_COL32(64, 196, 255, 255), l.name.c_str()); // kept clear of the rulers
+            dl->AddText(at, theme::withAlpha(theme::kGuide, 255), l.name.c_str()); // kept clear of the rulers
         }
 
     drawMotionPath(ctx);
@@ -541,7 +540,7 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
     }
     if (visibleSelected > 1)
         dl->AddRect(ImVec2(groupMin.x - 4, groupMin.y - 4), ImVec2(groupMax.x + 4, groupMax.y + 4),
-                    IM_COL32(232, 185, 49, 90), 2.0f, 0, 1.0f);
+                    theme::accent(90), 2.0f, 0, 1.0f);
 
     // Handles for a single selection.
     if (selected.size() == 1 && selected[0]->activeAt(t)) {
@@ -568,8 +567,8 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
     if (drag_ == Drag::Marquee && dragMoved_) {
         const ImVec2 a(std::min(dragStartScreen_.x, io.MousePos.x), std::min(dragStartScreen_.y, io.MousePos.y));
         const ImVec2 b(std::max(dragStartScreen_.x, io.MousePos.x), std::max(dragStartScreen_.y, io.MousePos.y));
-        dl->AddRectFilled(a, b, IM_COL32(232, 185, 49, 22));
-        dl->AddRect(a, b, IM_COL32(232, 185, 49, 160));
+        dl->AddRectFilled(a, b, theme::accent(22));
+        dl->AddRect(a, b, theme::accent(160));
     }
 
     // Live position readout while moving.
@@ -580,7 +579,7 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
             std::snprintf(buf, sizeof(buf), "X %.0f   Y %.0f", p.x, p.y);
             const ImVec2 at(io.MousePos.x + 16, io.MousePos.y + 18);
             const ImVec2 ts = ImGui::CalcTextSize(buf);
-            dl->AddRectFilled(ImVec2(at.x - 6, at.y - 3), ImVec2(at.x + ts.x + 6, at.y + ts.y + 3), IM_COL32(14, 14, 16, 220), 4);
+            dl->AddRectFilled(ImVec2(at.x - 6, at.y - 3), ImVec2(at.x + ts.x + 6, at.y + ts.y + 3), theme::withAlpha(theme::kBgDeep, 220), 4);
             dl->AddText(at, theme::kText, buf);
         }
     }
@@ -625,8 +624,8 @@ void ViewportPanel::drawHud(EditorContext& ctx) {
     // Zoom controls, bottom right: [-] [ 50% v ] [+] [Fit]
     const float comboW = 76.0f, btn = lineH;
     float x = canvasMax_.x - 12 - (btn * 3 + comboW + 46 + 4 * 3 + 12);
-    ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(30, 30, 34, 220));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(30, 30, 34, 220));
+    ImGui::PushStyleColor(ImGuiCol_Button, theme::withAlpha(theme::kBgRaised, 220));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, theme::withAlpha(theme::kBgRaised, 220));
     const bool hasCamera = std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.type == LayerType::Camera; });
     if (hasCamera) {
         ImGui::SetCursorScreenPos(ImVec2(x - btn - 6, y));
@@ -684,7 +683,7 @@ void ViewportPanel::collectSnapTargets(EditorContext& ctx, const std::vector<uin
 }
 
 Vec2 ViewportPanel::snapMove(Vec2 boxMin, Vec2 boxMax, Vec2 delta) {
-    const double threshold = 8.0 / zoom_; // 8 screen pixels
+    const double threshold = settings().snapDistance / zoom_; // screen pixels
     Vec2 correction{0, 0};
     const SnapResult sx = snap1D({boxMin.x + delta.x, (boxMin.x + boxMax.x) * 0.5 + delta.x, boxMax.x + delta.x},
                                  snapTargetsX_, threshold);
@@ -811,7 +810,7 @@ void ViewportPanel::drawRulers(EditorContext& ctx) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const render::View view = sceneView();
     const ImVec2 a = im(canvasMin_), b = im(canvasMax_);
-    const ImU32 bg = IM_COL32(20, 20, 23, 245);
+    const ImU32 bg = theme::withAlpha(theme::kBgPanel, 245);
     dl->AddRectFilled(a, ImVec2(b.x, a.y + kRuler), bg);
     dl->AddRectFilled(ImVec2(a.x, a.y + kRuler), ImVec2(a.x + kRuler, b.y), bg);
     dl->AddLine(ImVec2(a.x, a.y + kRuler), ImVec2(b.x, a.y + kRuler), theme::kBorder);

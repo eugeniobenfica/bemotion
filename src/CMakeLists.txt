@@ -22,6 +22,7 @@ add_executable(bemotion WIN32
     app/EffectLibrary.cpp
     app/Platform.cpp
     app/PresetLibrary.cpp
+    app/Settings.cpp
     app/RecentProjects.cpp
     export/Export.cpp
     export/FfmpegEncoder.cpp
@@ -37,6 +38,7 @@ add_executable(bemotion WIN32
     ui/EditorScreen.cpp
     ui/ExportDialog.cpp
     ui/HomeScreen.cpp
+    ui/SettingsWindow.cpp
     ui/Theme.cpp
     ui/Widgets.cpp
     ui/panels/ObjectsPanel.cpp

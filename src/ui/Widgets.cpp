@@ -282,7 +282,7 @@ bool objectTile(const char* id, Icon icon, const char* label, ImVec2 size) {
     const bool held = ImGui::IsItemActive();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 end(pos.x + size.x, pos.y + size.y);
-    dl->AddRectFilled(pos, end, held ? theme::kBgHover : (hovered ? IM_COL32(36, 36, 41, 255) : theme::kBgRaised), 8.0f);
+    dl->AddRectFilled(pos, end, held ? theme::kBgHover : (hovered ? theme::kBgHover : theme::kBgRaised), 8.0f);
     if (hovered) dl->AddRect(pos, end, theme::kAccent, 8.0f, 0, 1.0f);
     const float iconSize = std::min(size.x, size.y) * 0.34f;
     drawIcon(dl, icon, ImVec2(pos.x + size.x * 0.5f, pos.y + size.y * 0.42f), iconSize,

@@ -1,6 +1,7 @@
 #include "ui/HomeScreen.h"
 
 #include "app/Platform.h"
+#include "ui/SettingsWindow.h"
 #include "core/Serialization.h"
 #include "render/Fonts.h"
 #include "render/SceneRenderer.h"
@@ -167,8 +168,10 @@ void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float widt
     ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY() + 12, ImGui::GetWindowHeight() - footerH));
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0, 4));
-    if (ImGui::Button("Show Projects Folder", ImVec2(w, 0)))
+    if (ImGui::Button("Show Projects Folder", ImVec2(w - 34, 0)))
         platform::revealInFileManager(platform::defaultProjectsDir());
+    ImGui::SameLine(0, 6);
+    if (ui::iconButton("##settings", ui::Icon::Gear, ImGui::GetFrameHeight(), "Settings (Ctrl+,)")) ui::openSettings();
     ImGui::TextColored(theme::vec(theme::kTextFaint), "%d recent project%s", static_cast<int>(recents.items().size()),
                        recents.items().size() == 1 ? "" : "s");
 
