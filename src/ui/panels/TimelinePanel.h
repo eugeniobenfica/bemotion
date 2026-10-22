@@ -19,22 +19,38 @@ public:
     void draw(EditorContext& ctx);
 
 private:
-    // Name drags only restack; bar drags move in time and restack vertically.
+    // Each timeline row is a track that may hold several clips (layers).
+    //   LayerName  drag the row name: reorders whole tracks
+    //   LayerMove  drag a clip: moves it in time and, vertically, onto another
+    //              track (drop in a row) or onto a new track (drop between rows)
+    //   LayerIn/Out  trim a clip edge
     enum class Drag { None, Keys, LayerName, LayerMove, LayerIn, LayerOut };
+
+    // Where a vertical drag would land.
+    struct DropTarget {
+        bool valid = false;
+        bool newTrack = true; // true: new track at `gap`; false: join `track`
+        int gap = 0;
+        uint64_t track = 0;
+        bool fits = true;     // joining is only possible without overlaps
+    };
 
     void drawToolbar(EditorContext& ctx);
     void drawRuler(EditorContext& ctx, float x0, float y0, float width);
-    void drawLayerRow(EditorContext& ctx, Layer& layer, int index, float x0, float width);
-    // Handles a click on a layer (name or bar) honoring Ctrl/Shift multi-select.
+    void drawTrackRow(EditorContext& ctx, const TrackRow& row, int rowIndex, float x0, float width);
+    // Handles a click on a clip honoring Ctrl/Shift multi-select.
     void clickLayer(EditorContext& ctx, uint64_t id);
+    // Handles a click on a track name: selects all its clips.
+    void clickTrack(EditorContext& ctx, const TrackRow& row);
     void beginLayerDrag(EditorContext& ctx, Drag mode, uint64_t id);
     void updateLayerDrag(EditorContext& ctx);
     void endLayerDrag(EditorContext& ctx);
-    int dropGapAt(float y) const; // insertion gap (0..layerCount) under screen y
+    int dropGapAt(float y) const; // insertion gap (0..rowCount) under screen y
+    DropTarget dropTargetAt(EditorContext& ctx, float y, Drag mode) const;
     void applyPendingDrop(EditorContext& ctx);
     void beginMarquee(EditorContext& ctx);
     void updateMarquee(EditorContext& ctx, ImDrawList* dl);
-    void drawDropIndicator(ImDrawList* dl, float x0, float width) const;
+    void drawDropIndicator(ImDrawList* dl, const DropTarget& target, float x0, float width) const;
     void drawPropertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop, float x0, float width);
     void drawKeyContextMenu(EditorContext& ctx);
 
@@ -53,17 +69,19 @@ private:
     bool animatedOnly_ = false;
     bool openKeyMenu_ = false;
 
-    std::set<uint64_t> expanded_;
-    uint64_t renaming_ = 0;
+    std::set<uint64_t> expanded_; // track ids showing their property rows
+    uint64_t renaming_ = 0;       // layer id being renamed
     bool focusRename_ = false;
 
-    struct LayerRow {
-        int index;    // position in the layer stack
+    struct RowRect {
+        int index;      // row (track) position, 0 = top
+        uint64_t track;
+        float top;      // screen y of the track row
+        float bottom;   // screen y below it (property rows excluded)
+    };
+    struct ClipRect {
         uint64_t id;
-        float top;    // screen y of the layer row
-        float bottom; // screen y below the layer row (property rows excluded)
-        float barX1;  // screen x range of the layer bar
-        float barX2;
+        float top, bottom, x1, x2;
     };
 
     Drag drag_ = Drag::None;
@@ -76,12 +94,14 @@ private:
     // dragged layer see the rows that come after it.
     bool pendingDrop_ = false;
     float pendingDropY_ = 0.0f;
+    Drag pendingDropMode_ = Drag::None;
     // Box selection by dragging on empty timeline space.
     bool marquee_ = false;
     ImVec2 marqueeStart_;
     std::vector<uint64_t> marqueeBase_;
     std::vector<std::pair<KeySelection, double>> dragKeys_;
-    std::vector<LayerRow> rows_; // rebuilt every frame
+    std::vector<RowRect> rows_;   // rebuilt every frame
+    std::vector<ClipRect> clips_; // rebuilt every frame
     float rowsBottom_ = 0.0f;
 };
 

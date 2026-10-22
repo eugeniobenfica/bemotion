@@ -80,8 +80,11 @@ public:
     Layer& addText(std::optional<Vec2> position = std::nullopt);
     void deleteSelected();
     void duplicateSelected();
-    void moveSelectedTo(int targetIndex);  // see Composition::moveLayers
-    void shiftSelected(int delta);         // stacking order: negative = forward
+    std::vector<uint64_t> selectedTracks(); // tracks holding selected clips, top first
+    void moveSelectedTracksTo(int targetRow);        // whole tracks, see Composition::moveTracks
+    void moveSelectedClipsToNewTrack(int gapRow);    // clips onto a new track at a row gap
+    bool moveSelectedClipsToTrack(uint64_t trackId); // false if they would overlap other clips
+    void shiftSelected(int delta);                   // stacking order of tracks: negative = forward
     void splitSelectedAtPlayhead();        // splits all selected (or all) layers under the playhead
     void splitLayerAt(uint64_t id, double t);
     void deleteSelectedKeys();

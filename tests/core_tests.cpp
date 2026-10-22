@@ -142,22 +142,34 @@ uint64_t idOf(const Composition& c, const char* name) {
     return 0;
 }
 
-void testMoveLayers() {
+uint64_t trackOf(const Composition& c, const char* name) { return c.findLayer(idOf(c, name))->track; }
+
+// Track rows as text: "A|BC|D" means three rows, the middle one holding B and C.
+std::string rowsText(const Composition& c) {
+    std::string s;
+    for (const TrackRow& r : c.trackRows()) {
+        if (!s.empty()) s += "|";
+        for (int i = r.first; i < r.first + r.count; ++i) s += c.layers[i].name;
+    }
+    return s;
+}
+
+void testMoveTracks() {
     Composition c = makeStack();
-    CHECK(order(c) == "ABCDE");
-    c.moveLayers({idOf(c, "B"), idOf(c, "D")}, 0);
+    CHECK(rowsText(c) == "A|B|C|D|E");
+    c.moveTracks({trackOf(c, "B"), trackOf(c, "D")}, 0);
     CHECK(order(c) == "BDACE");
-    c.moveLayers({idOf(c, "B")}, 99);
+    c.moveTracks({trackOf(c, "B")}, 99);
     CHECK(order(c) == "DACEB");
 }
 
-void testShiftLayers() {
+void testShiftTracks() {
     Composition c = makeStack();
-    c.shiftLayers({idOf(c, "C"), idOf(c, "D")}, -1);
+    c.shiftTracks({trackOf(c, "C"), trackOf(c, "D")}, -1);
     CHECK(order(c) == "ACDBE");
-    c.shiftLayers({idOf(c, "A")}, -1); // already on top
+    c.shiftTracks({trackOf(c, "A")}, -1); // already on top
     CHECK(order(c) == "ACDBE");
-    c.shiftLayers({idOf(c, "A"), idOf(c, "C")}, 99); // to the bottom
+    c.shiftTracks({trackOf(c, "A"), trackOf(c, "C")}, 99); // to the bottom
     CHECK(order(c) == "DBEAC");
 }
 
@@ -172,11 +184,58 @@ void testSplitLayer() {
     const uint64_t tail = c.splitLayer(original, 1.5);
     CHECK(tail != 0);
     CHECK(c.layers.size() == 2);
-    CHECK(c.indexOf(tail) == 0); // placed above the original
+    CHECK(c.trackRows().size() == 1); // both halves stay on the same track
+    CHECK(c.findLayer(tail)->track == c.findLayer(original)->track);
     CHECK(c.findLayer(original)->outPoint == 1.5);
     CHECK(c.findLayer(tail)->inPoint == 1.5 && c.findLayer(tail)->outPoint == 4.0);
     // Animation continues seamlessly across the cut.
     CHECK(near(c.findLayer(tail)->transform.opacity.valueAt(2.0), 50.0f));
+}
+
+// Splits "A" (0..10 s) at 5 s: A keeps 0..5, "A2" gets 5..10 on the same track.
+Composition makeSplitStack() {
+    Composition c = makeStack();
+    const uint64_t tail = c.splitLayer(idOf(c, "A"), 5.0);
+    c.findLayer(tail)->name = "a";
+    return c;
+}
+
+void testClipsBetweenTracks() {
+    Composition c = makeSplitStack();
+    CHECK(rowsText(c) == "aA|B|C|D|E");
+    // Pull the tail onto its own new track below C, then put it back.
+    c.moveClipsToNewTracks({idOf(c, "a")}, 3);
+    CHECK(rowsText(c) == "A|B|C|a|D|E");
+    CHECK(c.clipsFitTrack({idOf(c, "a")}, trackOf(c, "A")));  // 5..10 next to 0..5: fits
+    CHECK(!c.clipsFitTrack({idOf(c, "a")}, trackOf(c, "B"))); // B spans 0..10: overlaps
+    CHECK(!c.moveClipsToTrack({idOf(c, "a")}, trackOf(c, "B")));
+    CHECK(rowsText(c) == "A|B|C|a|D|E"); // refused moves change nothing
+    CHECK(c.moveClipsToTrack({idOf(c, "a")}, trackOf(c, "A")));
+    CHECK(c.trackRows().size() == 5); // the empty track disappeared
+    CHECK(trackOf(c, "a") == trackOf(c, "A"));
+}
+
+void testTimeShiftLimits() {
+    Composition c = makeSplitStack(); // A: 0..5, a: 5..10 on one track
+    double lo = 0, hi = 0;
+    c.timeShiftLimits({idOf(c, "A")}, lo, hi);
+    CHECK(std::isinf(lo) && lo < 0);
+    CHECK(near(static_cast<float>(hi), 0.0f)); // touching "a" already
+    c.findLayer(idOf(c, "a"))->inPoint = 7.0;
+    c.timeShiftLimits({idOf(c, "A")}, lo, hi);
+    CHECK(near(static_cast<float>(hi), 2.0f));
+    double prevOut = 0, nextIn = 0;
+    c.neighborBounds(idOf(c, "a"), prevOut, nextIn);
+    CHECK(near(static_cast<float>(prevOut), 5.0f) && std::isinf(nextIn));
+}
+
+void testTracksRoundTrip() {
+    Project p;
+    p.comp = makeSplitStack();
+    Project q;
+    CHECK(deserializeProject(serializeProject(p), q));
+    CHECK(rowsText(q.comp) == rowsText(p.comp));
+    CHECK(q.comp.nextTrackId == p.comp.nextTrackId);
 }
 
 void testLegacyFormatId() {
@@ -215,9 +274,12 @@ int main() {
         {"trim path", testTrimPath},
         {"frames", testFrames},
         {"serialization round trip", testSerializationRoundTrip},
-        {"move layers", testMoveLayers},
-        {"shift layers", testShiftLayers},
+        {"move tracks", testMoveTracks},
+        {"shift tracks", testShiftTracks},
         {"split layer", testSplitLayer},
+        {"clips between tracks", testClipsBetweenTracks},
+        {"time shift limits", testTimeShiftLimits},
+        {"tracks round trip", testTracksRoundTrip},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };

@@ -90,6 +90,7 @@ json encodeLayer(const Layer& constLayer) {
     Layer& layer = const_cast<Layer&>(constLayer);
     json j;
     j["id"] = layer.id;
+    j["track"] = layer.track;
     j["name"] = layer.name;
     j["type"] = layer.type == LayerType::Text ? "text" : "shape";
     j["visible"] = layer.visible;
@@ -115,6 +116,7 @@ json encodeLayer(const Layer& constLayer) {
 Layer decodeLayer(const json& j) {
     Layer layer;
     layer.id = j.value("id", uint64_t{0});
+    layer.track = j.value("track", uint64_t{0});
     layer.name = j.value("name", std::string("Layer"));
     layer.type = j.value("type", std::string("shape")) == "text" ? LayerType::Text : LayerType::Shape;
     layer.visible = j.value("visible", true);
@@ -153,6 +155,7 @@ std::string serializeProject(const Project& project) {
     comp["duration"] = c.duration;
     comp["background"] = encode(c.background);
     comp["next_layer_id"] = c.nextLayerId;
+    comp["next_track_id"] = c.nextTrackId;
     json layers = json::array();
     for (const auto& l : c.layers) layers.push_back(encodeLayer(l));
     comp["layers"] = std::move(layers);
@@ -188,13 +191,19 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
             c.fps = std::max(1.0, cj.value("fps", 30.0));
             c.duration = std::max(c.frameDuration(), cj.value("duration", 10.0));
             if (cj.contains("background")) decode(cj["background"], c.background);
-            uint64_t maxId = 0;
+            uint64_t maxId = 0, maxTrack = 0;
             if (cj.contains("layers"))
                 for (const auto& lj : cj["layers"]) {
                     c.layers.push_back(decodeLayer(lj));
                     maxId = std::max(maxId, c.layers.back().id);
+                    maxTrack = std::max(maxTrack, c.layers.back().track);
                 }
             c.nextLayerId = std::max(cj.value("next_layer_id", uint64_t{1}), maxId + 1);
+            c.nextTrackId = std::max(cj.value("next_track_id", uint64_t{1}), maxTrack + 1);
+            // Files from before tracks existed: one track per layer.
+            for (auto& l : c.layers)
+                if (l.track == 0) l.track = c.nextTrackId++;
+            c.normalizeTracks();
         }
         out = std::move(p);
         return true;

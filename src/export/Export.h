@@ -105,6 +105,7 @@ private:
     bool cancelled_ = false;
     std::string error_;
     std::chrono::steady_clock::time_point startTime_;
+    std::chrono::steady_clock::time_point endTime_;
 };
 
 } // namespace bemotion::exporting

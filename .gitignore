@@ -17,3 +17,9 @@ desktop.ini
 
 # Temporary save files
 *.bemotion.tmp
+
+# Rendered exports
+*.mp4
+*.mov
+*.webm
+*.gif

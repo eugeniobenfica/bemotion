@@ -26,9 +26,12 @@ tests in `tests/`.
   `properties()` — the inspector, timeline and file format pick it up
   automatically.
 - **`Composition` / `Project`** (`Project.h`) — canvas size, frame rate,
-  duration, background and the layer stack (index 0 is the top layer). Stack
-  operations live here so they are testable: `moveLayers` (drag restacking),
-  `shiftLayers` (bring forward / send backward) and `splitLayer` (cut tool).
+  duration, background and the layer stack (index 0 is the top layer). Layers
+  carry a `track` id: a track is one timeline row and may hold several
+  non-overlapping layers ("clips"); same-track layers are kept contiguous. Stack
+  operations live here so they are testable: `moveTracks`, `shiftTracks`,
+  `moveClipsToTrack` / `moveClipsToNewTracks` (dragging clips between rows),
+  `timeShiftLimits` (no overlaps) and `splitLayer` (cut tool).
 - **`Serialization`** — the `.bemotion` format is versioned JSON. Properties are
   stored by their stable `id`, so files stay readable when properties are
   added or reordered. Saves go through a temporary file to avoid corruption.

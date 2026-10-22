@@ -83,6 +83,9 @@ Color labelColor(int index);
 
 struct Layer {
     uint64_t id = 0;
+    // Timeline row. Several layers ("clips") may share a track as long as
+    // they do not overlap in time; 0 means "give me a new track".
+    uint64_t track = 0;
     std::string name;
     LayerType type = LayerType::Shape;
     bool visible = true;

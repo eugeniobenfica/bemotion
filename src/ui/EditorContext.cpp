@@ -169,25 +169,45 @@ void EditorContext::duplicateSelected() {
     for (const Layer* src : sources) {
         Layer copy = *src;
         copy.name = comp().uniqueLayerName(src->name);
+        copy.track = 0; // each copy gets its own new track
         copies.emplace_back(std::move(copy), comp().indexOf(src->id));
     }
     selection.clear();
     selectedKeys.clear();
-    // Insert bottom-up so earlier indices stay valid; each copy sits above its source.
+    // Insert bottom-up so earlier indices stay valid; each copy's track sits above its source's.
     for (auto it = copies.rbegin(); it != copies.rend(); ++it)
         selection.push_back(comp().addLayer(std::move(it->first), it->second).id);
     touch();
 }
 
-void EditorContext::moveSelectedTo(int targetIndex) {
+std::vector<uint64_t> EditorContext::selectedTracks() {
+    std::vector<uint64_t> tracks;
+    for (const Layer* l : selectedLayers())
+        if (std::find(tracks.begin(), tracks.end(), l->track) == tracks.end()) tracks.push_back(l->track);
+    return tracks;
+}
+
+void EditorContext::moveSelectedTracksTo(int targetRow) {
     if (selection.empty()) return;
-    comp().moveLayers(selection, targetIndex);
+    comp().moveTracks(selectedTracks(), targetRow);
     touch();
+}
+
+void EditorContext::moveSelectedClipsToNewTrack(int gapRow) {
+    if (selection.empty()) return;
+    comp().moveClipsToNewTracks(selection, gapRow);
+    touch();
+}
+
+bool EditorContext::moveSelectedClipsToTrack(uint64_t trackId) {
+    if (selection.empty() || !comp().moveClipsToTrack(selection, trackId)) return false;
+    touch();
+    return true;
 }
 
 void EditorContext::shiftSelected(int delta) {
     if (selection.empty()) return;
-    comp().shiftLayers(selection, delta);
+    comp().shiftTracks(selectedTracks(), delta);
     touch();
 }
 

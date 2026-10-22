@@ -30,8 +30,12 @@ common moves are one click away through *Quick Animations*.
   (move in time / trim in & out), **drag layers up and down to change the
   stacking order**, multi-select (Shift/Ctrl), keyframe dragging, easing menu
   (right click), zoom (Ctrl+Wheel)
-- **Cut tool**: the razor (C) splits a layer where you click; Ctrl+K splits the
-  selected layers at the playhead
+- **Tracks**: each timeline row is a track that can hold several clips. Drag a
+  clip into another row to move it to that track (it must not overlap), or
+  between rows to give it a new track; clips stop at their neighbors
+- **Cut tool**: the razor (C) splits a clip where you click, keeping both pieces
+  on the same track; Ctrl+K splits the
+  selected clips at the playhead
 - **Video export** (Ctrl+M): MP4 / H.264 (built in on Windows), PNG sequence
   with transparency, and — with [FFmpeg](https://ffmpeg.org) installed — MOV
   ProRes 4444 (alpha), WebM VP9 and animated GIF; any size from ¼× to 2×

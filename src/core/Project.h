@@ -8,6 +8,13 @@
 
 namespace bemotion {
 
+// A timeline row: a contiguous run of `layers` sharing one track id.
+struct TrackRow {
+    uint64_t track = 0;
+    int first = 0; // index of the first layer of the track in Composition::layers
+    int count = 0;
+};
+
 struct Composition {
     int width = 1920;
     int height = 1080;
@@ -15,8 +22,11 @@ struct Composition {
     double duration = 10.0; // seconds
     Color background = Color::fromHex(0x101012);
 
-    std::vector<Layer> layers; // index 0 is the top-most layer
+    // Rendering order: index 0 is the top-most layer. Layers of the same
+    // track are always kept next to each other (see normalizeTracks).
+    std::vector<Layer> layers;
     uint64_t nextLayerId = 1;
+    uint64_t nextTrackId = 1;
 
     double frameDuration() const { return 1.0 / fps; }
     int frameCount() const;
@@ -25,7 +35,9 @@ struct Composition {
     double snapToFrame(double t) const { return timeOfFrame(frameAt(t)); }
     Vec2 center() const { return {width * 0.5f, height * 0.5f}; }
 
-    // Inserts a layer at `index` (default: top), assigning it a fresh id.
+    // Inserts a layer, assigning it a fresh id (and a fresh track when its
+    // track is 0). `index` is rounded to a track boundary so tracks stay
+    // contiguous; the default puts it on top.
     Layer& addLayer(Layer layer, int index = 0);
     Layer* findLayer(uint64_t id);
     const Layer* findLayer(uint64_t id) const;
@@ -33,15 +45,38 @@ struct Composition {
     void removeLayer(uint64_t id);
     std::string uniqueLayerName(const std::string& base) const;
 
-    // Moves `ids` as one block, keeping their relative order, so the block
-    // starts at `targetIndex` of the list *without* the moved layers.
-    void moveLayers(const std::vector<uint64_t>& ids, int targetIndex);
-    // Moves each of `ids` `delta` steps in the stack (negative = towards the top).
-    void shiftLayers(const std::vector<uint64_t>& ids, int delta);
-    // Cuts a layer in two at time `t`. The original keeps [in, t), a copy
-    // placed right above it gets [t, out). Returns the copy's id, or 0 when
-    // `t` is not strictly inside the layer.
+    // --- tracks (timeline rows) ---------------------------------------------------
+    std::vector<TrackRow> trackRows() const;
+    int trackRowOf(uint64_t layerId) const; // row index of the layer's track, or -1
+    // Groups layers of the same track together, ordered by first appearance.
+    void normalizeTracks();
+
+    // Moves whole tracks, keeping their order, so they start at row
+    // `targetRow` of the list *without* them.
+    void moveTracks(const std::vector<uint64_t>& trackIds, int targetRow);
+    // Moves each of the tracks `delta` rows (negative = towards the top).
+    void shiftTracks(const std::vector<uint64_t>& trackIds, int delta);
+    // Takes the given clips out of their tracks and puts them on new tracks
+    // inserted at row gap `gapRow` (0 = above the first row). Clips that came
+    // from the same track stay together. Empty tracks disappear.
+    void moveClipsToNewTracks(const std::vector<uint64_t>& layerIds, int gapRow);
+    // True if the clips can join `trackId` without overlapping its other clips (or each other).
+    bool clipsFitTrack(const std::vector<uint64_t>& layerIds, uint64_t trackId) const;
+    // Moves the clips onto an existing track. Returns false (and changes nothing) if they don't fit.
+    bool moveClipsToTrack(const std::vector<uint64_t>& layerIds, uint64_t trackId);
+    // How far the clips may be shifted in time without overlapping other
+    // clips on their tracks.
+    void timeShiftLimits(const std::vector<uint64_t>& layerIds, double& minDelta, double& maxDelta) const;
+    // End of the previous clip and start of the next clip on the same track.
+    void neighborBounds(uint64_t layerId, double& prevOut, double& nextIn) const;
+
+    // Cuts a layer in two at time `t`. The original keeps [in, t), a copy on
+    // the same track gets [t, out). Returns the copy's id, or 0 when `t` is
+    // not strictly inside the layer.
     uint64_t splitLayer(uint64_t id, double t);
+
+private:
+    void rebuild(std::vector<std::vector<Layer>> rows);
 };
 
 struct Project {

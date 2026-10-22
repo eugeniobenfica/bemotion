@@ -102,16 +102,24 @@ void TimelinePanel::draw(EditorContext& ctx) {
     }
 
     rows_.clear();
+    clips_.clear();
     auto& layers = comp.layers;
-    for (int i = 0; i < static_cast<int>(layers.size()); ++i) {
-        Layer& layer = layers[i];
-        ImGui::PushID(static_cast<int>(layer.id));
-        drawLayerRow(ctx, layer, i, x0, avail.x);
-        if (expanded_.count(layer.id)) {
-            for (const PropertyRef& prop : layer.properties()) {
+    const auto trackRows = comp.trackRows();
+    for (int r = 0; r < static_cast<int>(trackRows.size()); ++r) {
+        const TrackRow& row = trackRows[r];
+        ImGui::PushID(static_cast<int>(row.track));
+        drawTrackRow(ctx, row, r, x0, avail.x);
+        if (expanded_.count(row.track)) {
+            // Property rows belong to the primary clip if it is on this track, else the first clip.
+            Layer* focus = &layers[row.first];
+            for (int i = row.first; i < row.first + row.count; ++i)
+                if (layers[i].id == ctx.primaryId()) focus = &layers[i];
+            ImGui::PushID(static_cast<int>(focus->id));
+            for (const PropertyRef& prop : focus->properties()) {
                 if (animatedOnly_ && !prop.anim->isAnimated()) continue;
-                drawPropertyRow(ctx, layer, prop, x0, avail.x);
+                drawPropertyRow(ctx, *focus, prop, x0, avail.x);
             }
+            ImGui::PopID();
         }
         ImGui::PopID();
     }
@@ -153,7 +161,8 @@ void TimelinePanel::draw(EditorContext& ctx) {
     }
     dl->PopClipRect();
 
-    if (restacking_ && drag_ != Drag::None) drawDropIndicator(dl, x0, avail.x);
+    if (restacking_ && drag_ != Drag::None)
+        drawDropIndicator(dl, dropTargetAt(ctx, io.MousePos.y, drag_), x0, avail.x);
 
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -280,19 +289,26 @@ void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float widt
     dl->PopClipRect();
 }
 
-void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, float x0, float width) {
+void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int rowIndex, float x0, float width) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImGuiIO& io = ImGui::GetIO();
+    auto& layers = ctx.comp().layers;
     const float y = ImGui::GetCursorScreenPos().y;
     const float h = kLayerRowHeight;
-    const bool selected = ctx.isSelected(layer.id);
-    const bool primary = ctx.primaryId() == layer.id;
-    rows_.push_back({index, layer.id, y, y + h, timeToX(layer.inPoint), timeToX(layer.outPoint)});
+    rows_.push_back({rowIndex, row.track, y, y + h});
 
-    // Every selected layer gets the same clear highlight; the primary one
-    // (shown in Properties) is a bit brighter.
-    if (selected) {
-        dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(232, 185, 49, primary ? 34 : 24));
+    // The clip that represents the track in the left column: the primary
+    // selection if it is here, otherwise the first clip.
+    Layer* focus = &layers[row.first];
+    bool anySelected = false;
+    for (int i = row.first; i < row.first + row.count; ++i) {
+        anySelected |= ctx.isSelected(layers[i].id);
+        if (layers[i].id == ctx.primaryId()) focus = &layers[i];
+    }
+    const bool hasPrimary = focus->id == ctx.primaryId();
+
+    if (anySelected) {
+        dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(232, 185, 49, hasPrimary ? 34 : 24));
         dl->AddRectFilled(ImVec2(x0, y + 2), ImVec2(x0 + 3, y + h - 2), theme::kAccent, 1.5f);
     }
     dl->AddLine(ImVec2(x0, y + h - 1), ImVec2(x0 + width, y + h - 1), IM_COL32(255, 255, 255, 10));
@@ -301,57 +317,60 @@ void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, fl
     const float btn = 20.0f;
     const float by = y + (h - btn) * 0.5f;
     ImGui::SetCursorScreenPos(ImVec2(x0 + 6, by));
-    const bool isExpanded = expanded_.count(layer.id) > 0;
+    const bool isExpanded = expanded_.count(row.track) > 0;
     if (ui::iconButton("##expand", isExpanded ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, btn, "Show properties")) {
-        if (isExpanded) expanded_.erase(layer.id);
-        else expanded_.insert(layer.id);
+        if (isExpanded) expanded_.erase(row.track);
+        else expanded_.insert(row.track);
     }
+    // Visibility and lock act on the whole track.
     ImGui::SameLine();
-    if (ui::iconButton("##vis", layer.visible ? ui::Icon::Eye : ui::Icon::EyeOff, btn,
-                       layer.visible ? "Hide layer" : "Show layer")) {
-        layer.visible = !layer.visible;
+    if (ui::iconButton("##vis", focus->visible ? ui::Icon::Eye : ui::Icon::EyeOff, btn,
+                       focus->visible ? "Hide track" : "Show track")) {
+        const bool visible = !focus->visible;
+        for (int i = row.first; i < row.first + row.count; ++i) layers[i].visible = visible;
         ctx.touch();
     }
     ImGui::SameLine();
-    if (ui::iconButton("##lock", layer.locked ? ui::Icon::Lock : ui::Icon::Unlock, btn,
-                       layer.locked ? "Unlock layer" : "Lock layer", layer.locked)) {
-        layer.locked = !layer.locked;
+    if (ui::iconButton("##lock", focus->locked ? ui::Icon::Lock : ui::Icon::Unlock, btn,
+                       focus->locked ? "Unlock track" : "Lock track", focus->locked)) {
+        const bool locked = !focus->locked;
+        for (int i = row.first; i < row.first + row.count; ++i) layers[i].locked = locked;
         ctx.touch();
     }
     ImGui::SameLine();
     const ImVec2 chip = ImGui::GetCursorScreenPos();
-    dl->AddRectFilled(ImVec2(chip.x + 2, y + 8), ImVec2(chip.x + 5, y + h - 8), toU32(labelColor(layer.label)), 2.0f);
-    ui::drawIcon(dl, ui::iconForLayer(layer), ImVec2(chip.x + 18, y + h * 0.5f), 14.0f,
-                 selected ? theme::kAccent : theme::kTextDim);
+    dl->AddRectFilled(ImVec2(chip.x + 2, y + 8), ImVec2(chip.x + 5, y + h - 8), toU32(labelColor(focus->label)), 2.0f);
+    ui::drawIcon(dl, ui::iconForLayer(*focus), ImVec2(chip.x + 18, y + h * 0.5f), 14.0f,
+                 anySelected ? theme::kAccent : theme::kTextDim);
 
     const float nameX = chip.x + 32;
     const float nameW = std::max(10.0f, x0 + leftWidth_ - nameX - 8);
     ImGui::SetCursorScreenPos(ImVec2(nameX, y + (h - ImGui::GetFrameHeight()) * 0.5f));
-    if (renaming_ == layer.id) {
+    if (renaming_ == focus->id) {
         ImGui::SetNextItemWidth(nameW);
         if (focusRename_) {
             ImGui::SetKeyboardFocusHere();
             focusRename_ = false;
         }
-        if (ImGui::InputText("##rename", &layer.name, ImGuiInputTextFlags_AutoSelectAll)) ctx.touch();
+        if (ImGui::InputText("##rename", &focus->name, ImGuiInputTextFlags_AutoSelectAll)) ctx.touch();
         if (ImGui::IsItemDeactivated()) renaming_ = 0;
     } else {
         ImGui::SetCursorScreenPos(ImVec2(nameX, y));
         ImGui::InvisibleButton("##name", ImVec2(nameW, h));
         if (ImGui::IsItemActivated()) {
-            clickLayer(ctx, layer.id);
-            if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, Drag::LayerName, layer.id);
+            clickTrack(ctx, row);
+            if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, Drag::LayerName, focus->id);
         }
         if (ImGui::IsItemActive() && drag_ == Drag::LayerName) updateLayerDrag(ctx);
         if (ImGui::IsItemDeactivated() && drag_ == Drag::LayerName) endLayerDrag(ctx);
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            renaming_ = layer.id;
+            renaming_ = focus->id;
             focusRename_ = true;
         }
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !ctx.isSelected(layer.id)) ctx.select(layer.id);
-        if (ImGui::BeginPopupContextItem("##layerctx")) {
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !anySelected) clickTrack(ctx, row);
+        if (ImGui::BeginPopupContextItem("##trackctx")) {
             if (ImGui::MenuItem("Rename")) {
-                renaming_ = layer.id;
+                renaming_ = focus->id;
                 focusRename_ = true;
             }
             if (ImGui::MenuItem("Duplicate", "Ctrl+D")) ctx.duplicateSelected();
@@ -365,60 +384,84 @@ void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, fl
             if (ImGui::MenuItem("Delete", "Del")) ctx.deleteSelected();
             ImGui::EndPopup();
         }
-        const ImU32 col = layer.visible ? (selected ? theme::kText : theme::kTextDim) : theme::kTextFaint;
+        const ImU32 col = focus->visible ? (anySelected ? theme::kText : theme::kTextDim) : theme::kTextFaint;
         dl->PushClipRect(ImVec2(nameX, y), ImVec2(nameX + nameW, y + h), true);
-        dl->AddText(ImVec2(nameX, y + (h - ImGui::GetTextLineHeight()) * 0.5f), col, layer.name.c_str());
+        const float textY = y + (h - ImGui::GetTextLineHeight()) * 0.5f;
+        dl->AddText(ImVec2(nameX, textY), col, focus->name.c_str());
+        if (row.count > 1) { // e.g. a track that was cut into pieces
+            char badge[16];
+            std::snprintf(badge, sizeof(badge), "%d clips", row.count);
+            const float bw = ImGui::CalcTextSize(badge).x;
+            dl->AddText(ImVec2(nameX + nameW - bw, textY), theme::kTextFaint, badge);
+        }
         dl->PopClipRect();
     }
 
-    // --- track: layer bar ------------------------------------------------------
+    // --- track: clip bars ------------------------------------------------------
     ImGui::SetCursorScreenPos(ImVec2(trackX0_, y));
     ImGui::InvisibleButton("##track", ImVec2(trackW_, h));
     const bool hovered = ImGui::IsItemHovered();
-    const float bx1 = timeToX(layer.inPoint), bx2 = timeToX(layer.outPoint);
     const float mx = io.MousePos.x;
 
-    const bool onEdgeIn = std::fabs(mx - bx1) < kEdgeGrab, onEdgeOut = std::fabs(mx - bx2) < kEdgeGrab;
-    const bool onBar = mx > bx1 && mx < bx2;
+    // Clip under the mouse; edges win over bodies so adjacent clips can be trimmed.
+    int hit = -1;
+    Drag hitMode = Drag::None;
+    for (int i = row.first; i < row.first + row.count; ++i) {
+        const float bx1 = timeToX(layers[i].inPoint), bx2 = timeToX(layers[i].outPoint);
+        if (std::fabs(mx - bx1) < kEdgeGrab) hit = i, hitMode = Drag::LayerIn;
+        else if (std::fabs(mx - bx2) < kEdgeGrab && hitMode != Drag::LayerIn) hit = i, hitMode = Drag::LayerOut;
+        else if (mx > bx1 && mx < bx2 && hit < 0) hit = i, hitMode = Drag::LayerMove;
+    }
 
     if (ctx.tool == Tool::Razor) {
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && onBar) ctx.splitLayerAt(layer.id, xToTime(mx));
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && hit >= 0) ctx.splitLayerAt(layers[hit].id, xToTime(mx));
     } else {
-        if (hovered && drag_ == Drag::None && (onEdgeIn || onEdgeOut)) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        if (hovered && drag_ == Drag::None && (hitMode == Drag::LayerIn || hitMode == Drag::LayerOut))
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
         if (ImGui::IsItemActivated()) {
-            const Drag mode = onEdgeIn ? Drag::LayerIn : onEdgeOut ? Drag::LayerOut : onBar ? Drag::LayerMove : Drag::None;
-            if (mode != Drag::None) {
-                clickLayer(ctx, layer.id);
-                if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, mode, layer.id);
+            if (hit >= 0) {
+                const uint64_t id = layers[hit].id;
+                clickLayer(ctx, id);
+                if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, hitMode, id);
             } else {
                 beginMarquee(ctx); // empty track space: box selection
             }
         }
         const bool barDrag = drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut;
-        if (ImGui::IsItemActive() && barDrag && dragLayer_ == layer.id) updateLayerDrag(ctx);
-        if (ImGui::IsItemDeactivated() && barDrag && dragLayer_ == layer.id) endLayerDrag(ctx);
+        // The dragged clip may change track mid-frame; match by row activity instead of clip.
+        if (ImGui::IsItemActive() && barDrag) updateLayerDrag(ctx);
+        if (ImGui::IsItemDeactivated() && barDrag) endLayerDrag(ctx);
     }
 
     dl->PushClipRect(ImVec2(trackX0_, y), ImVec2(trackX0_ + trackW_, y + h), true);
-    const Color lc = labelColor(layer.label);
-    const ImVec2 a(bx1, y + 5), b(bx2, y + h - 5);
-    dl->AddRectFilled(a, b, toU32(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
-    if (selected) dl->AddRect(a, b, primary ? theme::kText : IM_COL32(255, 255, 255, 170), 5.0f, 0, primary ? 1.8f : 1.3f);
-    dl->AddRectFilled(ImVec2(bx1 + 2, y + 9), ImVec2(bx1 + 4, y + h - 9), toU32(lc, 0.8f), 1.0f);
-    dl->AddRectFilled(ImVec2(bx2 - 4, y + 9), ImVec2(bx2 - 2, y + h - 9), toU32(lc, 0.8f), 1.0f);
-    dl->PushClipRect(ImVec2(std::max(bx1, trackX0_), y), ImVec2(std::min(bx2, trackX0_ + trackW_), y + h), true);
-    dl->AddText(ImVec2(std::max(bx1, trackX0_) + 10, y + (h - ImGui::GetTextLineHeight()) * 0.5f),
-                IM_COL32(255, 255, 255, 150), layer.name.c_str());
-    dl->PopClipRect();
+    for (int i = row.first; i < row.first + row.count; ++i) {
+        const Layer& layer = layers[i];
+        const bool selected = ctx.isSelected(layer.id);
+        const bool primary = ctx.primaryId() == layer.id;
+        const float bx1 = timeToX(layer.inPoint), bx2 = timeToX(layer.outPoint);
+        clips_.push_back({layer.id, y, y + h, bx1, bx2});
 
-    // Summary of all keyframe times on the layer.
-    if (!isExpanded) {
-        for (const PropertyRef& p : layer.properties())
-            for (int k = 0; k < p.anim->keyCount(); ++k) {
-                const double kt = p.anim->keyTime(k);
-                if (kt < layer.inPoint - kTimeEpsilon || kt > layer.outPoint + kTimeEpsilon) continue; // e.g. after a cut
-                ui::drawDiamond(dl, ImVec2(timeToX(kt), y + h - 7), 3.0f, IM_COL32(230, 230, 235, 200), 0);
-            }
+        const Color lc = labelColor(layer.label);
+        const ImVec2 a(bx1 + 1, y + 5), b(bx2 - 1, y + h - 5); // 1px gap shows cut points
+        dl->AddRectFilled(a, b, toU32(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
+        if (selected)
+            dl->AddRect(a, b, primary ? theme::kText : IM_COL32(255, 255, 255, 170), 5.0f, 0, primary ? 1.8f : 1.3f);
+        dl->AddRectFilled(ImVec2(bx1 + 3, y + 9), ImVec2(bx1 + 5, y + h - 9), toU32(lc, 0.8f), 1.0f);
+        dl->AddRectFilled(ImVec2(bx2 - 5, y + 9), ImVec2(bx2 - 3, y + h - 9), toU32(lc, 0.8f), 1.0f);
+        dl->PushClipRect(ImVec2(std::max(bx1, trackX0_), y), ImVec2(std::min(bx2, trackX0_ + trackW_), y + h), true);
+        dl->AddText(ImVec2(std::max(bx1, trackX0_) + 10, y + (h - ImGui::GetTextLineHeight()) * 0.5f),
+                    IM_COL32(255, 255, 255, 150), layer.name.c_str());
+        dl->PopClipRect();
+
+        // Summary of the clip's keyframes (within the clip only, e.g. after a cut).
+        if (!isExpanded) {
+            for (const PropertyRef& p : const_cast<Layer&>(layer).properties())
+                for (int k = 0; k < p.anim->keyCount(); ++k) {
+                    const double kt = p.anim->keyTime(k);
+                    if (kt < layer.inPoint - kTimeEpsilon || kt > layer.outPoint + kTimeEpsilon) continue;
+                    ui::drawDiamond(dl, ImVec2(timeToX(kt), y + h - 7), 3.0f, IM_COL32(230, 230, 235, 200), 0);
+                }
+        }
     }
     dl->PopClipRect();
 
@@ -523,6 +566,32 @@ void TimelinePanel::clickLayer(EditorContext& ctx, uint64_t id) {
     }
 }
 
+namespace {
+std::vector<uint64_t> clipsOfTrack(const Composition& comp, uint64_t track) {
+    std::vector<uint64_t> ids;
+    for (const Layer& l : comp.layers)
+        if (l.track == track) ids.push_back(l.id);
+    return ids;
+}
+} // namespace
+
+void TimelinePanel::clickTrack(EditorContext& ctx, const TrackRow& row) {
+    const ImGuiIO& io = ImGui::GetIO();
+    const auto ids = clipsOfTrack(ctx.comp(), row.track);
+    const bool all = std::all_of(ids.begin(), ids.end(), [&](uint64_t id) { return ctx.isSelected(id); });
+    if (io.KeyCtrl) {
+        for (uint64_t id : ids)
+            if (all) std::erase(ctx.selection, id);
+            else if (!ctx.isSelected(id)) ctx.selection.push_back(id);
+        ctx.clearKeySelection();
+    } else if (io.KeyShift) {
+        ctx.selectRange(ids.front());
+    } else if (!all) { // keep a multi-track selection when clicking one of its tracks
+        ctx.select(ids.front());
+        for (size_t i = 1; i < ids.size(); ++i) ctx.selection.push_back(ids[i]);
+    }
+}
+
 void TimelinePanel::beginLayerDrag(EditorContext& ctx, Drag mode, uint64_t id) {
     const Layer* layer = ctx.comp().findLayer(id);
     if (!layer) return;
@@ -550,21 +619,32 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
     if (restacking_ && std::fabs(dx) < 12.0f) delta = 0.0; // vertical drags shouldn't nudge time
     const double fd = comp.frameDuration();
     switch (drag_) {
-    case Drag::LayerMove:
-        if (delta != dragApplied_) {
-            for (Layer* l : ctx.selectedLayers()) l->shiftTime(delta - dragApplied_);
-            dragApplied_ = delta;
+    case Drag::LayerMove: {
+        // Clips never overlap others on their track: stop at the neighbors.
+        double lo = 0, hi = 0;
+        comp.timeShiftLimits(ctx.selection, lo, hi);
+        const double step = std::clamp(delta - dragApplied_, lo, hi);
+        if (std::fabs(step) > 1e-9) {
+            for (Layer* l : ctx.selectedLayers()) l->shiftTime(step);
+            dragApplied_ += step;
             ctx.touch();
         }
         break;
-    case Drag::LayerIn:
-        layer->inPoint = std::min(dragOrigIn_ + delta, layer->outPoint - fd);
+    }
+    case Drag::LayerIn: {
+        double prevOut = 0, nextIn = 0;
+        comp.neighborBounds(layer->id, prevOut, nextIn);
+        layer->inPoint = std::clamp(dragOrigIn_ + delta, std::max(prevOut, -1e9), layer->outPoint - fd);
         ctx.touch();
         break;
-    case Drag::LayerOut:
-        layer->outPoint = std::max(dragOrigOut_ + delta, layer->inPoint + fd);
+    }
+    case Drag::LayerOut: {
+        double prevOut = 0, nextIn = 0;
+        comp.neighborBounds(layer->id, prevOut, nextIn);
+        layer->outPoint = std::clamp(dragOrigOut_ + delta, layer->inPoint + fd, std::min(nextIn, 1e9));
         ctx.touch();
         break;
+    }
     default: break;
     }
 }
@@ -576,22 +656,70 @@ void TimelinePanel::endLayerDrag(EditorContext& ctx) {
         // are laid out: finish the drop once the whole list is known.
         pendingDrop_ = true;
         pendingDropY_ = io.MousePos.y;
+        pendingDropMode_ = drag_;
     } else if (std::fabs(io.MousePos.x - dragStartX_) < 3.0f && std::fabs(io.MousePos.y - dragStartY_) < 3.0f &&
                !io.KeyCtrl && !io.KeyShift) {
-        ctx.select(dragLayer_); // plain click inside a multi-selection keeps just this layer
+        // A plain click inside a multi-selection keeps just this clip (or this track's clips).
+        if (drag_ == Drag::LayerName) {
+            if (const Layer* l = ctx.comp().findLayer(dragLayer_)) {
+                const auto ids = clipsOfTrack(ctx.comp(), l->track);
+                ctx.select(ids.front());
+                for (size_t i = 1; i < ids.size(); ++i) ctx.selection.push_back(ids[i]);
+            }
+        } else {
+            ctx.select(dragLayer_);
+        }
     }
     drag_ = Drag::None;
     restacking_ = false;
 }
 
+TimelinePanel::DropTarget TimelinePanel::dropTargetAt(EditorContext& ctx, float y, Drag mode) const {
+    DropTarget t;
+    if (rows_.empty()) return t;
+    t.valid = true;
+    t.gap = dropGapAt(y);
+    if (mode != Drag::LayerMove) return t; // name drags reorder whole tracks
+
+    // Clips: the middle of a row joins that track, its edges (or the space
+    // between rows) create a new track.
+    constexpr float kEdge = 7.0f;
+    for (const RowRect& r : rows_) {
+        if (y < r.top || y >= r.bottom) continue;
+        if (y < r.top + kEdge) t.gap = r.index;
+        else if (y > r.bottom - kEdge) t.gap = r.index + 1;
+        else {
+            t.newTrack = false;
+            t.track = r.track;
+            const auto& sel = ctx.selection;
+            const bool alreadyThere = std::all_of(sel.begin(), sel.end(), [&](uint64_t id) {
+                const Layer* l = ctx.comp().findLayer(id);
+                return l && l->track == r.track;
+            });
+            if (alreadyThere) t.valid = false;
+            else t.fits = ctx.comp().clipsFitTrack(sel, r.track);
+        }
+        break;
+    }
+    return t;
+}
+
 void TimelinePanel::applyPendingDrop(EditorContext& ctx) {
     if (!pendingDrop_) return;
     pendingDrop_ = false;
-    const int gap = dropGapAt(pendingDropY_);
-    int selectedAbove = 0; // selected layers above the gap leave the list first
-    for (int i = 0; i < gap && i < static_cast<int>(ctx.comp().layers.size()); ++i)
-        if (ctx.isSelected(ctx.comp().layers[i].id)) ++selectedAbove;
-    ctx.moveSelectedTo(gap - selectedAbove);
+    const DropTarget t = dropTargetAt(ctx, pendingDropY_, pendingDropMode_);
+    if (!t.valid) return;
+    if (pendingDropMode_ == Drag::LayerName) {
+        const auto tracks = ctx.selectedTracks();
+        int above = 0; // selected tracks above the gap leave the list first
+        for (const RowRect& r : rows_)
+            if (r.index < t.gap && std::find(tracks.begin(), tracks.end(), r.track) != tracks.end()) ++above;
+        ctx.moveSelectedTracksTo(t.gap - above);
+    } else if (t.newTrack) {
+        ctx.moveSelectedClipsToNewTrack(t.gap);
+    } else if (t.fits) {
+        ctx.moveSelectedClipsToTrack(t.track);
+    }
 }
 
 void TimelinePanel::beginMarquee(EditorContext& ctx) {
@@ -615,12 +743,12 @@ void TimelinePanel::updateMarquee(EditorContext& ctx, ImDrawList* dl) {
     const ImVec2 b(std::max(marqueeStart_.x, m.x), std::max(marqueeStart_.y, m.y));
     if (b.x - a.x < 3.0f && b.y - a.y < 3.0f) return; // still a click
 
-    // Rows the box touches vertically; inside the track area the box must also touch the bar.
+    // Clips whose row the box touches; inside the track area the box must also touch the clip.
     ctx.selection = marqueeBase_;
-    for (const LayerRow& r : rows_) {
-        const bool vertical = r.bottom > a.y && r.top < b.y;
-        const bool horizontal = a.x < trackX0_ || (r.barX2 > a.x && r.barX1 < b.x);
-        if (vertical && horizontal && !ctx.isSelected(r.id)) ctx.selection.push_back(r.id);
+    for (const ClipRect& c : clips_) {
+        const bool vertical = c.bottom > a.y && c.top < b.y;
+        const bool horizontal = a.x < trackX0_ || (c.x2 > a.x && c.x1 < b.x);
+        if (vertical && horizontal && !ctx.isSelected(c.id)) ctx.selection.push_back(c.id);
     }
     dl->AddRectFilled(a, b, IM_COL32(232, 185, 49, 22));
     dl->AddRect(a, b, IM_COL32(232, 185, 49, 160));
@@ -628,17 +756,26 @@ void TimelinePanel::updateMarquee(EditorContext& ctx, ImDrawList* dl) {
 
 int TimelinePanel::dropGapAt(float y) const {
     int gap = 0;
-    for (const LayerRow& r : rows_)
+    for (const RowRect& r : rows_)
         if (y > (r.top + r.bottom) * 0.5f) gap = r.index + 1;
     return gap;
 }
 
-void TimelinePanel::drawDropIndicator(ImDrawList* dl, float x0, float width) const {
-    if (rows_.empty()) return;
-    const int gap = dropGapAt(ImGui::GetIO().MousePos.y);
+void TimelinePanel::drawDropIndicator(ImDrawList* dl, const DropTarget& target, float x0, float width) const {
+    if (!target.valid) return;
+    if (!target.newTrack) { // joining an existing track: outline that row
+        for (const RowRect& r : rows_) {
+            if (r.track != target.track) continue;
+            const ImU32 col = target.fits ? theme::kAccent : theme::kDanger;
+            dl->AddRectFilled(ImVec2(trackX0_, r.top + 1), ImVec2(x0 + width - 2, r.bottom - 1),
+                              target.fits ? IM_COL32(232, 185, 49, 30) : IM_COL32(229, 96, 77, 30), 4.0f);
+            dl->AddRect(ImVec2(trackX0_, r.top + 1), ImVec2(x0 + width - 2, r.bottom - 1), col, 4.0f, 0, 2.0f);
+        }
+        return;
+    }
     float y = rowsBottom_;
-    for (const LayerRow& r : rows_)
-        if (r.index == gap) y = r.top;
+    for (const RowRect& r : rows_)
+        if (r.index == target.gap) y = r.top;
     dl->AddLine(ImVec2(x0 + 4, y), ImVec2(x0 + width - 4, y), theme::kAccent, 2.0f);
     dl->AddCircleFilled(ImVec2(x0 + 6, y), 4.0f, theme::kAccent);
 }

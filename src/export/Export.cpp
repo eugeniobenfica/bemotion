@@ -166,6 +166,7 @@ void ExportJob::step(double budgetSeconds) {
     renderer_.release();
     running_ = false;
     done_ = true;
+    endTime_ = std::chrono::steady_clock::now();
     if (!ok) error_ = err.empty() ? "Finishing the file failed." : err;
 }
 
@@ -177,6 +178,7 @@ void ExportJob::cancel() {
     renderer_.release();
     running_ = false;
     done_ = true;
+    endTime_ = std::chrono::steady_clock::now();
     cancelled_ = true;
 }
 
@@ -187,11 +189,14 @@ void ExportJob::fail(std::string message) {
     renderer_.release();
     running_ = false;
     done_ = true;
+    endTime_ = std::chrono::steady_clock::now();
     error_ = std::move(message);
 }
 
 double ExportJob::elapsedSeconds() const {
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - startTime_).count();
+    // Frozen once the job ends, so the result dialog shows the real export time.
+    const auto end = done_ ? endTime_ : std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(end - startTime_).count();
 }
 
 } // namespace bemotion::exporting
