@@ -136,11 +136,12 @@ void TimelinePanel::draw(EditorContext& ctx) {
     for (const Layer& l : comp.layers) contentEnd = std::max(contentEnd, l.outPoint);
     const double minPx = trackW_ / (contentEnd * 4.0);
     if (pxPerSec_ <= 0.0) {
-        pxPerSec_ = (trackW_ - 24.0) / comp.duration;
+        pxPerSec_ = (trackW_ - 24.0) / std::max(comp.duration, 2.0 * kDefaultLayerLength); // room to grow
         scroll_ = 0.0;
     }
     pxPerSec_ = std::clamp(pxPerSec_, std::min(minPx, 4000.0), 4000.0);
-    scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, contentEnd + 1.0 - (trackW_ - 24.0) / pxPerSec_));
+    // Some room past the end: the playhead can go there to add objects (the composition grows).
+    scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, contentEnd + kDefaultLayerLength - (trackW_ - 24.0) / pxPerSec_));
 
     drawRuler(ctx, area.x, area.y, avail.x);
 
@@ -315,7 +316,7 @@ void TimelinePanel::handleObjectDrop(EditorContext& ctx, ImDrawList* dl, float x
         const float tx = timeToX(t);
         dl->AddLine(ImVec2(x0, gy), ImVec2(x0 + width, gy), theme::kAccent, 2.0f);
         const MediaItem* item = mediaId ? ctx.comp().findMedia(mediaId) : nullptr;
-        const double end = item && item->kind != MediaKind::Image ? t + item->duration : ctx.comp().duration;
+        const double end = t + (item && item->kind != MediaKind::Image ? item->duration : kDefaultLayerLength);
         dl->AddRectFilled(ImVec2(tx, gy - 9), ImVec2(std::max(tx + 60, timeToX(end)), gy + 9), theme::accent(60), 4.0f);
         dl->AddLine(ImVec2(tx, winPos.y), ImVec2(tx, winPos.y + winSize.y), theme::kAccent, 1.0f);
         char label[48];

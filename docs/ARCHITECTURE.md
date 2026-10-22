@@ -26,7 +26,9 @@ tests in `tests/`.
   `properties()` — the inspector, timeline and file format pick it up
   automatically.
 - **`Composition` / `Project`** (`Project.h`) — canvas size, frame rate,
-  duration, background and the layer stack (index 0 is the top layer). Layers
+  duration, background and the layer stack (index 0 is the top layer). The
+  duration is not set by hand: `fitDuration` makes it end with the last clip
+  (the editor calls it whenever an edit is committed). Layers
   carry a `track` id: a track is one timeline row and may hold several
   non-overlapping layers ("clips"); same-track layers are kept contiguous. Stack
   operations live here so they are testable: `moveTracks`, `shiftTracks`,
@@ -101,10 +103,14 @@ trimmed clips stay in sync with their source.
   dragged onto the viewport with an ImGui drag-and-drop payload
   (`kObjectPayload`).
 - **`ExportDialog`** — settings, progress and result of an export.
+- **`IntroScreen`** plays `assets/welcome/Welcome.bemotion` full-window at
+  startup (skippable, can be turned off in Settings). The same file is the
+  Welcome project users can open, so the intro is edited in bemotion itself.
 - **`Theme`** defines the palette (dark neutrals + golden accent `#E8B931`).
   Use the named colors from `Theme.h` instead of literals.
 - **`Widgets`** has the vector icon set and custom controls (accent button,
-  object tile, keyframe toggle).
+  object tile, keyframe toggle). The logo is `drawLogoMark`, built from the
+  shared geometry in `render/LogoMark.h` (also used by the app icon).
 
 ## App (`src/app`)
 
@@ -123,5 +129,7 @@ folders, native file dialogs and UTF-8 paths.
 - `BEMOTION_SCRIPT=steps.txt` replays scripted mouse/keyboard input and can
   capture frames along the way (see `app/DevScript.h`), so interactions can be
   checked without anyone at the screen.
+- `bemotion --write-icon <file.ico|png|svg>` / `--write-mark <file.svg>`
+  regenerate the brand files in `assets/branding` from `render/LogoMark.h`.
 - Configure with `-DBEMOTION_CONSOLE=ON` to keep a console window for logs and
   assertion messages.

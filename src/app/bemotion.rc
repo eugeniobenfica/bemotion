@@ -1,0 +1,3 @@
+// Windows resources: the executable's icon (Explorer, taskbar, shortcuts).
+// Regenerate the .ico with `bemotion --write-icon assets/branding/bemotion.ico`.
+1 ICON "../../assets/branding/bemotion.ico"

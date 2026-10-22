@@ -3,6 +3,7 @@
 #include "app/PluginHost.h"
 #include "core/Math.h"
 #include "render/Fonts.h"
+#include "render/LogoMark.h"
 #include "ui/Theme.h"
 
 #include <imgui_internal.h>
@@ -40,6 +41,16 @@ Icon iconForShape(ShapeKind kind) {
     case ShapeKind::Count: break;
     }
     return Icon::Rectangle;
+}
+
+void drawLogoMark(ImDrawList* dl, ImVec2 center, float radius, ImU32 color) {
+    static const std::vector<std::vector<Vec2>> shapes = logo::outlines(96);
+    std::vector<ImVec2> pts;
+    for (const auto& shape : shapes) {
+        pts.clear();
+        for (const Vec2& p : shape) pts.emplace_back(center.x + p.x * radius, center.y + p.y * radius);
+        dl->AddConcavePolyFilled(pts.data(), static_cast<int>(pts.size()), color);
+    }
 }
 
 Icon iconForMedia(MediaKind kind) {
@@ -173,16 +184,9 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         dl->AddLine(ImVec2(c.x - h * 0.2f, c.y - h * 0.75f), ImVec2(c.x + h * 0.2f, c.y - h * 0.75f), col, th);
         break;
     }
-    case Icon::Logo: {
-        // A geometric lowercase "b": tall stem plus a round bowl.
-        const float stroke = std::max(2.0f, size * 0.15f);
-        const float r = h * 0.42f;
-        const ImVec2 bowl(c.x + h * 0.12f, c.y + h * 0.36f);
-        const float stemX = bowl.x - r;
-        dl->AddLine(ImVec2(stemX, c.y - h * 0.9f), ImVec2(stemX, bowl.y + r * 0.35f), col, stroke);
-        dl->AddCircle(bowl, r, col, 0, stroke);
+    case Icon::Logo:
+        drawLogoMark(dl, c, h * 0.95f, col);
         break;
-    }
     case Icon::Pointer: {
         const ImVec2 pts[7] = {ImVec2(c.x - h * 0.45f, c.y - h * 0.8f), ImVec2(c.x + h * 0.55f, c.y + h * 0.15f),
                                ImVec2(c.x + h * 0.05f, c.y + h * 0.2f), ImVec2(c.x + h * 0.35f, c.y + h * 0.8f),

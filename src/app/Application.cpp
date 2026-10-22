@@ -76,6 +76,10 @@ int Application::run(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         auto next = [&]() { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
+        if (arg == "--write-icon" || arg == "--write-mark") { // developer aid: refresh the branding files
+            const std::string file = next();
+            return writeAppIcon(platform::fromUtf8(file), arg == "--write-mark") ? 0 : 1;
+        }
         if (arg == "--export") {
             if (!cliExport) cliExport.emplace();
             cliExport->output = platform::fromUtf8(next());
@@ -102,6 +106,7 @@ int Application::run(int argc, char** argv) {
     }
 
     if (!projectArg.empty()) openProject(projectArg);
+    else if (settings().showIntro) intro_.start(platform::assetsDir() / "welcome" / "Welcome.bemotion");
 
     // Frames are paced in software at the monitor refresh rate: driver vsync
     // (swap interval 1) can stall indefinitely on some GPU drivers.
@@ -154,6 +159,7 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
         for (int k = 0; k < static_cast<int>(exporting::Format::Count); ++k)
             if (settings.output.extension() == exporting::formatExtension(static_cast<exporting::Format>(k)))
                 settings.format = static_cast<exporting::Format>(k);
+    project.comp.fitDuration();
     settings.end = project.comp.duration;
     PluginHost::get().reconcile(project.comp);
 
@@ -321,6 +327,8 @@ void Application::frame(double dt) {
         if (r.action == HomeScreen::Result::Action::Open) openProject(r.path);
         else if (r.action == HomeScreen::Result::Action::Create) createProject(std::move(r.project), r.path);
     }
+
+    intro_.draw(dt); // on top of the home screen while it plays
 
     if (ui::shortcutPressed(ui::Action::Settings)) ui::openSettings();
     if (ui::shortcutPressed(ui::Action::Help)) ui::openHelp();

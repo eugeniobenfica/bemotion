@@ -76,6 +76,7 @@ void loadSettings() {
         s.uiFont = j.value("ui_font", s.uiFont);
         s.arrowFrames = std::clamp(j.value("arrow_frames", s.arrowFrames), 1, 1000);
         s.bigArrowFrames = std::clamp(j.value("big_arrow_frames", s.bigArrowFrames), 1, 1000);
+        s.showIntro = j.value("show_intro", s.showIntro);
         ui::loadKeymap(j.contains("shortcuts") ? j["shortcuts"].dump() : "{}");
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
     } catch (const std::exception&) {
@@ -89,7 +90,7 @@ void saveSettings() {
               {"advanced", s.advanced}, {"snap_distance", s.snapDistance}, {"disabled_plugins", s.disabledPlugins},
               {"timeline_layer_row", s.timelineLayerRow}, {"timeline_property_row", s.timelinePropertyRow},
               {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}, {"ui_font", s.uiFont},
-              {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames},
+              {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames}, {"show_intro", s.showIntro},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);

@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Writing a plugin
+    url: https://github.com/eugeniobenfica/bemotion/blob/main/docs/PLUGINS.md
+    about: The plugin guide covers the Lua API and the bundled Charts plugin.

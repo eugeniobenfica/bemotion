@@ -11,6 +11,7 @@ namespace bemotion {
 void EditorContext::open(Project p, std::filesystem::path file) {
     project = std::move(p);
     path = std::move(file);
+    project.comp.fitDuration();
     history.reset(project);
     selection.clear();
     selectedKeys.clear();
@@ -75,7 +76,8 @@ void EditorContext::pruneSelection() {
 
 // --- time ------------------------------------------------------------------------
 
-void EditorContext::setTime(double t) { time = comp().snapToFrame(std::clamp(t, 0.0, comp().duration)); }
+// The playhead may go past the end: new objects can be added there, extending the composition.
+void EditorContext::setTime(double t) { time = comp().snapToFrame(std::clamp(t, 0.0, comp().duration + kMaxOverhang)); }
 
 void EditorContext::stepFrames(int frames) {
     playing = false;
@@ -101,6 +103,8 @@ void EditorContext::tick(double dt) {
 
 void EditorContext::commitIfIdle(bool interacting) {
     if (!pendingCommit_ || interacting) return;
+    // The composition grows and shrinks with its content (once an edit is done, not mid-drag).
+    project.comp.fitDuration();
     history.commit(project);
     pendingCommit_ = false;
 }
@@ -159,15 +163,9 @@ Layer& EditorContext::insertLayer(Layer layer) {
     }
     layer.name = comp().uniqueLayerName(layer.name);
     if (layer.type != LayerType::Media) layer.label = static_cast<int>(comp().nextLayerId % kLabelColorCount);
-    // Like After Effects: the new layer starts at the playhead and runs to the end of the composition.
-    const double start = comp().snapToFrame(std::clamp(time, 0.0, std::max(0.0, comp().duration - comp().frameDuration())));
-    if (start > 0.0) {
-        layer.shiftTime(start - layer.inPoint); // keyframes (e.g. plugin intros) move along
-        // Footage keeps its own length; everything else runs to the end of the composition.
-        const MediaItem* item = layer.type == LayerType::Media ? comp().findMedia(layer.media.mediaId) : nullptr;
-        const bool footage = item && item->kind != MediaKind::Image;
-        if (!footage) layer.outPoint = std::max(comp().duration, layer.inPoint + comp().frameDuration());
-    }
+    // The new layer starts at the playhead (even past the end: the composition grows to hold it).
+    const double start = comp().snapToFrame(std::max(0.0, time));
+    if (start > 0.0) layer.shiftTime(start - layer.inPoint); // keyframes (e.g. plugin intros) move along
     // New layers go right above the primary selection, or on top.
     const int index = std::max(0, comp().indexOf(primaryId()));
     Layer& added = comp().addLayer(std::move(layer), index);
@@ -177,28 +175,28 @@ Layer& EditorContext::insertLayer(Layer layer) {
 }
 
 Layer& EditorContext::addShape(ShapeKind kind, std::optional<Vec2> position) {
-    return insertLayer(makeShapeLayer(kind, position.value_or(comp().center()), comp().duration));
+    return insertLayer(makeShapeLayer(kind, position.value_or(comp().center()), kDefaultLayerLength));
 }
 
 Layer& EditorContext::addText(std::optional<Vec2> position) {
-    return insertLayer(makeTextLayer("Your text", position.value_or(comp().center()), comp().duration));
+    return insertLayer(makeTextLayer("Your text", position.value_or(comp().center()), kDefaultLayerLength));
 }
 
 Layer& EditorContext::addCamera() {
     const Vec2 size{static_cast<float>(comp().width), static_cast<float>(comp().height)};
-    Layer& cam = insertLayer(makeCameraLayer(size, comp().duration));
+    Layer& cam = insertLayer(makeCameraLayer(size, std::max(kDefaultLayerLength, comp().duration)) /* the whole composition */);
     return cam;
 }
 
 Layer& EditorContext::addPluginObject(const PluginObjectType& type, std::optional<Vec2> position) {
-    Layer layer = PluginHost::get().createLayer(type, position.value_or(comp().center()), comp().duration);
+    Layer layer = PluginHost::get().createLayer(type, position.value_or(comp().center()), kDefaultLayerLength);
     return insertLayer(std::move(layer));
 }
 
 Layer* EditorContext::addMedia(uint64_t mediaId, std::optional<Vec2> position, std::optional<double> start) {
     const MediaItem* item = comp().findMedia(mediaId);
     if (!item) return nullptr;
-    Layer layer = makeMediaLayer(*item, position.value_or(comp().center()), 0.0, comp().duration);
+    Layer layer = makeMediaLayer(*item, position.value_or(comp().center()), 0.0, kDefaultLayerLength);
     // Footage larger than the composition is scaled down to fit (like After Effects' "fit" on import).
     if (item->width > 0 && item->height > 0) {
         const float fit = std::min({1.0f, static_cast<float>(comp().width) / item->width,
@@ -206,7 +204,7 @@ Layer* EditorContext::addMedia(uint64_t mediaId, std::optional<Vec2> position, s
         layer.transform.scale.base = {fit * 100.0f, fit * 100.0f};
     }
     const double saved = time;
-    if (start) time = std::clamp(*start, 0.0, comp().duration); // new layers start at `time`
+    if (start) time = std::max(0.0, *start); // new layers start at `time`
     Layer* added = &insertLayer(std::move(layer));
     time = saved;
     return added;
@@ -214,7 +212,7 @@ Layer* EditorContext::addMedia(uint64_t mediaId, std::optional<Vec2> position, s
 
 Layer* EditorContext::addObject(int kind, Vec2 position, double start) {
     const double saved = time;
-    time = std::clamp(start, 0.0, comp().duration); // new layers start at `time`
+    time = std::max(0.0, start); // new layers start at `time`
     Layer* added = nullptr;
     if (kind == -2) added = &addCamera(); // kDropCamera
     else if (kind == -1) added = &addText(position);

@@ -136,8 +136,7 @@ void drawShortcuts() {
 void drawAbout() {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + 48, p.y + 48), theme::kAccent, 12.0f);
-    drawIcon(dl, Icon::Logo, ImVec2(p.x + 24, p.y + 25), 28.0f, theme::kOnAccent);
+    drawLogoMark(dl, ImVec2(p.x + 24, p.y + 24), 23.0f, theme::kAccent);
     ImGui::SetCursorScreenPos(ImVec2(p.x + 62, p.y + 2));
     ImGui::PushFont(Fonts::uiBold(), ImGui::GetFontSize() * 1.6f);
     ImGui::TextUnformatted("bemotion");

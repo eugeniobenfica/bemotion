@@ -10,6 +10,7 @@
 #include "ui/Widgets.h"
 
 #include <imgui.h>
+#include <imgui_stdlib.h>
 
 #include <algorithm>
 #include <cmath>
@@ -172,6 +173,7 @@ void ViewportPanel::draw(EditorContext& ctx) {
     drawGuides(ctx);
     drawOverlay(ctx, hovered);
     dl->PopClipRect();
+    drawTextEditor(ctx);
 
     handleGuides(ctx); // rulers are items on top of the canvas
     drawRulers(ctx);
@@ -336,7 +338,16 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                     }
                     if (inner) hit = inner;
                 }
-                if (hit) {
+                // A double-click on a text edits it right there.
+                const Layer* hitLayer = hit ? comp.findLayer(hit) : nullptr;
+                if (hitLayer && !additive && hitLayer->type == LayerType::Text && !hitLayer->locked &&
+                    ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    ctx.select(hit);
+                    textEdit_ = hit;
+                    focusTextEdit_ = true;
+                    hit = 0;
+                    drag_ = Drag::None;
+                } else if (hit) {
                     if (additive) ctx.toggleSelected(hit);
                     else if (!ctx.isSelected(hit)) ctx.select(hit);
                     else { // keep the group, make the clicked layer primary
@@ -362,7 +373,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                         }
                         collectSnapTargets(ctx, moving);
                     }
-                } else {
+                } else if (!textEdit_) {
                     drag_ = Drag::Marquee;
                     marqueeBase_ = additive ? ctx.selection : std::vector<uint64_t>{};
                     if (!additive) ctx.select(0);
@@ -653,7 +664,7 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
         const Vec2 scenePos = world_.inverse().apply(dropPos_);
         const PluginObjectType* type = dropMedia_ ? nullptr : droppedPluginType();
         const MediaItem* item = dropMedia_ ? comp.findMedia(dropMedia_) : nullptr;
-        Layer ghost = item                     ? makeMediaLayer(*item, scenePos, 0.0, comp.duration)
+        Layer ghost = item                     ? makeMediaLayer(*item, scenePos, 0.0, kDefaultLayerLength)
                       : dropKind_ == kDropCamera ? makeCameraLayer(compSize_, comp.duration)
                       : type                   ? makePluginLayer(type->name, type->prototype, scenePos, comp.duration)
                       : dropKind_ < 0          ? makeTextLayer("Your text", scenePos, comp.duration)
@@ -673,6 +684,46 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
         std::snprintf(buf, sizeof(buf), "X %.0f   Y %.0f", dropPos_.x, dropPos_.y);
         dl->AddText(ImVec2(s.x + 14, s.y - ImGui::GetTextLineHeight() - 12), theme::kAccent, buf); // above the drag tooltip
     }
+}
+
+void ViewportPanel::drawTextEditor(EditorContext& ctx) {
+    if (!textEdit_) return;
+    Layer* layer = ctx.comp().findLayer(textEdit_);
+    Vec2 mn, mx;
+    if (!layer || layer->type != LayerType::Text || !layer->activeAt(ctx.time) || !compBox(*layer, ctx.time, world_, mn, mx)) {
+        textEdit_ = 0;
+        return;
+    }
+    // The text updates live on the canvas; the box under it holds the caret.
+    const render::View view = sceneView();
+    const Vec2 a = view.toScreen(mn), b = view.toScreen(mx);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRect(ImVec2(a.x - 4, a.y - 4), ImVec2(b.x + 4, b.y + 4), theme::kAccent, 3.0f, 0, 1.5f);
+
+    const float lineH = ImGui::GetTextLineHeight();
+    const int lines = 1 + static_cast<int>(std::count(layer->text.text.begin(), layer->text.text.end(), '\n'));
+    const float w = std::clamp(b.x - a.x + 8.0f, 220.0f, std::max(220.0f, canvasMax_.x - canvasMin_.x - 16.0f));
+    const float h = lineH * static_cast<float>(std::min(lines, 6)) + ImGui::GetStyle().FramePadding.y * 2.0f + 2.0f;
+    const float x = std::clamp((a.x + b.x) * 0.5f - w * 0.5f, canvasMin_.x + 8.0f, canvasMax_.x - w - 8.0f);
+    float y = b.y + 12.0f;
+    if (y + h + lineH * 1.6f > canvasMax_.y) y = std::max(canvasMin_.y + 8.0f, a.y - h - lineH * 1.6f - 12.0f); // no room below
+    ImGui::SetCursorScreenPos(ImVec2(x, y));
+    if (focusTextEdit_) {
+        ImGui::SetKeyboardFocusHere();
+        focusTextEdit_ = false;
+    }
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, theme::kBgRaised);
+    ImGui::PushStyleColor(ImGuiCol_Border, theme::kAccent);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    const bool done = ImGui::InputTextMultiline("##textEdit", &layer->text.text, ImVec2(w, h),
+                                                ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CtrlEnterForNewLine);
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(2);
+    if (ImGui::IsItemEdited()) ctx.touch();
+    const bool left = ImGui::IsItemDeactivated();
+    ImGui::SetCursorScreenPos(ImVec2(x, y + h + 3.0f));
+    ImGui::TextColored(theme::vec(theme::kTextFaint), "Enter to finish  ·  Ctrl+Enter for a new line  ·  Esc to cancel");
+    if (done || left) textEdit_ = 0;
 }
 
 void ViewportPanel::drawHud(EditorContext& ctx) {

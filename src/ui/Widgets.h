@@ -80,6 +80,8 @@ Icon iconForMedia(MediaKind kind);
 Icon iconForPlugin(const std::string& name);
 
 void drawIcon(ImDrawList* dl, Icon icon, ImVec2 center, float size, ImU32 color);
+// The bemotion mark (render/LogoMark.h): a disc of `radius` around `center`.
+void drawLogoMark(ImDrawList* dl, ImVec2 center, float radius, ImU32 color);
 
 // Square, frameless icon button. `active` tints it with the accent color.
 bool iconButton(const char* id, Icon icon, float size, const char* tooltip = nullptr, bool active = false);

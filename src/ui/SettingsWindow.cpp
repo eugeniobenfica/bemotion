@@ -283,6 +283,10 @@ void drawInterface(Settings& s) {
     hint("Colors, corner rounding and themes are in the Theme page.");
     ImGui::Spacing();
     drawUiFont(s);
+    ImGui::Spacing();
+    sectionLabel("STARTUP");
+    if (ImGui::Checkbox("Play the intro animation", &s.showIntro)) changed();
+    hint("The bemotion logo animation shown when the app opens (a click or any key skips it).");
 }
 
 // Interface font: any installed family (searchable).
@@ -469,6 +473,7 @@ void resetPage(SettingsTab tab) {
     case SettingsTab::Interface:
         s.timelineLayerRow = d.timelineLayerRow, s.timelinePropertyRow = d.timelinePropertyRow;
         s.keyframeSize = d.keyframeSize, s.textScale = d.textScale, s.uiFont = d.uiFont;
+        s.showIntro = d.showIntro;
         break;
     case SettingsTab::Editor:
         s.snapDistance = d.snapDistance, s.arrowFrames = d.arrowFrames, s.bigArrowFrames = d.bigArrowFrames;

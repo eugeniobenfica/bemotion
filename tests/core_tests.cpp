@@ -91,7 +91,8 @@ void testFrames() {
     c.duration = 2;
     CHECK(c.frameCount() == 60);
     CHECK(c.frameAt(1.0) == 30);
-    CHECK(c.frameAt(99.0) == 59);
+    CHECK(c.frameAt(99.0) == 2970); // past the end: the composition grows to hold what goes there
+    CHECK(c.frameAt(-1.0) == 0);
 }
 
 void testSerializationRoundTrip() {
@@ -159,7 +160,9 @@ void testMedia() {
     image.width = image.height = 64;
     image.hasVideo = true;
     const Layer& still = p.comp.addLayer(makeMediaLayer(*p.comp.findMedia(p.comp.addMedia(image)), {0, 0}, 2.0, 10.0));
-    CHECK(near(static_cast<float>(still.outPoint), 10.0f));
+    CHECK(near(static_cast<float>(still.outPoint), 12.0f));
+    p.comp.fitDuration(); // the composition ends with its last clip
+    CHECK(near(static_cast<float>(p.comp.duration), 12.0f));
 
     Project q;
     std::string err;

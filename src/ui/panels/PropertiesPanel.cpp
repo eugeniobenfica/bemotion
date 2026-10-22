@@ -300,12 +300,9 @@ void PropertiesPanel::drawComposition(EditorContext& ctx) {
         ctx.touch();
     }
     plainRowLabel("Duration");
-    float dur = static_cast<float>(c.duration);
-    if (ImGui::DragFloat("##dur", &dur, 0.05f, 0.1f, 3600.0f, "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
-        c.duration = dur;
-        ctx.setTime(ctx.time);
-        ctx.touch();
-    }
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("%.2f s", c.duration);
+    ui::tooltip("The composition ends where its last clip ends: add objects or extend clips to make it longer.");
     plainRowLabel("Background");
     if (ImGui::ColorEdit3("##bg", &c.background.r, ImGuiColorEditFlags_DisplayHex)) ctx.touch();
     ImGui::EndTable();

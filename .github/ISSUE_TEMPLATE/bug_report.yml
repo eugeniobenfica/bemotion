@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this! A short, precise report gets fixed fastest.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected and what happened instead.
+      placeholder: |
+        1. Add a text layer
+        2. Double-click it in the viewport
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshots, recordings or project files
+      description: Drag files here. A small `.bemotion` project that shows the problem helps a lot.
+  - type: input
+    id: version
+    attributes:
+      label: bemotion version
+      description: Shown in Help › About (F1), or the commit you built.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows, Linux, macOS]
+    validations:
+      required: true

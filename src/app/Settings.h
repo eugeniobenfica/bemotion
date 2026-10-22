@@ -29,6 +29,7 @@ struct Settings {
     std::string uiFont = "Inter";      // interface font family (any installed one)
     int arrowFrames = 1;               // frames stepped by the arrow keys
     int bigArrowFrames = 10;           // ... with Shift (big step)
+    bool showIntro = true;             // the opening animation at startup
     std::vector<std::string> disabledPlugins; // plugin ids
 };
 

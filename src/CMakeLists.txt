@@ -37,6 +37,7 @@ add_executable(bemotion WIN32
     render/Fonts.cpp
     render/FontScan.cpp
     render/GL.cpp
+    render/LogoMark.cpp
     render/OffscreenRenderer.cpp
     render/PluginCanvas.cpp
     render/SceneRenderer.cpp
@@ -45,6 +46,7 @@ add_executable(bemotion WIN32
     ui/ExportDialog.cpp
     ui/HelpWindow.cpp
     ui/HomeScreen.cpp
+    ui/IntroScreen.cpp
     ui/Keymap.cpp
     ui/PluginsWindow.cpp
     ui/SettingsWindow.cpp
@@ -68,6 +70,10 @@ if(UNIX AND NOT APPLE)
 endif()
 
 if(WIN32)
+    # The executable's icon. Its own target: windres chokes on include paths with spaces.
+    enable_language(RC)
+    add_library(bemotion_resources OBJECT app/bemotion.rc)
+    target_sources(bemotion PRIVATE $<TARGET_OBJECTS:bemotion_resources>)
     target_link_libraries(bemotion PRIVATE comdlg32 shell32 ole32 uuid winmm mfplat mfreadwrite mfuuid)
 endif()
 

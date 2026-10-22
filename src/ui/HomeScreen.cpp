@@ -135,6 +135,20 @@ HomeScreen::Result HomeScreen::draw(RecentProjects& recents) {
     return result;
 }
 
+void HomeScreen::openWelcomeProject(Result& result) {
+    // A copy in the projects folder, so the bundled one stays as shipped.
+    const auto copy = platform::defaultProjectsDir() / platform::fromUtf8(std::string("Welcome to bemotion") + kProjectExtension);
+    std::error_code ec;
+    if (!std::filesystem::exists(copy, ec))
+        std::filesystem::copy_file(platform::assetsDir() / "welcome" / "Welcome.bemotion", copy, ec);
+    if (ec) {
+        error_ = "Could not copy the Welcome project: " + ec.message();
+        return;
+    }
+    result.action = Result::Action::Open;
+    result.path = copy;
+}
+
 void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float width) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, theme::kBgPanel);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(22, 26));
@@ -144,8 +158,7 @@ void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float widt
     // Brand.
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + 40, p.y + 40), theme::kAccent, 10.0f);
-    ui::drawIcon(dl, ui::Icon::Logo, ImVec2(p.x + 20, p.y + 21), 24.0f, theme::kOnAccent);
+    ui::drawLogoMark(dl, ImVec2(p.x + 20, p.y + 20), 19.0f, theme::kAccent);
     ImGui::SetCursorScreenPos(ImVec2(p.x + 52, p.y + 1));
     ImGui::PushFont(Fonts::uiBold(), 22.0f);
     ImGui::TextUnformatted("bemotion");
@@ -163,6 +176,9 @@ void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float widt
             result.path = *file;
         }
     }
+    ImGui::Dummy(ImVec2(0, 2));
+    if (ImGui::Button("Welcome Project", ImVec2(w, 34))) openWelcomeProject(result);
+    ui::tooltip("The intro animation, made in bemotion: open it to see how it is built");
 
     // Footer.
     // Separator + button row + count line, sized from the current text size.
@@ -224,6 +240,9 @@ void HomeScreen::drawProjects(Result& result, RecentProjects& recents) {
         ImGui::Dummy(ImVec2(0, 12));
         ImGui::SetCursorPosX((ImGui::GetWindowWidth() - 200) * 0.5f);
         if (ui::accentButton("Create a project", ImVec2(200, 40))) openNewProjectModal();
+        ImGui::Dummy(ImVec2(0, 2));
+        ImGui::SetCursorPosX((ImGui::GetWindowWidth() - 200) * 0.5f);
+        if (ImGui::Button("Open the Welcome project", ImVec2(200, 34))) openWelcomeProject(result);
         ImGui::EndChild();
         return;
     }
@@ -346,8 +365,6 @@ void HomeScreen::drawNewProjectModal(Result& result) {
     }
     label("Frame rate");
     ImGui::Combo("##fps", &fpsIndex_, kFpsLabels, static_cast<int>(std::size(kFpsLabels)));
-    label("Duration");
-    ImGui::DragFloat("##duration", &duration_, 0.1f, 0.5f, 3600.0f, "%.1f seconds", ImGuiSliderFlags_AlwaysClamp);
     label("Background");
     ImGui::ColorEdit3("##bg", &background_.r, ImGuiColorEditFlags_DisplayHex);
     label("Location");
@@ -378,7 +395,7 @@ void HomeScreen::drawNewProjectModal(Result& result) {
         p.comp.width = width_;
         p.comp.height = height_;
         p.comp.fps = kFpsOptions[fpsIndex_];
-        p.comp.duration = duration_;
+        p.comp.fitDuration(); // grows as objects are added
         p.comp.background = background_;
         result.action = Result::Action::Create;
         result.path = uniqueProjectPath(folder_, p.name);

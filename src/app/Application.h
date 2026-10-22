@@ -3,6 +3,7 @@
 #include "app/RecentProjects.h"
 #include "export/Export.h"
 #include "ui/HomeScreen.h"
+#include "ui/IntroScreen.h"
 
 #include <filesystem>
 #include <memory>
@@ -44,6 +45,7 @@ private:
     std::string title_;
     RecentProjects recents_;
     HomeScreen home_;
+    IntroScreen intro_;
     std::unique_ptr<EditorScreen> editor_;
     std::unique_ptr<DevScript> script_; // BEMOTION_SCRIPT developer aid
     std::vector<std::filesystem::path> droppedFiles_; // dropped on the window, handled next frame

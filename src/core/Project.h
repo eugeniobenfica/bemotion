@@ -11,6 +11,10 @@ namespace bemotion {
 // A ruler guide in composition pixels (vertical: x = position; else y).
 // How far past the end of the composition a clip may run (seconds).
 inline constexpr double kMaxOverhang = 3600.0;
+// Length of a new object (like Premiere's default still duration). The composition
+// has no fixed length: it ends where its last clip ends (see fitDuration).
+inline constexpr double kDefaultLayerLength = 5.0;
+inline constexpr double kMinCompDuration = 1.0;
 
 struct Guide {
     bool vertical = true;
@@ -28,7 +32,7 @@ struct Composition {
     int width = 1920;
     int height = 1080;
     double fps = 30.0;
-    double duration = 10.0; // seconds
+    double duration = 10.0; // seconds; follows the content (fitDuration)
     Color background = Color::fromHex(0x101012);
 
     // Rendering order: index 0 is the top-most layer. Layers of the same
@@ -42,6 +46,9 @@ struct Composition {
     MediaItem* findMedia(uint64_t id);
     const MediaItem* findMedia(uint64_t id) const;
     uint64_t addMedia(MediaItem item); // reuses an item already imported from the same path
+
+    // Makes the composition end where its last clip ends (at least kMinCompDuration).
+    void fitDuration();
 
     double frameDuration() const { return 1.0 / fps; }
     int frameCount() const;

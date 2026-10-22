@@ -58,6 +58,7 @@ private:
     const struct PluginObjectType* droppedPluginType() const; // null unless a plugin object is dragged in
     void drawOverlay(EditorContext& ctx, bool hovered);
     void drawHud(EditorContext& ctx);
+    void drawTextEditor(EditorContext& ctx);
 
     // --- motion path ---------------------------------------------------------------
     // The single selected layer's position keyframes, drawn as an editable curve.
@@ -114,6 +115,8 @@ private:
     std::vector<float> snapLinesX_, snapLinesY_; // snapped this frame (composition pixels)
     Vec2 dragBoxMin_, dragBoxMax_;                // moving layers' bounds at drag start
     int guideDrag_ = -1;                          // index into Composition::guides
+    uint64_t textEdit_ = 0;   // text layer being edited in place (double-click)
+    bool focusTextEdit_ = false;
     int guideEdit_ = -1;                          // guide whose position popup is open
 };
 

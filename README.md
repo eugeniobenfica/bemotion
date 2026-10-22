@@ -1,94 +1,155 @@
+<div align="center">
+
+<img src="assets/branding/icon.svg" width="112" alt="bemotion icon">
+
 # bemotion
 
-**A minimal, open source 2D motion graphics animator.**
+**Motion graphics, simplified.**<br>
+A minimal, open source 2D motion graphics animator — fast, focused and free.
 
-bemotion gives you a clean, focused space to animate text and graphics: drop an
-object on the canvas, set keyframes, pick an easing and press play. Everything
-is customizable (color, transform, stroke, typography, timing) while the most
-common moves are one click away through *Quick Animations*.
+[![Build](https://github.com/eugeniobenfica/bemotion/actions/workflows/build.yml/badge.svg)](https://github.com/eugeniobenfica/bemotion/actions/workflows/build.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-E8B931?labelColor=141417)](LICENSE)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-E8B931?labelColor=141417)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20·%20Linux%20·%20macOS-E8B931?labelColor=141417)
+
+<img src="docs/media/intro.gif" width="720" alt="The bemotion intro animation">
+
+<sub>The intro above is an ordinary bemotion project, built from four shapes and two texts —<br>
+open it from <b>Home › Welcome Project</b> and take it apart.</sub>
+
+[Features](#features) · [Getting started](#getting-started) · [Shortcuts](#keyboard-shortcuts) · [Plugins](docs/PLUGINS.md) · [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
+
+bemotion gives you a clean, focused space to animate text, graphics and footage:
+drop an object on the canvas, set keyframes, pick an easing and press play.
+Everything is customizable — color, transform, stroke, typography, timing — while
+the most common moves are one click away through *Quick Animations*. It follows
+the conventions of After Effects and Premiere, so it feels familiar from the
+first minute.
 
 > 🇧🇷 **Resumo:** bemotion é um animador 2D minimalista e de código aberto para
-> motion graphics. Escrito em C++20 com Dear ImGui e OpenGL, foco em
+> motion graphics. Escrito em C++20 com Dear ImGui e OpenGL, com foco em
 > simplicidade, liberdade de customização e uma interface limpa no modo escuro.
+
+<p align="center">
+  <img src="docs/media/editor.png" width="100%" alt="The bemotion editor: viewport, properties and timeline">
+</p>
 
 ## Features
 
-- **Home screen** with recent projects (live thumbnails), search and a
-  *New Project* dialog with format presets (Full HD, 4K, Vertical/Reels, Square…)
-- **Objects panel**: Text, Rectangle, Ellipse, Polygon, Star, Line, Camera and
-  plugin objects (charts) — click to add at the center, **drag onto the
-  canvas** to drop at an exact spot, or **onto the timeline** to start at a
-  given time and row
-- **Media panel** (a tab next to Objects, like After Effects' *Project* panel):
-  import images (PNG, JPEG, BMP, TGA, GIF, PSD, HDR), audio (WAV, MP3, FLAC;
-  M4A/AAC/WMA on Windows) and video (MP4, MOV, M4V, WMV, AVI, MKV — Windows,
-  through Media Foundation) with *Import* (Ctrl+I) or by dropping files on the
-  window. Drag an item onto the canvas or the timeline (or double-click it) to
-  make a layer: media layers have transform, opacity, effects, keyframes and
-  compounds like any other layer, plus an animatable *Volume*. Audio plays
-  with the timeline, clips show their waveform, video and audio clips trim
-  only within their source, and missing files can be relinked
-- **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
-  Space+drag or Alt+drag; click or **box-select** layers, drag to move, corner
-  handles to scale (Shift = uniform), rotation handle (Shift = 15° snaps)
-- **Snapping** (S, or the magnet button): canvas center and edges, other
-  layers' edges and centers, **rulers and custom guides** (drag them out of the
-  rulers); in the timeline clips snap to each other, keyframes and the playhead
-- **Motion paths**: position keyframes follow a curve drawn in the viewport —
-  drag the keys and their bezier handles (Alt breaks a handle into a corner)
-- **Graph Editor** (the curve button in the timeline toolbar), like After
-  Effects': value curves of the selected layer (X / Y separately), drag
-  keyframes and easing handles; Easy Ease (F9), Ease In (Shift+F9), Ease Out
-  (Ctrl+Shift+F9), Linear and Hold
-- **Properties panel**: every property is animatable, with a keyframe toggle
-  and a **reset** button; collapsible sections; any installed **font family**
-- **Effects** tab next to Properties (like After Effects' *Effect Controls* +
-  *Effects & Presets*): Gaussian and Directional Blur, Brightness & Contrast,
-  Hue/Saturation, Tint, Invert, Wave Warp, Fill, Stroke, Drop Shadow, Glow and
-  Motion Blur — browse them by category icons, apply from the tab or from the
-  timeline's right-click *Effect* menu (also *Layer → Effect*); GPU rendered,
-  stackable, every parameter keyframable (also in the timeline under
-  *Effects*), with presets you can **import / save**
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### ✦ Create
+- **Objects**: text, rectangle, ellipse, polygon, star, line, camera and plugin
+  objects — click to add, or drag onto the canvas or the timeline
+- **Media**: import images, video and audio (Ctrl+I or drop files on the
+  window) into the *Media* panel; media layers animate like everything else
+  and get an animatable *Volume*
+- **Compounds** (Ctrl+G): group layers into one object with its own timeline
+- **Edit text in place**: double-click a text on the canvas
+
+</td>
+<td width="50%" valign="top">
+
+### ✦ Animate
+- Every property keyframable, with a reset button and live values
+- **Graph Editor**, motion paths with bezier handles, easing presets and a
+  custom cubic-bezier curve editor; Easy Ease with F9
 - **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
-  Draw On… stack without breaking; **import** more or save your own
-- **Timeline**: tracks holding several clips, trim in/out (clamped to
-  neighbors), inline value editing on keyframe rows, keyframe dragging,
-  easing menu with a **custom cubic-bezier curve editor**, zoom (Ctrl+Wheel)
-- **Compounds** (the combine tool in the timeline, or Ctrl+G): turn the
-  selected layers into one object that moves, scales, rotates, fades, takes
-  quick animations and effects as a whole; double-click it to open its own
-  timeline and edit what is inside (a breadcrumb leads back); Ctrl+Shift+G
+  Draw On… stackable, importable, savable
+- **Effects**: blur, color, distort, glow, drop shadow, motion blur… GPU
+  rendered, stackable, keyframable, with presets
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### ✦ Edit
+- **Timeline** with multi-clip tracks, trimming, cut tool (C), split at
+  playhead (Ctrl+K), snapping to clips, keys and the playhead
+- **No fixed length**: the composition ends where its last clip ends and grows
+  as you add objects or extend clips
+- **Viewport** with box selection, rulers, guides and smart snapping
+- **Camera** with position, rotation and zoom
+
+</td>
+<td valign="top">
+
+### ✦ Deliver
+- **Export** to MP4 / H.264 (built in on Windows), PNG sequences with
+  transparency, and with [FFmpeg](https://ffmpeg.org) MOV ProRes 4444, WebM VP9
+  and GIF
+- Audio is mixed in: AAC in MP4, PCM in MOV, Opus in WebM, a `.wav` beside PNGs
+- Render from the command line for automation
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+### ✦ Make it yours
+- Dark, Light and Midnight themes, any accent color, an advanced mode for
+  every UI color; import / export themes ([example](examples/themes))
+- Rebind every shortcut, pick the interface font and text size, timeline
+  densities, frames per arrow press
+- Dockable panels that minimize to an edge handle or maximize with <kbd>`</kbd>
+
+</td>
+<td valign="top">
+
+### ✦ Extend
+- **Plugins** are sandboxed Lua scripts that add new kinds of objects
+- The bundled **Charts** plugin draws animated column / bar, line / area and
+  donut charts from a data table you can paste from a spreadsheet
+- See [docs/PLUGINS.md](docs/PLUGINS.md) to write your own
+
+</td>
+</tr>
+</table>
+
+<details>
+<summary><b>All the details</b></summary>
+
+- **Home screen** with recent projects (live thumbnails), search, the Welcome
+  project and a *New Project* dialog with format presets (Full HD, 4K,
+  Vertical/Reels, Square…)
+- **Media panel** (like After Effects' *Project* panel): images (PNG, JPEG,
+  BMP, TGA, GIF, PSD, HDR), audio (WAV, MP3, FLAC; M4A/AAC/WMA on Windows) and
+  video (MP4, MOV, M4V, WMV, AVI, MKV — Windows, through Media Foundation).
+  Audio plays with the timeline, clips show their waveform, video and audio
+  clips trim only within their source, and missing files can be relinked
+- **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
+  Space+drag or Alt+drag; corner handles scale (Shift = uniform), the rotation
+  handle rotates (Shift = 15° snaps)
+- **Snapping** (S): canvas center and edges, other layers, rulers and custom
+  guides; hold Ctrl while dragging to skip it
+- **Properties panel**: collapsible sections, any installed font family, a
+  *Source* section for media layers (Fit to Composition, Show in Folder)
+- **Effects tab** (like *Effect Controls* + *Effects & Presets*): Gaussian and
+  Directional Blur, Brightness & Contrast, Hue/Saturation, Tint, Invert, Wave
+  Warp, Fill, Stroke, Drop Shadow, Glow and Motion Blur
+- **Compounds**: move, scale, rotate, fade and take effects as a whole;
+  double-click to open their timeline (a breadcrumb leads back); Ctrl+Shift+G
   releases the layers keeping their look
-- **Camera**: animate position, rotation and zoom; toggle the viewport between
-  the camera view and a free view showing the camera frame
-- **Cut tool** (C) and split at playhead (Ctrl+K)
-- **Video export** (Ctrl+M, or the button in the top-right corner): MP4 / H.264
-  (built in on Windows), PNG sequence with transparency, and — with
-  [FFmpeg](https://ffmpeg.org) installed — MOV ProRes 4444, WebM VP9 and GIF.
-  The composition's audio is mixed in (AAC in MP4, PCM in MOV, Opus in WebM;
-  a `.wav` next to PNG sequences)
-- **Panels**: minimize / restore with the handle on their inner edge, maximize
-  by double-clicking their tabs or pressing ` over them
-- **Settings** (Ctrl+, or the gear) with *Theme*, *Interface* (timeline row
-  heights, keyframe size, text size, interface font), *Editor* (frames per
-  arrow press, snapping), *Shortcuts* (rebind every shortcut) and *Plugins*
-  pages: Dark, Light and Midnight themes, any
-  accent color, and an *advanced mode* to edit every UI color, rounding and the
-  snap distance; a *Reset* on every page and *Reset All*; **import, save and export themes** (JSON, see
-  [examples/themes](examples/themes))
-- **Plugins**: sandboxed Lua scripts that add new kinds of objects. The bundled
-  *Charts* plugin draws animated **column / bar, line / area and donut charts**
-  from an editable data table (paste from a spreadsheet), with trim start / end,
-  sorting, highlighting, compact numbers, outlines and smooth lines. See
-  [docs/PLUGINS.md](docs/PLUGINS.md) to write your own
+- **New objects** start at the playhead and last 5 seconds (like Premiere's
+  default still duration); the playhead may go past the end to add more
+- **Settings** (Ctrl+,): Theme, Interface, Editor, Shortcuts and Plugins pages,
+  each with a reset; the intro animation can be turned off in *Interface*
 - **Help** (F1): every shortcut drawn as key caps, plus About, Credits and License
 - **Undo / redo** for everything, unsaved-changes protection
-- Dockable, rearrangeable panels
 
-## Building
+</details>
+
+## Getting started
 
 Requirements: CMake ≥ 3.21, a C++20 compiler (GCC 11+, Clang 14+ or MSVC 2022)
-and an internet connection on first configure (dependencies are fetched
+and an internet connection on the first configure (dependencies are fetched
 automatically and pinned to exact versions).
 
 ```bash
@@ -102,13 +163,10 @@ Run the unit tests with `ctest --test-dir build`.
 On Linux, install the X11/OpenGL development packages first, e.g. on Ubuntu:
 `sudo apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libwayland-dev libxkbcommon-dev`.
 
-An example project lives in [`examples/Welcome.bemotion`](examples/Welcome.bemotion):
-open it from *Open Project…* or pass it on the command line.
-
 ### Rendering from the command line
 
 ```bash
-bemotion examples/Welcome.bemotion --export welcome.mp4
+bemotion assets/welcome/Welcome.bemotion --export welcome.mp4
 bemotion project.bemotion --export frames/shot.png --transparent --scale 0.5
 ```
 
@@ -116,47 +174,74 @@ The format follows the file extension (`.mp4`, `.png`, `.mov`, `.webm`, `.gif`).
 
 ## Keyboard shortcuts
 
+Every shortcut can be changed in *Settings › Shortcuts*; *Help* (F1) shows the
+current ones.
+
+<details>
+<summary><b>Default shortcuts</b></summary>
+
 | Keys | Action |
 | --- | --- |
-| Space | Play / pause (hold + drag: pan the viewport) |
-| ← / → (Shift: ×10) | Previous / next frame |
-| Home / End | Go to start / end |
-| J / K | Previous / next keyframe |
-| V / C | Selection tool / Cut tool |
-| Ctrl+K | Split selected layers at the playhead |
-| T | Add text |
-| Ctrl+A | Select all layers |
-| Ctrl+] / Ctrl+[ (Shift: to front / back) | Bring forward / send backward |
-| Ctrl+Z / Ctrl+Shift+Z | Undo / redo |
-| Ctrl+D | Duplicate layers |
-| Ctrl+G / Ctrl+Shift+G | Create / release a compound |
-| Delete | Delete selected keyframes, or the layers |
-| Ctrl+S / Ctrl+Shift+S | Save / save as |
-| Ctrl+I | Import media |
-| Ctrl+M | Export video |
-| S | Toggle snapping (hold Ctrl while dragging to skip it) |
-| Ctrl+, | Settings |
-| F9 / Shift+F9 / Ctrl+Shift+F9 | Easy Ease / Ease In / Ease Out on the selected keyframes |
+| <kbd>Space</kbd> | Play / pause (hold + drag: pan the viewport) |
+| <kbd>←</kbd> / <kbd>→</kbd> (Shift: ×10) | Previous / next frame |
+| <kbd>Home</kbd> / <kbd>End</kbd> | Go to start / end |
+| <kbd>J</kbd> / <kbd>K</kbd> | Previous / next keyframe |
+| <kbd>V</kbd> / <kbd>C</kbd> | Selection tool / Cut tool |
+| <kbd>Ctrl</kbd>+<kbd>K</kbd> | Split selected layers at the playhead |
+| <kbd>T</kbd> | Add text (double-click a text to edit it) |
+| <kbd>Ctrl</kbd>+<kbd>A</kbd> | Select all layers |
+| <kbd>Ctrl</kbd>+<kbd>]</kbd> / <kbd>Ctrl</kbd>+<kbd>[</kbd> (Shift: to front / back) | Bring forward / send backward |
+| <kbd>Ctrl</kbd>+<kbd>Z</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> | Undo / redo |
+| <kbd>Ctrl</kbd>+<kbd>D</kbd> | Duplicate layers |
+| <kbd>Ctrl</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> | Create / release a compound |
+| <kbd>Delete</kbd> | Delete selected keyframes, or the layers |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd> | Save / save as |
+| <kbd>Ctrl</kbd>+<kbd>I</kbd> | Import media |
+| <kbd>Ctrl</kbd>+<kbd>M</kbd> | Export video |
+| <kbd>S</kbd> | Toggle snapping (hold Ctrl while dragging to skip it) |
+| <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |
+| <kbd>F9</kbd> / <kbd>Shift</kbd>+<kbd>F9</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F9</kbd> | Easy Ease / Ease In / Ease Out on the selected keyframes |
 | Wheel · Middle/right drag | Zoom · pan the viewport |
-| Ctrl+0 / Ctrl+1 / Ctrl+= / Ctrl+- | Fit / 100% / zoom in / zoom out |
+| <kbd>Ctrl</kbd>+<kbd>0</kbd> / <kbd>Ctrl</kbd>+<kbd>1</kbd> / <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd> | Fit / 100% / zoom in / zoom out |
+
+</details>
 
 ## Project layout
 
 ```
 src/core     document model (layers, keyframes, easing, file format, undo) — no UI code
-src/render   draws compositions (viewport, thumbnails, off-screen export)
+src/render   draws compositions (viewport, thumbnails, off-screen export) and the logo mark
 src/export   video / image-sequence encoders and the export job
 src/media    imported media: image / audio / video decoding, textures, audio playback and mixing
-src/ui       theme, widgets, home screen, editor, panels and dialogs
+src/ui       theme, widgets, intro, home screen, editor, panels and dialogs
 src/app      window, main loop, OS integration, settings, preset/theme libraries, plugin host
-assets       fonts and bundled plugins (assets/plugins/charts)
+assets       fonts, bundled plugins, the Welcome project and the brand files
 tests        unit tests for the core
 ```
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit
 together and [CONTRIBUTING.md](CONTRIBUTING.md) to get involved.
 
+## Brand
+
+The mark is a disc with a lowercase **b** cut out of it, in the accent gold
+(`#E8B931`) on the interface's near-black (`#141417`). Its geometry lives in
+[`src/render/LogoMark.h`](src/render/LogoMark.h) and every brand file is drawn
+from it — regenerate them with `bemotion --write-icon <file.ico|png|svg>` and
+`bemotion --write-mark <file.svg>`.
+
+| | File |
+| --- | --- |
+| App icon | [`assets/branding/icon.svg`](assets/branding/icon.svg) · [`.ico`](assets/branding/bemotion.ico) · [`1024 px .png`](assets/branding/icon-1024.png) |
+| Mark only | [`assets/branding/mark.svg`](assets/branding/mark.svg) |
+| Intro / Welcome project | [`assets/welcome/Welcome.bemotion`](assets/welcome/Welcome.bemotion) |
+| Social preview | [`docs/media/social-preview.png`](docs/media/social-preview.png) |
+
 ## License
 
 bemotion is released under the [MIT License](LICENSE). The bundled Inter font is
 licensed under the [SIL Open Font License](assets/fonts/Inter-OFL.txt).
+
+<div align="center">
+<sub>Made with care — and animated with bemotion.</sub>
+</div>

@@ -190,7 +190,7 @@ const char* mediaKindLabel(MediaKind kind) {
     return "Media";
 }
 
-Layer makeMediaLayer(const MediaItem& item, Vec2 position, double start, double compDuration) {
+Layer makeMediaLayer(const MediaItem& item, Vec2 position, double start, double stillLength) {
     Layer l;
     l.type = LayerType::Media;
     l.name = item.name;
@@ -201,8 +201,7 @@ Layer makeMediaLayer(const MediaItem& item, Vec2 position, double start, double 
     l.media.hasAudio = item.hasAudio;
     l.media.start = start;
     l.inPoint = start;
-    // Footage lasts as long as its source; a still image until the composition ends.
-    const double length = item.kind == MediaKind::Image ? std::max(1.0, compDuration - start) : std::max(0.1, item.duration);
+    const double length = std::max(0.1, item.kind == MediaKind::Image ? stillLength : item.duration);
     l.outPoint = start + length;
     l.transform.position.base = position;
     return l;

@@ -192,7 +192,8 @@ Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
 Layer makeCameraLayer(Vec2 compSize, double duration);
 Layer makeCompoundLayer(Vec2 position, double duration);
 // A layer for `item` starting at `start` (videos and audio last as long as the source).
-Layer makeMediaLayer(const MediaItem& item, Vec2 position, double start, double compDuration);
+// Footage lasts as long as its source; a still image `stillLength` seconds.
+Layer makeMediaLayer(const MediaItem& item, Vec2 position, double start, double stillLength);
 // A plugin object with the given parameters at their defaults (see PluginHost).
 Layer makePluginLayer(const std::string& name, PluginProps props, Vec2 position, double duration);
 

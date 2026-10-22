@@ -1,3 +1,5 @@
+<img src="assets/branding/icon.svg" width="64" alt="bemotion icon">
+
 # Contributing to bemotion
 
 Thanks for your interest! bemotion aims to stay **simple, fast and easy to
@@ -15,7 +17,9 @@ maintain**, so a few guidelines:
    with sensible defaults; bump `Project::kFormatVersion` only for
    incompatible changes and keep loading older versions.
 5. **Commits / PRs:** small and focused, with a clear description. Screenshots
-   are welcome for UI changes.
+   are welcome for UI changes (the pull request template has a checklist).
+6. **Issues:** use the *Bug report* or *Feature request* forms; a small
+   `.bemotion` project that shows a problem helps a lot.
 
 ## Building
 

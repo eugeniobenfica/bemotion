@@ -20,11 +20,21 @@ bool overlaps(const Layer& a, const Layer& b) {
 
 } // namespace
 
+void Composition::fitDuration() {
+    double end = 0.0;
+    for (const Layer& l : layers)
+        if (!findLayer(l.parent)) end = std::max(end, l.outPoint); // inside a compound, the compound bounds it
+    // Whole frames, so the last clip's last frame is part of the composition.
+    const double frames = std::ceil(std::max(end, kMinCompDuration) * fps - 1e-6);
+    duration = frames / fps;
+}
+
 int Composition::frameCount() const { return std::max(1, static_cast<int>(std::lround(duration * fps))); }
 
 int Composition::frameAt(double t) const {
-    // Small bias so times exactly on a frame boundary never round down.
-    return std::clamp(static_cast<int>(std::floor(t * fps + 1e-6)), 0, frameCount() - 1);
+    // Small bias so times exactly on a frame boundary never round down. Not capped at the end:
+    // the playhead and clips may go past it (the composition grows to hold them).
+    return std::max(0, static_cast<int>(std::floor(t * fps + 1e-6)));
 }
 
 Layer& Composition::addLayer(Layer layer, int index) {
@@ -377,7 +387,7 @@ uint64_t Composition::createCompound(const std::vector<uint64_t>& layerIds, doub
         top = std::min(top, indexOf(id));
     }
     center = center / static_cast<float>(grouped.size());
-    Layer compound = makeCompoundLayer(center, duration);
+    Layer compound = makeCompoundLayer(center, out - in);
     compound.inPoint = in;
     compound.outPoint = out;
     compound.parent = outerParent;
