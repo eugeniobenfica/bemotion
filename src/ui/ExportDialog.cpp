@@ -83,6 +83,10 @@ void ExportDialog::draw(EditorContext& ctx) {
     }
     switch (stage_) {
     case Stage::Settings: drawSettings(ctx); break;
+    case Stage::Preparing: // system fonts used by text layers load between frames
+        ImGui::TextUnformatted("Preparing fonts...");
+        startExport(ctx);
+        break;
     case Stage::Running: drawProgress(); break;
     case Stage::Done: drawResult(); break;
     case Stage::Closed: break;
@@ -192,7 +196,14 @@ void ExportDialog::startExport(EditorContext& ctx) {
     if (settings_.output.extension() != exporting::formatExtension(settings_.format))
         settings_.output += exporting::formatExtension(settings_.format);
     error_.clear();
-    if (!job_.start(ctx.project, settings_, error_)) return;
+    if (!Fonts::ensureLoaded(ctx.comp())) {
+        stage_ = Stage::Preparing;
+        return;
+    }
+    if (!job_.start(ctx.project, settings_, error_)) {
+        stage_ = Stage::Settings;
+        return;
+    }
     stage_ = Stage::Running;
 }
 

@@ -10,7 +10,7 @@
 
 namespace bemotion {
 
-enum class LayerType { Shape, Text };
+enum class LayerType { Shape, Text, Camera };
 
 enum class ShapeKind { Rectangle, Ellipse, Polygon, Star, Line, Count };
 
@@ -69,9 +69,17 @@ struct ShapeProps {
     AnimFloat trimEnd{100.0f};
 };
 
+// A camera frames the scene: its position is the composition point shown at
+// the center, rotation rolls the view and zoom magnifies it.
+struct CameraProps {
+    AnimFloat zoom{100.0f}; // percent
+    Vec2 frameSize{1920.0f, 1080.0f}; // composition size, kept in sync (not saved)
+};
+
 struct TextProps {
     std::string text = "Text";
-    FontWeight weight = FontWeight::SemiBold;
+    std::string fontFamily = "Inter"; // any installed family; Inter ships with the app
+    std::string fontStyle = "SemiBold";
     TextAlign align = TextAlign::Center;
     AnimFloat fontSize{120.0f};
     AnimColor color{Color::fromHex(0xFFFFFF)};
@@ -100,6 +108,7 @@ struct Layer {
     TransformProps transform;
     ShapeProps shape;
     TextProps text;
+    CameraProps camera;
     std::vector<Effect> effects; // applied in order
 
     // All animatable properties that apply to this layer's type, in UI order.
@@ -117,6 +126,7 @@ struct Layer {
 
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
+Layer makeCameraLayer(Vec2 compSize, double duration);
 
 // Generic access to a property value as 1 (float), 2 (vec2) or 4 (color) components.
 std::vector<float> propertyValue(const PropertyRef& p, double t);

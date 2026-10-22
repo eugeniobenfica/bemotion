@@ -50,6 +50,12 @@ Color labelColor(int index) {
 std::vector<PropertyRef> Layer::properties() {
     std::vector<PropertyRef> p;
     auto& tr = transform;
+    if (type == LayerType::Camera) { // never drawn: no shape, text or effects
+        p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
+        p.push_back({"rotation", "Transform", "Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"camera_zoom", "Camera", "Zoom", PropertyKind::Float, &camera.zoom, 0.5f, 1, 10000, "%.0f%%"});
+        return p;
+    }
     p.push_back({"anchor", "Transform", "Anchor Point", PropertyKind::Vec2, &tr.anchor});
     p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
     p.push_back({"scale", "Transform", "Scale", PropertyKind::Vec2, &tr.scale, 0.5f, 0, 0, "%.1f%%"});
@@ -164,6 +170,17 @@ Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration) {
     return l;
 }
 
+Layer makeCameraLayer(Vec2 compSize, double duration) {
+    Layer l;
+    l.type = LayerType::Camera;
+    l.name = "Camera";
+    l.outPoint = duration;
+    l.label = 5;
+    l.transform.position.base = compSize * 0.5f;
+    l.camera.frameSize = compSize;
+    return l;
+}
+
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration) {
     Layer l;
     l.type = LayerType::Text;
@@ -198,8 +215,9 @@ void setPropertyValue(const PropertyRef& p, double t, const std::vector<float>& 
 }
 
 std::vector<float> defaultPropertyValue(const Layer& layer, const char* propertyId, Vec2 compCenter) {
-    Layer fresh = layer.type == LayerType::Text ? makeTextLayer(layer.text.text, compCenter, 1.0)
-                                                : makeShapeLayer(layer.shape.kind, compCenter, 1.0);
+    Layer fresh = layer.type == LayerType::Text     ? makeTextLayer(layer.text.text, compCenter, 1.0)
+                  : layer.type == LayerType::Camera ? makeCameraLayer(compCenter * 2.0f, 1.0)
+                                                    : makeShapeLayer(layer.shape.kind, compCenter, 1.0);
     auto props = fresh.properties();
     if (const PropertyRef* p = fresh.findProperty(props, propertyId)) return propertyValue(*p, 0.0);
     return {};

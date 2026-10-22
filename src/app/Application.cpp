@@ -149,6 +149,13 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
                 settings.format = static_cast<exporting::Format>(k);
     settings.end = project.comp.duration;
 
+    // Text layers may use system fonts: wait until they are in the atlas.
+    for (int tries = 0; !Fonts::ensureLoaded(project.comp) && tries < 3000; ++tries) {
+        Fonts::processPending();
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    Fonts::processPending();
+
     exporting::ExportJob job;
     int result = 0;
     if (!job.start(project, settings, error)) {
@@ -233,6 +240,7 @@ bool Application::init(bool visible) {
     ImGui::GetStyle().ScaleAllSizes(scale);
     ImGui::GetStyle().FontScaleDpi = scale;
     Fonts::load(platform::assetsDir());
+    Fonts::startSystemScan(platform::appDataDir() / "fontcache.json");
 
     ImGui_ImplGlfw_InitForOpenGL(window_, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -258,6 +266,7 @@ void Application::shutdown() {
 
 void Application::frame(double dt) {
     render::screenEffects().beginFrame(); // effect textures from the previous frame can be reused
+    Fonts::processPending(); // faces requested by text layers last frame
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     if (script_) script_->apply();

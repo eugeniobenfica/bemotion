@@ -28,6 +28,7 @@ add_executable(bemotion WIN32
     export/PngSequenceEncoder.cpp
     render/EffectRenderer.cpp
     render/Fonts.cpp
+    render/FontScan.cpp
     render/GL.cpp
     render/OffscreenRenderer.cpp
     render/SceneRenderer.cpp

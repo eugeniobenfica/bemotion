@@ -159,6 +159,7 @@ void EditorScreen::drawMenuBar() {
     }
     if (ImGui::BeginMenu("Add")) {
         if (ImGui::MenuItem("Text", "T")) ctx_.addText();
+        if (ImGui::MenuItem("Camera")) ctx_.addCamera();
         ImGui::Separator();
         for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i)
             if (ImGui::MenuItem(shapeKindLabel(static_cast<ShapeKind>(i)))) ctx_.addShape(static_cast<ShapeKind>(i));

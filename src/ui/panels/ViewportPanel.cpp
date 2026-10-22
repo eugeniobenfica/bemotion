@@ -53,7 +53,7 @@ bool computeHandles(const Layer& layer, double t, const render::View& view, Hand
     // A mirrored layer flips its local "up"; keep the handle outside the box.
     if (m.determinant() < 0.0f) dir = dir * -1.0f, h.topMid = (h.screen[2] + h.screen[3]) * 0.5f;
     h.rotate = h.topMid + dir * kRotateOffset;
-    h.pivot = view.toScreen(layer.transform.position.valueAt(t));
+    h.pivot = view.sceneToScreen(layer.transform.position.valueAt(t));
     return true;
 }
 
@@ -85,11 +85,11 @@ void outline(ImDrawList* dl, const Handles& h, ImU32 col, float thickness) {
 
 bool near(Vec2 a, Vec2 b, float r) { return (a - b).length() <= r; }
 
-// Axis-aligned bounds of a layer in composition pixels.
-bool compBox(const Layer& layer, double t, Vec2& mn, Vec2& mx) {
+// Axis-aligned bounds of a layer in composition pixels (as seen through `camera`).
+bool compBox(const Layer& layer, double t, const Affine& camera, Vec2& mn, Vec2& mx) {
     Vec2 lmn, lmx;
     if (!render::localBounds(layer, t, lmn, lmx)) return false;
-    const Affine m = layer.matrixAt(t);
+    const Affine m = camera * layer.matrixAt(t);
     const Vec2 corners[4] = {m.apply(lmn), m.apply({lmx.x, lmn.y}), m.apply(lmx), m.apply({lmn.x, lmx.y})};
     mn = mx = corners[0];
     for (const Vec2& c : corners) {
@@ -129,6 +129,7 @@ void ViewportPanel::draw(EditorContext& ctx) {
         pan_ = {0.0f, 0.0f};
     }
     origin_ = (canvasMin_ + canvasMax_) * 0.5f + pan_ - compSize_ * (zoom_ * 0.5f);
+    world_ = throughCamera_ ? c.cameraAt(ctx.time) : Affine{};
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(p0, p1, kCanvasColor);
@@ -147,10 +148,10 @@ void ViewportPanel::draw(EditorContext& ctx) {
     handleSelectionInput(ctx, hovered);
 
     dl->PushClipRect(p0, p1, true);
-    const render::View view{origin_, zoom_};
+    const render::View view = sceneView();
     const Vec2 compMax = view.toScreen(compSize_);
     dl->AddRectFilled(ImVec2(origin_.x + 4, origin_.y + 6), ImVec2(compMax.x + 4, compMax.y + 6), IM_COL32(0, 0, 0, 90), 2);
-    render::drawComposition(dl, c, ctx.time, view);
+    render::drawComposition(dl, c, ctx.time, view, true, nullptr, throughCamera_);
     dl->AddRect(im(origin_), im(compMax), theme::kBorder);
     drawGuides(ctx);
     drawOverlay(ctx, hovered);
@@ -211,8 +212,10 @@ void ViewportPanel::handleDrop(EditorContext& ctx) {
         }
         dropHover_ = true;
         if (payload->IsDelivery()) {
-            if (dropKind_ < 0) ctx.addText(dropPos_);
-            else ctx.addShape(static_cast<ShapeKind>(dropKind_), dropPos_);
+            const Vec2 scenePos = world_.inverse().apply(dropPos_); // where the camera shows that point
+            if (dropKind_ == kDropCamera) ctx.addCamera();
+            else if (dropKind_ < 0) ctx.addText(scenePos);
+            else ctx.addShape(static_cast<ShapeKind>(dropKind_), scenePos);
             dropHover_ = false;
         }
     }
@@ -224,7 +227,7 @@ void ViewportPanel::handleDrop(EditorContext& ctx) {
 void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
     ImGuiIO& io = ImGui::GetIO();
     const Composition& comp = ctx.comp();
-    const render::View view{origin_, zoom_};
+    const render::View view = sceneView();
     const Vec2 mouse = vec(io.MousePos);
     const Vec2 mouseComp = view.toComp(mouse);
     const double t = ctx.time;
@@ -271,12 +274,12 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                     dragStartPosition_ = single->transform.position.valueAt(t);
                     dragStartScale_ = single->transform.scale.valueAt(t);
                     dragStartRotation_ = single->transform.rotation.valueAt(t);
-                    const Vec2 d = mouse - view.toScreen(dragStartPosition_);
+                    const Vec2 d = mouse - view.sceneToScreen(dragStartPosition_);
                     dragStartAngle_ = radToDeg(std::atan2(d.y, d.x));
                 }
             }
             if (drag_ == Drag::None) {
-                const uint64_t hit = render::hitTest(comp, t, mouseComp);
+                const uint64_t hit = render::hitTest(comp, t, view.screenToScene(mouse), !throughCamera_);
                 if (hit) {
                     if (additive) ctx.toggleSelected(hit);
                     else if (!ctx.isSelected(hit)) ctx.select(hit);
@@ -296,7 +299,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
                             dragStartPositions_.emplace_back(l->id, l->transform.position.valueAt(t));
                             moving.push_back(l->id);
                             Vec2 mn, mx;
-                            if (l->activeAt(t) && compBox(*l, t, mn, mx)) {
+                            if (l->activeAt(t) && compBox(*l, t, world_, mn, mx)) {
                                 dragBoxMin_ = {std::min(dragBoxMin_.x, mn.x), std::min(dragBoxMin_.y, mn.y)};
                                 dragBoxMax_ = {std::max(dragBoxMax_.x, mx.x), std::max(dragBoxMax_.y, mx.y)};
                             }
@@ -345,8 +348,9 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
         Vec2 delta = mouseComp - dragStartMouse_;
         if (io.KeyShift) (std::fabs(delta.x) > std::fabs(delta.y) ? delta.y : delta.x) = 0.0f;
         if (ctx.snapping && !io.KeyCtrl) delta = delta + snapMove(dragBoxMin_, dragBoxMax_, delta);
+        const Vec2 sceneDelta = world_.inverse().applyVector(delta); // the camera may zoom or rotate the view
         for (const auto& [id, start] : dragStartPositions_)
-            if (Layer* l = ctx.comp().findLayer(id)) l->transform.position.set(t, start + delta);
+            if (Layer* l = ctx.comp().findLayer(id)) l->transform.position.set(t, start + sceneDelta);
         break;
     }
     case Drag::Scale: {
@@ -354,7 +358,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
         if (!layer) break;
         auto& tr = layer->transform;
         const Affine pre = Affine::translate(dragStartPosition_) * Affine::rotateDeg(dragStartRotation_);
-        const Vec2 q = pre.inverse().apply(mouseComp);
+        const Vec2 q = pre.inverse().apply(view.screenToScene(mouse));
         const Vec2 v = dragCorner_ - tr.anchor.valueAt(t);
         Vec2 s = dragStartScale_;
         if (io.KeyShift) {
@@ -371,7 +375,7 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
     case Drag::Rotate: {
         Layer* layer = ctx.comp().findLayer(dragLayer_);
         if (!layer) break;
-        const Vec2 d = mouse - view.toScreen(dragStartPosition_);
+        const Vec2 d = mouse - view.sceneToScreen(dragStartPosition_);
         float r = dragStartRotation_ + radToDeg(std::atan2(d.y, d.x)) - dragStartAngle_;
         if (io.KeyShift) r = std::round(r / 15.0f) * 15.0f;
         layer->transform.rotation.set(t, r);
@@ -386,18 +390,28 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
 
 void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const render::View view{origin_, zoom_};
+    const render::View view = sceneView();
     const ImGuiIO& io = ImGui::GetIO();
     const double t = ctx.time;
     Composition& comp = ctx.comp();
 
     // Hover outline for the layer under the cursor.
     if (drag_ == Drag::None && hovered && !spaceHeld()) {
-        const uint64_t hover = render::hitTest(comp, t, view.toComp(vec(io.MousePos)));
+        const uint64_t hover = render::hitTest(comp, t, view.screenToScene(vec(io.MousePos)), !throughCamera_);
         Handles h{};
         if (hover && !ctx.isSelected(hover) && computeHandles(*comp.findLayer(hover), t, view, h))
             outline(dl, h, IM_COL32(232, 185, 49, 110), 1.0f);
     }
+
+    // Free view: show what each camera sees.
+    if (!throughCamera_)
+        for (const Layer& l : comp.layers) {
+            Handles h{};
+            if (l.type != LayerType::Camera || !l.activeAt(t) || !computeHandles(l, t, view, h)) continue;
+            outline(dl, h, IM_COL32(64, 196, 255, 220), 1.5f);
+            const ImVec2 at(std::max(h.screen[0].x + 6, canvasMin_.x + kRuler + 6), std::max(h.screen[0].y + 4, canvasMin_.y + kRuler + 4));
+            dl->AddText(at, IM_COL32(64, 196, 255, 255), l.name.c_str()); // kept clear of the rulers
+        }
 
     // Selection outlines.
     const auto selected = ctx.selectedLayers();
@@ -471,8 +485,10 @@ void ViewportPanel::drawOverlay(EditorContext& ctx, bool hovered) {
 
     // Ghost of an object being dragged in from the Objects panel.
     if (dropHover_) {
-        Layer ghost = dropKind_ < 0 ? makeTextLayer("Your text", dropPos_, comp.duration)
-                                    : makeShapeLayer(static_cast<ShapeKind>(dropKind_), dropPos_, comp.duration);
+        const Vec2 scenePos = world_.inverse().apply(dropPos_);
+        Layer ghost = dropKind_ == kDropCamera ? makeCameraLayer(compSize_, comp.duration)
+                      : dropKind_ < 0          ? makeTextLayer("Your text", scenePos, comp.duration)
+                                               : makeShapeLayer(static_cast<ShapeKind>(dropKind_), scenePos, comp.duration);
         ghost.transform.opacity.base = 55.0f;
         render::drawLayer(dl, ghost, t, view.matrix() * ghost.matrixAt(t));
         const Vec2 s = view.toScreen(dropPos_);
@@ -499,6 +515,15 @@ void ViewportPanel::drawHud(EditorContext& ctx) {
     float x = canvasMax_.x - 12 - (btn * 3 + comboW + 46 + 4 * 3 + 12);
     ImGui::PushStyleColor(ImGuiCol_Button, IM_COL32(30, 30, 34, 220));
     ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(30, 30, 34, 220));
+    const bool hasCamera = std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.type == LayerType::Camera; });
+    if (hasCamera) {
+        ImGui::SetCursorScreenPos(ImVec2(x - btn - 6, y));
+        if (ui::iconButton("##camView", ui::Icon::Camera, btn,
+                           throughCamera_ ? "Looking through the camera (click for the free view)"
+                                          : "Free view: camera frames shown (click to look through the camera)",
+                           throughCamera_))
+            throughCamera_ = !throughCamera_;
+    }
     ImGui::SetCursorScreenPos(ImVec2(x, y));
     if (ui::iconButton("##snap", ui::Icon::Magnet, btn, "Snapping (S) - hold Ctrl while dragging to bypass", ctx.snapping))
         ctx.snapping = !ctx.snapping;
@@ -540,7 +565,7 @@ void ViewportPanel::collectSnapTargets(EditorContext& ctx, const std::vector<uin
     for (const Layer& l : comp.layers) {
         if (!l.activeAt(ctx.time) || std::find(exclude.begin(), exclude.end(), l.id) != exclude.end()) continue;
         Vec2 mn, mx;
-        if (!compBox(l, ctx.time, mn, mx)) continue;
+        if (!compBox(l, ctx.time, world_, mn, mx)) continue;
         snapTargetsX_.insert(snapTargetsX_.end(), {mn.x, (mn.x + mx.x) * 0.5, mx.x});
         snapTargetsY_.insert(snapTargetsY_.end(), {mn.y, (mn.y + mx.y) * 0.5, mx.y});
     }
@@ -566,7 +591,7 @@ Vec2 ViewportPanel::snapMove(Vec2 boxMin, Vec2 boxMax, Vec2 delta) {
 
 int ViewportPanel::guideAt(EditorContext& ctx, Vec2 screen) const {
     if (!ctx.showGuides) return -1;
-    const render::View view{origin_, zoom_};
+    const render::View view = sceneView();
     const auto& guides = ctx.comp().guides;
     for (int i = static_cast<int>(guides.size()) - 1; i >= 0; --i) {
         const Vec2 s = view.toScreen({guides[i].position, guides[i].position});
@@ -577,7 +602,7 @@ int ViewportPanel::guideAt(EditorContext& ctx, Vec2 screen) const {
 
 void ViewportPanel::handleGuides(EditorContext& ctx) {
     const ImGuiIO& io = ImGui::GetIO();
-    const render::View view{origin_, zoom_};
+    const render::View view = sceneView();
     const Vec2 mouse = vec(io.MousePos);
     const Vec2 mouseComp = view.toComp(mouse);
     auto& guides = ctx.comp().guides;
@@ -650,7 +675,7 @@ void ViewportPanel::handleGuides(EditorContext& ctx) {
 void ViewportPanel::drawGuides(EditorContext& ctx) {
     if (!ctx.showGuides) return;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const render::View view{origin_, zoom_};
+    const render::View view = sceneView();
     const auto& guides = ctx.comp().guides;
     for (int i = 0; i < static_cast<int>(guides.size()); ++i) {
         const Guide& g = guides[i];
@@ -672,7 +697,7 @@ void ViewportPanel::drawGuides(EditorContext& ctx) {
 void ViewportPanel::drawRulers(EditorContext& ctx) {
     if (!ctx.showRulers) return;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const render::View view{origin_, zoom_};
+    const render::View view = sceneView();
     const ImVec2 a = im(canvasMin_), b = im(canvasMax_);
     const ImU32 bg = IM_COL32(20, 20, 23, 245);
     dl->AddRectFilled(a, ImVec2(b.x, a.y + kRuler), bg);

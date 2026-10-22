@@ -26,6 +26,7 @@ Icon iconForShape(ShapeKind kind) {
 }
 
 Icon iconForLayer(const Layer& layer) {
+    if (layer.type == LayerType::Camera) return Icon::Camera;
     return layer.type == LayerType::Text ? Icon::Text : iconForShape(layer.shape.kind);
 }
 

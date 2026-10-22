@@ -251,4 +251,20 @@ uint64_t Composition::splitLayer(uint64_t id, double t) {
     return addLayer(std::move(tail)).id;
 }
 
+Affine Composition::cameraAt(double t) const {
+    for (const Layer& l : layers) {
+        if (l.type != LayerType::Camera || !l.activeAt(t)) continue;
+        // The camera frame (composition-sized, scaled by 1/zoom) maps onto the composition.
+        const float zoom = std::max(0.01f, l.camera.zoom.valueAt(t) * 0.01f);
+        const Affine frame = l.matrixAt(t) * Affine::scale(1.0f / zoom);
+        return Affine::translate(center()) * frame.inverse();
+    }
+    return {};
+}
+
+void Composition::syncCameras() {
+    for (Layer& l : layers)
+        if (l.type == LayerType::Camera) l.camera.frameSize = {static_cast<float>(width), static_cast<float>(height)};
+}
+
 } // namespace bemotion

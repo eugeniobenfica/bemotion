@@ -9,7 +9,7 @@ namespace bemotion {
 class EditorContext;
 
 // Right panel: every property of the selected layer (or the composition when
-// nothing is selected), with keyframe toggles and quick animation presets.
+// nothing is selected), with keyframe toggles, effects and quick animation presets.
 class PropertiesPanel {
 public:
     static constexpr const char* kWindowName = "Properties";
@@ -26,6 +26,7 @@ private:
     std::string presetMessage_;
     std::string effectMessage_;
     std::string effectSaveName_;
+    std::string fontFilter_;
 };
 
 // Building blocks shared with the timeline's property rows. Each returns true

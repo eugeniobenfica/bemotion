@@ -64,7 +64,7 @@ void OffscreenRenderer::render(const Composition& comp, double t, float scale, b
     dl.PushClipRect(ImVec2(0, 0), size);
     dl.PushTexture(ImGui::GetIO().Fonts->TexRef);
     effects_.beginFrame();
-    drawComposition(&dl, comp, t, View{{0.0f, 0.0f}, scale}, background, &effects_);
+    drawComposition(&dl, comp, t, View{{0.0f, 0.0f}, scale, {}}, background, &effects_);
 
     ImDrawData data;
     data.Valid = true;

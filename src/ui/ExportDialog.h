@@ -16,7 +16,7 @@ public:
     bool busy() const { return job_.running(); }
 
 private:
-    enum class Stage { Closed, Settings, Running, Done };
+    enum class Stage { Closed, Settings, Preparing, Running, Done };
 
     void drawSettings(EditorContext& ctx);
     void drawProgress();

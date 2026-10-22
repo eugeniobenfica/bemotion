@@ -13,6 +13,7 @@
 #include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <cstring>
 
@@ -39,6 +40,14 @@ void plainRowLabel(const char* label) {
     ImGui::TextColored(theme::vec(theme::kTextDim), "%s", label);
     ImGui::TableSetColumnIndex(2);
     ImGui::SetNextItemWidth(-FLT_MIN);
+}
+
+bool containsNoCase(const std::string& hay, const std::string& needle) {
+    if (needle.empty()) return true;
+    auto it = std::search(hay.begin(), hay.end(), needle.begin(), needle.end(), [](char a, char b) {
+        return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
+    });
+    return it != hay.end();
 }
 
 void jumpToKey(EditorContext& ctx, const AnimatedBase& anim, int direction) {
@@ -188,9 +197,9 @@ void PropertiesPanel::drawComposition(EditorContext& ctx) {
 
     if (!beginPropertyTable("comp")) return;
     plainRowLabel("Width");
-    if (ImGui::InputInt("##w", &c.width, 0)) { c.width = std::clamp(c.width, 16, 16384); ctx.touch(); }
+    if (ImGui::InputInt("##w", &c.width, 0)) { c.width = std::clamp(c.width, 16, 16384); c.syncCameras(); ctx.touch(); }
     plainRowLabel("Height");
-    if (ImGui::InputInt("##h", &c.height, 0)) { c.height = std::clamp(c.height, 16, 16384); ctx.touch(); }
+    if (ImGui::InputInt("##h", &c.height, 0)) { c.height = std::clamp(c.height, 16, 16384); c.syncCameras(); ctx.touch(); }
     plainRowLabel("Frame Rate");
     float fps = static_cast<float>(c.fps);
     if (ImGui::DragFloat("##fps", &fps, 0.1f, 1.0f, 240.0f, "%.2f fps", ImGuiSliderFlags_AlwaysClamp)) {
@@ -274,17 +283,47 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
                 if (ImGui::InputTextMultiline("##text", &layer.text.text,
                                               ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3.6f)))
                     ctx.touch();
-                plainRowLabel("Weight");
-                if (ImGui::BeginCombo("##weight", fontWeightLabel(layer.text.weight))) {
-                    for (int i = 0; i < static_cast<int>(FontWeight::Count); ++i) {
-                        const auto w = static_cast<FontWeight>(i);
-                        ImGui::PushFont(Fonts::forWeight(w), 0.0f);
-                        if (ImGui::Selectable(fontWeightLabel(w), w == layer.text.weight)) {
-                            layer.text.weight = w;
+                plainRowLabel("Font");
+                const bool missing = !Fonts::systemScanReady() ? false : !Fonts::hasFamily(layer.text.fontFamily);
+                if (ImGui::BeginCombo("##font", layer.text.fontFamily.c_str(), ImGuiComboFlags_HeightLarge)) {
+                    if (ImGui::IsWindowAppearing()) {
+                        fontFilter_.clear();
+                        ImGui::SetKeyboardFocusHere();
+                    }
+                    ImGui::SetNextItemWidth(-FLT_MIN);
+                    ImGui::InputTextWithHint("##fontFilter", "Search fonts", &fontFilter_);
+                    if (!Fonts::systemScanReady()) ImGui::TextColored(theme::vec(theme::kTextFaint), "Looking for installed fonts...");
+                    const auto families = Fonts::families();
+                    std::vector<const std::string*> shown;
+                    for (const auto& f : families)
+                        if (containsNoCase(f, fontFilter_)) shown.push_back(&f);
+                    ImGuiListClipper clipper; // hundreds of families: only lay out the visible ones
+                    clipper.Begin(static_cast<int>(shown.size()));
+                    while (clipper.Step())
+                        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+                            if (ImGui::Selectable(shown[i]->c_str(), *shown[i] == layer.text.fontFamily)) {
+                                for (Layer* l : ctx.selectedLayers()) {
+                                    if (l->type != LayerType::Text) continue;
+                                    l->text.fontFamily = *shown[i];
+                                    const auto styles = Fonts::stylesOf(*shown[i]);
+                                    if (std::find(styles.begin(), styles.end(), l->text.fontStyle) == styles.end() &&
+                                        !styles.empty())
+                                        l->text.fontStyle = styles.front();
+                                }
+                                ctx.touch();
+                            }
+                    ImGui::EndCombo();
+                }
+                if (missing) ui::tooltip("This font is not installed here: Inter is used instead.");
+                plainRowLabel("Style");
+                if (ImGui::BeginCombo("##style", layer.text.fontStyle.c_str())) {
+                    for (const auto& s : Fonts::stylesOf(layer.text.fontFamily))
+                        if (ImGui::Selectable(s.c_str(), s == layer.text.fontStyle)) {
+                            for (Layer* l : ctx.selectedLayers())
+                                if (l->type == LayerType::Text && l->text.fontFamily == layer.text.fontFamily)
+                                    l->text.fontStyle = s;
                             ctx.touch();
                         }
-                        ImGui::PopFont();
-                    }
                     ImGui::EndCombo();
                 }
                 plainRowLabel("Align");
@@ -345,6 +384,7 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
         ImGui::EndTable();
     }
 
+    if (layer.type == LayerType::Camera) return; // cameras are not drawn: no effects or animation presets
     drawEffects(ctx, layer);
     drawPresets(ctx, layer);
 }

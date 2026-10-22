@@ -42,6 +42,11 @@ struct Composition {
     double snapToFrame(double t) const { return timeOfFrame(frameAt(t)); }
     Vec2 center() const { return {width * 0.5f, height * 0.5f}; }
 
+    // Scene -> composition transform of the top-most active camera (identity without one).
+    Affine cameraAt(double t) const;
+    // Gives every camera the current composition size as its frame.
+    void syncCameras();
+
     // Inserts a layer, assigning it a fresh id (and a fresh track when its
     // track is 0). `index` is rounded to a track boundary so tracks stay
     // contiguous; the default puts it on top.

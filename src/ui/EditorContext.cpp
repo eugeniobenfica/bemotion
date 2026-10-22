@@ -150,6 +150,12 @@ Layer& EditorContext::addText(std::optional<Vec2> position) {
     return insertLayer(makeTextLayer("Your text", position.value_or(comp().center()), comp().duration));
 }
 
+Layer& EditorContext::addCamera() {
+    const Vec2 size{static_cast<float>(comp().width), static_cast<float>(comp().height)};
+    Layer& cam = insertLayer(makeCameraLayer(size, comp().duration));
+    return cam;
+}
+
 void EditorContext::deleteSelected() {
     if (selection.empty()) return;
     int index = static_cast<int>(comp().layers.size());

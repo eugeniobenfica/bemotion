@@ -93,7 +93,7 @@ json encodeLayer(const Layer& constLayer) {
     j["id"] = layer.id;
     j["track"] = layer.track;
     j["name"] = layer.name;
-    j["type"] = layer.type == LayerType::Text ? "text" : "shape";
+    j["type"] = layer.type == LayerType::Text ? "text" : layer.type == LayerType::Camera ? "camera" : "shape";
     j["visible"] = layer.visible;
     j["locked"] = layer.locked;
     j["label"] = layer.label;
@@ -105,7 +105,8 @@ json encodeLayer(const Layer& constLayer) {
                       {"stroke", layer.shape.strokeEnabled}};
     } else {
         j["text"] = {{"text", layer.text.text},
-                     {"weight", kWeightIds[static_cast<int>(layer.text.weight)]},
+                     {"font_family", layer.text.fontFamily},
+                     {"font_style", layer.text.fontStyle},
                      {"align", kAlignIds[static_cast<int>(layer.text.align)]}};
     }
     json props = json::object();
@@ -134,7 +135,8 @@ Layer decodeLayer(const json& j) {
     layer.id = j.value("id", uint64_t{0});
     layer.track = j.value("track", uint64_t{0});
     layer.name = j.value("name", std::string("Layer"));
-    layer.type = j.value("type", std::string("shape")) == "text" ? LayerType::Text : LayerType::Shape;
+    const std::string type = j.value("type", std::string("shape"));
+    layer.type = type == "text" ? LayerType::Text : type == "camera" ? LayerType::Camera : LayerType::Shape;
     layer.visible = j.value("visible", true);
     layer.locked = j.value("locked", false);
     layer.label = j.value("label", 0);
@@ -149,7 +151,10 @@ Layer decodeLayer(const json& j) {
     if (j.contains("text")) {
         const auto& t = j["text"];
         layer.text.text = t.value("text", std::string());
-        layer.text.weight = enumFromId(kWeightIds, t.value("weight", std::string()), FontWeight::Regular);
+        layer.text.fontFamily = t.value("font_family", std::string("Inter"));
+        if (t.contains("font_style")) layer.text.fontStyle = t.value("font_style", std::string("Regular"));
+        else // files from before font families: Inter weights
+            layer.text.fontStyle = fontWeightLabel(enumFromId(kWeightIds, t.value("weight", std::string()), FontWeight::Regular));
         layer.text.align = enumFromId(kAlignIds, t.value("align", std::string()), TextAlign::Center);
     }
     if (j.contains("properties")) {
@@ -237,6 +242,7 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
             for (auto& l : c.layers)
                 if (l.track == 0) l.track = c.nextTrackId++;
             c.normalizeTracks();
+            c.syncCameras();
             for (const auto& gj : cj.value("guides", json::array()))
                 c.guides.push_back({gj.value("vertical", true), gj.value("position", 0.0f)});
         }

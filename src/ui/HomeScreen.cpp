@@ -95,7 +95,7 @@ void drawThumbnail(ImDrawList* dl, const Project* project, ImVec2 a, ImVec2 b) {
     const float zoom = std::min((b.x - a.x - pad * 2) / c.width, (b.y - a.y - pad * 2) / c.height);
     const Vec2 origin{(a.x + b.x) * 0.5f - c.width * zoom * 0.5f, (a.y + b.y) * 0.5f - c.height * zoom * 0.5f};
     dl->PushClipRect(a, b, true);
-    render::drawComposition(dl, c, std::min(c.duration * 0.5, 2.0), render::View{origin, zoom});
+    render::drawComposition(dl, c, std::min(c.duration * 0.5, 2.0), render::View{origin, zoom, {}});
     dl->PopClipRect();
 }
 

@@ -60,6 +60,12 @@ void ObjectsPanel::draw(EditorContext& ctx) {
         ImGui::PopID();
     }
 
+    ImGui::Dummy(ImVec2(0, 6));
+    ui::sectionLabel("SCENE");
+    if (ui::objectTile("##camera", ui::Icon::Camera, "Camera", tile)) ctx.addCamera();
+    ui::tooltip("A camera frames the scene: animate its position, rotation and zoom");
+    dragSource(kDropCamera, ui::Icon::Camera, "Camera");
+
     ImGui::Dummy(ImVec2(0, 10));
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
     ImGui::TextWrapped("Click an object to add it at the center, or drag it to any spot on the canvas.");

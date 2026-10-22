@@ -103,7 +103,8 @@ void testSerializationRoundTrip() {
     rect.transform.opacity.setKey(0.5, 25.0f, Easing::Bounce);
     rect.transform.opacity.setKey(1.5, 75.0f);
     Layer& text = p.comp.addLayer(makeTextLayer("Olá, bemotion", {0, 0}, 5.0));
-    text.text.weight = FontWeight::Bold;
+    text.text.fontFamily = "Arial";
+    text.text.fontStyle = "Bold Italic";
 
     Project q;
     std::string err;
@@ -112,7 +113,7 @@ void testSerializationRoundTrip() {
     CHECK(q.comp.width == 1080 && q.comp.height == 1920);
     CHECK(q.comp.layers.size() == 2);
     CHECK(q.comp.layers[0].text.text == "Olá, bemotion");
-    CHECK(q.comp.layers[0].text.weight == FontWeight::Bold);
+    CHECK(q.comp.layers[0].text.fontFamily == "Arial" && q.comp.layers[0].text.fontStyle == "Bold Italic");
     CHECK(q.comp.layers[1].shape.kind == ShapeKind::Star);
     CHECK(q.comp.layers[1].transform.opacity.keyCount() == 2);
     CHECK(q.comp.layers[1].transform.opacity.keys[0].easing == Easing::Bounce);
@@ -326,6 +327,24 @@ void testEffectPresets() {
     CHECK(effectMargin(shadow, 0) > shadow.offset.base.length());
 }
 
+void testCamera() {
+    Composition c; // 1920x1080
+    c.addLayer(makeShapeLayer(ShapeKind::Rectangle, {960, 540}, 10.0));
+    CHECK(near(c.cameraAt(1.0).apply({100, 100}).x, 100.0f)); // no camera: identity
+    Layer& cam = c.addLayer(makeCameraLayer({1920, 1080}, 10.0));
+    CHECK(near(c.cameraAt(1.0).apply({100, 100}).x, 100.0f)); // default camera: identity too
+    cam.camera.zoom.base = 200.0f;
+    cam.transform.position.base = {500, 300};
+    const Affine m = c.cameraAt(1.0);
+    CHECK(near(m.apply({500, 300}).x, 960.0f) && near(m.apply({500, 300}).y, 540.0f)); // looked-at point -> center
+    CHECK(near(m.apply({510, 300}).x, 980.0f));                                        // 2x zoom
+    Project p;
+    p.comp = c;
+    Project q;
+    CHECK(deserializeProject(serializeProject(p), q));
+    CHECK(q.comp.layers[0].type == LayerType::Camera && near(q.comp.layers[0].camera.zoom.base, 200.0f));
+}
+
 void testTracksRoundTrip() {
     Project p;
     p.comp = makeSplitStack();
@@ -384,6 +403,7 @@ int main() {
         {"guides round trip", testGuidesRoundTrip},
         {"effects round trip", testEffectsRoundTrip},
         {"effect presets", testEffectPresets},
+        {"camera", testCamera},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };

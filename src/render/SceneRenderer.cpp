@@ -67,7 +67,7 @@ constexpr float kMeasureSize = 64.0f;
 
 TextLayout layoutText(const TextProps& text, double t) {
     TextLayout layout;
-    ImFont* font = Fonts::forWeight(text.weight);
+    ImFont* font = Fonts::forText(text);
     const float size = std::max(1.0f, text.fontSize.valueAt(t));
     const float tracking = text.tracking.valueAt(t);
     const float advance = size * std::max(0.1f, text.lineHeight.valueAt(t) * 0.01f);
@@ -133,7 +133,7 @@ void drawText(ImDrawList* dl, const Layer& layer, double t, const Affine& toScre
     const float reveal = std::clamp(text.reveal.valueAt(t), 0.0f, 100.0f) * 0.01f;
     const int visibleGlyphs = static_cast<int>(std::floor(reveal * layout.glyphCount + 1e-4f));
 
-    ImFont* font = Fonts::forWeight(text.weight);
+    ImFont* font = Fonts::forText(text);
     // Culling happens before our vertex transform, so disable it entirely.
     const ImVec4 noClip(-FLT_MAX, -FLT_MAX, FLT_MAX, FLT_MAX);
     const int start = dl->VtxBuffer.Size;
@@ -198,13 +198,13 @@ void drawShape(ImDrawList* dl, const Layer& layer, double t, const Affine& toScr
 void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride) {
     const float opacity = opacityOverride >= 0.0f ? std::min(opacityOverride, 1.0f)
                                                   : std::clamp(layer.transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
-    if (opacity <= 0.0f) return;
+    if (opacity <= 0.0f || layer.type == LayerType::Camera) return;
     if (layer.type == LayerType::Text) drawText(dl, layer, time, layerToScreen, opacity);
     else drawShape(dl, layer, time, layerToScreen, opacity);
 }
 
 void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background,
-                     EffectRenderer* effects) {
+                     EffectRenderer* effects, bool throughCamera) {
     if (!effects) effects = &screenEffects();
     const Vec2 a = view.toScreen({0, 0});
     const Vec2 b = view.toScreen({static_cast<float>(comp.width), static_cast<float>(comp.height)});
@@ -215,9 +215,10 @@ void drawComposition(ImDrawList* dl, const Composition& comp, double time, const
 
     // Layers are clipped to the composition frame.
     dl->PushClipRect(ImVec2(a.x, a.y), ImVec2(b.x, b.y), true);
-    const Affine viewMatrix = view.matrix();
+    const Affine viewMatrix = Affine::translate(view.origin) * Affine::scale(view.zoom) *
+                              (throughCamera ? comp.cameraAt(time) : Affine{});
     for (auto it = comp.layers.rbegin(); it != comp.layers.rend(); ++it) {
-        if (!it->activeAt(time)) continue;
+        if (!it->activeAt(time) || it->type == LayerType::Camera) continue;
         if (hasActiveEffects(*it)) effects->drawLayer(dl, *it, time, comp.frameDuration(), viewMatrix, view.zoom);
         else drawLayer(dl, *it, time, viewMatrix * it->matrixAt(time));
     }
@@ -225,6 +226,11 @@ void drawComposition(ImDrawList* dl, const Composition& comp, double time, const
 }
 
 bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax) {
+    if (layer.type == LayerType::Camera) { // the camera frame
+        outMin = layer.camera.frameSize * -0.5f;
+        outMax = layer.camera.frameSize * 0.5f;
+        return true;
+    }
     if (layer.type == LayerType::Text) {
         const TextLayout layout = layoutText(layer.text, time);
         const float left = alignedLeft(layer.text, layout.width);
@@ -241,12 +247,13 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax) {
     return true;
 }
 
-uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint) {
+uint64_t hitTest(const Composition& comp, double time, Vec2 scenePoint, bool includeCameras) {
     for (const auto& layer : comp.layers) {
         if (!layer.activeAt(time) || layer.locked) continue;
+        if (layer.type == LayerType::Camera && !includeCameras) continue;
         Vec2 mn, mx;
         if (!localBounds(layer, time, mn, mx)) continue;
-        const Vec2 p = layer.matrixAt(time).inverse().apply(compPoint);
+        const Vec2 p = layer.matrixAt(time).inverse().apply(scenePoint);
         if (p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y) return layer.id;
     }
     return 0;

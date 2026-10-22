@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Math.h"
+#include "render/SceneRenderer.h"
 
 #include <cstdint>
 #include <utility>
@@ -11,8 +12,9 @@ namespace bemotion {
 class EditorContext;
 
 // Payload id for dragging objects from the Objects panel onto the canvas.
-// The payload is an int: -1 for text, otherwise a ShapeKind.
+// The payload is an int: -1 for text, kDropCamera for a camera, otherwise a ShapeKind.
 inline constexpr const char* kObjectPayload = "BEMOTION_OBJECT";
+inline constexpr int kDropCamera = -2;
 
 // Center panel: renders the composition and provides direct manipulation.
 //
@@ -58,6 +60,10 @@ private:
     Vec2 origin_{0.0f, 0.0f}; // screen position of comp (0,0), updated each frame
     Vec2 canvasMin_, canvasMax_;
     Vec2 compSize_;
+    // Camera: through it (the default) or a free view showing camera frames.
+    bool throughCamera_ = true;
+    Affine world_; // scene -> composition for this frame
+    render::View sceneView() const { return {origin_, zoom_, world_}; }
     bool autoFit_ = true;
     bool spaceUsed_ = false;
 

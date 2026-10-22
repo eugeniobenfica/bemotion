@@ -82,6 +82,7 @@ public:
     // New objects are centered unless a composition position is given.
     Layer& addShape(ShapeKind kind, std::optional<Vec2> position = std::nullopt);
     Layer& addText(std::optional<Vec2> position = std::nullopt);
+    Layer& addCamera();
     void deleteSelected();
     void duplicateSelected();
     std::vector<uint64_t> selectedTracks(); // tracks holding selected clips, top first
