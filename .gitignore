@@ -23,3 +23,6 @@ desktop.ini
 *.mov
 *.webm
 *.gif
+
+# Media shown in the README
+!docs/media/*.gif
