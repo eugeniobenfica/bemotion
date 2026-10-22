@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(Mirage
+project(bemotion
     VERSION 0.1.0
     DESCRIPTION "Minimal, open source 2D motion graphics animator"
     LANGUAGES C CXX)
@@ -14,13 +14,13 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-option(MIRAGE_BUILD_TESTS "Build the core unit tests" ON)
+option(BEMOTION_BUILD_TESTS "Build the core unit tests" ON)
 
 include(cmake/Dependencies.cmake)
 
 add_subdirectory(src)
 
-if(MIRAGE_BUILD_TESTS)
+if(BEMOTION_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()

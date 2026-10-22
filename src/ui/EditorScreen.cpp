@@ -12,7 +12,7 @@
 
 #include <cfloat>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 
@@ -22,17 +22,25 @@ struct ShortcutHelp {
 };
 
 constexpr ShortcutHelp kShortcuts[] = {
-    {"Space", "Play / pause"},
+    {"Space", "Play / pause (hold and drag: pan the viewport)"},
     {"Left / Right", "Previous / next frame (Shift: 10 frames)"},
     {"Home / End", "Go to start / end"},
     {"J / K", "Previous / next keyframe"},
+    {"V / C", "Selection tool / Cut tool"},
+    {"Ctrl+K", "Split selected layers at the playhead"},
     {"T", "Add text"},
+    {"Ctrl+A", "Select all layers"},
+    {"Shift / Ctrl + click", "Add to / toggle the selection"},
+    {"Ctrl+] / Ctrl+[", "Bring forward / send backward (Shift: to front / back)"},
     {"Ctrl+Z / Ctrl+Shift+Z", "Undo / redo"},
-    {"Ctrl+D", "Duplicate layer"},
-    {"Delete", "Delete keyframes or layer"},
+    {"Ctrl+D", "Duplicate layers"},
+    {"Delete", "Delete keyframes or layers"},
     {"Ctrl+S", "Save"},
-    {"Ctrl+0", "Fit composition in viewport"},
-    {"Wheel / Middle drag", "Zoom / pan the viewport"},
+    {"Ctrl+M", "Export video"},
+    {"Wheel", "Zoom the viewport around the cursor"},
+    {"Middle / right drag", "Pan the viewport (also Alt+drag)"},
+    {"Ctrl+0 / Ctrl+1", "Fit / 100% zoom"},
+    {"Ctrl+= / Ctrl+-", "Zoom in / out"},
     {"Ctrl+Wheel", "Zoom the timeline"},
     {"Shift (while dragging)", "Constrain move / uniform scale / snap rotation"},
 };
@@ -44,14 +52,14 @@ EditorScreen::EditorScreen(Project project, std::filesystem::path path, RecentPr
 }
 
 std::string EditorScreen::windowTitle() const {
-    return ctx_.project.name + (ctx_.isDirty() ? " •" : "") + "  —  Mirage";
+    return ctx_.project.name + (ctx_.isDirty() ? " •" : "") + "  —  bemotion";
 }
 
 EditorScreen::Request EditorScreen::draw(double dt) {
     ctx_.tick(dt);
     drawMenuBar();
 
-    const ImGuiID dockId = ImGui::GetID("MirageDockspace");
+    const ImGuiID dockId = ImGui::GetID("bemotionDockspace");
     if (resetLayout_ || ImGui::DockBuilderGetNode(dockId) == nullptr) {
         buildDefaultLayout(dockId);
         resetLayout_ = false;
@@ -66,6 +74,7 @@ EditorScreen::Request EditorScreen::draw(double dt) {
     handleShortcuts();
     drawUnsavedModal();
     drawAboutModal();
+    exportDialog_.draw(ctx_);
 
     ctx_.commitIfIdle(ImGui::IsAnyItemActive() || ImGui::IsMouseDown(ImGuiMouseButton_Left));
 
@@ -116,6 +125,8 @@ void EditorScreen::drawMenuBar() {
         if (ImGui::MenuItem("Show in Folder", nullptr, false, !ctx_.path.empty()))
             platform::revealInFileManager(ctx_.path);
         ImGui::Separator();
+        if (ImGui::MenuItem("Export Video...", "Ctrl+M")) exportDialog_.open(ctx_);
+        ImGui::Separator();
         if (ImGui::MenuItem("Close Project", "Ctrl+W")) askLeave(Request::GoHome);
         if (ImGui::MenuItem("Quit", "Ctrl+Q")) askLeave(Request::Quit);
         ImGui::EndMenu();
@@ -124,10 +135,24 @@ void EditorScreen::drawMenuBar() {
         if (ImGui::MenuItem("Undo", "Ctrl+Z", false, ctx_.history.canUndo() || ctx_.isDirty())) ctx_.undo();
         if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, ctx_.history.canRedo())) ctx_.redo();
         ImGui::Separator();
-        if (ImGui::MenuItem("Duplicate Layer", "Ctrl+D", false, ctx_.selected() != nullptr)) ctx_.duplicateSelected();
-        if (ImGui::MenuItem("Delete Layer", "Del", false, ctx_.selected() != nullptr)) ctx_.deleteSelected();
+        const bool any = !ctx_.selection.empty();
+        if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, any)) ctx_.duplicateSelected();
+        if (ImGui::MenuItem("Delete", "Del", false, any)) ctx_.deleteSelected();
         ImGui::Separator();
+        if (ImGui::MenuItem("Select All", "Ctrl+A")) ctx_.selectAll();
         if (ImGui::MenuItem("Deselect", "Esc")) ctx_.select(0);
+        ImGui::EndMenu();
+    }
+    if (ImGui::BeginMenu("Layer")) {
+        const bool any = !ctx_.selection.empty();
+        if (ImGui::MenuItem("Split at Playhead", "Ctrl+K")) ctx_.splitSelectedAtPlayhead();
+        if (ImGui::MenuItem("Cut Tool", "C", ctx_.tool == Tool::Razor)) ctx_.tool = Tool::Razor;
+        if (ImGui::MenuItem("Selection Tool", "V", ctx_.tool == Tool::Select)) ctx_.tool = Tool::Select;
+        ImGui::Separator();
+        if (ImGui::MenuItem("Bring to Front", "Ctrl+Shift+]", false, any)) ctx_.shiftSelected(-1000);
+        if (ImGui::MenuItem("Bring Forward", "Ctrl+]", false, any)) ctx_.shiftSelected(-1);
+        if (ImGui::MenuItem("Send Backward", "Ctrl+[", false, any)) ctx_.shiftSelected(1);
+        if (ImGui::MenuItem("Send to Back", "Ctrl+Shift+[", false, any)) ctx_.shiftSelected(1000);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Add")) {
@@ -139,6 +164,10 @@ void EditorScreen::drawMenuBar() {
     }
     if (ImGui::BeginMenu("View")) {
         if (ImGui::MenuItem("Fit Composition", "Ctrl+0")) viewport_.requestFit();
+        if (ImGui::MenuItem("Actual Size (100%)", "Ctrl+1")) viewport_.setZoom(1.0f);
+        if (ImGui::MenuItem("Zoom In", "Ctrl+=")) viewport_.zoomBy(1.25f);
+        if (ImGui::MenuItem("Zoom Out", "Ctrl+-")) viewport_.zoomBy(1.0f / 1.25f);
+        ImGui::Separator();
         if (ImGui::MenuItem("Reset Layout")) resetLayout_ = true;
         ImGui::EndMenu();
     }
@@ -177,19 +206,43 @@ void EditorScreen::handleShortcuts() {
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_W, global)) askLeave(Request::GoHome);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Q, global)) askLeave(Request::Quit);
     if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_0, global)) viewport_.requestFit();
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_1, global)) viewport_.setZoom(1.0f);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Equal, global) || ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadAdd, global))
+        viewport_.zoomBy(1.25f);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Minus, global) ||
+        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadSubtract, global))
+        viewport_.zoomBy(1.0f / 1.25f);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_M, global)) exportDialog_.open(ctx_);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_K, global)) ctx_.splitSelectedAtPlayhead();
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_RightBracket, global)) ctx_.shiftSelected(-1);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_LeftBracket, global)) ctx_.shiftSelected(1);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_RightBracket, global)) ctx_.shiftSelected(-1000);
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_LeftBracket, global)) ctx_.shiftSelected(1000);
 
     // Single-key shortcuts must not fire while typing.
-    if (io.WantTextInput || ImGui::IsAnyItemActive()) return;
+    if (io.WantTextInput) return;
+    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_A, global)) ctx_.selectAll();
+
+    // Space: a tap toggles playback, holding it turns the mouse into a hand (viewport pan).
+    if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) viewport_.takeSpaceUsed();
+    if (ImGui::IsKeyReleased(ImGuiKey_Space) && !viewport_.takeSpaceUsed()) ctx_.playing = !ctx_.playing;
+
+    // Plain keys only: Ctrl+K must not also act as K.
+    if (ImGui::IsAnyItemActive() || io.KeyCtrl || io.KeyAlt || io.KeySuper) return;
     const bool shift = io.KeyShift;
-    if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) ctx_.playing = !ctx_.playing;
+    if (ImGui::IsKeyPressed(ImGuiKey_V, false)) ctx_.tool = Tool::Select;
+    if (ImGui::IsKeyPressed(ImGuiKey_C, false)) ctx_.tool = Tool::Razor;
     if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) ctx_.stepFrames(shift ? -10 : -1);
     if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) ctx_.stepFrames(shift ? 10 : 1);
     if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) ctx_.setTime(0.0);
     if (ImGui::IsKeyPressed(ImGuiKey_End, false)) ctx_.setTime(ctx_.comp().duration);
     if (ImGui::IsKeyPressed(ImGuiKey_J)) jumpToKeyframe(-1);
     if (ImGui::IsKeyPressed(ImGuiKey_K)) jumpToKeyframe(+1);
-    if (!io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_T, false)) ctx_.addText();
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) ctx_.select(0);
+    if (ImGui::IsKeyPressed(ImGuiKey_T, false)) ctx_.addText();
+    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        if (ctx_.tool != Tool::Select) ctx_.tool = Tool::Select;
+        else ctx_.select(0);
+    }
     if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
         if (!ctx_.selectedKeys.empty()) ctx_.deleteSelectedKeys();
         else ctx_.deleteSelected();
@@ -231,7 +284,7 @@ bool EditorScreen::saveAs() {
     const auto suggested = ctx_.path.empty()
                                ? platform::defaultProjectsDir() / platform::fromUtf8(ctx_.project.name + kProjectExtension)
                                : ctx_.path;
-    auto file = platform::saveFileDialog("Save Project As", suggested, "Mirage Project", kProjectExtension);
+    auto file = platform::saveFileDialog("Save Project As", suggested, "bemotion Project", kProjectExtension);
     if (!file) return false;
     std::string err;
     if (!ctx_.saveTo(*file, &err)) {
@@ -286,17 +339,17 @@ void EditorScreen::drawUnsavedModal() {
 
 void EditorScreen::drawAboutModal() {
     if (openAboutModal_) {
-        ImGui::OpenPopup("About Mirage");
+        ImGui::OpenPopup("About bemotion");
         openAboutModal_ = false;
     }
     ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24, 20));
     bool open = true;
-    if (ImGui::BeginPopupModal("About Mirage", &open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+    if (ImGui::BeginPopupModal("About bemotion", &open, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
         ImGui::PushFont(Fonts::uiBold(), 22.0f);
-        ImGui::TextColored(theme::vec(theme::kAccent), "Mirage");
+        ImGui::TextColored(theme::vec(theme::kAccent), "bemotion");
         ImGui::PopFont();
-        ImGui::TextColored(theme::vec(theme::kTextDim), "Version %s  ·  Free and open source (MIT)", MIRAGE_VERSION);
+        ImGui::TextColored(theme::vec(theme::kTextDim), "Version %s  ·  Free and open source (MIT)", BEMOTION_VERSION);
         ImGui::Dummy(ImVec2(0, 8));
         ui::sectionLabel("KEYBOARD SHORTCUTS");
         if (ImGui::BeginTable("##keys", 2, ImGuiTableFlags_SizingFixedFit)) {
@@ -316,4 +369,4 @@ void EditorScreen::drawAboutModal() {
     ImGui::PopStyleVar();
 }
 
-} // namespace mirage
+} // namespace bemotion

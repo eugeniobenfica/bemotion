@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/RecentProjects.h"
+#include "export/Export.h"
 #include "ui/HomeScreen.h"
 
 #include <filesystem>
@@ -9,9 +10,10 @@
 
 struct GLFWwindow;
 
-namespace mirage {
+namespace bemotion {
 
 class EditorScreen;
+class DevScript;
 
 // Owns the OS window and the ImGui context, and switches between the home
 // screen and the editor.
@@ -23,7 +25,8 @@ public:
     int run(int argc, char** argv);
 
 private:
-    bool init();
+    bool init(bool visible);
+    int runCommandLineExport(const std::filesystem::path& projectPath, exporting::Settings settings);
     void shutdown();
     void frame(double dt);
 
@@ -41,6 +44,7 @@ private:
     RecentProjects recents_;
     HomeScreen home_;
     std::unique_ptr<EditorScreen> editor_;
+    std::unique_ptr<DevScript> script_; // BEMOTION_SCRIPT developer aid
 };
 
-} // namespace mirage
+} // namespace bemotion

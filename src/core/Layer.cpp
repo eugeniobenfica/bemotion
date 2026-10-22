@@ -3,7 +3,7 @@
 #include <atomic>
 #include <cstring>
 
-namespace mirage {
+namespace bemotion {
 
 uint32_t nextKeyframeUid() {
     static std::atomic<uint32_t> counter{1};
@@ -138,4 +138,4 @@ Layer makeTextLayer(const std::string& text, Vec2 position, double duration) {
     return l;
 }
 
-} // namespace mirage
+} // namespace bemotion

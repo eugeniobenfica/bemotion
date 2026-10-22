@@ -1,6 +1,6 @@
-# Contributing to Mirage
+# Contributing to bemotion
 
-Thanks for your interest! Mirage aims to stay **simple, fast and easy to
+Thanks for your interest! bemotion aims to stay **simple, fast and easy to
 maintain**, so a few guidelines:
 
 1. **Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first.** Keep
@@ -11,7 +11,7 @@ maintain**, so a few guidelines:
    members end with `_`, constants start with `k`.
 3. **Tests:** add or update tests in `tests/` for changes to `src/core`, and
    make sure `ctest --test-dir build` passes.
-4. **File format:** never break existing `.mirage` files. Add new properties
+4. **File format:** never break existing `.bemotion` files. Add new properties
    with sensible defaults; bump `Project::kFormatVersion` only for
    incompatible changes and keep loading older versions.
 5. **Commits / PRs:** small and focused, with a clear description. Screenshots

@@ -6,7 +6,7 @@
 #include <optional>
 #include <string>
 
-namespace mirage::platform {
+namespace bemotion::platform {
 
 namespace fs = std::filesystem;
 
@@ -15,7 +15,7 @@ fs::path fromUtf8(const std::string& utf8);
 
 fs::path executableDir();
 fs::path appDataDir();         // per-user settings, created on demand
-fs::path defaultProjectsDir(); // Documents/Mirage, created on demand
+fs::path defaultProjectsDir(); // Documents/bemotion, created on demand
 fs::path assetsDir();
 
 // Native window handle used to parent dialogs (HWND on Windows).
@@ -26,5 +26,6 @@ std::optional<fs::path> saveFileDialog(const char* title, const fs::path& sugges
                                        const char* extension);
 
 void revealInFileManager(const fs::path& path);
+void openWithDefaultApp(const fs::path& path);
 
-} // namespace mirage::platform
+} // namespace bemotion::platform

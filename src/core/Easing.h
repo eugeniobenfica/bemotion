@@ -1,6 +1,6 @@
 #pragma once
 
-namespace mirage {
+namespace bemotion {
 
 // Interpolation curve applied to the segment that starts at a keyframe.
 // Values are persisted by name (see easingId), so the order may change freely.
@@ -24,4 +24,4 @@ const char* easingLabel(Easing easing); // human readable, for the UI
 const char* easingId(Easing easing);    // stable identifier, for files
 Easing easingFromId(const char* id);
 
-} // namespace mirage
+} // namespace bemotion

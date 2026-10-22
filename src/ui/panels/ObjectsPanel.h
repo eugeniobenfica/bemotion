@@ -1,6 +1,6 @@
 #pragma once
 
-namespace mirage {
+namespace bemotion {
 
 class EditorContext;
 
@@ -11,4 +11,4 @@ public:
     void draw(EditorContext& ctx);
 };
 
-} // namespace mirage
+} // namespace bemotion

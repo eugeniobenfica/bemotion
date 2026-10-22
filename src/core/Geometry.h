@@ -5,7 +5,7 @@
 
 #include <vector>
 
-namespace mirage {
+namespace bemotion {
 
 struct Path {
     std::vector<Vec2> points;
@@ -20,4 +20,4 @@ Path buildShapePath(const ShapeProps& shape, double t);
 // The result is always an open path.
 Path trimPath(const Path& path, float start, float end);
 
-} // namespace mirage
+} // namespace bemotion

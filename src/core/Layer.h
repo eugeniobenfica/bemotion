@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace mirage {
+namespace bemotion {
 
 enum class LayerType { Shape, Text };
 
@@ -112,4 +112,4 @@ struct Layer {
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
 
-} // namespace mirage
+} // namespace bemotion

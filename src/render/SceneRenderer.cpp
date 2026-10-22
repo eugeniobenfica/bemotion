@@ -10,7 +10,7 @@
 #include <cmath>
 #include <vector>
 
-namespace mirage::render {
+namespace bemotion::render {
 
 namespace {
 
@@ -201,12 +201,13 @@ void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& la
     else drawShape(dl, layer, time, layerToScreen, opacity);
 }
 
-void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view) {
+void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background) {
     const Vec2 a = view.toScreen({0, 0});
     const Vec2 b = view.toScreen({static_cast<float>(comp.width), static_cast<float>(comp.height)});
     const Color bg = comp.background;
-    dl->AddRectFilled(ImVec2(a.x, a.y), ImVec2(b.x, b.y),
-                      ImGui::ColorConvertFloat4ToU32(ImVec4(bg.r, bg.g, bg.b, 1.0f)));
+    if (background)
+        dl->AddRectFilled(ImVec2(a.x, a.y), ImVec2(b.x, b.y),
+                          ImGui::ColorConvertFloat4ToU32(ImVec4(bg.r, bg.g, bg.b, 1.0f)));
 
     // Layers are clipped to the composition frame.
     dl->PushClipRect(ImVec2(a.x, a.y), ImVec2(b.x, b.y), true);
@@ -246,4 +247,4 @@ uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint) {
     return 0;
 }
 
-} // namespace mirage::render
+} // namespace bemotion::render

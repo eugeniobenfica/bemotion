@@ -1,8 +1,10 @@
 #include "app/Application.h"
 
 #include "app/AppIcon.h"
+#include "app/DevScript.h"
 #include "app/Platform.h"
 #include "core/Serialization.h"
+#include "export/Export.h"
 #include "render/Fonts.h"
 #include "ui/EditorScreen.h"
 #include "ui/Theme.h"
@@ -21,6 +23,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <vector>
 #include <thread>
 
@@ -28,7 +31,7 @@
 #include <timeapi.h>
 #endif
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 
@@ -56,9 +59,38 @@ Application::Application() = default;
 Application::~Application() = default;
 
 int Application::run(int argc, char** argv) {
-    if (!init()) return 1;
+    // Command line: bemotion [project] [--export <file> [--format mp4|png|mov|webm|gif] [--scale N] [--transparent]]
+    std::filesystem::path projectArg;
+    std::optional<exporting::Settings> cliExport;
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        auto next = [&]() { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
+        if (arg == "--export") {
+            if (!cliExport) cliExport.emplace();
+            cliExport->output = platform::fromUtf8(next());
+        } else if (arg == "--format" || arg == "--scale" || arg == "--transparent") {
+            if (!cliExport) cliExport.emplace();
+            if (arg == "--transparent") cliExport->transparent = true;
+            else if (arg == "--scale") cliExport->scale = std::strtof(next().c_str(), nullptr);
+            else {
+                const std::string f = next();
+                for (int k = 0; k < static_cast<int>(exporting::Format::Count); ++k)
+                    if ("." + f == exporting::formatExtension(static_cast<exporting::Format>(k)))
+                        cliExport->format = static_cast<exporting::Format>(k);
+            }
+        } else {
+            projectArg = platform::fromUtf8(arg);
+        }
+    }
+    if (cliExport) return runCommandLineExport(projectArg, *cliExport);
 
-    if (argc > 1) openProject(platform::fromUtf8(argv[1]));
+    if (!init(true)) return 1;
+    if (const char* script = std::getenv("BEMOTION_SCRIPT")) {
+        script_ = std::make_unique<DevScript>();
+        if (!script_->load(platform::fromUtf8(script))) script_.reset();
+    }
+
+    if (!projectArg.empty()) openProject(projectArg);
 
     // Frames are paced in software at the monitor refresh rate: driver vsync
     // (swap interval 1) can stall indefinitely on some GPU drivers.
@@ -83,13 +115,76 @@ int Application::run(int argc, char** argv) {
     return 0;
 }
 
-bool Application::init() {
+int Application::runCommandLineExport(const std::filesystem::path& projectPath, exporting::Settings settings) {
+#ifdef _WIN32
+    // GUI-subsystem executable: print to the terminal that launched us, if any.
+    if (!GetStdHandle(STD_OUTPUT_HANDLE) && AttachConsole(ATTACH_PARENT_PROCESS)) {
+        std::freopen("CONOUT$", "w", stdout);
+        std::freopen("CONOUT$", "w", stderr);
+    }
+#endif
+    Project project;
+    std::string error;
+    if (projectPath.empty() || settings.output.empty()) {
+        std::fprintf(stderr, "usage: bemotion <project.bemotion> --export <output> [--format mp4|png|mov|webm|gif] "
+                             "[--scale 0.5] [--transparent]\n");
+        return 2;
+    }
+    if (!loadProject(projectPath, project, &error)) {
+        std::fprintf(stderr, "error: %s\n", error.c_str());
+        return 1;
+    }
+    if (!init(false)) {
+        std::fprintf(stderr, "error: could not create an OpenGL context\n");
+        return 1;
+    }
+    if (settings.output.extension().empty()) settings.output += exporting::formatExtension(settings.format);
+    else
+        for (int k = 0; k < static_cast<int>(exporting::Format::Count); ++k)
+            if (settings.output.extension() == exporting::formatExtension(static_cast<exporting::Format>(k)))
+                settings.format = static_cast<exporting::Format>(k);
+    settings.end = project.comp.duration;
+
+    exporting::ExportJob job;
+    int result = 0;
+    if (!job.start(project, settings, error)) {
+        std::fprintf(stderr, "error: %s\n", error.c_str());
+        result = 1;
+    }
+    int reported = -1;
+    while (job.running()) {
+        // Glyphs are rasterized through ImGui's font atlas, which updates per frame.
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        job.step(0.25);
+        ImGui::EndFrame();
+        const int percent = job.framesDone() * 100 / std::max(1, job.framesTotal());
+        if (percent / 10 != reported) {
+            reported = percent / 10;
+            std::printf("exporting... %d%% (%d/%d frames)\n", percent, job.framesDone(), job.framesTotal());
+            std::fflush(stdout);
+        }
+    }
+    if (result == 0 && !job.succeeded()) {
+        std::fprintf(stderr, "error: %s\n", job.error().c_str());
+        result = 1;
+    }
+    if (result == 0)
+        std::printf("done: %s (%d frames, %.1f s)\n", platform::toUtf8(settings.output).c_str(), job.framesTotal(),
+                    job.elapsedSeconds());
+    shutdown();
+    return result;
+}
+
+bool Application::init(bool visible) {
     glfwSetErrorCallback([](int code, const char* desc) { std::fprintf(stderr, "GLFW error %d: %s\n", code, desc); });
     if (!glfwInit()) return false;
 #ifdef _WIN32
     timeBeginPeriod(1); // 1 ms sleep granularity for frame pacing
 #endif
 
+    glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
@@ -98,7 +193,7 @@ bool Application::init() {
 #endif
 
     const float scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor());
-    window_ = glfwCreateWindow(static_cast<int>(1440 * scale), static_cast<int>(900 * scale), "Mirage", nullptr, nullptr);
+    window_ = glfwCreateWindow(static_cast<int>(1440 * scale), static_cast<int>(900 * scale), "bemotion", nullptr, nullptr);
     if (!window_) {
         glfwTerminate();
         return false;
@@ -108,7 +203,7 @@ bool Application::init() {
     glfwSetWindowUserPointer(window_, this);
     glfwSetWindowCloseCallback(window_, &Application::onWindowClose);
     glfwSetWindowSizeLimits(window_, 960, 600, GLFW_DONT_CARE, GLFW_DONT_CARE);
-    glfwMaximizeWindow(window_);
+    if (visible) glfwMaximizeWindow(window_);
 #ifdef _WIN32
     platform::setMainWindowHandle(glfwGetWin32Window(window_));
 #endif
@@ -159,6 +254,7 @@ void Application::shutdown() {
 void Application::frame(double dt) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
+    if (script_) script_->apply();
     ImGui::NewFrame();
 
     if (editor_) {
@@ -185,14 +281,18 @@ void Application::frame(double dt) {
     glClear(GL_COLOR_BUFFER_BIT);
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-    // Developer aid: MIRAGE_CAPTURE=<file.bmp> saves frame MIRAGE_CAPTURE_FRAME (default 60) and quits.
+    // Developer aid: BEMOTION_CAPTURE=<file.bmp> saves frame BEMOTION_CAPTURE_FRAME (default 60) and quits.
     ++frameIndex_;
-    if (const char* capture = std::getenv("MIRAGE_CAPTURE")) {
-        const char* at = std::getenv("MIRAGE_CAPTURE_FRAME");
+    if (const char* capture = std::getenv("BEMOTION_CAPTURE")) {
+        const char* at = std::getenv("BEMOTION_CAPTURE_FRAME");
         if (frameIndex_ == (at ? std::atoi(at) : 60)) {
             writeFramebufferBmp(capture, w, h);
             glfwSetWindowShouldClose(window_, GLFW_TRUE);
         }
+    }
+    if (script_) {
+        if (const std::string shot = script_->takeCapture(); !shot.empty()) writeFramebufferBmp(shot.c_str(), w, h);
+        if (script_->wantsQuit()) glfwSetWindowShouldClose(window_, GLFW_TRUE);
     }
     glfwSwapBuffers(window_);
 
@@ -227,7 +327,7 @@ void Application::goHome() {
 }
 
 void Application::updateTitle() {
-    const std::string title = editor_ ? editor_->windowTitle() : std::string("Mirage");
+    const std::string title = editor_ ? editor_->windowTitle() : std::string("bemotion");
     if (title != title_) {
         title_ = title;
         glfwSetWindowTitle(window_, title_.c_str());
@@ -242,4 +342,4 @@ void Application::onWindowClose(GLFWwindow* window) {
     }
 }
 
-} // namespace mirage
+} // namespace bemotion

@@ -11,7 +11,7 @@
 #include <cmath>
 #include <cstdio>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 
@@ -101,7 +101,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
         }
     }
 
-    rowTops_.clear();
+    rows_.clear();
     auto& layers = comp.layers;
     for (int i = 0; i < static_cast<int>(layers.size()); ++i) {
         Layer& layer = layers[i];
@@ -118,9 +118,10 @@ void TimelinePanel::draw(EditorContext& ctx) {
 
     // Empty space below the rows: click to deselect.
     const float y = ImGui::GetCursorScreenPos().y;
+    rowsBottom_ = y;
     const float rest = std::max(kLayerRowHeight, winPos.y + winSize.y - y);
     ImGui::SetCursorScreenPos(ImVec2(x0, y));
-    if (ImGui::InvisibleButton("##empty", ImVec2(avail.x, rest))) {
+    if (ImGui::InvisibleButton("##empty", ImVec2(avail.x, rest)) && !io.KeyCtrl && !io.KeyShift) {
         ctx.select(0);
         ctx.clearKeySelection();
     }
@@ -139,19 +140,19 @@ void TimelinePanel::draw(EditorContext& ctx) {
         dl->AddRectFilled(ImVec2(endX, bodyTop), ImVec2(trackX0_ + trackW_, bodyBottom), IM_COL32(0, 0, 0, 80));
     const float ph = timeToX(ctx.time);
     dl->AddLine(ImVec2(ph, bodyTop), ImVec2(ph, bodyBottom), theme::kAccent, 1.5f);
+
+    // Razor tool: show where the cut will happen.
+    const bool overTracks = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+                            io.MousePos.x >= trackX0_ && io.MousePos.y < rowsBottom_;
+    if (ctx.tool == Tool::Razor && overTracks) {
+        const float cx = timeToX(comp.snapToFrame(xToTime(io.MousePos.x)));
+        for (float yy = bodyTop; yy < rowsBottom_; yy += 8.0f)
+            dl->AddLine(ImVec2(cx, yy), ImVec2(cx, std::min(yy + 4.0f, rowsBottom_)), theme::kDanger, 1.5f);
+        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    }
     dl->PopClipRect();
 
-    // Live reordering while dragging a layer name.
-    if (drag_ == Drag::Reorder) {
-        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) drag_ = Drag::None;
-        else {
-            int target = -1;
-            for (const auto& [index, top] : rowTops_)
-                if (io.MousePos.y >= top) target = index;
-            if (io.MousePos.y < (rowTops_.empty() ? 0.0f : rowTops_.front().second)) target = 0;
-            if (target >= 0) ctx.moveLayer(dragLayer_, target);
-        }
-    }
+    if (restacking_) drawDropIndicator(dl, x0, avail.x);
 
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -165,6 +166,16 @@ void TimelinePanel::drawToolbar(EditorContext& ctx) {
     const float s = 26.0f;
     const float toolbarRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
+    if (ui::iconButton("##toolSelect", ui::Icon::Pointer, s, "Selection tool (V)", ctx.tool == Tool::Select))
+        ctx.tool = Tool::Select;
+    ImGui::SameLine();
+    if (ui::iconButton("##toolRazor", ui::Icon::Razor, s, "Cut tool (C): click a layer to split it",
+                       ctx.tool == Tool::Razor))
+        ctx.tool = Tool::Razor;
+    ImGui::SameLine();
+    if (ui::iconButton("##split", ui::Icon::SplitPlayhead, s, "Split selected layers at the playhead (Ctrl+K)"))
+        ctx.splitSelectedAtPlayhead();
+    ImGui::SameLine(0, 14);
     if (ui::iconButton("##start", ui::Icon::ToStart, s, "Go to start (Home)")) {
         ctx.playing = false;
         ctx.setTime(0.0);
@@ -271,13 +282,14 @@ void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float widt
 void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, float x0, float width) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImGuiIO& io = ImGui::GetIO();
-    const Composition& comp = ctx.comp();
     const float y = ImGui::GetCursorScreenPos().y;
     const float h = kLayerRowHeight;
-    const bool selected = ctx.selectedLayer == layer.id;
-    rowTops_.emplace_back(index, y);
+    const bool selected = ctx.isSelected(layer.id);
+    const bool primary = ctx.primaryId() == layer.id;
+    rows_.push_back({index, y, y + h});
 
-    if (selected) dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(232, 185, 49, 18));
+    if (selected)
+        dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), IM_COL32(232, 185, 49, primary ? 24 : 14));
     dl->AddLine(ImVec2(x0, y + h - 1), ImVec2(x0 + width, y + h - 1), IM_COL32(255, 255, 255, 10));
 
     // --- left column: controls and name ---------------------------------------
@@ -321,22 +333,30 @@ void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, fl
     } else {
         ImGui::SetCursorScreenPos(ImVec2(nameX, y));
         ImGui::InvisibleButton("##name", ImVec2(nameW, h));
-        if (ImGui::IsItemActivated()) ctx.select(layer.id);
+        if (ImGui::IsItemActivated()) {
+            clickLayer(ctx, layer.id);
+            if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, Drag::LayerName, layer.id);
+        }
+        if (ImGui::IsItemActive() && drag_ == Drag::LayerName) updateLayerDrag(ctx);
+        if (ImGui::IsItemDeactivated() && drag_ == Drag::LayerName) endLayerDrag(ctx);
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
             renaming_ = layer.id;
             focusRename_ = true;
         }
-        if (ImGui::IsItemActive() && drag_ == Drag::None && std::fabs(ImGui::GetMouseDragDelta().y) > 4.0f) {
-            drag_ = Drag::Reorder;
-            dragLayer_ = layer.id;
-        }
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !ctx.isSelected(layer.id)) ctx.select(layer.id);
         if (ImGui::BeginPopupContextItem("##layerctx")) {
-            ctx.select(layer.id);
             if (ImGui::MenuItem("Rename")) {
                 renaming_ = layer.id;
                 focusRename_ = true;
             }
             if (ImGui::MenuItem("Duplicate", "Ctrl+D")) ctx.duplicateSelected();
+            if (ImGui::MenuItem("Split at Playhead", "Ctrl+K")) ctx.splitSelectedAtPlayhead();
+            ImGui::Separator();
+            if (ImGui::MenuItem("Bring to Front", "Ctrl+Shift+]")) ctx.shiftSelected(-1000);
+            if (ImGui::MenuItem("Bring Forward", "Ctrl+]")) ctx.shiftSelected(-1);
+            if (ImGui::MenuItem("Send Backward", "Ctrl+[")) ctx.shiftSelected(1);
+            if (ImGui::MenuItem("Send to Back", "Ctrl+Shift+[")) ctx.shiftSelected(1000);
+            ImGui::Separator();
             if (ImGui::MenuItem("Delete", "Del")) ctx.deleteSelected();
             ImGui::EndPopup();
         }
@@ -353,50 +373,32 @@ void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, fl
     const float bx1 = timeToX(layer.inPoint), bx2 = timeToX(layer.outPoint);
     const float mx = io.MousePos.x;
 
-    if (hovered && drag_ == Drag::None && (std::fabs(mx - bx1) < kEdgeGrab || std::fabs(mx - bx2) < kEdgeGrab))
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+    const bool onEdgeIn = std::fabs(mx - bx1) < kEdgeGrab, onEdgeOut = std::fabs(mx - bx2) < kEdgeGrab;
+    const bool onBar = mx > bx1 && mx < bx2;
 
-    if (ImGui::IsItemActivated()) {
-        ctx.select(layer.id);
-        dragStartX_ = mx;
-        dragLayer_ = layer.id;
-        dragOrigIn_ = layer.inPoint;
-        dragOrigOut_ = layer.outPoint;
-        dragApplied_ = 0.0;
-        if (std::fabs(mx - bx1) < kEdgeGrab) drag_ = Drag::LayerIn;
-        else if (std::fabs(mx - bx2) < kEdgeGrab) drag_ = Drag::LayerOut;
-        else if (mx > bx1 && mx < bx2) drag_ = Drag::LayerMove;
-        else drag_ = Drag::None;
-    }
-    if (ImGui::IsItemActive() && dragLayer_ == layer.id) {
-        const double delta = snapDelta((mx - dragStartX_) / pxPerSec_, comp.fps);
-        const double fd = comp.frameDuration();
-        switch (drag_) {
-        case Drag::LayerMove:
-            if (delta != dragApplied_) {
-                layer.shiftTime(delta - dragApplied_);
-                dragApplied_ = delta;
-                ctx.touch();
+    if (ctx.tool == Tool::Razor) {
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && onBar) ctx.splitLayerAt(layer.id, xToTime(mx));
+    } else {
+        if (hovered && drag_ == Drag::None && (onEdgeIn || onEdgeOut)) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        if (ImGui::IsItemActivated()) {
+            const Drag mode = onEdgeIn ? Drag::LayerIn : onEdgeOut ? Drag::LayerOut : onBar ? Drag::LayerMove : Drag::None;
+            if (mode != Drag::None) {
+                clickLayer(ctx, layer.id);
+                if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, mode, layer.id);
+            } else if (!io.KeyCtrl && !io.KeyShift) {
+                ctx.clearKeySelection();
             }
-            break;
-        case Drag::LayerIn:
-            layer.inPoint = std::min(dragOrigIn_ + delta, layer.outPoint - fd);
-            ctx.touch();
-            break;
-        case Drag::LayerOut:
-            layer.outPoint = std::max(dragOrigOut_ + delta, layer.inPoint + fd);
-            ctx.touch();
-            break;
-        default: break;
         }
+        const bool barDrag = drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut;
+        if (ImGui::IsItemActive() && barDrag && dragLayer_ == layer.id) updateLayerDrag(ctx);
+        if (ImGui::IsItemDeactivated() && barDrag && dragLayer_ == layer.id) endLayerDrag(ctx);
     }
-    if (ImGui::IsItemDeactivated() && drag_ != Drag::Reorder) drag_ = Drag::None;
 
     dl->PushClipRect(ImVec2(trackX0_, y), ImVec2(trackX0_ + trackW_, y + h), true);
     const Color lc = labelColor(layer.label);
     const ImVec2 a(bx1, y + 5), b(bx2, y + h - 5);
     dl->AddRectFilled(a, b, toU32(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
-    if (selected) dl->AddRect(a, b, toU32(lc, 0.9f), 5.0f, 0, 1.2f);
+    if (selected) dl->AddRect(a, b, primary ? theme::kText : toU32(lc, 0.9f), 5.0f, 0, primary ? 1.5f : 1.2f);
     dl->AddRectFilled(ImVec2(bx1 + 2, y + 9), ImVec2(bx1 + 4, y + h - 9), toU32(lc, 0.8f), 1.0f);
     dl->AddRectFilled(ImVec2(bx2 - 4, y + 9), ImVec2(bx2 - 2, y + h - 9), toU32(lc, 0.8f), 1.0f);
     dl->PushClipRect(ImVec2(std::max(bx1, trackX0_), y), ImVec2(std::min(bx2, trackX0_ + trackW_), y + h), true);
@@ -407,8 +409,11 @@ void TimelinePanel::drawLayerRow(EditorContext& ctx, Layer& layer, int index, fl
     // Summary of all keyframe times on the layer.
     if (!isExpanded) {
         for (const PropertyRef& p : layer.properties())
-            for (int k = 0; k < p.anim->keyCount(); ++k)
-                ui::drawDiamond(dl, ImVec2(timeToX(p.anim->keyTime(k)), y + h - 7), 3.0f, IM_COL32(230, 230, 235, 200), 0);
+            for (int k = 0; k < p.anim->keyCount(); ++k) {
+                const double kt = p.anim->keyTime(k);
+                if (kt < layer.inPoint - kTimeEpsilon || kt > layer.outPoint + kTimeEpsilon) continue; // e.g. after a cut
+                ui::drawDiamond(dl, ImVec2(timeToX(kt), y + h - 7), 3.0f, IM_COL32(230, 230, 235, 200), 0);
+            }
     }
     dl->PopClipRect();
 
@@ -501,6 +506,97 @@ void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const Prop
     ImGui::Dummy(ImVec2(0, 0));
 }
 
+void TimelinePanel::clickLayer(EditorContext& ctx, uint64_t id) {
+    const ImGuiIO& io = ImGui::GetIO();
+    if (io.KeyCtrl) ctx.toggleSelected(id);
+    else if (io.KeyShift) ctx.selectRange(id);
+    else if (!ctx.isSelected(id)) ctx.select(id);
+    else if (ctx.primaryId() != id) { // keep the group, make this one primary
+        std::erase(ctx.selection, id);
+        ctx.selection.push_back(id);
+        ctx.clearKeySelection();
+    }
+}
+
+void TimelinePanel::beginLayerDrag(EditorContext& ctx, Drag mode, uint64_t id) {
+    const Layer* layer = ctx.comp().findLayer(id);
+    if (!layer) return;
+    drag_ = mode;
+    dragLayer_ = id;
+    dragStartX_ = ImGui::GetIO().MousePos.x;
+    dragStartY_ = ImGui::GetIO().MousePos.y;
+    dragOrigIn_ = layer->inPoint;
+    dragOrigOut_ = layer->outPoint;
+    dragApplied_ = 0.0;
+    restacking_ = false;
+}
+
+void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
+    const ImGuiIO& io = ImGui::GetIO();
+    Composition& comp = ctx.comp();
+    const float dx = io.MousePos.x - dragStartX_, dy = io.MousePos.y - dragStartY_;
+    if ((drag_ == Drag::LayerName || drag_ == Drag::LayerMove) && std::fabs(dy) > kLayerRowHeight * 0.6f)
+        restacking_ = true;
+    if (restacking_) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+
+    Layer* layer = comp.findLayer(dragLayer_);
+    if (!layer) return;
+    double delta = snapDelta(dx / pxPerSec_, comp.fps);
+    if (restacking_ && std::fabs(dx) < 12.0f) delta = 0.0; // vertical drags shouldn't nudge time
+    const double fd = comp.frameDuration();
+    switch (drag_) {
+    case Drag::LayerMove:
+        if (delta != dragApplied_) {
+            for (Layer* l : ctx.selectedLayers()) l->shiftTime(delta - dragApplied_);
+            dragApplied_ = delta;
+            ctx.touch();
+        }
+        break;
+    case Drag::LayerIn:
+        layer->inPoint = std::min(dragOrigIn_ + delta, layer->outPoint - fd);
+        ctx.touch();
+        break;
+    case Drag::LayerOut:
+        layer->outPoint = std::max(dragOrigOut_ + delta, layer->inPoint + fd);
+        ctx.touch();
+        break;
+    default: break;
+    }
+}
+
+void TimelinePanel::endLayerDrag(EditorContext& ctx) {
+    const ImGuiIO& io = ImGui::GetIO();
+    if (restacking_) {
+        const int gap = dropGapAt(io.MousePos.y);
+        int selectedAbove = 0; // selected layers above the gap leave the list first
+        for (int i = 0; i < gap && i < static_cast<int>(ctx.comp().layers.size()); ++i)
+            if (ctx.isSelected(ctx.comp().layers[i].id)) ++selectedAbove;
+        ctx.moveSelectedTo(gap - selectedAbove);
+    } else if (std::fabs(io.MousePos.x - dragStartX_) < 3.0f && std::fabs(io.MousePos.y - dragStartY_) < 3.0f &&
+               !io.KeyCtrl && !io.KeyShift) {
+        ctx.select(dragLayer_); // plain click inside a multi-selection keeps just this layer
+    }
+    drag_ = Drag::None;
+    restacking_ = false;
+}
+
+int TimelinePanel::dropGapAt(float y) const {
+    int gap = 0;
+    for (const LayerRow& r : rows_)
+        if (y > (r.top + r.bottom) * 0.5f) gap = r.index + 1;
+    return gap;
+}
+
+void TimelinePanel::drawDropIndicator(ImDrawList* dl, float x0, float width) const {
+    if (rows_.empty()) return;
+    const int gap = dropGapAt(ImGui::GetIO().MousePos.y);
+    float y = rowsBottom_;
+    for (const LayerRow& r : rows_)
+        if (r.index == gap) y = r.top;
+    dl->AddLine(ImVec2(x0 + 4, y), ImVec2(x0 + width - 4, y), theme::kAccent, 2.0f);
+    dl->AddCircleFilled(ImVec2(x0 + 6, y), 4.0f, theme::kAccent);
+}
+
 void TimelinePanel::beginKeyDrag(EditorContext& ctx) {
     drag_ = Drag::Keys;
     dragStartX_ = ImGui::GetIO().MousePos.x;
@@ -567,4 +663,4 @@ void TimelinePanel::drawKeyContextMenu(EditorContext& ctx) {
     ImGui::EndPopup();
 }
 
-} // namespace mirage
+} // namespace bemotion

@@ -8,7 +8,7 @@
 #include <chrono>
 #include <fstream>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 std::filesystem::path storePath() { return platform::appDataDir() / "recent.json"; }
@@ -58,4 +58,4 @@ void RecentProjects::remove(const std::filesystem::path& path) {
     save();
 }
 
-} // namespace mirage
+} // namespace bemotion

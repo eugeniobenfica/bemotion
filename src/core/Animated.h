@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace mirage {
+namespace bemotion {
 
 // Two keyframe times closer than this are considered the same instant.
 constexpr double kTimeEpsilon = 1e-4;
@@ -147,4 +147,4 @@ using AnimFloat = Animated<float>;
 using AnimVec2 = Animated<Vec2>;
 using AnimColor = Animated<Color>;
 
-} // namespace mirage
+} // namespace bemotion

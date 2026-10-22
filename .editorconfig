@@ -8,5 +8,5 @@ indent_style = space
 indent_size = 4
 trim_trailing_whitespace = true
 
-[*.{yml,yaml,json,mirage}]
+[*.{yml,yaml,json,bemotion}]
 indent_size = 2

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 
@@ -119,4 +119,4 @@ Path trimPath(const Path& path, float start, float end) {
     return out;
 }
 
-} // namespace mirage
+} // namespace bemotion

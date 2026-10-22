@@ -6,7 +6,7 @@
 
 #include "core/Layer.h"
 
-namespace mirage {
+namespace bemotion {
 
 enum class Preset { FadeIn, FadeOut, PopIn, SlideUp, SlideLeft, Spin, Typewriter, DrawOn, Count };
 
@@ -14,4 +14,4 @@ const char* presetLabel(Preset preset);
 bool presetAppliesTo(Preset preset, const Layer& layer);
 void applyPreset(Preset preset, Layer& layer, double time);
 
-} // namespace mirage
+} // namespace bemotion

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace mirage {
+namespace bemotion {
 
 struct Composition {
     int width = 1920;
@@ -32,6 +32,16 @@ struct Composition {
     int indexOf(uint64_t id) const;
     void removeLayer(uint64_t id);
     std::string uniqueLayerName(const std::string& base) const;
+
+    // Moves `ids` as one block, keeping their relative order, so the block
+    // starts at `targetIndex` of the list *without* the moved layers.
+    void moveLayers(const std::vector<uint64_t>& ids, int targetIndex);
+    // Moves each of `ids` `delta` steps in the stack (negative = towards the top).
+    void shiftLayers(const std::vector<uint64_t>& ids, int delta);
+    // Cuts a layer in two at time `t`. The original keeps [in, t), a copy
+    // placed right above it gets [t, out). Returns the copy's id, or 0 when
+    // `t` is not strictly inside the layer.
+    uint64_t splitLayer(uint64_t id, double t);
 };
 
 struct Project {
@@ -41,4 +51,4 @@ struct Project {
     Composition comp;
 };
 
-} // namespace mirage
+} // namespace bemotion

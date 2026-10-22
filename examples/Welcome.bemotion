@@ -1,7 +1,7 @@
 {
-  "format": "mirage",
+  "format": "bemotion",
   "version": 1,
-  "name": "Welcome to Mirage",
+  "name": "Welcome to bemotion",
   "composition": {
     "width": 1920,
     "height": 1080,
@@ -13,7 +13,7 @@
       {
         "id": 1, "name": "Title", "type": "text", "visible": true, "locked": false, "label": 0,
         "in": 0.0, "out": 5.0,
-        "text": { "text": "Mirage", "weight": "bold", "align": "center" },
+        "text": { "text": "bemotion", "weight": "bold", "align": "center" },
         "properties": {
           "position": { "value": [960.0, 500.0] },
           "scale": { "value": [100.0, 100.0], "keys": [

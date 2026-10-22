@@ -11,7 +11,7 @@
 #include <deque>
 #include <string>
 
-namespace mirage {
+namespace bemotion {
 
 class History {
 public:
@@ -41,4 +41,4 @@ private:
     std::string saved_;
 };
 
-} // namespace mirage
+} // namespace bemotion

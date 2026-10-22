@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/EditorContext.h"
+#include "ui/ExportDialog.h"
 #include "ui/panels/ObjectsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "ui/panels/TimelinePanel.h"
@@ -9,7 +10,7 @@
 #include <filesystem>
 #include <string>
 
-namespace mirage {
+namespace bemotion {
 
 class RecentProjects;
 
@@ -47,6 +48,7 @@ private:
     ViewportPanel viewport_;
     PropertiesPanel properties_;
     TimelinePanel timeline_;
+    ExportDialog exportDialog_;
 
     Request pendingLeave_ = Request::None;
     Request confirmedLeave_ = Request::None;
@@ -56,4 +58,4 @@ private:
     std::string error_;
 };
 
-} // namespace mirage
+} // namespace bemotion

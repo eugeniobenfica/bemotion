@@ -3,6 +3,7 @@
 #   GLFW        - window, input and OpenGL context
 #   Dear ImGui  - immediate mode UI (docking branch)
 #   nlohmann    - JSON for the project file format
+#   stb         - PNG writing for image-sequence export
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
@@ -29,7 +30,15 @@ FetchContent_Declare(imgui
     GIT_TAG        v1.92.4-docking
     GIT_SHALLOW    TRUE)
 
-FetchContent_MakeAvailable(glfw json imgui)
+# --- stb (image writing for PNG export) --------------------------------------
+FetchContent_Declare(stb
+    GIT_REPOSITORY https://github.com/nothings/stb.git
+    GIT_TAG        a7d4c2175630e1ea5b6f8dd00ab96fed0b97b96d)
+
+FetchContent_MakeAvailable(glfw json imgui stb)
+
+add_library(stb INTERFACE)
+target_include_directories(stb SYSTEM INTERFACE ${stb_SOURCE_DIR})
 
 find_package(OpenGL REQUIRED)
 

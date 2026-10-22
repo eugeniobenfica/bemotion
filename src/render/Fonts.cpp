@@ -4,7 +4,7 @@
 
 #include <imgui.h>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 ImFont* g_weights[static_cast<int>(FontWeight::Count)] = {};
@@ -40,4 +40,4 @@ ImFont* Fonts::forWeight(FontWeight weight) {
     return (i >= 0 && i < static_cast<int>(FontWeight::Count)) ? g_weights[i] : g_weights[0];
 }
 
-} // namespace mirage
+} // namespace bemotion

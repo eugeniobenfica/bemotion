@@ -1,13 +1,34 @@
 #include "ui/panels/ObjectsPanel.h"
 
 #include "ui/EditorContext.h"
+#include "ui/Theme.h"
 #include "ui/Widgets.h"
+#include "ui/panels/ViewportPanel.h"
 
 #include <imgui.h>
 
 #include <algorithm>
 
-namespace mirage {
+namespace bemotion {
+
+namespace {
+
+// Lets a tile be dragged onto the viewport to drop the object at a precise spot.
+// `kind` is -1 for text, otherwise a ShapeKind.
+void dragSource(int kind, ui::Icon icon, const char* label) {
+    if (!ImGui::BeginDragDropSource()) return;
+    ImGui::SetDragDropPayload(kObjectPayload, &kind, sizeof(kind));
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float s = ImGui::GetFrameHeight();
+    ImGui::Dummy(ImVec2(s, s));
+    ui::drawIcon(ImGui::GetWindowDrawList(), icon, ImVec2(p.x + s * 0.5f, p.y + s * 0.5f), s * 0.6f, theme::kAccent);
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("%s  ·  drop on the canvas", label);
+    ImGui::EndDragDropSource();
+}
+
+} // namespace
 
 void ObjectsPanel::draw(EditorContext& ctx) {
     if (!ImGui::Begin(kWindowName)) {
@@ -21,7 +42,8 @@ void ObjectsPanel::draw(EditorContext& ctx) {
 
     ui::sectionLabel("TEXT");
     if (ui::objectTile("##text", ui::Icon::Text, "Text", tile)) ctx.addText();
-    ui::tooltip("Add a text layer (T)");
+    ui::tooltip("Click to add at the center, or drag onto the canvas (T)");
+    dragSource(-1, ui::Icon::Text, "Text");
 
     ImGui::Dummy(ImVec2(0, 6));
     ui::sectionLabel("GRAPHICS");
@@ -31,15 +53,17 @@ void ObjectsPanel::draw(EditorContext& ctx) {
         if (column++ % 2 == 1) ImGui::SameLine();
         ImGui::PushID(i);
         if (ui::objectTile("##shape", ui::iconForShape(kind), shapeKindLabel(kind), tile)) ctx.addShape(kind);
+        ui::tooltip("Click to add at the center, or drag onto the canvas");
+        dragSource(i, ui::iconForShape(kind), shapeKindLabel(kind));
         ImGui::PopID();
     }
 
     ImGui::Dummy(ImVec2(0, 10));
     ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyle().Colors[ImGuiCol_TextDisabled]);
-    ImGui::TextWrapped("Click an object to add it to the center of the composition.");
+    ImGui::TextWrapped("Click an object to add it at the center, or drag it to any spot on the canvas.");
     ImGui::PopStyleColor();
 
     ImGui::End();
 }
 
-} // namespace mirage
+} // namespace bemotion

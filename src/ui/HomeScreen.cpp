@@ -17,7 +17,7 @@
 #include <cstdio>
 #include <ctime>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 
@@ -146,17 +146,17 @@ void HomeScreen::drawSidebar(Result& result, RecentProjects& recents, float widt
     ui::drawIcon(dl, ui::Icon::Logo, ImVec2(p.x + 20, p.y + 21), 24.0f, theme::kOnAccent);
     ImGui::SetCursorScreenPos(ImVec2(p.x + 52, p.y + 1));
     ImGui::PushFont(Fonts::uiBold(), 22.0f);
-    ImGui::TextUnformatted("Mirage");
+    ImGui::TextUnformatted("bemotion");
     ImGui::PopFont();
     ImGui::SetCursorScreenPos(ImVec2(p.x + 52, p.y + 26));
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "Motion graphics  ·  v%s", MIRAGE_VERSION);
+    ImGui::TextColored(theme::vec(theme::kTextFaint), "Motion graphics  ·  v%s", BEMOTION_VERSION);
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + 64));
 
     const float w = ImGui::GetContentRegionAvail().x;
     if (ui::accentButton("+  New Project", ImVec2(w, 38))) openNewProjectModal();
     ImGui::Dummy(ImVec2(0, 2));
     if (ImGui::Button("Open Project...", ImVec2(w, 34))) {
-        if (auto file = platform::openFileDialog("Open Mirage Project", "Mirage Project", kProjectExtension)) {
+        if (auto file = platform::openFileDialog("Open bemotion Project", "bemotion Project", kProjectExtension)) {
             result.action = Result::Action::Open;
             result.path = *file;
         }
@@ -350,7 +350,7 @@ void HomeScreen::drawNewProjectModal(Result& result) {
     ImGui::SameLine();
     if (ImGui::Button("Change...", ImVec2(-FLT_MIN, 0))) {
         if (auto file = platform::saveFileDialog("Choose where to save the project",
-                                                 uniqueProjectPath(folder_, newName_), "Mirage Project",
+                                                 uniqueProjectPath(folder_, newName_), "bemotion Project",
                                                  kProjectExtension)) {
             folder_ = file->parent_path();
             newName_ = platform::toUtf8(file->stem());
@@ -378,4 +378,4 @@ void HomeScreen::drawNewProjectModal(Result& result) {
     ImGui::EndPopup();
 }
 
-} // namespace mirage
+} // namespace bemotion

@@ -3,7 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 
@@ -25,18 +25,18 @@ float roundedBoxDistance(float px, float py, float half, float radius) {
 std::vector<uint8_t> renderAppIcon(int size) {
     std::vector<uint8_t> px(static_cast<size_t>(size) * size * 4);
     const float s = static_cast<float>(size);
-    // "M" polyline in unit coordinates.
-    const float m[5][2] = {{0.24f, 0.70f}, {0.37f, 0.30f}, {0.50f, 0.56f}, {0.63f, 0.30f}, {0.76f, 0.70f}};
-    const float stroke = 0.075f * s;
+    // Lowercase "b" in unit coordinates: a stem and a round bowl.
+    const float bowlX = 0.54f * s, bowlY = 0.60f * s, bowlR = 0.17f * s;
+    const float stemX = bowlX - bowlR, stemTop = 0.20f * s, stemBottom = bowlY + bowlR * 0.35f;
+    const float stroke = 0.085f * s;
 
     for (int y = 0; y < size; ++y)
         for (int x = 0; x < size; ++x) {
             const float fx = x + 0.5f, fy = y + 0.5f;
             const float box = roundedBoxDistance(fx - s * 0.5f, fy - s * 0.5f, s * 0.47f, s * 0.22f);
             const float boxA = std::clamp(0.5f - box, 0.0f, 1.0f);
-            float d = 1e9f;
-            for (int i = 0; i < 4; ++i)
-                d = std::min(d, segmentDistance(fx, fy, m[i][0] * s, m[i][1] * s, m[i + 1][0] * s, m[i + 1][1] * s));
+            const float ring = std::fabs(std::hypot(fx - bowlX, fy - bowlY) - bowlR);
+            const float d = std::min(ring, segmentDistance(fx, fy, stemX, stemTop, stemX, stemBottom));
             const float markA = std::clamp(stroke * 0.5f - d + 0.5f, 0.0f, 1.0f);
 
             // Background #17171A, mark #E8B931.
@@ -50,4 +50,4 @@ std::vector<uint8_t> renderAppIcon(int size) {
     return px;
 }
 
-} // namespace mirage
+} // namespace bemotion

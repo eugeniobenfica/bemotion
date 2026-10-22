@@ -2,7 +2,7 @@
 
 #include "core/Serialization.h"
 
-namespace mirage {
+namespace bemotion {
 
 void History::reset(const Project& project) {
     undo_.clear();
@@ -36,4 +36,4 @@ bool History::redo(Project& project) {
     return deserializeProject(current_, project);
 }
 
-} // namespace mirage
+} // namespace bemotion

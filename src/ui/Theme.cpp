@@ -1,6 +1,6 @@
 #include "ui/Theme.h"
 
-namespace mirage::theme {
+namespace bemotion::theme {
 
 void apply() {
     ImGuiStyle& s = ImGui::GetStyle();
@@ -81,4 +81,4 @@ void apply() {
     c[ImGuiCol_TableBorderStrong] = vec(kBorder);
 }
 
-} // namespace mirage::theme
+} // namespace bemotion::theme

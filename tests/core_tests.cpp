@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-using namespace mirage;
+using namespace bemotion;
 
 namespace {
 
@@ -100,7 +100,7 @@ void testSerializationRoundTrip() {
     Layer& rect = p.comp.addLayer(makeShapeLayer(ShapeKind::Star, {10, 20}, 5.0));
     rect.transform.opacity.setKey(0.5, 25.0f, Easing::Bounce);
     rect.transform.opacity.setKey(1.5, 75.0f);
-    Layer& text = p.comp.addLayer(makeTextLayer("Olá, Mirage", {0, 0}, 5.0));
+    Layer& text = p.comp.addLayer(makeTextLayer("Olá, bemotion", {0, 0}, 5.0));
     text.text.weight = FontWeight::Bold;
 
     Project q;
@@ -109,7 +109,7 @@ void testSerializationRoundTrip() {
     CHECK(q.name == "Round Trip");
     CHECK(q.comp.width == 1080 && q.comp.height == 1920);
     CHECK(q.comp.layers.size() == 2);
-    CHECK(q.comp.layers[0].text.text == "Olá, Mirage");
+    CHECK(q.comp.layers[0].text.text == "Olá, bemotion");
     CHECK(q.comp.layers[0].text.weight == FontWeight::Bold);
     CHECK(q.comp.layers[1].shape.kind == ShapeKind::Star);
     CHECK(q.comp.layers[1].transform.opacity.keyCount() == 2);
@@ -117,6 +117,76 @@ void testSerializationRoundTrip() {
     CHECK(near(q.comp.layers[1].transform.opacity.valueAt(1.5), 75.0f));
     CHECK(q.comp.nextLayerId == p.comp.nextLayerId);
     CHECK(serializeProject(p) == serializeProject(q));
+}
+
+// Builds a composition with layers named "A".."E" from top to bottom.
+Composition makeStack() {
+    Composition c;
+    for (const char* name : {"E", "D", "C", "B", "A"}) {
+        Layer l = makeShapeLayer(ShapeKind::Rectangle, {}, 10.0);
+        l.name = name;
+        c.addLayer(std::move(l));
+    }
+    return c;
+}
+
+std::string order(const Composition& c) {
+    std::string s;
+    for (const auto& l : c.layers) s += l.name;
+    return s;
+}
+
+uint64_t idOf(const Composition& c, const char* name) {
+    for (const auto& l : c.layers)
+        if (l.name == name) return l.id;
+    return 0;
+}
+
+void testMoveLayers() {
+    Composition c = makeStack();
+    CHECK(order(c) == "ABCDE");
+    c.moveLayers({idOf(c, "B"), idOf(c, "D")}, 0);
+    CHECK(order(c) == "BDACE");
+    c.moveLayers({idOf(c, "B")}, 99);
+    CHECK(order(c) == "DACEB");
+}
+
+void testShiftLayers() {
+    Composition c = makeStack();
+    c.shiftLayers({idOf(c, "C"), idOf(c, "D")}, -1);
+    CHECK(order(c) == "ACDBE");
+    c.shiftLayers({idOf(c, "A")}, -1); // already on top
+    CHECK(order(c) == "ACDBE");
+    c.shiftLayers({idOf(c, "A"), idOf(c, "C")}, 99); // to the bottom
+    CHECK(order(c) == "DBEAC");
+}
+
+void testSplitLayer() {
+    Composition c;
+    c.fps = 10;
+    Layer& l = c.addLayer(makeShapeLayer(ShapeKind::Star, {}, 4.0));
+    l.transform.opacity.setKey(0.0, 0.0f, Easing::Linear);
+    l.transform.opacity.setKey(4.0, 100.0f);
+    const uint64_t original = l.id;
+    CHECK(c.splitLayer(original, 0.0) == 0); // at the edge: nothing to cut
+    const uint64_t tail = c.splitLayer(original, 1.5);
+    CHECK(tail != 0);
+    CHECK(c.layers.size() == 2);
+    CHECK(c.indexOf(tail) == 0); // placed above the original
+    CHECK(c.findLayer(original)->outPoint == 1.5);
+    CHECK(c.findLayer(tail)->inPoint == 1.5 && c.findLayer(tail)->outPoint == 4.0);
+    // Animation continues seamlessly across the cut.
+    CHECK(near(c.findLayer(tail)->transform.opacity.valueAt(2.0), 50.0f));
+}
+
+void testLegacyFormatId() {
+    Project p;
+    std::string text = serializeProject(p);
+    const auto pos = text.find("\"bemotion\"");
+    CHECK(pos != std::string::npos);
+    text.replace(pos, 10, "\"mirage\"");
+    Project q;
+    CHECK(deserializeProject(text, q));
 }
 
 void testHistory() {
@@ -145,6 +215,10 @@ int main() {
         {"trim path", testTrimPath},
         {"frames", testFrames},
         {"serialization round trip", testSerializationRoundTrip},
+        {"move layers", testMoveLayers},
+        {"shift layers", testShiftLayers},
+        {"split layer", testSplitLayer},
+        {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
     };
     for (const auto& [name, fn] : tests) {

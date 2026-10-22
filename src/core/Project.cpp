@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <iterator>
 
-namespace mirage {
+namespace bemotion {
 
 int Composition::frameCount() const { return std::max(1, static_cast<int>(std::lround(duration * fps))); }
 
@@ -40,6 +42,44 @@ void Composition::removeLayer(uint64_t id) {
     std::erase_if(layers, [id](const Layer& l) { return l.id == id; });
 }
 
+void Composition::moveLayers(const std::vector<uint64_t>& ids, int targetIndex) {
+    std::vector<Layer> moving, rest;
+    for (auto& l : layers)
+        (std::find(ids.begin(), ids.end(), l.id) != ids.end() ? moving : rest).push_back(std::move(l));
+    targetIndex = std::clamp(targetIndex, 0, static_cast<int>(rest.size()));
+    rest.insert(rest.begin() + targetIndex, std::make_move_iterator(moving.begin()),
+                std::make_move_iterator(moving.end()));
+    layers = std::move(rest);
+}
+
+void Composition::shiftLayers(const std::vector<uint64_t>& ids, int delta) {
+    auto selected = [&](size_t i) { return std::find(ids.begin(), ids.end(), layers[i].id) != ids.end(); };
+    const int n = static_cast<int>(layers.size());
+    for (int step = 0; step < std::abs(delta); ++step) {
+        bool moved = false;
+        if (delta < 0) {
+            for (int i = 1; i < n; ++i)
+                if (selected(i) && !selected(i - 1)) std::swap(layers[i], layers[i - 1]), moved = true;
+        } else {
+            for (int i = n - 2; i >= 0; --i)
+                if (selected(i) && !selected(i + 1)) std::swap(layers[i], layers[i + 1]), moved = true;
+        }
+        if (!moved) break;
+    }
+}
+
+uint64_t Composition::splitLayer(uint64_t id, double t) {
+    const int index = indexOf(id);
+    if (index < 0) return 0;
+    Layer& original = layers[index];
+    const double eps = frameDuration() * 0.5;
+    if (t <= original.inPoint + eps || t >= original.outPoint - eps) return 0;
+    Layer tail = original; // keyframes are kept on both halves so motion stays continuous
+    original.outPoint = t;
+    tail.inPoint = t;
+    return addLayer(std::move(tail), index).id;
+}
+
 std::string Composition::uniqueLayerName(const std::string& base) const {
     auto taken = [&](const std::string& n) {
         return std::any_of(layers.begin(), layers.end(), [&](const Layer& l) { return l.name == n; });
@@ -51,4 +91,4 @@ std::string Composition::uniqueLayerName(const std::string& base) const {
     }
 }
 
-} // namespace mirage
+} // namespace bemotion

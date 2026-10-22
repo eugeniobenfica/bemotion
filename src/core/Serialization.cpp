@@ -5,7 +5,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace mirage {
+namespace bemotion {
 
 using json = nlohmann::json;
 
@@ -158,7 +158,7 @@ std::string serializeProject(const Project& project) {
     comp["layers"] = std::move(layers);
 
     json root;
-    root["format"] = "mirage";
+    root["format"] = "bemotion";
     root["version"] = Project::kFormatVersion;
     root["name"] = project.name;
     root["composition"] = std::move(comp);
@@ -168,12 +168,14 @@ std::string serializeProject(const Project& project) {
 bool deserializeProject(const std::string& text, Project& out, std::string* error) {
     try {
         const json root = json::parse(text);
-        if (root.value("format", std::string()) != "mirage") {
-            if (error) *error = "Not a Mirage project file.";
+        // "mirage" is the format id used before the project was renamed.
+        const std::string format = root.value("format", std::string());
+        if (format != "bemotion" && format != "mirage") {
+            if (error) *error = "Not a bemotion project file.";
             return false;
         }
         if (root.value("version", 0) > Project::kFormatVersion) {
-            if (error) *error = "This project was created by a newer version of Mirage.";
+            if (error) *error = "This project was created by a newer version of bemotion.";
             return false;
         }
         Project p;
@@ -240,4 +242,4 @@ bool loadProject(const std::filesystem::path& path, Project& out, std::string* e
     return deserializeProject(ss.str(), out, error);
 }
 
-} // namespace mirage
+} // namespace bemotion

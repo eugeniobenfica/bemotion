@@ -3,10 +3,10 @@
 #include <cstdint>
 #include <vector>
 
-namespace mirage {
+namespace bemotion {
 
-// Procedurally rasterized app icon (golden "M" on a dark rounded square),
+// Procedurally rasterized app icon (golden "b" on a dark rounded square),
 // RGBA8, size x size pixels. Used for the window/taskbar icon.
 std::vector<uint8_t> renderAppIcon(int size);
 
-} // namespace mirage
+} // namespace bemotion

@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 constexpr double kDuration = 0.6; // seconds
@@ -94,4 +94,4 @@ void applyPreset(Preset preset, Layer& layer, double t) {
     }
 }
 
-} // namespace mirage
+} // namespace bemotion

@@ -2,7 +2,7 @@
 
 #include "core/Layer.h"
 
-namespace mirage {
+namespace bemotion {
 
 class EditorContext;
 
@@ -23,4 +23,4 @@ private:
 // timeline. Returns true when the property changed.
 bool propertyRow(EditorContext& ctx, const PropertyRef& prop);
 
-} // namespace mirage
+} // namespace bemotion

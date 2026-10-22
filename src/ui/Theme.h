@@ -2,7 +2,7 @@
 
 #include <imgui.h>
 
-namespace mirage::theme {
+namespace bemotion::theme {
 
 // Palette. Dark neutrals with a single golden accent.
 inline constexpr ImU32 kBgDeep = IM_COL32(14, 14, 16, 255);     // app background, viewport
@@ -24,4 +24,4 @@ inline ImVec4 vec(ImU32 c) { return ImGui::ColorConvertU32ToFloat4(c); }
 
 void apply();
 
-} // namespace mirage::theme
+} // namespace bemotion::theme

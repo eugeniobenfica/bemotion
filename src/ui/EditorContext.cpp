@@ -5,27 +5,73 @@
 #include <algorithm>
 #include <cmath>
 
-namespace mirage {
+namespace bemotion {
 
 void EditorContext::open(Project p, std::filesystem::path file) {
     project = std::move(p);
     path = std::move(file);
     history.reset(project);
-    selectedLayer = 0;
+    selection.clear();
     selectedKeys.clear();
+    tool = Tool::Select;
     time = 0.0;
     playing = false;
     pendingCommit_ = false;
 }
 
+// --- selection -----------------------------------------------------------------
+
+bool EditorContext::isSelected(uint64_t layerId) const {
+    return std::find(selection.begin(), selection.end(), layerId) != selection.end();
+}
+
+std::vector<Layer*> EditorContext::selectedLayers() {
+    std::vector<Layer*> out;
+    for (auto& l : comp().layers)
+        if (isSelected(l.id)) out.push_back(&l);
+    return out;
+}
+
 void EditorContext::select(uint64_t layerId) {
-    if (selectedLayer != layerId) selectedKeys.clear();
-    selectedLayer = layerId;
+    if (primaryId() != layerId) selectedKeys.clear();
+    selection.clear();
+    if (layerId) selection.push_back(layerId);
+}
+
+void EditorContext::toggleSelected(uint64_t layerId) {
+    if (isSelected(layerId)) std::erase(selection, layerId);
+    else selection.push_back(layerId);
+    selectedKeys.clear();
+}
+
+void EditorContext::selectRange(uint64_t layerId) {
+    const int from = comp().indexOf(primaryId());
+    const int to = comp().indexOf(layerId);
+    if (from < 0 || to < 0) {
+        select(layerId);
+        return;
+    }
+    selection.clear();
+    const int step = to >= from ? 1 : -1;
+    for (int i = from; i != to + step; i += step) selection.push_back(comp().layers[i].id);
+    selectedKeys.clear();
+}
+
+void EditorContext::selectAll() {
+    selection.clear();
+    for (const auto& l : comp().layers) selection.push_back(l.id);
+    selectedKeys.clear();
 }
 
 bool EditorContext::isKeySelected(const KeySelection& k) const {
     return std::find(selectedKeys.begin(), selectedKeys.end(), k) != selectedKeys.end();
 }
+
+void EditorContext::pruneSelection() {
+    std::erase_if(selection, [&](uint64_t id) { return comp().findLayer(id) == nullptr; });
+}
+
+// --- time ------------------------------------------------------------------------
 
 void EditorContext::setTime(double t) { time = comp().snapToFrame(std::clamp(t, 0.0, comp().duration)); }
 
@@ -49,6 +95,8 @@ void EditorContext::tick(double dt) {
     }
 }
 
+// --- history / files ---------------------------------------------------------------
+
 void EditorContext::commitIfIdle(bool interacting) {
     if (!pendingCommit_ || interacting) return;
     history.commit(project);
@@ -59,7 +107,7 @@ void EditorContext::undo() {
     commitIfIdle(false);
     if (history.undo(project)) {
         selectedKeys.clear();
-        if (!comp().findLayer(selectedLayer)) selectedLayer = 0;
+        pruneSelection();
     }
 }
 
@@ -67,7 +115,7 @@ void EditorContext::redo() {
     commitIfIdle(false);
     if (history.redo(project)) {
         selectedKeys.clear();
-        if (!comp().findLayer(selectedLayer)) selectedLayer = 0;
+        pruneSelection();
     }
 }
 
@@ -81,53 +129,85 @@ bool EditorContext::saveTo(const std::filesystem::path& file, std::string* error
     return true;
 }
 
+// --- document operations -----------------------------------------------------------
+
 Layer& EditorContext::insertLayer(Layer layer) {
     layer.name = comp().uniqueLayerName(layer.name);
     layer.label = static_cast<int>(comp().nextLayerId % kLabelColorCount);
-    // New layers go right above the selection, or on top.
-    const int index = std::max(0, comp().indexOf(selectedLayer));
+    // New layers go right above the primary selection, or on top.
+    const int index = std::max(0, comp().indexOf(primaryId()));
     Layer& added = comp().addLayer(std::move(layer), index);
     select(added.id);
     touch();
     return added;
 }
 
-Layer& EditorContext::addShape(ShapeKind kind) {
-    return insertLayer(makeShapeLayer(kind, comp().center(), comp().duration));
+Layer& EditorContext::addShape(ShapeKind kind, std::optional<Vec2> position) {
+    return insertLayer(makeShapeLayer(kind, position.value_or(comp().center()), comp().duration));
 }
 
-Layer& EditorContext::addText() { return insertLayer(makeTextLayer("Your text", comp().center(), comp().duration)); }
+Layer& EditorContext::addText(std::optional<Vec2> position) {
+    return insertLayer(makeTextLayer("Your text", position.value_or(comp().center()), comp().duration));
+}
 
 void EditorContext::deleteSelected() {
-    if (!selected()) return;
-    const int index = comp().indexOf(selectedLayer);
-    comp().removeLayer(selectedLayer);
+    if (selection.empty()) return;
+    int index = static_cast<int>(comp().layers.size());
+    for (uint64_t id : selection) index = std::min(index, comp().indexOf(id));
+    for (uint64_t id : selection) comp().removeLayer(id);
     selectedKeys.clear();
     auto& layers = comp().layers;
-    selectedLayer = layers.empty() ? 0 : layers[std::min<size_t>(index, layers.size() - 1)].id;
+    select(layers.empty() ? 0 : layers[std::clamp<size_t>(index, 0, layers.size() - 1)].id);
     touch();
 }
 
 void EditorContext::duplicateSelected() {
-    const Layer* src = selected();
-    if (!src) return;
-    Layer copy = *src;
-    copy.name = comp().uniqueLayerName(src->name);
-    const int index = comp().indexOf(selectedLayer);
-    Layer& added = comp().addLayer(std::move(copy), index);
-    select(added.id);
+    const auto sources = selectedLayers();
+    if (sources.empty()) return;
+    // Copy first: adding layers invalidates the pointers.
+    std::vector<std::pair<Layer, int>> copies;
+    for (const Layer* src : sources) {
+        Layer copy = *src;
+        copy.name = comp().uniqueLayerName(src->name);
+        copies.emplace_back(std::move(copy), comp().indexOf(src->id));
+    }
+    selection.clear();
+    selectedKeys.clear();
+    // Insert bottom-up so earlier indices stay valid; each copy sits above its source.
+    for (auto it = copies.rbegin(); it != copies.rend(); ++it)
+        selection.push_back(comp().addLayer(std::move(it->first), it->second).id);
     touch();
 }
 
-void EditorContext::moveLayer(uint64_t id, int newIndex) {
-    auto& layers = comp().layers;
-    const int from = comp().indexOf(id);
-    if (from < 0) return;
-    newIndex = std::clamp(newIndex, 0, static_cast<int>(layers.size()) - 1);
-    if (from == newIndex) return;
-    Layer moving = std::move(layers[from]);
-    layers.erase(layers.begin() + from);
-    layers.insert(layers.begin() + newIndex, std::move(moving));
+void EditorContext::moveSelectedTo(int targetIndex) {
+    if (selection.empty()) return;
+    comp().moveLayers(selection, targetIndex);
+    touch();
+}
+
+void EditorContext::shiftSelected(int delta) {
+    if (selection.empty()) return;
+    comp().shiftLayers(selection, delta);
+    touch();
+}
+
+void EditorContext::splitLayerAt(uint64_t id, double t) {
+    if (const uint64_t tail = comp().splitLayer(id, comp().snapToFrame(t))) {
+        select(tail);
+        touch();
+    }
+}
+
+void EditorContext::splitSelectedAtPlayhead() {
+    std::vector<uint64_t> targets = selection;
+    if (targets.empty())
+        for (const auto& l : comp().layers) targets.push_back(l.id);
+    std::vector<uint64_t> tails;
+    for (uint64_t id : targets)
+        if (const uint64_t tail = comp().splitLayer(id, time)) tails.push_back(tail);
+    if (tails.empty()) return;
+    selection = tails;
+    selectedKeys.clear();
     touch();
 }
 
@@ -154,4 +234,4 @@ void EditorContext::setSelectedKeysEasing(Easing easing) {
     touch();
 }
 
-} // namespace mirage
+} // namespace bemotion

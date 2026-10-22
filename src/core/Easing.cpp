@@ -5,7 +5,7 @@
 #include <cmath>
 #include <cstring>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 
@@ -80,4 +80,4 @@ Easing easingFromId(const char* id) {
     return Easing::Linear;
 }
 
-} // namespace mirage
+} // namespace bemotion

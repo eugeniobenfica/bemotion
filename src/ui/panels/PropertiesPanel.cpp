@@ -13,7 +13,7 @@
 #include <cfloat>
 #include <cstring>
 
-namespace mirage {
+namespace bemotion {
 
 namespace {
 
@@ -174,6 +174,12 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
         ImGui::SetNextItemWidth(-FLT_MIN);
         if (ImGui::InputText("##name", &layer.name)) ctx.touch();
     }
+    if (ctx.selection.size() > 1) {
+        ImGui::TextColored(theme::vec(theme::kAccent), "%d layers selected", static_cast<int>(ctx.selection.size()));
+        ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
+        ImGui::TextWrapped("Properties below belong to this layer. Quick animations apply to all selected layers.");
+        ImGui::PopStyleColor();
+    }
     ImGui::Dummy(ImVec2(0, 2));
 
     auto props = layer.properties();
@@ -298,10 +304,11 @@ void PropertiesPanel::drawPresets(EditorContext& ctx, Layer& layer) {
         if (!presetAppliesTo(preset, layer)) continue;
         if (column++ % 2 == 1) ImGui::SameLine();
         if (ImGui::Button(presetLabel(preset), ImVec2(w, 0))) {
-            applyPreset(preset, layer, ctx.time);
+            for (Layer* l : ctx.selectedLayers())
+                if (presetAppliesTo(preset, *l)) applyPreset(preset, *l, ctx.time);
             ctx.touch();
         }
     }
 }
 
-} // namespace mirage
+} // namespace bemotion

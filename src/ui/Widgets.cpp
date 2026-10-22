@@ -8,7 +8,7 @@
 #include <cmath>
 #include <cstdio>
 
-namespace mirage::ui {
+namespace bemotion::ui {
 
 
 Icon iconForShape(ShapeKind kind) {
@@ -136,11 +136,54 @@ void drawIcon(ImDrawList* dl, Icon icon, ImVec2 c, float size, ImU32 col) {
         break;
     }
     case Icon::Logo: {
-        // A stylized "M": two overlapping rounded peaks, like a heat shimmer.
-        const float w = h * 0.95f;
-        ImVec2 pts[5] = {ImVec2(c.x - w, c.y + h * 0.7f), ImVec2(c.x - w * 0.5f, c.y - h * 0.7f), ImVec2(c.x, c.y + h * 0.2f),
-                         ImVec2(c.x + w * 0.5f, c.y - h * 0.7f), ImVec2(c.x + w, c.y + h * 0.7f)};
-        dl->AddPolyline(pts, 5, col, ImDrawFlags_None, std::max(2.0f, size * 0.16f));
+        // A geometric lowercase "b": tall stem plus a round bowl.
+        const float stroke = std::max(2.0f, size * 0.15f);
+        const float r = h * 0.42f;
+        const ImVec2 bowl(c.x + h * 0.12f, c.y + h * 0.36f);
+        const float stemX = bowl.x - r;
+        dl->AddLine(ImVec2(stemX, c.y - h * 0.9f), ImVec2(stemX, bowl.y + r * 0.35f), col, stroke);
+        dl->AddCircle(bowl, r, col, 0, stroke);
+        break;
+    }
+    case Icon::Pointer: {
+        const ImVec2 pts[7] = {ImVec2(c.x - h * 0.45f, c.y - h * 0.8f), ImVec2(c.x + h * 0.55f, c.y + h * 0.15f),
+                               ImVec2(c.x + h * 0.05f, c.y + h * 0.2f), ImVec2(c.x + h * 0.35f, c.y + h * 0.8f),
+                               ImVec2(c.x + h * 0.12f, c.y + h * 0.9f), ImVec2(c.x - h * 0.15f, c.y + h * 0.3f),
+                               ImVec2(c.x - h * 0.45f, c.y + h * 0.6f)};
+        dl->AddConcavePolyFilled(pts, 7, col);
+        break;
+    }
+    case Icon::Razor: {
+        // Scissors: two rings and crossing blades.
+        dl->AddCircle(ImVec2(c.x - h * 0.42f, c.y + h * 0.5f), h * 0.26f, col, 0, th);
+        dl->AddCircle(ImVec2(c.x + h * 0.42f, c.y + h * 0.5f), h * 0.26f, col, 0, th);
+        dl->AddLine(ImVec2(c.x - h * 0.25f, c.y + h * 0.3f), ImVec2(c.x + h * 0.45f, c.y - h * 0.85f), col, th);
+        dl->AddLine(ImVec2(c.x + h * 0.25f, c.y + h * 0.3f), ImVec2(c.x - h * 0.45f, c.y - h * 0.85f), col, th);
+        break;
+    }
+    case Icon::SplitPlayhead: {
+        dl->AddLine(ImVec2(c.x, c.y - h * 0.9f), ImVec2(c.x, c.y + h * 0.9f), col, th);
+        dl->AddRectFilled(ImVec2(c.x - h * 0.9f, c.y - h * 0.3f), ImVec2(c.x - h * 0.2f, c.y + h * 0.3f), col, 1.5f);
+        dl->AddRectFilled(ImVec2(c.x + h * 0.2f, c.y - h * 0.3f), ImVec2(c.x + h * 0.9f, c.y + h * 0.3f), col, 1.5f);
+        break;
+    }
+    case Icon::Export: {
+        dl->AddLine(ImVec2(c.x, c.y + h * 0.3f), ImVec2(c.x, c.y - h * 0.8f), col, th);
+        dl->AddLine(ImVec2(c.x - h * 0.4f, c.y - h * 0.4f), ImVec2(c.x, c.y - h * 0.8f), col, th);
+        dl->AddLine(ImVec2(c.x + h * 0.4f, c.y - h * 0.4f), ImVec2(c.x, c.y - h * 0.8f), col, th);
+        const ImVec2 tray[4] = {ImVec2(c.x - h * 0.8f, c.y), ImVec2(c.x - h * 0.8f, c.y + h * 0.8f),
+                                ImVec2(c.x + h * 0.8f, c.y + h * 0.8f), ImVec2(c.x + h * 0.8f, c.y)};
+        dl->AddPolyline(tray, 4, col, ImDrawFlags_None, th);
+        break;
+    }
+    case Icon::ZoomIn:
+    case Icon::ZoomOut: {
+        const ImVec2 lens(c.x - h * 0.15f, c.y - h * 0.15f);
+        dl->AddCircle(lens, h * 0.55f, col, 0, th);
+        dl->AddLine(ImVec2(c.x + h * 0.25f, c.y + h * 0.25f), ImVec2(c.x + h * 0.8f, c.y + h * 0.8f), col, th * 1.3f);
+        dl->AddLine(ImVec2(lens.x - h * 0.28f, lens.y), ImVec2(lens.x + h * 0.28f, lens.y), col, th);
+        if (icon == Icon::ZoomIn)
+            dl->AddLine(ImVec2(lens.x, lens.y - h * 0.28f), ImVec2(lens.x, lens.y + h * 0.28f), col, th);
         break;
     }
     }
@@ -233,4 +276,4 @@ std::string formatTimecode(double seconds, double fps) {
     return buf;
 }
 
-} // namespace mirage::ui
+} // namespace bemotion::ui

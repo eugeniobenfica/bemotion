@@ -8,7 +8,7 @@
 #include <optional>
 #include <string>
 
-namespace mirage {
+namespace bemotion {
 
 // Start screen: recent projects grid and the "New Project" dialog.
 class HomeScreen {
@@ -46,4 +46,4 @@ private:
     std::filesystem::path folder_;
 };
 
-} // namespace mirage
+} // namespace bemotion

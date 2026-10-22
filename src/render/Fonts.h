@@ -6,7 +6,7 @@
 
 struct ImFont;
 
-namespace mirage {
+namespace bemotion {
 
 // Fonts shared by the UI and the canvas. ImGui 1.92+ rasterizes glyphs on
 // demand at any size, so a single ImFont per weight is enough.
@@ -22,4 +22,4 @@ public:
     static ImFont* forWeight(FontWeight weight);
 };
 
-} // namespace mirage
+} // namespace bemotion

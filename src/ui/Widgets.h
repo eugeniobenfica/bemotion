@@ -9,7 +9,7 @@
 
 #include <string>
 
-namespace mirage::ui {
+namespace bemotion::ui {
 
 enum class Icon {
     Text,
@@ -36,6 +36,12 @@ enum class Icon {
     Diamond,
     Trash,
     Logo,
+    Pointer,       // selection tool
+    Razor,         // cut tool
+    SplitPlayhead, // split at playhead
+    Export,
+    ZoomIn,
+    ZoomOut,
 };
 
 Icon iconForLayer(const Layer& layer);
@@ -67,4 +73,4 @@ void tooltip(const char* text);
 // "HH:MM:SS:FF" timecode.
 std::string formatTimecode(double seconds, double fps);
 
-} // namespace mirage::ui
+} // namespace bemotion::ui

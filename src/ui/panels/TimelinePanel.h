@@ -2,13 +2,15 @@
 
 #include "ui/EditorContext.h"
 
+#include <imgui.h>
+
 #include <cstdint>
 #include <set>
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace mirage {
+namespace bemotion {
 
 // Bottom panel: transport controls, time ruler, layer bars and keyframes.
 class TimelinePanel {
@@ -17,11 +19,19 @@ public:
     void draw(EditorContext& ctx);
 
 private:
-    enum class Drag { None, Scrub, Keys, LayerMove, LayerIn, LayerOut, Reorder };
+    // Name drags only restack; bar drags move in time and restack vertically.
+    enum class Drag { None, Keys, LayerName, LayerMove, LayerIn, LayerOut };
 
     void drawToolbar(EditorContext& ctx);
     void drawRuler(EditorContext& ctx, float x0, float y0, float width);
     void drawLayerRow(EditorContext& ctx, Layer& layer, int index, float x0, float width);
+    // Handles a click on a layer (name or bar) honoring Ctrl/Shift multi-select.
+    void clickLayer(EditorContext& ctx, uint64_t id);
+    void beginLayerDrag(EditorContext& ctx, Drag mode, uint64_t id);
+    void updateLayerDrag(EditorContext& ctx);
+    void endLayerDrag(EditorContext& ctx);
+    int dropGapAt(float y) const; // insertion gap (0..layerCount) under screen y
+    void drawDropIndicator(ImDrawList* dl, float x0, float width) const;
     void drawPropertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop, float x0, float width);
     void drawKeyContextMenu(EditorContext& ctx);
 
@@ -44,12 +54,21 @@ private:
     uint64_t renaming_ = 0;
     bool focusRename_ = false;
 
+    struct LayerRow {
+        int index;    // position in the layer stack
+        float top;    // screen y of the layer row
+        float bottom; // screen y below the layer row (property rows excluded)
+    };
+
     Drag drag_ = Drag::None;
     float dragStartX_ = 0.0f;
+    float dragStartY_ = 0.0f;
     uint64_t dragLayer_ = 0;
     double dragOrigIn_ = 0.0, dragOrigOut_ = 0.0, dragApplied_ = 0.0;
+    bool restacking_ = false; // vertical drag past the threshold: show the drop gap
     std::vector<std::pair<KeySelection, double>> dragKeys_;
-    std::vector<std::pair<int, float>> rowTops_; // layer index -> row top (screen y), for reordering
+    std::vector<LayerRow> rows_; // rebuilt every frame
+    float rowsBottom_ = 0.0f;
 };
 
-} // namespace mirage
+} // namespace bemotion

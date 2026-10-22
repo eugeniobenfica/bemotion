@@ -12,7 +12,7 @@
 
 struct ImDrawList;
 
-namespace mirage::render {
+namespace bemotion::render {
 
 // Maps composition pixels to screen pixels.
 struct View {
@@ -24,7 +24,8 @@ struct View {
     Vec2 toComp(Vec2 s) const { return (s - origin) / zoom; }
 };
 
-void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view);
+// `background` = false leaves the frame transparent (for exports with alpha).
+void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background = true);
 void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen);
 
 // Axis-aligned bounds of the layer content in its local space.
@@ -33,4 +34,4 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax);
 // Top-most visible, unlocked layer under `compPoint`, or 0.
 uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint);
 
-} // namespace mirage::render
+} // namespace bemotion::render

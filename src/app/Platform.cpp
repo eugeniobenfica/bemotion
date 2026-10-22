@@ -16,7 +16,7 @@
 #include <unistd.h>
 #endif
 
-namespace mirage::platform {
+namespace bemotion::platform {
 
 namespace {
 void* g_window = nullptr;
@@ -44,7 +44,7 @@ fs::path knownFolder(REFKNOWNFOLDERID id) {
     return result;
 }
 
-// "Mirage Project", ".mirage" -> L"Mirage Project (*.mirage)\0*.mirage\0\0"
+// "bemotion Project", ".bemotion" -> L"bemotion Project (*.bemotion)\0*.bemotion\0\0"
 std::wstring makeFilter(const char* name, const char* ext) {
     std::wstring f = widen(std::string(name) + " (*" + ext + ")");
     f.push_back(L'\0');
@@ -93,14 +93,14 @@ fs::path executableDir() {
 
 fs::path appDataDir() {
 #ifdef _WIN32
-    return ensureDir(knownFolder(FOLDERID_RoamingAppData) / "Mirage");
+    return ensureDir(knownFolder(FOLDERID_RoamingAppData) / "bemotion");
 #elif defined(__APPLE__)
     const char* home = std::getenv("HOME");
-    return ensureDir(fs::path(home ? home : ".") / "Library/Application Support/Mirage");
+    return ensureDir(fs::path(home ? home : ".") / "Library/Application Support/bemotion");
 #else
-    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) return ensureDir(fs::path(xdg) / "mirage");
+    if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) return ensureDir(fs::path(xdg) / "bemotion");
     const char* home = std::getenv("HOME");
-    return ensureDir(fs::path(home ? home : ".") / ".config/mirage");
+    return ensureDir(fs::path(home ? home : ".") / ".config/bemotion");
 #endif
 }
 
@@ -111,15 +111,15 @@ fs::path defaultProjectsDir() {
     const char* home = std::getenv("HOME");
     fs::path docs = fs::path(home ? home : ".") / "Documents";
 #endif
-    return ensureDir(docs / "Mirage");
+    return ensureDir(docs / "bemotion");
 }
 
 fs::path assetsDir() {
     std::error_code ec;
     fs::path nextToExe = executableDir() / "assets";
     if (fs::exists(nextToExe, ec)) return nextToExe;
-#ifdef MIRAGE_SOURCE_ASSETS_DIR
-    return fs::path(MIRAGE_SOURCE_ASSETS_DIR);
+#ifdef BEMOTION_SOURCE_ASSETS_DIR
+    return fs::path(BEMOTION_SOURCE_ASSETS_DIR);
 #else
     return nextToExe;
 #endif
@@ -199,4 +199,14 @@ void revealInFileManager(const fs::path& path) {
 #endif
 }
 
-} // namespace mirage::platform
+void openWithDefaultApp(const fs::path& path) {
+#ifdef _WIN32
+    ShellExecuteW(nullptr, L"open", path.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+#elif defined(__APPLE__)
+    std::system(("open \"" + toUtf8(path) + "\"").c_str());
+#else
+    std::system(("xdg-open \"" + toUtf8(path) + "\" &").c_str());
+#endif
+}
+
+} // namespace bemotion::platform

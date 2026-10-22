@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-namespace mirage {
+namespace bemotion {
 
 struct RecentProject {
     std::filesystem::path path;
@@ -29,4 +29,4 @@ private:
     std::vector<RecentProject> items_; // newest first
 };
 
-} // namespace mirage
+} // namespace bemotion
