@@ -18,7 +18,7 @@ Path rectangle(Vec2 size, float radius) {
     Path p;
     p.closed = true;
     const float hw = size.x * 0.5f, hh = size.y * 0.5f;
-    radius = std::clamp(radius, 0.0f, std::min(hw, hh));
+    radius = std::clamp(radius, 0.0f, std::max(0.0f, std::min(std::fabs(hw), std::fabs(hh)))); // negative sizes mirror
     if (radius < 0.01f) {
         p.points = {{-hw, -hh}, {hw, -hh}, {hw, hh}, {-hw, hh}};
         return p;

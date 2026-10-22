@@ -240,6 +240,24 @@ void Composition::clipLimits(uint64_t layerId, double& minIn, double& maxOut) co
     maxOut = std::min(nextIn, duration + kMaxOverhang); // the out point may pass the composition end
 }
 
+void Composition::setInPoint(uint64_t layerId, double t) {
+    Layer* l = findLayer(layerId);
+    if (!l) return;
+    double minIn = 0, maxOut = 0;
+    clipLimits(layerId, minIn, maxOut);
+    const double in = std::clamp(t, minIn, std::max(minIn, l->outPoint - frameDuration()));
+    if (in < l->outPoint) l->inPoint = in;
+}
+
+void Composition::setOutPoint(uint64_t layerId, double t) {
+    Layer* l = findLayer(layerId);
+    if (!l) return;
+    double minIn = 0, maxOut = 0;
+    clipLimits(layerId, minIn, maxOut);
+    const double out = std::clamp(t, std::min(maxOut, l->inPoint + frameDuration()), maxOut);
+    if (out > l->inPoint) l->outPoint = out;
+}
+
 uint64_t Composition::splitLayer(uint64_t id, double t) {
     const int index = indexOf(id);
     if (index < 0) return 0;

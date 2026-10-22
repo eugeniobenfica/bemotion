@@ -252,4 +252,12 @@ bool Fonts::ensureLoaded(const Composition& comp) {
     return ready;
 }
 
+ImVector<ImTextureData*>* Fonts::texturesForOffscreenDraw() {
+    static ImVector<ImTextureData*> list;
+    list = ImGui::GetPlatformIO().Textures;
+    for (ImTextureData* tex : ImGui::GetIO().Fonts->TexList)
+        if (!list.contains(tex)) list.push_back(tex);
+    return &list;
+}
+
 } // namespace bemotion

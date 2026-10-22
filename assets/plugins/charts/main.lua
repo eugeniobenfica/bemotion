@@ -45,9 +45,9 @@ end
 local function data_params()
   return {
     { id = "sort", label = "Sort", type = "choice", choices = { "None", "Ascending", "Descending" },
-      default = "None", group = "Data" },
+      default = "None", group = "Sorting & Highlight" },
     { id = "highlight", label = "Highlight Row", type = "number", default = 0, min = 0, max = 100, step = 0.05,
-      format = "%.0f (0 = none)", group = "Data" },
+      format = "%.0f (0 = none)", group = "Sorting & Highlight" },
   }
 end
 
@@ -372,7 +372,7 @@ bemotion.register_object {
       { id = "background", label = "Background", type = "color", default = "#00000000", group = "Chart" } },
     animation_params(), trim_params(),
     { { id = "highlight", label = "Highlight Point", type = "number", default = 0, min = 0, max = 100, step = 0.05,
-        format = "%.0f (0 = none)", group = "Data" } },
+        format = "%.0f (0 = none)", group = "Sorting & Highlight" } },
     grid_params(), text_params()),
   draw = function(o, g)
     local rows = o.rows

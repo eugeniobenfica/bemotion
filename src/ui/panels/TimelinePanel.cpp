@@ -125,7 +125,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
         pxPerSec_ = (trackW_ - 24.0) / comp.duration;
         scroll_ = 0.0;
     }
-    pxPerSec_ = std::clamp(pxPerSec_, minPx, 4000.0);
+    pxPerSec_ = std::clamp(pxPerSec_, std::min(minPx, 4000.0), 4000.0);
     scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, contentEnd + 1.0 - (trackW_ - 24.0) / pxPerSec_));
 
     drawRuler(ctx, area.x, area.y, avail.x);
@@ -145,7 +145,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
     if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && io.MouseWheel != 0.0f) {
         if (io.KeyCtrl) {
             const double mouseT = xToTime(io.MousePos.x);
-            pxPerSec_ = std::clamp(pxPerSec_ * std::pow(1.2, io.MouseWheel), minPx, 4000.0);
+            pxPerSec_ = std::clamp(pxPerSec_ * std::pow(1.2, io.MouseWheel), std::min(minPx, 4000.0), 4000.0);
             scroll_ = std::max(0.0, mouseT - (io.MousePos.x - trackX0_) / pxPerSec_);
         } else if (io.KeyShift) {
             scroll_ = std::max(0.0, scroll_ - io.MouseWheel * 60.0 / pxPerSec_);
@@ -812,7 +812,6 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
     if (!layer) return;
     const double raw = dx / pxPerSec_;
     const bool frozen = restacking_ && std::fabs(dx) < 12.0f; // vertical drags shouldn't nudge time
-    const double fd = comp.frameDuration();
     switch (drag_) {
     case Drag::LayerMove: {
         std::vector<double> edges;
@@ -830,18 +829,12 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
         break;
     }
     case Drag::LayerIn: {
-        double minIn = 0, maxOut = 0;
-        comp.clipLimits(layer->id, minIn, maxOut);
-        const double in = dragOrigIn_ + snappedDelta(ctx, {dragOrigIn_}, raw);
-        layer->inPoint = std::clamp(in, minIn, std::max(minIn, layer->outPoint - fd));
+        comp.setInPoint(layer->id, dragOrigIn_ + snappedDelta(ctx, {dragOrigIn_}, raw));
         ctx.touch();
         break;
     }
     case Drag::LayerOut: {
-        double minIn = 0, maxOut = 0;
-        comp.clipLimits(layer->id, minIn, maxOut);
-        const double out = dragOrigOut_ + snappedDelta(ctx, {dragOrigOut_}, raw);
-        layer->outPoint = std::clamp(out, std::min(maxOut, layer->inPoint + fd), maxOut);
+        comp.setOutPoint(layer->id, dragOrigOut_ + snappedDelta(ctx, {dragOrigOut_}, raw));
         ctx.touch();
         break;
     }

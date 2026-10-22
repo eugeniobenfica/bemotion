@@ -452,22 +452,22 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
 
     if (ImGui::CollapsingHeader("Layer", ImGuiTreeNodeFlags_DefaultOpen) && beginPropertyTable("layer")) {
         // In/out stay inside the composition, between neighboring clips, at least one frame long.
-        const Composition& comp = ctx.comp();
+        Composition& comp = ctx.comp();
         const double frame = comp.frameDuration();
         double minIn = 0, maxOut = 0;
         comp.clipLimits(layer.id, minIn, maxOut);
         plainRowLabel("In");
         float in = static_cast<float>(layer.inPoint);
-        if (ImGui::DragFloat("##in", &in, 0.01f, static_cast<float>(minIn), static_cast<float>(layer.outPoint - frame),
-                             "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
-            layer.inPoint = std::clamp(comp.snapToFrame(in), minIn, layer.outPoint - frame);
+        const float inMax = static_cast<float>(std::max(minIn, layer.outPoint - frame));
+        if (ImGui::DragFloat("##in", &in, 0.01f, static_cast<float>(minIn), inMax, "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
+            comp.setInPoint(layer.id, comp.snapToFrame(in));
             ctx.touch();
         }
         plainRowLabel("Out");
         float out = static_cast<float>(layer.outPoint);
-        if (ImGui::DragFloat("##out", &out, 0.01f, static_cast<float>(layer.inPoint + frame), static_cast<float>(maxOut),
-                             "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
-            layer.outPoint = std::clamp(static_cast<double>(out), layer.inPoint + frame, maxOut);
+        const float outMin = static_cast<float>(std::min(maxOut, layer.inPoint + frame));
+        if (ImGui::DragFloat("##out", &out, 0.01f, outMin, static_cast<float>(maxOut), "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
+            comp.setOutPoint(layer.id, out);
             ctx.touch();
         }
         plainRowLabel("Label");
@@ -494,7 +494,7 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
 }
 
 void PropertiesPanel::drawPluginData(EditorContext& ctx, Layer& layer) {
-    if (!ImGui::CollapsingHeader("Data", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    if (!ImGui::CollapsingHeader("Data###pluginRows", ImGuiTreeNodeFlags_DefaultOpen)) return;
     auto& rows = layer.plugin.rows;
     int remove = -1, moveUp = -1;
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_RowBg;

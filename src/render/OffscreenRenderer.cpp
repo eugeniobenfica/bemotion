@@ -1,5 +1,6 @@
 #include "render/OffscreenRenderer.h"
 
+#include "render/Fonts.h"
 #include "render/GL.h"
 #include "render/SceneRenderer.h"
 
@@ -71,7 +72,7 @@ void OffscreenRenderer::render(const Composition& comp, double t, float scale, b
     data.DisplayPos = ImVec2(0, 0);
     data.DisplaySize = size;
     data.FramebufferScale = ImVec2(1, 1);
-    data.Textures = &ImGui::GetPlatformIO().Textures; // uploads glyphs baked for this frame
+    data.Textures = Fonts::texturesForOffscreenDraw(); // uploads glyphs baked for this frame
     data.AddDrawList(&dl);
 
     gl::api().BindFramebuffer(gl::kFramebuffer, fbo_);

@@ -136,7 +136,7 @@ Layer& EditorContext::insertLayer(Layer layer) {
     layer.name = comp().uniqueLayerName(layer.name);
     layer.label = static_cast<int>(comp().nextLayerId % kLabelColorCount);
     // Like After Effects: the new layer starts at the playhead and runs to the end of the composition.
-    const double start = comp().snapToFrame(std::clamp(time, 0.0, comp().duration - comp().frameDuration()));
+    const double start = comp().snapToFrame(std::clamp(time, 0.0, std::max(0.0, comp().duration - comp().frameDuration())));
     if (start > 0.0) {
         layer.shiftTime(start - layer.inPoint); // keyframes (e.g. plugin intros) move along
         layer.outPoint = std::max(comp().duration, layer.inPoint + comp().frameDuration());

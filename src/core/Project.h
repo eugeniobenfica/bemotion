@@ -86,6 +86,9 @@ struct Composition {
     void neighborBounds(uint64_t layerId, double& prevOut, double& nextIn) const;
     // Where a clip may start/end: inside the composition and between its neighbors.
     void clipLimits(uint64_t layerId, double& minIn, double& maxOut) const;
+    // Trim a clip edge to `t` within clipLimits; a clip shorter than a frame never grows over a neighbor.
+    void setInPoint(uint64_t layerId, double t);
+    void setOutPoint(uint64_t layerId, double t);
 
     // Cuts a layer in two at time `t`. The original keeps [in, t), a copy on
     // the same track gets [t, out). Returns the copy's id, or 0 when `t` is

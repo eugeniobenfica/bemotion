@@ -15,6 +15,8 @@
 #include <string>
 #include <vector>
 
+#include <imgui.h> // ImVector, ImTextureData
+
 struct ImFont;
 
 namespace bemotion {
@@ -50,6 +52,10 @@ public:
     // Queues every face the composition uses; true once all are loaded (or
     // known to be missing). Exports wait for this so no frame uses a fallback.
     static bool ensureLoaded(const Composition& comp);
+    // Every texture an off-screen draw may reference this frame: the registered
+    // ones plus atlas pages created since the frame started (ImGui registers
+    // those only at the next NewFrame, so mid-frame renders must upload them).
+    static ImVector<ImTextureData*>* texturesForOffscreenDraw();
 
     static std::vector<std::string> families();                    // sorted, Inter first
     static std::vector<std::string> stylesOf(const std::string& family); // regular first

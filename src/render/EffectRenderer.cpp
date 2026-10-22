@@ -1,5 +1,6 @@
 #include "render/EffectRenderer.h"
 
+#include "render/Fonts.h"
 #include "render/GL.h"
 #include "render/SceneRenderer.h"
 
@@ -362,7 +363,7 @@ void EffectRenderer::drawLayer(ImDrawList* dl, const Layer& layer, double t, dou
         data.DisplayPos = ImVec2(0, 0);
         data.DisplaySize = ImVec2(static_cast<float>(w), static_cast<float>(h));
         data.FramebufferScale = ImVec2(1, 1);
-        data.Textures = &ImGui::GetPlatformIO().Textures;
+        data.Textures = Fonts::texturesForOffscreenDraw();
         data.AddDrawList(&list);
         gl.BindFramebuffer(gl::kFramebuffer, target.fbo);
         glViewport(0, 0, w, h);
