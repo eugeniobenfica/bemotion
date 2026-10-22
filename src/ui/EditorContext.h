@@ -88,7 +88,14 @@ public:
     void duplicateSelected();
     // Compounds: group the selection (Ctrl+G) / put selected compounds' contents back (Ctrl+Shift+G).
     void createCompound();
+    // The compound open in the timeline (0: the whole composition). New layers go
+    // inside it; the timeline shows only its contents; clicks pick inside it.
+    uint64_t scope = 0;
+    void enterScope(uint64_t compoundId);
+    void exitScope(); // one level up
     void releaseSelectedCompounds();
+    // Adds an object of the Objects panel (see kObjectPayload) at a scene position, starting at `start`.
+    Layer* addObject(int kind, Vec2 position, double start);
     bool selectionHasCompound();
     // The selection plus everything inside selected compounds (what moves when they move in time).
     std::vector<uint64_t> selectionWithContents();

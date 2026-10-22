@@ -268,6 +268,10 @@ void PropertiesPanel::draw(EditorContext& ctx) {
         releaseRequested_ = false;
         ctx.releaseSelectedCompounds();
     }
+    if (deleteRequested_) {
+        deleteRequested_ = false;
+        ctx.deleteSelected();
+    }
     if (Layer* layer = ctx.selected()) drawLayer(ctx, *layer);
     else drawComposition(ctx);
     ui::panelMinimizeButton();
@@ -315,8 +319,11 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
         ui::drawIcon(ImGui::GetWindowDrawList(), ui::iconForLayer(layer), ImVec2(p.x + h * 0.5f, p.y + h * 0.5f), h * 0.6f,
                      theme::kAccent);
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::SetNextItemWidth(-(h + ImGui::GetStyle().ItemSpacing.x));
         if (ImGui::InputText("##name", &layer.name)) ctx.touch();
+        ImGui::SameLine();
+        // Deferred like releasing: deleting removes the layer this panel is drawing.
+        if (ui::iconButton("##deleteLayer", ui::Icon::Trash, h, "Delete this layer (Delete)")) deleteRequested_ = true;
     }
     if (ctx.selection.size() > 1) {
         ImGui::TextColored(theme::vec(theme::kAccent), "%d layers selected", static_cast<int>(ctx.selection.size()));

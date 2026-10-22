@@ -176,9 +176,33 @@ void Fonts::processPending() {
     g_pending.clear();
 }
 
-ImFont* Fonts::ui() { return g_weights[static_cast<int>(FontWeight::Regular)]; }
-ImFont* Fonts::uiMedium() { return g_weights[static_cast<int>(FontWeight::Medium)]; }
-ImFont* Fonts::uiBold() { return g_weights[static_cast<int>(FontWeight::SemiBold)]; }
+namespace {
+std::string g_uiFamily = Fonts::kDefaultFamily;
+
+// A face of the interface family close to `wanted` (its styles vary by family).
+ImFont* uiFace(const char* wanted, FontWeight interWeight) {
+    if (g_uiFamily == Fonts::kDefaultFamily || !Fonts::hasFamily(g_uiFamily)) return g_weights[static_cast<int>(interWeight)];
+    const auto styles = Fonts::stylesOf(g_uiFamily);
+    std::string style = styles.empty() ? "Regular" : styles.front();
+    for (const char* candidate : {wanted, "Bold", "Medium", "Regular"})
+        if (std::find(styles.begin(), styles.end(), candidate) != styles.end()) {
+            style = candidate;
+            break;
+        }
+    TextProps t;
+    t.fontFamily = g_uiFamily;
+    t.fontStyle = style;
+    return Fonts::forText(t); // Inter until the face is loaded (next frame)
+}
+} // namespace
+
+void Fonts::setUiFamily(const std::string& family) {
+    g_uiFamily = family.empty() ? kDefaultFamily : family;
+    ImGui::GetIO().FontDefault = ui();
+}
+ImFont* Fonts::ui() { return uiFace("Regular", FontWeight::Regular); }
+ImFont* Fonts::uiMedium() { return uiFace("Medium", FontWeight::Medium); }
+ImFont* Fonts::uiBold() { return uiFace("SemiBold", FontWeight::SemiBold); }
 
 ImFont* Fonts::forWeight(FontWeight weight) {
     const int i = static_cast<int>(weight);

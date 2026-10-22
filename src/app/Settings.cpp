@@ -1,6 +1,7 @@
 #include "app/Settings.h"
 
 #include "app/Platform.h"
+#include "ui/Keymap.h"
 
 #include <nlohmann/json.hpp>
 
@@ -72,6 +73,10 @@ void loadSettings() {
         s.timelinePropertyRow = std::clamp(j.value("timeline_property_row", s.timelinePropertyRow), 20.0f, 60.0f);
         s.keyframeSize = std::clamp(j.value("keyframe_size", s.keyframeSize), 3.0f, 10.0f);
         s.textScale = std::clamp(j.value("text_scale", s.textScale), 0.8f, 1.5f);
+        s.uiFont = j.value("ui_font", s.uiFont);
+        s.arrowFrames = std::clamp(j.value("arrow_frames", s.arrowFrames), 1, 1000);
+        s.bigArrowFrames = std::clamp(j.value("big_arrow_frames", s.bigArrowFrames), 1, 1000);
+        ui::loadKeymap(j.contains("shortcuts") ? j["shortcuts"].dump() : "{}");
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
     } catch (const std::exception&) {
         // Missing or unreadable settings: keep the defaults.
@@ -83,7 +88,9 @@ void saveSettings() {
     json j = {{"theme", s.theme},        {"custom_accent", s.customAccent}, {"accent", s.accent},
               {"advanced", s.advanced}, {"snap_distance", s.snapDistance}, {"disabled_plugins", s.disabledPlugins},
               {"timeline_layer_row", s.timelineLayerRow}, {"timeline_property_row", s.timelinePropertyRow},
-              {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}};
+              {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}, {"ui_font", s.uiFont},
+              {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames},
+              {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);
 }

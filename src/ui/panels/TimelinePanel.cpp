@@ -6,9 +6,11 @@
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 #include "ui/panels/EffectsPanel.h"
+#include "ui/panels/ViewportPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 
 #include <imgui.h>
+#include <imgui_internal.h> // BeginDragDropTargetCustom
 #include <imgui_stdlib.h>
 
 #include <algorithm>
@@ -111,8 +113,15 @@ void TimelinePanel::draw(EditorContext& ctx) {
     if (pendingCompound_ == 1) ctx.createCompound();
     if (pendingCompound_ == 2) ctx.releaseSelectedCompounds();
     pendingCompound_ = 0;
+    if (pendingDelete_) {
+        if (!ctx.selectedKeys.empty()) ctx.deleteSelectedKeys();
+        else ctx.deleteSelected();
+        pendingDelete_ = false;
+    }
     Composition& comp = ctx.comp();
+    if (ctx.scope && !comp.findLayer(ctx.scope)) ctx.scope = 0; // closed by undo / delete
     drawToolbar(ctx);
+    drawBreadcrumb(ctx);
 
     const ImVec2 area = ImGui::GetCursorScreenPos();
     const ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -164,11 +173,9 @@ void TimelinePanel::draw(EditorContext& ctx) {
     const auto trackRows = comp.trackRows();
     for (int r = 0; r < static_cast<int>(trackRows.size()); ++r) {
         const TrackRow& row = trackRows[r];
-        // Rows of layers inside a collapsed compound are hidden.
-        bool hidden = false;
-        for (uint64_t c : collapsedCompounds_)
-            if (const Layer* cl = comp.findLayer(c); cl && comp.isInside(layers[row.first], c)) hidden = true;
-        if (hidden) continue;
+        // A compound's contents live in its own timeline (double-click it to open).
+        const uint64_t owner = comp.findLayer(layers[row.first].parent) ? layers[row.first].parent : 0; // orphans: top level
+        if (owner != ctx.scope) continue;
         ImGui::PushID(static_cast<int>(row.track));
         drawTrackRow(ctx, row, r, x0, avail.x);
         if (expanded_.count(row.track)) {
@@ -208,6 +215,7 @@ void TimelinePanel::draw(EditorContext& ctx) {
 
     applyPendingDrop(ctx);
     updateMarquee(ctx, dl);
+    handleObjectDrop(ctx, dl, x0, avail.x);
     if (layers.empty()) {
         const char* hint = "Add text or graphics from the Objects panel to start animating.";
         const ImVec2 ts = ImGui::CalcTextSize(hint);
@@ -252,6 +260,77 @@ void TimelinePanel::draw(EditorContext& ctx) {
     ImGui::End();
 }
 
+void TimelinePanel::handleObjectDrop(EditorContext& ctx, ImDrawList* dl, float x0, float width) {
+    // Objects dragged from the Objects panel drop at a time (x) and between rows (y).
+    const ImVec2 winPos = ImGui::GetWindowPos(), winSize = ImGui::GetWindowSize();
+    const ImRect area(ImVec2(x0, winPos.y), ImVec2(x0 + width, winPos.y + winSize.y));
+    if (!ImGui::BeginDragDropTargetCustom(area, ImGui::GetID("##objectDrop"))) return;
+    constexpr ImGuiDragDropFlags flags = ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+    if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kObjectPayload, flags)) {
+        const ImVec2 m = ImGui::GetIO().MousePos;
+        double t = std::max(0.0, xToTime(std::max(m.x, trackX0_)));
+        if (ctx.snapping && !ImGui::GetIO().KeyCtrl) { // snaps to clips, keys and the playhead like everything else
+            collectTimeSnapTargets(ctx, {}, false);
+            t = snappedDelta(ctx, {0.0}, t);
+        } else {
+            t = ctx.comp().snapToFrame(t);
+        }
+        const int gap = dropGapAt(m.y);
+        float gy = rows_.empty() ? winPos.y + 4 : rows_.back().bottom;
+        for (const RowRect& r : rows_)
+            if (r.index == gap) {
+                gy = r.top;
+                break;
+            }
+        // Where it lands: a new row at the gap, starting at t.
+        const float tx = timeToX(t);
+        dl->AddLine(ImVec2(x0, gy), ImVec2(x0 + width, gy), theme::kAccent, 2.0f);
+        dl->AddRectFilled(ImVec2(tx, gy - 9), ImVec2(std::max(tx + 60, timeToX(ctx.comp().duration)), gy + 9), theme::accent(60), 4.0f);
+        dl->AddLine(ImVec2(tx, winPos.y), ImVec2(tx, winPos.y + winSize.y), theme::kAccent, 1.0f);
+        char label[48];
+        std::snprintf(label, sizeof label, "  %s", ui::formatTimecode(t, ctx.comp().fps).c_str());
+        dl->AddText(ImVec2(tx + 2, gy - 8), theme::kText, label);
+        if (payload->IsDelivery()) {
+            const int kind = *static_cast<const int*>(payload->Data);
+            if (Layer* l = ctx.addObject(kind, ctx.comp().center(), t)) {
+                ctx.comp().moveTracks({l->track}, gap);
+                ctx.touch();
+            }
+        }
+    }
+    ImGui::EndDragDropTarget();
+}
+
+void TimelinePanel::drawBreadcrumb(EditorContext& ctx) {
+    if (!ctx.scope) return;
+    // Composition > Compound > ...: where this timeline is; click a level to go back up.
+    std::vector<const Layer*> path;
+    for (const Layer* l = ctx.comp().findLayer(ctx.scope); l && path.size() < 32; l = ctx.comp().findLayer(l->parent))
+        path.insert(path.begin(), l);
+    ImGui::PushStyleColor(ImGuiCol_Button, theme::kBgRaised);
+    if (ImGui::SmallButton("Composition")) {
+        ctx.scope = 0;
+        ctx.select(path.empty() ? 0 : path.front()->id);
+    }
+    for (size_t i = 0; i < path.size(); ++i) {
+        ImGui::SameLine(0, 6);
+        ImGui::TextColored(theme::vec(theme::kTextFaint), "/");
+        ImGui::SameLine(0, 6);
+        ImGui::PushID(static_cast<int>(i));
+        const bool last = i + 1 == path.size();
+        if (last) ImGui::PushStyleColor(ImGuiCol_Button, theme::kAccentSoft);
+        if (ImGui::SmallButton(path[i]->name.c_str()) && !last) {
+            ctx.scope = path[i]->id;
+            ctx.select(path[i + 1]->id);
+        }
+        if (last) ImGui::PopStyleColor();
+        ImGui::PopID();
+    }
+    ImGui::PopStyleColor();
+    ImGui::SameLine(0, 12);
+    ImGui::TextColored(theme::vec(theme::kTextFaint), "Editing inside a compound  ·  Esc (with nothing selected) goes back");
+}
+
 void TimelinePanel::drawToolbar(EditorContext& ctx) {
     Composition& comp = ctx.comp();
     const float s = 26.0f;
@@ -266,6 +345,14 @@ void TimelinePanel::drawToolbar(EditorContext& ctx) {
     ImGui::SameLine();
     if (ui::iconButton("##split", ui::Icon::SplitPlayhead, s, "Split selected layers at the playhead (Ctrl+K)"))
         ctx.splitSelectedAtPlayhead();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(ctx.selection.empty());
+    if (ui::iconButton("##compound", ui::Icon::Compound, s,
+                       "Combine the selected layers into a compound (Ctrl+G). Double-click it to open its timeline"))
+        pendingCompound_ = 1;
+    ImGui::SameLine();
+    if (ui::iconButton("##delete", ui::Icon::Trash, s, "Delete the selected keyframes, or layers (Delete)")) pendingDelete_ = true;
+    ImGui::EndDisabled();
     ImGui::SameLine();
     if (ui::iconButton("##snap", ui::Icon::Magnet, s, "Snapping (S): clips, keyframes and objects snap. Hold Ctrl to bypass", ctx.snapping))
         ctx.snapping = !ctx.snapping;
@@ -465,33 +552,11 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
         ctx.touch();
     }
     ImGui::SameLine();
-    ImVec2 chip = ImGui::GetCursorScreenPos();
-    // Layers inside compounds are indented under them, with a guide line.
-    int depth = 0;
-    for (const Layer* p = focus; p->parent && depth < 16; ++depth) {
-        p = ctx.comp().findLayer(p->parent);
-        if (!p) break;
-    }
-    if (depth > 0) {
-        chip.x += 14.0f * depth;
-        dl->AddLine(ImVec2(chip.x - 8, y), ImVec2(chip.x - 8, y + h * 0.5f), theme::kTextFaint);
-        dl->AddLine(ImVec2(chip.x - 8, y + h * 0.5f), ImVec2(chip.x - 2, y + h * 0.5f), theme::kTextFaint);
-    }
+    const ImVec2 chip = ImGui::GetCursorScreenPos();
     dl->AddRectFilled(ImVec2(chip.x + 2, y + 8), ImVec2(chip.x + 5, y + h - 8), toU32(labelColor(focus->label)), 2.0f);
     ui::drawIcon(dl, ui::iconForLayer(*focus), ImVec2(chip.x + 18, y + h * 0.5f), 14.0f,
                  anySelected ? theme::kAccent : theme::kTextDim);
-    if (focus->type == LayerType::Compound) { // the icon folds / unfolds its contents
-        const bool folded = collapsedCompounds_.count(focus->id) > 0;
-        const ImVec2 back = ImGui::GetCursorScreenPos();
-        ImGui::SetCursorScreenPos(ImVec2(chip.x + 8, y + (h - 20) * 0.5f));
-        if (ImGui::InvisibleButton("##fold", ImVec2(20, 20))) {
-            if (folded) collapsedCompounds_.erase(focus->id);
-            else collapsedCompounds_.insert(focus->id);
-        }
-        ui::tooltip(folded ? "Show the layers inside" : "Hide the layers inside");
-        if (folded) dl->AddCircleFilled(ImVec2(chip.x + 26, y + h * 0.5f - 6), 3.0f, theme::kAccent);
-        ImGui::SetCursorScreenPos(back);
-    }
+
 
     const float nameX = chip.x + 32;
     const float nameW = std::max(10.0f, x0 + leftWidth_ - nameX - 8);
@@ -514,8 +579,12 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
         if (ImGui::IsItemActive() && drag_ == Drag::LayerName) updateLayerDrag(ctx);
         if (ImGui::IsItemDeactivated() && drag_ == Drag::LayerName) endLayerDrag(ctx);
         if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            renaming_ = focus->id;
-            focusRename_ = true;
+            if (focus->type == LayerType::Compound) {
+                ctx.enterScope(focus->id); // its timeline opens
+            } else {
+                renaming_ = focus->id;
+                focusRename_ = true;
+            }
         }
         if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !anySelected) clickTrack(ctx, row);
         if (ImGui::BeginPopupContextItem("##trackctx")) {
@@ -539,7 +608,7 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
             if (ImGui::MenuItem("Send Backward", "Ctrl+[")) ctx.shiftSelected(1);
             if (ImGui::MenuItem("Send to Back", "Ctrl+Shift+[")) ctx.shiftSelected(1000);
             ImGui::Separator();
-            if (ImGui::MenuItem("Delete", "Del")) ctx.deleteSelected();
+            if (ImGui::MenuItem("Delete", "Del")) pendingDelete_ = true;
             ImGui::EndPopup();
         }
         const ImU32 col = focus->visible ? (anySelected ? theme::kText : theme::kTextDim) : theme::kTextFaint;
@@ -577,7 +646,9 @@ void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int ro
         if (hovered && drag_ == Drag::None && (hitMode == Drag::LayerIn || hitMode == Drag::LayerOut))
             ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
         if (ImGui::IsItemActivated()) {
-            if (hit >= 0) {
+            if (hit >= 0 && layers[hit].type == LayerType::Compound && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                ctx.enterScope(layers[hit].id);
+            } else if (hit >= 0) {
                 const uint64_t id = layers[hit].id;
                 clickLayer(ctx, id);
                 if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, hitMode, id);

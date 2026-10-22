@@ -314,14 +314,19 @@ void ViewportPanel::handleSelectionInput(EditorContext& ctx, bool hovered) {
             }
             if (drag_ == Drag::None) {
                 const Vec2 scenePoint = view.screenToScene(mouse);
-                uint64_t hit = render::hitTest(comp, t, scenePoint, !throughCamera_);
+                // With a compound open (timeline), clicks pick among its contents.
+                if (ctx.scope && !comp.findLayer(ctx.scope)) ctx.scope = 0;
+                uint64_t hit = ctx.scope ? render::hitTestInside(comp, t, scenePoint, ctx.scope)
+                                         : render::hitTest(comp, t, scenePoint, !throughCamera_);
                 // Inside a compound, clicks pick among its layers; a double-click on a
                 // compound goes one level in (like After Effects / Figma groups).
                 if (const Layer* cur = ctx.selected(); cur && !additive) {
                     uint64_t inner = 0;
                     if (cur->parent) inner = render::hitTestInside(comp, t, scenePoint, cur->parent);
-                    if (!inner && cur->type == LayerType::Compound && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    if (!inner && cur->type == LayerType::Compound && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
                         inner = render::hitTestInside(comp, t, scenePoint, cur->id);
+                        if (inner) ctx.enterScope(cur->id); // its timeline opens too
+                    }
                     if (inner) hit = inner;
                 }
                 if (hit) {

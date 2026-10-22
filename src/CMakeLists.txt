@@ -41,6 +41,7 @@ add_executable(bemotion WIN32
     ui/ExportDialog.cpp
     ui/HelpWindow.cpp
     ui/HomeScreen.cpp
+    ui/Keymap.cpp
     ui/PluginsWindow.cpp
     ui/SettingsWindow.cpp
     ui/Theme.cpp

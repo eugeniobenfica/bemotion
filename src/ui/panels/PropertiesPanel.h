@@ -26,6 +26,7 @@ private:
     std::string presetMessage_;
     std::string fontFilter_;
     bool releaseRequested_ = false; // "Release Compound" clicked: done before the next draw
+    bool deleteRequested_ = false;  // the trash button next to the name
 };
 
 // Building blocks shared with the timeline's property rows. Each returns true

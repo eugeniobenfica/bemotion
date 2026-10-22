@@ -8,6 +8,7 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <tuple>
 #include <unordered_map>
 #include <cctype>
 #include <cmath>
@@ -505,66 +506,130 @@ bool panelIsMinimized() {
     return window->DockNode && nodeMinimized(window->DockNode);
 }
 
+namespace {
+
+// Maximized panel: the sizes along its path to the root, to restore them.
+struct Maximized {
+    ImGuiID node = 0;
+    std::vector<std::tuple<ImGuiID, int, float>> sizes; // split child id, axis, size
+};
+Maximized& maximized() {
+    static Maximized m;
+    return m;
+}
+
+// Every split between the node and the dockspace root, innermost first.
+std::vector<std::pair<ImGuiDockNode*, int>> splitPath(ImGuiDockNode* node) {
+    std::vector<std::pair<ImGuiDockNode*, int>> path;
+    for (ImGuiDockNode* n = node; n && n->ParentNode; n = n->ParentNode)
+        if (n->ParentNode->SplitAxis != ImGuiAxis_None) path.emplace_back(n, n->ParentNode->SplitAxis);
+    return path;
+}
+
+void toggleMaximize(ImGuiDockNode* node) {
+    Maximized& m = maximized();
+    if (m.node) { // restore the layout (outermost split first, so inner sizes fit)
+        for (auto it = m.sizes.rbegin(); it != m.sizes.rend(); ++it)
+            if (ImGuiDockNode* n = ImGui::DockBuilderGetNode(std::get<0>(*it))) resizeDockNode(n, std::get<1>(*it), std::get<2>(*it));
+        const bool same = m.node == node->ID;
+        m = {};
+        if (same) return;
+    }
+    m.node = node->ID;
+    for (auto [child, axis] : splitPath(node)) {
+        m.sizes.emplace_back(child->ID, axis, child->Size[axis]);
+        ImGuiDockNode* sibling = child->ParentNode->ChildNodes[0] == child ? child->ParentNode->ChildNodes[1] : child->ParentNode->ChildNodes[0];
+        resizeDockNode(child, axis, child->ParentNode->Size[axis] - minimizedSize(sibling, axis));
+    }
+}
+
+} // namespace
+
 void panelMinimizeButton() {
     ImGuiWindow* window = ImGui::GetCurrentWindow();
     ImGuiDockNode* node = window->DockNode;
     if (!node || !node->TabBar || !node->HostWindow) return; // floating or without a tab bar
-    if (node->TabBar->SelectedTabId != window->TabId) return; // only the visible tab owns the button
+    if (node->TabBar->SelectedTabId != window->TabId) return; // only the visible tab owns the controls
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    const bool popup = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
+
+    // Maximize / restore: double-click the tab bar, or ` (backquote) with the mouse over the panel.
+    const ImRect bar = node->TabBar->BarRect;
+    const ImRect area(node->Pos, ImVec2(node->Pos.x + node->Size.x, node->Pos.y + node->Size.y));
+    const bool overHost = g.HoveredWindow && g.HoveredWindow->RootWindowDockTree == node->HostWindow->RootWindowDockTree;
+    if (!popup && overHost &&
+        ((ImGui::IsMouseHoveringRect(bar.Min, bar.Max, false) && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) ||
+         (ImGui::IsMouseHoveringRect(area.Min, area.Max, false) && !ImGui::GetIO().WantTextInput &&
+          ImGui::IsKeyPressed(ImGuiKey_GraveAccent, false)))) {
+        toggleMaximize(node);
+        return;
+    }
+
     int axis = 0;
     ImGuiDockNode* child = splitChild(node, axis);
     if (!child) return; // alone in the dockspace
     const bool minimized = nodeMinimized(node);
-    // Arrows point where the panel goes: toward its edge to minimize, back to restore.
-    const bool farSide = child->ParentNode->ChildNodes[1] == child; // right (or bottom) of its split
+    // The handle sits on the edge facing the neighbor panel, centered on it.
+    const bool farSide = child->ParentNode->ChildNodes[1] == child; // right of / below its sibling
     const Icon toEdge = axis == ImGuiAxis_Y ? Icon::ChevronDown : (farSide ? Icon::ChevronRight : Icon::Back);
     const Icon fromEdge = axis == ImGuiAxis_Y ? Icon::ChevronUp : (farSide ? Icon::Back : Icon::ChevronRight);
     auto toggle = [&] {
         float& saved = savedSizes()[child->ID];
         if (minimized) {
-            const float fallback = child->ParentNode->Size[axis] * (axis == ImGuiAxis_Y ? 0.35f : 0.22f);
-            resizeDockNode(child, axis, saved > minimizedSize(node, axis) + 20.0f ? saved : fallback);
+            // Back to the last size, never to something too narrow to use.
+            const float usable = axis == ImGuiAxis_Y ? 180.0f : 280.0f;
+            const float fallback = std::max(usable, child->ParentNode->Size[axis] * (axis == ImGuiAxis_Y ? 0.35f : 0.24f));
+            resizeDockNode(child, axis, saved >= usable ? saved : fallback);
         } else {
             saved = child->Size[axis];
             resizeDockNode(child, axis, minimizedSize(node, axis));
         }
+        maximized() = {};
     };
+
+    const ImRect r(child->Pos, ImVec2(child->Pos.x + child->Size.x, child->Pos.y + child->Size.y));
+    const float len = 44.0f, thick = 14.0f;
+    ImVec2 a, b;
+    if (axis == ImGuiAxis_X) {
+        const float x = farSide ? r.Min.x + 1.0f : r.Max.x - thick - 1.0f;
+        const float cy = r.GetCenter().y;
+        a = ImVec2(x, cy - len * 0.5f), b = ImVec2(x + thick, cy + len * 0.5f);
+    } else {
+        const float y = farSide ? r.Min.y + 1.0f : r.Max.y - thick - 1.0f;
+        const float cx = r.GetCenter().x;
+        a = ImVec2(cx - len * 0.5f, y), b = ImVec2(cx + len * 0.5f, y + thick);
+    }
+    // Shown when the mouse is near that edge (or always while minimized), like editors' collapse handles.
+    const float reach = 60.0f;
+    const bool nearEdge = ImGui::IsMouseHoveringRect(ImVec2(a.x - reach, a.y - reach), ImVec2(b.x + reach, b.y + reach), false);
+    const bool hovered = !popup && overHost && ImGui::IsMouseHoveringRect(a, b, false);
+    if (!(nearEdge || minimized || hovered) || (popup && !minimized)) return; // never over menus
+    ImDrawList* dl = ImGui::GetForegroundDrawList(node->HostWindow->Viewport);
+    dl->AddRectFilled(a, b, hovered ? theme::kAccent : theme::withAlpha(theme::kBgHover, 235), 5.0f);
+    dl->AddRect(a, b, hovered ? theme::kAccent : theme::kBorder, 5.0f);
+    drawIcon(dl, minimized ? fromEdge : toEdge, ImVec2((a.x + b.x) * 0.5f, (a.y + b.y) * 0.5f), 12.0f,
+             hovered ? theme::kOnAccent : theme::kText);
+    if (hovered) {
+        ImGui::SetTooltip(minimized ? "Restore panel" : "Minimize panel  (double-click its tabs to maximize)");
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) toggle();
+    }
     if (minimized && axis == ImGuiAxis_X) {
-        // A narrow strip: its tab bar is too small for a button, so the whole
-        // strip restores the panel (arrow + the panel name written downwards).
+        // The narrow strip itself also restores: the panel name written downwards.
         const ImVec2 p = window->InnerRect.Min;
         const ImVec2 size(window->InnerRect.GetWidth(), window->InnerRect.GetHeight());
         ImGui::SetCursorScreenPos(p);
         const bool clicked = ImGui::InvisibleButton("##restore", ImVec2(std::max(1.0f, size.x), std::max(1.0f, size.y)));
         const bool hot = ImGui::IsItemHovered();
-        ImDrawList* dl = window->DrawList;
-        if (hot) dl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), theme::kBgHover);
+        ImDrawList* wl = window->DrawList;
+        if (hot) wl->AddRectFilled(p, ImVec2(p.x + size.x, p.y + size.y), theme::kBgHover);
         const float cx = p.x + size.x * 0.5f;
-        drawIcon(dl, fromEdge, ImVec2(cx, p.y + 18), 12.0f, hot ? theme::kAccent : theme::kTextDim);
-        float y = p.y + 36;
+        float y = p.y + 12;
         for (const char* c = window->Name; *c && *c != '#'; ++c, y += ImGui::GetFontSize()) {
             const char ch[2] = {*c, 0};
-            dl->AddText(ImVec2(cx - ImGui::CalcTextSize(ch).x * 0.5f, y), hot ? theme::kText : theme::kTextFaint, ch);
+            wl->AddText(ImVec2(cx - ImGui::CalcTextSize(ch).x * 0.5f, y), hot ? theme::kText : theme::kTextFaint, ch);
         }
         if (hot) ImGui::SetTooltip("Restore panel");
         if (clicked) toggle();
-        return;
-    }
-    // The tab bar belongs to the dock host window, where this window's widgets
-    // cannot be clicked: draw on the host and hit-test by hand.
-    const ImRect bar = node->TabBar->BarRect;
-    const float s = std::min(bar.GetHeight() - 2.0f, ImGui::GetFrameHeight());
-    const float cy = std::floor(bar.GetCenter().y) + 0.5f; // centered on the tab row
-    const ImVec2 a(bar.Max.x - s - 6.0f, cy - s * 0.5f), b(a.x + s, a.y + s);
-    ImGuiContext& g = *ImGui::GetCurrentContext();
-    const bool overHost = g.HoveredWindow && g.HoveredWindow->RootWindowDockTree == node->HostWindow->RootWindowDockTree;
-    const bool hovered = overHost && ImGui::IsMouseHoveringRect(a, b, false) && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId);
-    ImDrawList* dl = node->HostWindow->DrawList;
-    if (hovered) dl->AddRectFilled(a, b, theme::kBgHover, 4.0f);
-    const Icon icon = minimized ? fromEdge : toEdge;
-    drawIcon(dl, icon, ImVec2((a.x + b.x) * 0.5f, cy), s * 0.55f, hovered ? theme::kText : theme::kTextDim);
-    if (hovered) {
-        ImGui::SetTooltip(minimized ? "Restore panel" : "Minimize panel");
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) toggle();
     }
 }
 

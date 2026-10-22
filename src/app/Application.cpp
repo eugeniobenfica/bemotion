@@ -11,6 +11,7 @@
 #include "render/Fonts.h"
 #include "ui/EditorScreen.h"
 #include "ui/HelpWindow.h"
+#include "ui/Keymap.h"
 #include "ui/SettingsWindow.h"
 #include "ui/Theme.h"
 
@@ -277,6 +278,7 @@ void Application::frame(double dt) {
     render::screenEffects().beginFrame(); // effect textures from the previous frame can be reused
     Fonts::processPending(); // faces requested by text layers last frame
     PluginHost::get().processPendingReload();
+    Fonts::setUiFamily(settings().uiFont); // the interface font (Settings > Interface)
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     if (script_) script_->apply();
@@ -297,8 +299,8 @@ void Application::frame(double dt) {
         else if (r.action == HomeScreen::Result::Action::Create) createProject(std::move(r.project), r.path);
     }
 
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Comma, ImGuiInputFlags_RouteGlobal)) ui::openSettings();
-    if (ImGui::Shortcut(ImGuiKey_F1, ImGuiInputFlags_RouteGlobal)) ui::openHelp();
+    if (ui::shortcutPressed(ui::Action::Settings)) ui::openSettings();
+    if (ui::shortcutPressed(ui::Action::Help)) ui::openHelp();
     ui::drawSettings();
     ui::drawHelp();
 

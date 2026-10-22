@@ -2,13 +2,16 @@
 
 #include "app/Platform.h"
 #include "render/Fonts.h"
+#include "ui/Keymap.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -25,54 +28,21 @@ struct Shortcut {
     const char* keys; // "+" joins keys, " / " separates alternatives
     const char* action;
 };
-struct ShortcutGroup {
-    const char* name;
-    std::vector<Shortcut> items;
-};
 
-const std::vector<ShortcutGroup>& shortcutGroups() {
-    static const std::vector<ShortcutGroup> groups = {
-        {"Playback",
-         {{"Space", "Play / pause"},
-          {"Left / Right", "Previous / next frame"},
-          {"Shift+Left / Shift+Right", "Back / forward 10 frames"},
-          {"Home / End", "Go to start / end"},
-          {"J / K", "Previous / next keyframe"}}},
-        {"Tools",
-         {{"V", "Selection tool"},
-          {"C", "Cut tool (click a clip to split it)"},
-          {"Ctrl+K", "Split selected layers at the playhead"},
-          {"T", "Add text"},
-          {"S", "Snapping on / off"}}},
-        {"Editing",
-         {{"Ctrl+Z / Ctrl+Shift+Z", "Undo / redo"},
-          {"Ctrl+D", "Duplicate layers"},
-          {"Ctrl+G / Ctrl+Shift+G", "Create / release a compound (group)"},
-          {"Double Click", "Go inside a compound to select a layer in it"},
-          {"Delete", "Delete keyframes, or the layers"},
-          {"Ctrl+A", "Select all layers"},
-          {"Shift+Click / Ctrl+Click", "Add to / toggle the selection"},
-          {"Ctrl+] / Ctrl+[", "Bring forward / send backward"},
-          {"Ctrl+Shift+] / Ctrl+Shift+[", "Bring to front / send to back"}}},
-        {"Keyframes & motion",
-         {{"F9", "Easy Ease on the selected keyframes"},
-          {"Shift+F9 / Ctrl+Shift+F9", "Ease In / Ease Out"},
-          {"Alt+Drag", "Break a motion path handle into a corner"},
-          {"Shift+Drag", "Constrain a move, uniform scale, 15° rotation"},
-          {"Ctrl+Drag", "Move without snapping"}}},
-        {"View",
-         {{"Wheel", "Zoom the viewport around the cursor"},
-          {"Middle Drag / Space+Drag / Alt+Drag", "Pan the viewport"},
-          {"Ctrl+0 / Ctrl+1", "Fit / 100% zoom"},
-          {"Ctrl+= / Ctrl+-", "Zoom in / out"},
-          {"Ctrl+Wheel / Shift+Wheel", "Zoom / scroll the timeline"}}},
-        {"Files",
-         {{"Ctrl+S / Ctrl+Shift+S", "Save / save as"},
-          {"Ctrl+M", "Export video"},
-          {"Ctrl+,", "Settings"},
-          {"Ctrl+W / Ctrl+Q", "Close project / quit"}}},
+// Mouse gestures (not rebindable); keyboard shortcuts come from the keymap.
+const std::vector<Shortcut>& mouseGestures() {
+    static const std::vector<Shortcut> items = {
+        {"Wheel", "Zoom the viewport around the cursor"},
+        {"Middle Drag / Space+Drag / Alt+Drag", "Pan the viewport"},
+        {"Ctrl+Wheel / Shift+Wheel", "Zoom / scroll the timeline"},
+        {"Double Click", "Open a compound (its timeline) and pick a layer in it"},
+        {"Shift+Click / Ctrl+Click", "Add to / toggle the selection"},
+        {"Alt+Drag", "Break a motion path handle into a corner"},
+        {"Shift+Drag", "Constrain a move, uniform scale, 15° rotation"},
+        {"Ctrl+Drag", "Move without snapping"},
+        {"`", "Maximize the panel under the mouse (again to restore)"},
     };
-    return groups;
+    return items;
 }
 
 struct Credit {
@@ -119,25 +89,47 @@ void title(const char* text) {
     ImGui::Spacing();
 }
 
+void shortcutTable(const char* id, const std::vector<std::pair<std::string, std::string>>& rows) {
+    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) return;
+    ImGui::TableSetupColumn("keys", ImGuiTableColumnFlags_WidthFixed, 270.0f);
+    ImGui::TableSetupColumn("action", ImGuiTableColumnFlags_WidthStretch);
+    for (const auto& [keys, action] : rows) {
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        if (keys.empty()) ImGui::TextDisabled("(none)");
+        else keyCaps(keys.c_str());
+        ImGui::TableSetColumnIndex(1);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(action.c_str());
+    }
+    ImGui::EndTable();
+}
+
 void drawShortcuts() {
     title("Keyboard shortcuts");
-    for (const ShortcutGroup& g : shortcutGroups()) {
-        sectionLabel(g.name);
-        if (ImGui::BeginTable(g.name, 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
-            ImGui::TableSetupColumn("keys", ImGuiTableColumnFlags_WidthFixed, 270.0f);
-            ImGui::TableSetupColumn("action", ImGuiTableColumnFlags_WidthStretch);
-            for (const Shortcut& s : g.items) {
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                keyCaps(s.keys);
-                ImGui::TableSetColumnIndex(1);
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextUnformatted(s.action);
-            }
-            ImGui::EndTable();
-        }
+    paragraph("Change any of them in Settings > Shortcuts.");
+    ImGui::Spacing();
+    std::vector<std::pair<std::string, std::string>> rows;
+    const char* group = nullptr;
+    auto flush = [&] {
+        if (!group) return;
+        std::string upper = group;
+        for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        sectionLabel(upper.c_str());
+        shortcutTable(group, rows);
         ImGui::Spacing();
+        rows.clear();
+    };
+    for (int i = 0; i < static_cast<int>(Action::Count); ++i) {
+        const ActionInfo& info = actionInfo(static_cast<Action>(i));
+        if (group && std::strcmp(group, info.group) != 0) flush();
+        group = info.group;
+        rows.emplace_back(chordName(chordOf(static_cast<Action>(i))), info.label);
     }
+    flush();
+    sectionLabel("MOUSE");
+    for (const Shortcut& m : mouseGestures()) rows.emplace_back(m.keys, m.action);
+    shortcutTable("mouse", rows);
 }
 
 void drawAbout() {

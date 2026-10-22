@@ -16,8 +16,9 @@ common moves are one click away through *Quick Animations*.
 - **Home screen** with recent projects (live thumbnails), search and a
   *New Project* dialog with format presets (Full HD, 4K, Vertical/Reels, Square…)
 - **Objects panel**: Text, Rectangle, Ellipse, Polygon, Star, Line, Camera and
-  plugin objects (charts) — click to add at the center, or **drag onto the
-  canvas** to drop at an exact spot
+  plugin objects (charts) — click to add at the center, **drag onto the
+  canvas** to drop at an exact spot, or **onto the timeline** to start at a
+  given time and row
 - **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
   Space+drag or Alt+drag; click or **box-select** layers, drag to move, corner
   handles to scale (Shift = uniform), rotation handle (Shift = 15° snaps)
@@ -44,19 +45,23 @@ common moves are one click away through *Quick Animations*.
 - **Timeline**: tracks holding several clips, trim in/out (clamped to
   neighbors), inline value editing on keyframe rows, keyframe dragging,
   easing menu with a **custom cubic-bezier curve editor**, zoom (Ctrl+Wheel)
-- **Compounds** (Ctrl+G): group any layers - text, shapes, charts, other
-  compounds - into one object that moves, scales, rotates, fades, takes quick
-  animations and effects as a whole; double-click to edit what is inside;
-  Ctrl+Shift+G releases them keeping their look
+- **Compounds** (the combine tool in the timeline, or Ctrl+G): turn the
+  selected layers into one object that moves, scales, rotates, fades, takes
+  quick animations and effects as a whole; double-click it to open its own
+  timeline and edit what is inside (a breadcrumb leads back); Ctrl+Shift+G
+  releases the layers keeping their look
 - **Camera**: animate position, rotation and zoom; toggle the viewport between
   the camera view and a free view showing the camera frame
 - **Cut tool** (C) and split at playhead (Ctrl+K)
 - **Video export** (Ctrl+M, or the button in the top-right corner): MP4 / H.264
   (built in on Windows), PNG sequence with transparency, and — with
   [FFmpeg](https://ffmpeg.org) installed — MOV ProRes 4444, WebM VP9 and GIF
-- **Panels** can be minimized to their tab (the arrow at the right of the tab bar)
+- **Panels**: minimize / restore with the handle on their inner edge, maximize
+  by double-clicking their tabs or pressing ` over them
 - **Settings** (Ctrl+, or the gear) with *Theme*, *Interface* (timeline row
-  heights, keyframe size, text size), *Editor* and *Plugins* pages: Dark, Light and Midnight themes, any
+  heights, keyframe size, text size, interface font), *Editor* (frames per
+  arrow press, snapping), *Shortcuts* (rebind every shortcut) and *Plugins*
+  pages: Dark, Light and Midnight themes, any
   accent color, and an *advanced mode* to edit every UI color, rounding and the
   snap distance; a *Reset* on every page and *Reset All*; **import, save and export themes** (JSON, see
   [examples/themes](examples/themes))

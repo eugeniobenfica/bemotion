@@ -15,6 +15,7 @@ void EditorContext::open(Project p, std::filesystem::path file) {
     selection.clear();
     selectedKeys.clear();
     tool = Tool::Select;
+    scope = 0;
     time = 0.0;
     playing = false;
     pendingCommit_ = false;
@@ -132,7 +133,30 @@ bool EditorContext::saveTo(const std::filesystem::path& file, std::string* error
 
 // --- document operations -----------------------------------------------------------
 
+void EditorContext::enterScope(uint64_t compoundId) {
+    const Layer* l = comp().findLayer(compoundId);
+    if (!l || l->type != LayerType::Compound) return;
+    scope = compoundId;
+    selection.clear();
+    selectedKeys.clear();
+}
+
+void EditorContext::exitScope() {
+    const Layer* l = scope ? comp().findLayer(scope) : nullptr;
+    const uint64_t up = l ? l->parent : 0;
+    if (l) select(l->id); // back out with the compound selected
+    scope = up;
+}
+
 Layer& EditorContext::insertLayer(Layer layer) {
+    // Inside an open compound, new layers belong to it (their position becomes relative to it).
+    if (scope && !comp().findLayer(scope)) scope = 0;
+    if (scope && layer.type != LayerType::Camera) {
+        const Layer& c = *comp().findLayer(scope);
+        const Affine toLocal = comp().worldMatrix(c, time).inverse();
+        layer.parent = scope;
+        layer.transform.position.base = toLocal.apply(layer.transform.position.base);
+    }
     layer.name = comp().uniqueLayerName(layer.name);
     layer.label = static_cast<int>(comp().nextLayerId % kLabelColorCount);
     // Like After Effects: the new layer starts at the playhead and runs to the end of the composition.
@@ -166,6 +190,21 @@ Layer& EditorContext::addCamera() {
 Layer& EditorContext::addPluginObject(const PluginObjectType& type, std::optional<Vec2> position) {
     Layer layer = PluginHost::get().createLayer(type, position.value_or(comp().center()), comp().duration);
     return insertLayer(std::move(layer));
+}
+
+Layer* EditorContext::addObject(int kind, Vec2 position, double start) {
+    const double saved = time;
+    time = std::clamp(start, 0.0, comp().duration); // new layers start at `time`
+    Layer* added = nullptr;
+    if (kind == -2) added = &addCamera(); // kDropCamera
+    else if (kind == -1) added = &addText(position);
+    else if (kind >= 0 && kind < static_cast<int>(ShapeKind::Count)) added = &addShape(static_cast<ShapeKind>(kind), position);
+    else if (kind <= -100) { // kDropPlugin - i: plugin object type i
+        const auto types = PluginHost::get().objectTypes();
+        if (const size_t i = static_cast<size_t>(-100 - kind); i < types.size()) added = &addPluginObject(*types[i], position);
+    }
+    time = saved;
+    return added;
 }
 
 void EditorContext::deleteSelected() {

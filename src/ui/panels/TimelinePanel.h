@@ -37,6 +37,8 @@ private:
     };
 
     void drawToolbar(EditorContext& ctx);
+    void drawBreadcrumb(EditorContext& ctx); // inside a compound: the path back to the composition
+    void handleObjectDrop(EditorContext& ctx, ImDrawList* dl, float x0, float width);
     void drawRuler(EditorContext& ctx, float x0, float y0, float width);
     void drawTrackRow(EditorContext& ctx, const TrackRow& row, int rowIndex, float x0, float width);
     // Handles a click on a clip honoring Ctrl/Shift multi-select.
@@ -74,9 +76,9 @@ private:
     BezierEase curveEdit_; // curve being edited in the key menu
 
     std::set<uint64_t> expanded_; // track ids showing their property rows
-    std::set<uint64_t> collapsedCompounds_; // compound ids whose contents' rows are hidden
     std::vector<uint64_t> dragMoving_;      // clips moving in time (a compound brings its contents)
     int pendingCompound_ = 0;               // 1: create, 2: release (from the row menu, next frame)
+    bool pendingDelete_ = false;            // delete button / menu: applied next frame
     std::set<std::string> collapsedGroups_; // "track/group"
     uint64_t renaming_ = 0;       // layer id being renamed
     bool focusRename_ = false;

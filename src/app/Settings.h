@@ -26,6 +26,9 @@ struct Settings {
     float timelinePropertyRow = 30.0f; // keyframe rows (group headers derive from it)
     float keyframeSize = 5.0f;         // keyframe glyph radius
     float textScale = 1.0f;            // UI text size multiplier
+    std::string uiFont = "Inter";      // interface font family (any installed one)
+    int arrowFrames = 1;               // frames stepped by the arrow keys
+    int bigArrowFrames = 10;           // ... with Shift (big step)
     std::vector<std::string> disabledPlugins; // plugin ids
 };
 

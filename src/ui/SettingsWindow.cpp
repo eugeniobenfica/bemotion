@@ -2,8 +2,9 @@
 
 #include "app/Platform.h"
 #include "app/Settings.h"
-#include "render/Fonts.h"
 #include "app/PluginHost.h"
+#include "render/Fonts.h"
+#include "ui/Keymap.h"
 #include "ui/PluginsWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -12,7 +13,9 @@
 #include <imgui_stdlib.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
+#include <cstring>
 #include <string>
 
 namespace bemotion::ui {
@@ -62,7 +65,8 @@ bool themeCard(const theme::Palette& p, bool selected) {
     dl->AddText(ImVec2(a.x + 8, b.y - fs - 7), p.text, p.name.c_str());
     dl->PopClipRect();
     if (selected || hovered)
-        dl->AddRect(ImVec2(a.x - 2, a.y - 2), ImVec2(b.x + 2, b.y + 2), selected ? theme::kAccent : theme::kBorder, 9.0f, 0,
+        // Drawn inside the card: a border outside it would be clipped at the page's edges.
+        dl->AddRect(ImVec2(a.x + 1, a.y + 1), ImVec2(b.x - 1, b.y - 1), selected ? theme::kAccent : theme::ink(60), 8.0f, 0,
                     selected ? 2.0f : 1.0f);
     return clicked;
 }
@@ -251,6 +255,8 @@ void openSettings(SettingsTab tab) {
 
 namespace {
 
+void drawUiFont(Settings& s);
+
 void drawInterface(Settings& s) {
     sectionLabel("TIMELINE");
     ImGui::SetNextItemWidth(240);
@@ -275,14 +281,138 @@ void drawInterface(Settings& s) {
     }
     if (ImGui::IsItemHovered()) tooltip("Scales every label in the interface");
     hint("Colors, corner rounding and themes are in the Theme page.");
+    ImGui::Spacing();
+    drawUiFont(s);
+}
+
+// Interface font: any installed family (searchable).
+std::string g_fontFilter;
+void drawUiFont(Settings& s) {
+    sectionLabel("FONT");
+    ImGui::SetNextItemWidth(240);
+    if (ImGui::BeginCombo("Interface font", s.uiFont.c_str(), ImGuiComboFlags_HeightLarge)) {
+        if (ImGui::IsWindowAppearing()) {
+            g_fontFilter.clear();
+            ImGui::SetKeyboardFocusHere();
+        }
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        ImGui::InputTextWithHint("##uiFontFilter", "Search fonts", &g_fontFilter);
+        if (!Fonts::systemScanReady()) ImGui::TextDisabled("Looking for installed fonts...");
+        std::vector<std::string> shown;
+        for (const auto& f : Fonts::families()) {
+            std::string a = f, b = g_fontFilter;
+            for (char& c : a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            for (char& c : b) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+            if (a.find(b) != std::string::npos) shown.push_back(f);
+        }
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(shown.size()));
+        while (clipper.Step())
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+                if (ImGui::Selectable(shown[i].c_str(), shown[i] == s.uiFont)) {
+                    s.uiFont = shown[i];
+                    changed();
+                }
+        ImGui::EndCombo();
+    }
+    hint("Inter ships with bemotion. Other fonts come from your system.");
 }
 
 void drawEditor(Settings& s) {
+    sectionLabel("PLAYHEAD");
+    ImGui::SetNextItemWidth(240);
+    if (ImGui::SliderInt("Frames per arrow press", &s.arrowFrames, 1, 60)) changed();
+    ImGui::SetNextItemWidth(240);
+    if (ImGui::SliderInt("Frames per big step", &s.bigArrowFrames, 1, 300)) changed();
+    hint("Arrow keys step the playhead; the big step uses Shift + arrows by default (see Shortcuts).");
+    ImGui::Spacing();
     sectionLabel("SNAPPING");
     ImGui::SetNextItemWidth(240);
     if (ImGui::SliderFloat("Snap distance", &s.snapDistance, 2.0f, 30.0f, "%.0f px")) changed();
     hint("How close (on screen) an object, clip, keyframe or the playhead must get before it snaps. "
          "Toggle snapping with S or the magnet button; hold Ctrl while dragging to ignore it.");
+}
+
+// --- shortcuts ---------------------------------------------------------------------------
+
+int g_capturing = -1; // action waiting for its new keys
+
+// The chord being pressed right now (a non-modifier key + held modifiers), or 0.
+ImGuiKeyChord pressedChord() {
+    const ImGuiIO& io = ImGui::GetIO();
+    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k) {
+        const ImGuiKey key = static_cast<ImGuiKey>(k);
+        if (key == ImGuiKey_LeftCtrl || key == ImGuiKey_RightCtrl || key == ImGuiKey_LeftShift || key == ImGuiKey_RightShift ||
+            key == ImGuiKey_LeftAlt || key == ImGuiKey_RightAlt || key == ImGuiKey_LeftSuper || key == ImGuiKey_RightSuper ||
+            (k >= ImGuiKey_MouseLeft && k <= ImGuiKey_MouseWheelY) || k >= ImGuiKey_ReservedForModCtrl)
+            continue;
+        if (!ImGui::IsKeyPressed(key, false)) continue;
+        ImGuiKeyChord chord = k;
+        if (io.KeyCtrl) chord |= ImGuiMod_Ctrl;
+        if (io.KeyShift) chord |= ImGuiMod_Shift;
+        if (io.KeyAlt) chord |= ImGuiMod_Alt;
+        return chord;
+    }
+    return 0;
+}
+
+void drawShortcuts() {
+    hint("Click a shortcut and press the new keys (Esc cancels). Single keys work when no text field is being edited.");
+    ImGui::Spacing();
+    const char* group = nullptr;
+    for (int i = 0; i < static_cast<int>(Action::Count); ++i) {
+        const Action a = static_cast<Action>(i);
+        const ActionInfo& info = actionInfo(a);
+        if (!group || std::strcmp(group, info.group) != 0) {
+            if (group) ImGui::EndTable();
+            group = info.group;
+            ImGui::Spacing();
+            std::string upper = group;
+            for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            sectionLabel(upper.c_str());
+            ImGui::BeginTable(group, 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings);
+            ImGui::TableSetupColumn("action", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+            ImGui::TableSetupColumn("keys", ImGuiTableColumnFlags_WidthFixed, 170.0f);
+            ImGui::TableSetupColumn("tools", ImGuiTableColumnFlags_WidthStretch);
+        }
+        ImGui::PushID(i);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(info.label);
+        ImGui::TableNextColumn();
+        const bool capturing = g_capturing == i;
+        if (capturing) {
+            ImGui::PushStyleColor(ImGuiCol_Button, theme::kAccentSoft);
+            ImGui::Button("Press keys...", ImVec2(-FLT_MIN, 0));
+            ImGui::PopStyleColor();
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) g_capturing = -1;
+            else if (const ImGuiKeyChord chord = pressedChord()) {
+                setChord(a, chord);
+                g_capturing = -1;
+                changed();
+            }
+        } else {
+            const std::string name = chordName(chordOf(a));
+            if (ImGui::Button(name.empty() ? "(none)" : name.c_str(), ImVec2(-FLT_MIN, 0))) g_capturing = i;
+        }
+        ImGui::TableNextColumn();
+        if (chordOf(a) != info.defaultChord) {
+            if (iconButton("##reset", Icon::Reset, ImGui::GetFrameHeight(), "Back to the default")) resetChord(a), changed();
+            ImGui::SameLine();
+        }
+        if (chordOf(a)) {
+            if (iconButton("##clear", Icon::Trash, ImGui::GetFrameHeight(), "Remove this shortcut")) setChord(a, 0), changed();
+            const Action other = actionWithChord(chordOf(a), a);
+            if (other != Action::Count) {
+                ImGui::SameLine();
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextColored(theme::vec(theme::kDanger), "also %s", actionInfo(other).label);
+            }
+        }
+        ImGui::PopID();
+    }
+    if (group) ImGui::EndTable();
 }
 
 // One sidebar entry: icon + label, highlighted when selected.
@@ -338,9 +468,12 @@ void resetPage(SettingsTab tab) {
         break;
     case SettingsTab::Interface:
         s.timelineLayerRow = d.timelineLayerRow, s.timelinePropertyRow = d.timelinePropertyRow;
-        s.keyframeSize = d.keyframeSize, s.textScale = d.textScale;
+        s.keyframeSize = d.keyframeSize, s.textScale = d.textScale, s.uiFont = d.uiFont;
         break;
-    case SettingsTab::Editor: s.snapDistance = d.snapDistance; break;
+    case SettingsTab::Editor:
+        s.snapDistance = d.snapDistance, s.arrowFrames = d.arrowFrames, s.bigArrowFrames = d.bigArrowFrames;
+        break;
+    case SettingsTab::Shortcuts: loadKeymap("{}"); break;
     case SettingsTab::Plugins: enableAllPlugins(); break;
     }
     changed();
@@ -377,6 +510,7 @@ void drawSettings() {
     static constexpr Page kPages[] = {{SettingsTab::Theme, "Theme", Icon::Palette},
                                       {SettingsTab::Interface, "Interface", Icon::Sliders},
                                       {SettingsTab::Editor, "Editor", Icon::Magnet},
+                                      {SettingsTab::Shortcuts, "Shortcuts", Icon::Text},
                                       {SettingsTab::Plugins, "Plugins", Icon::Plugin}};
     ImGui::BeginChild("##sidebar", ImVec2(170, 0), ImGuiChildFlags_None);
     for (const Page& p : kPages)
@@ -389,6 +523,7 @@ void drawSettings() {
         ImGui::TextUnformatted("Reset every setting to its default?");
         if (accentButton("Reset All")) {
             settings() = Settings{};
+            loadKeymap("{}");
             enableAllPlugins();
             changed();
             ImGui::CloseCurrentPopup();
@@ -407,7 +542,7 @@ void drawSettings() {
         ImGui::SameLine(0, 0);
     }
     ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_None);
-    const char* titles[] = {"Theme", "Interface", "Editor", "Plugins"};
+    const char* titles[] = {"Theme", "Interface", "Editor", "Shortcuts", "Plugins"};
     if (pageHeader(titles[static_cast<int>(g_tab)])) resetPage(g_tab);
     switch (g_tab) {
     case SettingsTab::Theme:
@@ -424,6 +559,7 @@ void drawSettings() {
         break;
     case SettingsTab::Interface: drawInterface(s); break;
     case SettingsTab::Editor: drawEditor(s); break;
+    case SettingsTab::Shortcuts: drawShortcuts(); break;
     case SettingsTab::Plugins: drawPluginsTab(); break;
     }
     ImGui::EndChild();

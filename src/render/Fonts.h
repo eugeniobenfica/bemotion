@@ -42,6 +42,8 @@ public:
     // Adds fonts requested since the last call to the atlas (call between frames).
     static void processPending();
 
+    // The interface font family ("Inter" by default; any installed family).
+    static void setUiFamily(const std::string& family);
     static ImFont* ui();
     static ImFont* uiMedium();
     static ImFont* uiBold();

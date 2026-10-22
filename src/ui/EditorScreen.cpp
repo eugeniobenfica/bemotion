@@ -2,7 +2,9 @@
 
 #include "app/Platform.h"
 #include "app/RecentProjects.h"
+#include "app/Settings.h"
 #include "ui/HelpWindow.h"
+#include "ui/Keymap.h"
 #include "ui/SettingsWindow.h"
 #include "core/Serialization.h"
 #include "render/Fonts.h"
@@ -76,6 +78,15 @@ void EditorScreen::buildDefaultLayout(unsigned int dockspaceId) {
     viewport_.requestFit();
 }
 
+namespace {
+// The shortcut shown next to a menu item (follows Settings > Shortcuts).
+const char* keys(ui::Action a) {
+    static std::string names[static_cast<int>(ui::Action::Count)];
+    names[static_cast<int>(a)] = ui::chordName(ui::chordOf(a));
+    return names[static_cast<int>(a)].c_str();
+}
+} // namespace
+
 void EditorScreen::drawMenuBar() {
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10, 8));
     if (!ImGui::BeginMainMenuBar()) {
@@ -95,54 +106,54 @@ void EditorScreen::drawMenuBar() {
     }
 
     if (ImGui::BeginMenu("File")) {
-        if (ImGui::MenuItem("Save", "Ctrl+S")) save();
-        if (ImGui::MenuItem("Save As...", "Ctrl+Shift+S")) saveAs();
+        if (ImGui::MenuItem("Save", keys(ui::Action::Save))) save();
+        if (ImGui::MenuItem("Save As...", keys(ui::Action::SaveAs))) saveAs();
         if (ImGui::MenuItem("Show in Folder", nullptr, false, !ctx_.path.empty()))
             platform::revealInFileManager(ctx_.path);
         ImGui::Separator();
-        if (ImGui::MenuItem("Export Video...", "Ctrl+M")) exportDialog_.open(ctx_);
+        if (ImGui::MenuItem("Export Video...", keys(ui::Action::Export))) exportDialog_.open(ctx_);
         ImGui::Separator();
-        if (ImGui::MenuItem("Close Project", "Ctrl+W")) askLeave(Request::GoHome);
-        if (ImGui::MenuItem("Quit", "Ctrl+Q")) askLeave(Request::Quit);
+        if (ImGui::MenuItem("Close Project", keys(ui::Action::CloseProject))) askLeave(Request::GoHome);
+        if (ImGui::MenuItem("Quit", keys(ui::Action::Quit))) askLeave(Request::Quit);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Edit")) {
-        if (ImGui::MenuItem("Undo", "Ctrl+Z", false, ctx_.history.canUndo() || ctx_.isDirty())) ctx_.undo();
-        if (ImGui::MenuItem("Redo", "Ctrl+Shift+Z", false, ctx_.history.canRedo())) ctx_.redo();
+        if (ImGui::MenuItem("Undo", keys(ui::Action::Undo), false, ctx_.history.canUndo() || ctx_.isDirty())) ctx_.undo();
+        if (ImGui::MenuItem("Redo", keys(ui::Action::Redo), false, ctx_.history.canRedo())) ctx_.redo();
         ImGui::Separator();
         const bool any = !ctx_.selection.empty();
-        if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, any)) ctx_.duplicateSelected();
-        if (ImGui::MenuItem("Delete", "Del", false, any)) ctx_.deleteSelected();
+        if (ImGui::MenuItem("Duplicate", keys(ui::Action::Duplicate), false, any)) ctx_.duplicateSelected();
+        if (ImGui::MenuItem("Delete", keys(ui::Action::Delete), false, any)) ctx_.deleteSelected();
         ImGui::Separator();
-        if (ImGui::MenuItem("Select All", "Ctrl+A")) ctx_.selectAll();
-        if (ImGui::MenuItem("Deselect", "Esc")) ctx_.select(0);
+        if (ImGui::MenuItem("Select All", keys(ui::Action::SelectAll))) ctx_.selectAll();
+        if (ImGui::MenuItem("Deselect", keys(ui::Action::Deselect))) ctx_.select(0);
         ImGui::Separator();
-        if (ImGui::MenuItem("Settings...", "Ctrl+,")) ui::openSettings();
+        if (ImGui::MenuItem("Settings...", keys(ui::Action::Settings))) ui::openSettings();
         if (ImGui::MenuItem("Plugins...")) ui::openSettings(ui::SettingsTab::Plugins);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Layer")) {
         const bool any = !ctx_.selection.empty();
-        if (ImGui::MenuItem("Split at Playhead", "Ctrl+K")) ctx_.splitSelectedAtPlayhead();
+        if (ImGui::MenuItem("Split at Playhead", keys(ui::Action::Split))) ctx_.splitSelectedAtPlayhead();
         ImGui::Separator();
-        if (ImGui::MenuItem("Create Compound", "Ctrl+G", false, any)) ctx_.createCompound();
-        if (ImGui::MenuItem("Release Compound", "Ctrl+Shift+G", false, ctx_.selectionHasCompound()))
+        if (ImGui::MenuItem("Create Compound", keys(ui::Action::CreateCompound), false, any)) ctx_.createCompound();
+        if (ImGui::MenuItem("Release Compound", keys(ui::Action::ReleaseCompound), false, ctx_.selectionHasCompound()))
             ctx_.releaseSelectedCompounds();
         if (ImGui::BeginMenu("Effect", any)) {
             effectMenuItems(ctx_);
             ImGui::EndMenu();
         }
-        if (ImGui::MenuItem("Cut Tool", "C", ctx_.tool == Tool::Razor)) ctx_.tool = Tool::Razor;
-        if (ImGui::MenuItem("Selection Tool", "V", ctx_.tool == Tool::Select)) ctx_.tool = Tool::Select;
+        if (ImGui::MenuItem("Cut Tool", keys(ui::Action::CutTool), ctx_.tool == Tool::Razor)) ctx_.tool = Tool::Razor;
+        if (ImGui::MenuItem("Selection Tool", keys(ui::Action::SelectTool), ctx_.tool == Tool::Select)) ctx_.tool = Tool::Select;
         ImGui::Separator();
-        if (ImGui::MenuItem("Bring to Front", "Ctrl+Shift+]", false, any)) ctx_.shiftSelected(-1000);
-        if (ImGui::MenuItem("Bring Forward", "Ctrl+]", false, any)) ctx_.shiftSelected(-1);
-        if (ImGui::MenuItem("Send Backward", "Ctrl+[", false, any)) ctx_.shiftSelected(1);
-        if (ImGui::MenuItem("Send to Back", "Ctrl+Shift+[", false, any)) ctx_.shiftSelected(1000);
+        if (ImGui::MenuItem("Bring to Front", keys(ui::Action::BringToFront), false, any)) ctx_.shiftSelected(-1000);
+        if (ImGui::MenuItem("Bring Forward", keys(ui::Action::BringForward), false, any)) ctx_.shiftSelected(-1);
+        if (ImGui::MenuItem("Send Backward", keys(ui::Action::SendBackward), false, any)) ctx_.shiftSelected(1);
+        if (ImGui::MenuItem("Send to Back", keys(ui::Action::SendToBack), false, any)) ctx_.shiftSelected(1000);
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Add")) {
-        if (ImGui::MenuItem("Text", "T")) ctx_.addText();
+        if (ImGui::MenuItem("Text", keys(ui::Action::AddText))) ctx_.addText();
         if (ImGui::MenuItem("Camera")) ctx_.addCamera();
         ImGui::Separator();
         for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i)
@@ -150,12 +161,12 @@ void EditorScreen::drawMenuBar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("View")) {
-        if (ImGui::MenuItem("Fit Composition", "Ctrl+0")) viewport_.requestFit();
-        if (ImGui::MenuItem("Actual Size (100%)", "Ctrl+1")) viewport_.setZoom(1.0f);
-        if (ImGui::MenuItem("Zoom In", "Ctrl+=")) viewport_.zoomBy(1.25f);
-        if (ImGui::MenuItem("Zoom Out", "Ctrl+-")) viewport_.zoomBy(1.0f / 1.25f);
+        if (ImGui::MenuItem("Fit Composition", keys(ui::Action::FitView))) viewport_.requestFit();
+        if (ImGui::MenuItem("Actual Size (100%)", keys(ui::Action::ActualSize))) viewport_.setZoom(1.0f);
+        if (ImGui::MenuItem("Zoom In", keys(ui::Action::ZoomIn))) viewport_.zoomBy(1.25f);
+        if (ImGui::MenuItem("Zoom Out", keys(ui::Action::ZoomOut))) viewport_.zoomBy(1.0f / 1.25f);
         ImGui::Separator();
-        ImGui::MenuItem("Snapping", "S", &ctx_.snapping);
+        ImGui::MenuItem("Snapping", keys(ui::Action::ToggleSnapping), &ctx_.snapping);
         ImGui::MenuItem("Rulers", nullptr, &ctx_.showRulers);
         if (ImGui::BeginMenu("Guides")) {
             ImGui::MenuItem("Show Guides", nullptr, &ctx_.showGuides);
@@ -188,7 +199,7 @@ void EditorScreen::drawMenuBar() {
         ImGui::EndMenu();
     }
     if (ImGui::BeginMenu("Help")) {
-        if (ImGui::MenuItem("Keyboard Shortcuts", "F1")) ui::openHelp(ui::HelpTab::Shortcuts);
+        if (ImGui::MenuItem("Keyboard Shortcuts", keys(ui::Action::Help))) ui::openHelp(ui::HelpTab::Shortcuts);
         ImGui::Separator();
         if (ImGui::MenuItem("About bemotion")) ui::openHelp(ui::HelpTab::About);
         if (ImGui::MenuItem("Credits")) ui::openHelp(ui::HelpTab::Credits);
@@ -228,65 +239,65 @@ void EditorScreen::drawMenuBar() {
 
 void EditorScreen::handleShortcuts() {
     if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) return;
+    using ui::Action;
+    auto pressed = [](Action a, bool repeat = false) { return ui::shortcutPressed(a, repeat); };
+
+    if (pressed(Action::Save)) save();
+    if (pressed(Action::SaveAs)) saveAs();
+    if (pressed(Action::Undo, true)) ctx_.undo();
+    if (pressed(Action::Redo, true) || ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, ImGuiInputFlags_RouteGlobal)) ctx_.redo();
+    if (pressed(Action::Duplicate)) ctx_.duplicateSelected();
+    if (pressed(Action::CloseProject)) askLeave(Request::GoHome);
+    if (pressed(Action::Quit)) askLeave(Request::Quit);
+    if (pressed(Action::FitView)) viewport_.requestFit();
+    if (pressed(Action::ActualSize)) viewport_.setZoom(1.0f);
+    if (pressed(Action::ZoomIn, true)) viewport_.zoomBy(1.25f);
+    if (pressed(Action::ZoomOut, true)) viewport_.zoomBy(1.0f / 1.25f);
+    if (pressed(Action::Export)) exportDialog_.open(ctx_);
+    if (pressed(Action::Split)) ctx_.splitSelectedAtPlayhead();
+    if (pressed(Action::CreateCompound)) ctx_.createCompound();
+    if (pressed(Action::ReleaseCompound)) ctx_.releaseSelectedCompounds();
+    if (pressed(Action::EasyEase)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EasyEase);
+    if (pressed(Action::EaseIn)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseIn);
+    if (pressed(Action::EaseOut)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseOut);
+    if (pressed(Action::BringForward)) ctx_.shiftSelected(-1);
+    if (pressed(Action::SendBackward)) ctx_.shiftSelected(1);
+    if (pressed(Action::BringToFront)) ctx_.shiftSelected(-1000);
+    if (pressed(Action::SendToBack)) ctx_.shiftSelected(1000);
+    if (pressed(Action::SelectAll)) ctx_.selectAll();
+
+    // Play / pause on Space: a tap toggles playback, holding it turns the mouse into a hand (viewport pan).
     const ImGuiIO& io = ImGui::GetIO();
-    constexpr ImGuiInputFlags global = ImGuiInputFlags_RouteGlobal;
-
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_S, global)) save();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_S, global)) saveAs();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Z, global)) ctx_.undo();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_Z, global) ||
-        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Y, global))
-        ctx_.redo();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_D, global)) ctx_.duplicateSelected();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_W, global)) askLeave(Request::GoHome);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Q, global)) askLeave(Request::Quit);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_0, global)) viewport_.requestFit();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_1, global)) viewport_.setZoom(1.0f);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Equal, global) || ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadAdd, global))
-        viewport_.zoomBy(1.25f);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_Minus, global) ||
-        ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_KeypadSubtract, global))
-        viewport_.zoomBy(1.0f / 1.25f);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_M, global)) exportDialog_.open(ctx_);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_K, global)) ctx_.splitSelectedAtPlayhead();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_G, global)) ctx_.createCompound();
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_G, global)) ctx_.releaseSelectedCompounds();
-    // Keyframe easing, as in After Effects.
-    if (ImGui::Shortcut(ImGuiKey_F9, global)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EasyEase);
-    if (ImGui::Shortcut(ImGuiMod_Shift | ImGuiKey_F9, global)) TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseIn);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_F9, global))
-        TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseOut);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_RightBracket, global)) ctx_.shiftSelected(-1);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_LeftBracket, global)) ctx_.shiftSelected(1);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_RightBracket, global)) ctx_.shiftSelected(-1000);
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiMod_Shift | ImGuiKey_LeftBracket, global)) ctx_.shiftSelected(1000);
-
-    // Single-key shortcuts must not fire while typing.
-    if (io.WantTextInput) return;
-    if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_A, global)) ctx_.selectAll();
-
-    // Space: a tap toggles playback, holding it turns the mouse into a hand (viewport pan).
-    if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) viewport_.takeSpaceUsed();
-    if (ImGui::IsKeyReleased(ImGuiKey_Space) && !viewport_.takeSpaceUsed()) ctx_.playing = !ctx_.playing;
-
-    // Plain keys only: Ctrl+K must not also act as K.
-    if (ImGui::IsAnyItemActive() || io.KeyCtrl || io.KeyAlt || io.KeySuper) return;
-    const bool shift = io.KeyShift;
-    if (ImGui::IsKeyPressed(ImGuiKey_V, false)) ctx_.tool = Tool::Select;
-    if (ImGui::IsKeyPressed(ImGuiKey_C, false)) ctx_.tool = Tool::Razor;
-    if (ImGui::IsKeyPressed(ImGuiKey_S, false)) ctx_.snapping = !ctx_.snapping;
-    if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow)) ctx_.stepFrames(shift ? -10 : -1);
-    if (ImGui::IsKeyPressed(ImGuiKey_RightArrow)) ctx_.stepFrames(shift ? 10 : 1);
-    if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) ctx_.setTime(0.0);
-    if (ImGui::IsKeyPressed(ImGuiKey_End, false)) ctx_.setTime(ctx_.comp().duration);
-    if (ImGui::IsKeyPressed(ImGuiKey_J)) jumpToKeyframe(-1);
-    if (ImGui::IsKeyPressed(ImGuiKey_K)) jumpToKeyframe(+1);
-    if (ImGui::IsKeyPressed(ImGuiKey_T, false)) ctx_.addText();
-    if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
-        if (ctx_.tool != Tool::Select) ctx_.tool = Tool::Select;
-        else ctx_.select(0);
+    if (ui::chordOf(Action::PlayPause) == ImGuiKey_Space) {
+        if (!io.WantTextInput) {
+            if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) viewport_.takeSpaceUsed();
+            if (ImGui::IsKeyReleased(ImGuiKey_Space) && !viewport_.takeSpaceUsed()) ctx_.playing = !ctx_.playing;
+        }
+    } else if (pressed(Action::PlayPause)) {
+        ctx_.playing = !ctx_.playing;
     }
-    if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
+
+    const Settings& st = settings();
+    if (pressed(Action::PrevFrame, true)) ctx_.stepFrames(-st.arrowFrames);
+    if (pressed(Action::NextFrame, true)) ctx_.stepFrames(st.arrowFrames);
+    if (pressed(Action::PrevFrames, true)) ctx_.stepFrames(-st.bigArrowFrames);
+    if (pressed(Action::NextFrames, true)) ctx_.stepFrames(st.bigArrowFrames);
+    if (pressed(Action::GoToStart)) ctx_.setTime(0.0);
+    if (pressed(Action::GoToEnd)) ctx_.setTime(ctx_.comp().duration);
+    if (pressed(Action::PrevKeyframe, true)) jumpToKeyframe(-1);
+    if (pressed(Action::NextKeyframe, true)) jumpToKeyframe(+1);
+    if (pressed(Action::SelectTool)) ctx_.tool = Tool::Select;
+    if (pressed(Action::CutTool)) ctx_.tool = Tool::Razor;
+    if (pressed(Action::ToggleSnapping)) ctx_.snapping = !ctx_.snapping;
+    if (pressed(Action::AddText)) ctx_.addText();
+    if (pressed(Action::Deselect)) {
+        if (ctx_.tool != Tool::Select) ctx_.tool = Tool::Select;
+        else if (!ctx_.selection.empty()) ctx_.select(0);
+        else ctx_.exitScope(); // nothing selected: leave the open compound
+    }
+    const bool backspace = !io.WantTextInput && !ImGui::IsAnyItemActive() && !io.KeyCtrl &&
+                           ImGui::IsKeyPressed(ImGuiKey_Backspace, false);
+    if (pressed(Action::Delete) || backspace) {
         if (!ctx_.selectedKeys.empty()) ctx_.deleteSelectedKeys();
         else ctx_.deleteSelected();
     }
