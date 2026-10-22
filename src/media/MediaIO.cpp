@@ -8,6 +8,9 @@
 #define STBI_FAILURE_USERMSG
 #include <stb_image.h>
 
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX // miniaudio includes <windows.h>: keep std::min / std::max usable
+#endif
 #include <miniaudio.h>
 
 #include <algorithm>

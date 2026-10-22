@@ -3,6 +3,9 @@
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
 
+#if defined(_WIN32) && !defined(NOMINMAX)
+#define NOMINMAX // miniaudio includes <windows.h>: keep std::min / std::max usable
+#endif
 #define MINIAUDIO_IMPLEMENTATION
 #define MA_NO_ENCODING
 #define MA_NO_GENERATION
