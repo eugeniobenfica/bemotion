@@ -61,6 +61,7 @@ private:
     void showEditor(Project project, const std::filesystem::path& path);
     void goHome();
     void updateTitle();
+    void offerRecovery(); // projects a crash left unsaved (app/Recovery.h)
 
     RecentProjects recents_;
     MainWindow* window_ = nullptr;

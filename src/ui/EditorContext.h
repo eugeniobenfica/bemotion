@@ -93,6 +93,10 @@ public:
     Layer& addPluginObject(const struct PluginObjectType& type, std::optional<Vec2> position = {});
     void deleteSelected();
     void duplicateSelected();
+    // Copy / paste (core/Clipboard.h): the selection as text; pasted layers start at the
+    // playhead, above the selection, and become the selection. False when nothing was pasted.
+    std::string copySelected();
+    bool paste(const std::string& text);
     // Compounds: group the selection (Ctrl+G) / put selected compounds' contents back (Ctrl+Shift+G).
     void createCompound();
     // The compound open in the timeline (0: the whole composition). New layers go

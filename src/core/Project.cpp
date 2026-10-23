@@ -25,7 +25,8 @@ void Composition::fitDuration() {
     for (const Layer& l : layers)
         if (!findLayer(l.parent)) end = std::max(end, l.outPoint); // inside a compound, the compound bounds it
     // Whole frames, so the last clip's last frame is part of the composition.
-    const double frames = std::ceil(std::max(end, kMinCompDuration) * fps - 1e-6);
+    double frames = std::ceil(std::max(end, kMinCompDuration) * fps - 1e-6);
+    if (maxDuration > 0.0) frames = std::max(1.0, std::min(frames, std::ceil(maxDuration * fps - 1e-6)));
     duration = frames / fps;
 }
 

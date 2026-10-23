@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QFrame>
 #include <QScrollArea>
 
 #include <vector>
@@ -11,9 +12,9 @@ namespace ui {
 class Tile;
 }
 
-// The Tools tab (next to Objects and Media): every tool and editing action
-// that fits in the timeline's toolbar. Click one to use it, or drag it into
-// the toolbar to keep it at hand (see ui/Tools.h).
+// Every tool and editing action that fits in the timeline's toolbar. Click one
+// to use it, or drag it into the toolbar to keep it at hand (see ui/Tools.h).
+// Shown in a ToolsPopover, opened from the toolbar's "+".
 class ToolsPanel : public QScrollArea {
     Q_OBJECT
 public:
@@ -28,6 +29,21 @@ private:
     EditorContext& ctx_;
     std::vector<ui::Tile*> tiles_; // by catalog index
     int columns_ = 0;
+};
+
+// A floating card over the editor (not a window: tiles drag straight into the toolbar).
+// Closes on Escape or a click elsewhere.
+class ToolsPopover : public QFrame {
+    Q_OBJECT
+public:
+    ToolsPopover(ToolsPanel* panel, QWidget* host);
+    // Opens next to `anchor` (host coordinates): above it when there is room, else below.
+    void popup(QPoint anchor);
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+    void paintEvent(QPaintEvent* e) override;
+    void hideEvent(QHideEvent* e) override;
 };
 
 } // namespace bemotion

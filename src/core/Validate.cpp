@@ -41,6 +41,23 @@ private:
             report("composition", "frame rate must be between 1 and 240");
             c.fps = finite(c.fps) ? std::clamp(c.fps, 1.0, 240.0) : 30.0;
         }
+        for (Layer& l : c.layers) {
+            DataTable& t = l.plugin.table;
+            if (!l.plugin.hasTable) continue;
+            size_t width = t.header.size();
+            for (const auto& r : t.rows) width = std::max(width, r.size());
+            bool ragged = t.header.size() != width;
+            for (auto& r : t.rows) ragged = ragged || r.size() != width;
+            if (ragged) {
+                report(layerName(l), "table rows must all have as many cells as the header (padded)");
+                t.header.resize(width);
+                for (auto& r : t.rows) r.resize(width);
+            }
+        }
+        if (!finite(c.maxDuration) || c.maxDuration < 0.0) {
+            report("composition", "the length limit must be zero (none) or a positive number of seconds");
+            c.maxDuration = 0.0;
+        }
         if (!finite(c.duration) || c.duration <= 0.0) {
             report("composition", "duration must be a positive number");
             c.fitDuration();

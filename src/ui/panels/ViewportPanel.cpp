@@ -1072,7 +1072,7 @@ void ViewportPanel::beginTextEdit(uint64_t layerId) {
             }
         });
         textHint_ = new QLabel("Enter to finish  ·  Ctrl+Enter for a new line  ·  Esc to cancel", this);
-        textHint_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+        ui::setTone(textHint_, ui::Tone::TextFaint);
     }
     textEdit_ = layerId;
     textBefore_ = layer->text.text;

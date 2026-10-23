@@ -14,7 +14,7 @@ enum class Action {
     // Files
     Save, SaveAs, ImportMedia, Export, CloseProject, Quit, Settings, Help,
     // Editing
-    Undo, Redo, Duplicate, Delete, SelectAll, Deselect, CreateCompound, ReleaseCompound,
+    Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, SelectAll, Deselect, CreateCompound, ReleaseCompound,
     BringForward, SendBackward, BringToFront, SendToBack,
     // Playback & time
     PlayPause, PrevFrame, NextFrame, PrevFrames, NextFrames, GoToStart, GoToEnd, PrevKeyframe, NextKeyframe,

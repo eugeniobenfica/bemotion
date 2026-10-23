@@ -105,7 +105,7 @@ QGridLayout* CollapsibleSection::grid() {
 void CollapsibleSection::addPlainRow(const QString& label, QWidget* editor) {
     QGridLayout* g = grid();
     auto* l = new QLabel(label);
-    l->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextDim).name()));
+    ui::setTone(l, ui::Tone::TextDim);
     g->addWidget(l, gridRows_, 1);
     g->addWidget(editor, gridRows_, 2);
     ++gridRows_;
@@ -194,7 +194,7 @@ QWidget* PropertyRow::buildEditors(const PropertyRef& prop) {
         connect(color_, &ui::ColorButton::colorChanged, this, [this](Color c) { setValue({c.r, c.g, c.b, c.a}); });
         values->addWidget(color_);
         hex_ = new QLabel;
-        hex_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextDim).name()));
+        ui::setTone(hex_, ui::Tone::TextDim);
         values->addWidget(hex_, 1);
         break;
     }

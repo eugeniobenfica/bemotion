@@ -1,5 +1,8 @@
 #include "core/Ops.h"
 
+#include "core/Arrange.h"
+#include "core/Data.h"
+#include "core/Transitions.h"
 #include "core/Validate.h"
 
 #include <algorithm>
@@ -219,6 +222,10 @@ public:
             {"effect.add", &Applier::effectAdd},
             {"effect.remove", &Applier::effectRemove},
             {"effect.set", &Applier::effectSet},
+            {"transition.add", &Applier::transitionAdd},
+            {"arrange.distribute", &Applier::arrangeDistribute},
+            {"arrange.stagger", &Applier::arrangeStagger},
+            {"data.set", &Applier::dataSet},
             {"media.import", &Applier::mediaImport},
             {"query.composition", &Applier::queryComposition},
             {"query.layers", &Applier::queryLayers},
@@ -318,6 +325,11 @@ private:
             c_.fps = fps;
         }
         if (has(op, "background")) c_.background = colorOf(op["background"], "background");
+        if (has(op, "max_duration")) {
+            const double limit = number(op["max_duration"], "max_duration");
+            if (limit < 0 || (limit > 0 && limit < c_.frameDuration())) fail("\"max_duration\" must be 0 (no limit) or at least one frame");
+            c_.maxDuration = limit;
+        }
         c_.syncCameras();
         return json::object();
     }
@@ -604,6 +616,115 @@ private:
         return json::object();
     }
 
+    // A "layers" list (ids or names); "all" or missing: every layer.
+    std::vector<uint64_t> layerList(const json& op) {
+        std::vector<uint64_t> ids;
+        if (!has(op, "layers") || (op["layers"].is_string() && op["layers"].get<std::string>() == "all")) {
+            for (const Layer& l : c_.layers) ids.push_back(l.id);
+            return ids;
+        }
+        if (!op["layers"].is_array()) fail("\"layers\" must be a list of layers (ids or names) or \"all\"");
+        for (const json& ref : op["layers"]) ids.push_back(layer(json{{"layer", ref}}).id);
+        return ids;
+    }
+
+    json transitionAdd(const json& op) {
+        Layer& l = layer(op);
+        const std::string id = text(field(op, "transition"), "transition");
+        if (!findTransition(id)) {
+            std::vector<std::string> ids;
+            for (const TransitionInfo& t : transitions()) ids.push_back(t.id);
+            fail("unknown transition \"" + id + "\"" + suggest(id, ids));
+        }
+        const std::string edgeName = has(op, "edge") ? text(op["edge"], "edge") : "in";
+        TransitionEdge edge = TransitionEdge::In;
+        if (edgeName == "out") edge = TransitionEdge::Out;
+        else if (edgeName == "both") edge = TransitionEdge::Both;
+        else if (edgeName != "in") fail("\"edge\" must be \"in\", \"out\" or \"both\"");
+        const double duration = number(op, "duration", 0.5);
+        if (duration <= 0) fail("\"duration\" must be positive");
+        if (!applyTransition(l, id, edge, duration)) fail("layer \"" + l.name + "\" cannot take a transition (" + typeName(l) + ")");
+        return json::object();
+    }
+
+    json arrangeDistribute(const json& op) {
+        const std::string axis = has(op, "axis") ? text(op["axis"], "axis") : "x";
+        if (axis != "x" && axis != "y") fail("\"axis\" must be \"x\" or \"y\"");
+        std::string error;
+        if (!distributeLayers(c_, layerList(op), axis == "y", time(op), &error)) fail(error);
+        return json::object();
+    }
+
+    json arrangeStagger(const json& op) {
+        const double step = number(op, "step", 0.1);
+        std::string error;
+        if (!staggerLayers(c_, layerList(op), step, &error)) fail(error);
+        return json::object();
+    }
+
+    // The data of a plugin object (charts: rows; tables: a table), from JSON or CSV text.
+    json dataSet(const json& op) {
+        Layer& l = layer(op);
+        PluginProps& p = l.plugin;
+        if (l.type != LayerType::Plugin || (!p.hasRows && !p.hasTable)) fail("layer \"" + l.name + "\" holds no data (" + typeName(l) + ")");
+        if (has(op, "csv")) {
+            const Cells cells = parseCsv(text(op["csv"], "csv"));
+            if (p.hasRows) {
+                std::vector<DataRow> rows = rowsFromCells(cells);
+                if (rows.empty()) fail("no \"label, value\" lines found in the CSV");
+                p.rows = std::move(rows);
+            } else {
+                if (cells.empty()) fail("the CSV is empty");
+                p.table = tableFromCells(cells);
+            }
+            return json::object();
+        }
+        if (has(op, "rows")) {
+            if (!p.hasRows) fail("this object takes a \"table\", not \"rows\"");
+            if (!op["rows"].is_array()) fail("\"rows\" must be a list of {\"label\", \"value\", \"color\"} (or [label, value, color])");
+            std::vector<DataRow> rows;
+            for (const json& r : op["rows"]) {
+                DataRow row;
+                row.color = labelColor(static_cast<int>(rows.size()));
+                if (r.is_array() && r.size() >= 2) {
+                    row.label = r[0].is_string() ? r[0].get<std::string>() : r[0].dump();
+                    row.value = static_cast<float>(number(r[1], "value"));
+                    if (r.size() > 2) row.color = colorOf(r[2], "color");
+                } else if (r.is_object()) {
+                    row.label = has(r, "label") ? text(r["label"], "label") : "";
+                    row.value = static_cast<float>(number(field(r, "value"), "value"));
+                    if (has(r, "color")) row.color = colorOf(r["color"], "color");
+                } else {
+                    fail("each row must be {\"label\", \"value\"(, \"color\")} or [label, value(, color)]");
+                }
+                rows.push_back(std::move(row));
+            }
+            p.rows = std::move(rows);
+            return json::object();
+        }
+        if (has(op, "table")) {
+            if (!p.hasTable) fail("this object takes \"rows\", not a \"table\"");
+            const json& t = op["table"];
+            if (!t.is_object() || !has(t, "rows") || !t["rows"].is_array())
+                fail("\"table\" must be {\"header\": [...], \"rows\": [[...], ...]}");
+            auto cell = [](const json& c) { return c.is_string() ? c.get<std::string>() : c.dump(); };
+            Cells cells;
+            std::vector<std::string> header;
+            if (has(t, "header") && t["header"].is_array())
+                for (const json& h : t["header"]) header.push_back(cell(h));
+            cells.push_back(header);
+            for (const json& r : t["rows"]) {
+                if (!r.is_array()) fail("every table row must be a list of cells");
+                std::vector<std::string> row;
+                for (const json& c : r) row.push_back(cell(c));
+                cells.push_back(std::move(row));
+            }
+            p.table = tableFromCells(cells);
+            return json::object();
+        }
+        fail("give \"rows\", \"table\" or \"csv\"");
+    }
+
     json mediaImport(const json& op) {
         const std::string path = text(field(op, "path"), "path");
         if (!env_.probeMedia) fail("importing media is not available here");
@@ -622,7 +743,8 @@ private:
         for (const MediaItem& m : c_.media)
             media.push_back({{"media", m.id}, {"name", m.name}, {"kind", mediaKindLabel(m.kind)}, {"path", m.path}});
         return {{"name", p_.name}, {"width", c_.width}, {"height", c_.height}, {"fps", c_.fps}, {"duration", c_.duration},
-                {"background", hexOf(c_.background)}, {"layers", c_.layers.size()}, {"media", media}};
+                {"max_duration", c_.maxDuration}, {"background", hexOf(c_.background)}, {"layers", c_.layers.size()},
+                {"media", media}};
     }
 
     json layerSummary(const Layer& l) {
@@ -650,6 +772,12 @@ private:
                          {"align", kAlignNames[static_cast<int>(l.text.align)]}};
         if (l.type == LayerType::Shape) j["shape"] = {{"fill", l.shape.fillEnabled}, {"stroke", l.shape.strokeEnabled}};
         if (l.type == LayerType::Media) j["media"] = l.media.mediaId;
+        if (l.plugin.hasRows) {
+            json rows = json::array();
+            for (const DataRow& r : l.plugin.rows) rows.push_back({{"label", r.label}, {"value", r.value}, {"color", hexOf(r.color)}});
+            j["rows"] = rows;
+        }
+        if (l.plugin.hasTable) j["table"] = {{"header", l.plugin.table.header}, {"rows", l.plugin.table.rows}};
         json props = json::object();
         for (const PropertyRef& p : l.properties()) {
             json pj = {{"value", valueJson(p.kind, propertyValue(p, t))}};

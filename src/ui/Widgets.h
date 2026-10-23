@@ -88,6 +88,12 @@ enum class Icon {
     Ease,
     LayerUp,
     LayerDown,
+    ChevronLeft,
+    Minimize, // a panel's minimize button
+    Copy,
+    Paste,
+    Transition,
+    Table,
 };
 
 Icon iconForLayer(const Layer& layer);
@@ -100,10 +106,19 @@ void drawIcon(Draw& d, Icon icon, Pt center, float size, Rgba color);
 void drawDiamond(Draw& d, Pt center, float radius, Rgba fill, Rgba outline);
 // The bemotion mark (render/LogoMark.h): a disc of `radius` around `center`.
 void drawLogoMark(QPainter& p, Pt center, float radius, Rgba color);
-QIcon makeIcon(Icon icon, Rgba color, int size = 32); // for menus and Qt buttons
+QIcon makeIcon(Icon icon, Rgba color, int size = 32); // for Qt buttons
+QIcon menuIcon(Icon icon, Rgba color);                 // fills a menu's icon column
+
+// "Limit length to [N] s": a checkbox and a seconds field; `changed` gets 0 when unchecked.
+QWidget* lengthLimitRow(double seconds, std::function<void(double)> changed);
 
 // "HH:MM:SS:FF" timecode.
 std::string formatTimecode(double seconds, double fps);
+
+// Text colors that follow the theme: setTone colors a label (or any widget's text) with one of
+// the theme's roles, and recolors it whenever the appearance changes.
+enum class Tone { Text, TextDim, TextFaint, Accent, Danger, Border };
+void setTone(QWidget* widget, Tone tone);
 
 // A small label in capitals, faint (section headers in panels).
 QLabel* sectionLabel(const QString& text, QWidget* parent = nullptr);

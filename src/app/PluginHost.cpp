@@ -1,5 +1,6 @@
 #include "app/PluginHost.h"
 
+#include "core/Data.h"
 #include "app/Platform.h"
 #include "app/Settings.h"
 #include "core/Easing.h"
@@ -405,6 +406,103 @@ PluginParamKind kindFromName(const std::string& s) {
     return PluginParamKind::Number;
 }
 
+// Chart rows: { {label, value, color} | {label=, value=, color=}, ... } at `idx`.
+std::vector<DataRow> readRows(lua_State* L, int idx) {
+    std::vector<DataRow> rows;
+    idx = lua_absindex(L, idx);
+    for (lua_Integer i = 1; i <= luaL_len(L, idx); ++i) {
+        lua_rawgeti(L, idx, i);
+        const int e = lua_gettop(L);
+        if (lua_istable(L, e)) {
+            DataRow r;
+            lua_getfield(L, e, "label");
+            if (lua_isnil(L, -1)) {
+                lua_pop(L, 1);
+                lua_rawgeti(L, e, 1);
+            }
+            r.label = lua_type(L, -1) == LUA_TSTRING || lua_type(L, -1) == LUA_TNUMBER ? lua_tostring(L, -1) : "";
+            lua_pop(L, 1);
+            r.value = fieldNumber(L, e, "value", 2, 0);
+            lua_getfield(L, e, "color");
+            if (lua_isnil(L, -1)) {
+                lua_pop(L, 1);
+                lua_rawgeti(L, e, 3);
+            }
+            r.color = readColor(L, -1, labelColor(static_cast<int>(rows.size())));
+            lua_pop(L, 1);
+            rows.push_back(std::move(r));
+        }
+        lua_pop(L, 1);
+    }
+    return rows;
+}
+
+// A table: { header = {...}, rows = { {...}, ... } } at `idx` (cells as text).
+DataTable readTable(lua_State* L, int idx) {
+    idx = lua_absindex(L, idx);
+    Cells cells;
+    auto readLine = [&](int at) {
+        std::vector<std::string> line;
+        for (lua_Integer c = 1; c <= luaL_len(L, at); ++c) {
+            lua_rawgeti(L, at, c);
+            line.emplace_back(lua_type(L, -1) == LUA_TSTRING || lua_type(L, -1) == LUA_TNUMBER ? lua_tostring(L, -1) : "");
+            lua_pop(L, 1);
+        }
+        return line;
+    };
+    lua_getfield(L, idx, "header");
+    cells.push_back(lua_istable(L, -1) ? readLine(lua_gettop(L)) : std::vector<std::string>{});
+    lua_pop(L, 1);
+    lua_getfield(L, idx, "rows");
+    if (lua_istable(L, -1)) {
+        const int list = lua_gettop(L);
+        for (lua_Integer i = 1; i <= luaL_len(L, list); ++i) {
+            lua_rawgeti(L, list, i);
+            if (lua_istable(L, -1)) cells.push_back(readLine(lua_gettop(L)));
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+    return tableFromCells(cells);
+}
+
+void pushCells(lua_State* L, const Cells& cells) {
+    lua_createtable(L, static_cast<int>(cells.size()), 0);
+    for (size_t i = 0; i < cells.size(); ++i) {
+        lua_createtable(L, static_cast<int>(cells[i].size()), 0);
+        for (size_t c = 0; c < cells[i].size(); ++c) {
+            lua_pushstring(L, cells[i][c].c_str());
+            lua_rawseti(L, -2, static_cast<lua_Integer>(c + 1));
+        }
+        lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+    }
+}
+
+void pushTable(lua_State* L, const DataTable& t) {
+    lua_createtable(L, 0, 2);
+    pushCells(L, {t.header});
+    lua_rawgeti(L, -1, 1);
+    lua_setfield(L, -3, "header");
+    lua_pop(L, 1);
+    pushCells(L, t.rows);
+    lua_setfield(L, -2, "rows");
+}
+
+// bemotion.parse_csv(text) -> { {cell, ...}, ... } (rows of strings; see core/Data.h).
+int bmParseCsv(lua_State* L) {
+    pushCells(L, parseCsv(luaL_checkstring(L, 1)));
+    return 1;
+}
+
+// bemotion.number(text) -> number or nil: "1.234,5", "R$ 12", "45%" (core/Data.h).
+int bmNumber(lua_State* L) {
+    float v;
+    if (lua_type(L, 1) == LUA_TNUMBER) lua_pushvalue(L, 1);
+    else if (lua_type(L, 1) == LUA_TSTRING && parseNumber(lua_tostring(L, 1), v)) lua_pushnumber(L, v);
+    else lua_pushnil(L);
+    return 1;
+}
+
 int bmRegisterObject(lua_State* L) {
     luaL_checktype(L, 1, LUA_TTABLE);
     if (!g_registering) return luaL_error(L, "register_object can only be called while the plugin loads");
@@ -490,33 +588,20 @@ int bmRegisterObject(lua_State* L) {
     lua_getfield(L, 1, "rows");
     if (lua_istable(L, -1)) {
         t.prototype.hasRows = true;
-        const int list = lua_gettop(L);
-        for (lua_Integer i = 1; i <= luaL_len(L, list); ++i) {
-            lua_rawgeti(L, list, i);
-            const int e = lua_gettop(L);
-            if (lua_istable(L, e)) {
-                DataRow r;
-                lua_getfield(L, e, "label");
-                if (lua_isnil(L, -1)) {
-                    lua_pop(L, 1);
-                    lua_rawgeti(L, e, 1);
-                }
-                r.label = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "";
-                lua_pop(L, 1);
-                r.value = fieldNumber(L, e, "value", 2, 0);
-                lua_getfield(L, e, "color");
-                if (lua_isnil(L, -1)) {
-                    lua_pop(L, 1);
-                    lua_rawgeti(L, e, 3);
-                }
-                r.color = readColor(L, -1, labelColor(static_cast<int>(i - 1)));
-                lua_pop(L, 1);
-                t.prototype.rows.push_back(std::move(r));
-            }
-            lua_pop(L, 1);
-        }
+        t.prototype.rows = readRows(L, -1);
     }
     lua_pop(L, 1);
+
+    lua_getfield(L, 1, "table");
+    if (lua_istable(L, -1)) {
+        t.prototype.hasTable = true;
+        t.prototype.table = readTable(L, -1);
+    }
+    lua_pop(L, 1);
+
+    lua_getfield(L, 1, "import_csv");
+    if (lua_isfunction(L, -1)) t.importRef = luaL_ref(L, LUA_REGISTRYINDEX);
+    else lua_pop(L, 1);
 
     lua_getfield(L, 1, "draw");
     if (!lua_isfunction(L, -1)) return luaL_error(L, "register_object '%s': draw must be a function", id.c_str());
@@ -544,9 +629,10 @@ lua_State* newSandbox(const std::string& pluginId) {
     const luaL_Reg api[] = {{"register_object", bmRegisterObject}, {"register_command", bmRegisterCommand}, {"ease", bmEase},
                             {"color", bmColor},
                             {"mix", bmMix},                         {"with_alpha", bmWithAlpha}, {"format", bmFormat},
+                            {"parse_csv", bmParseCsv},              {"number", bmNumber},
                             {nullptr, nullptr}};
     luaL_newlib(L, api);
-    lua_pushinteger(L, 2); // 2: commands and operations
+    lua_pushinteger(L, 3); // 2: commands and operations; 3: tables, CSV import
     lua_setfield(L, -2, "api_version");
     lua_setglobal(L, "bemotion");
 
@@ -598,6 +684,10 @@ void pushParams(lua_State* L, const Layer& layer, double t) {
             lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
         }
         lua_setfield(L, -2, "rows");
+    }
+    if (p.hasTable) {
+        pushTable(L, p.table);
+        lua_setfield(L, -2, "table");
     }
 }
 
@@ -882,10 +972,92 @@ void PluginHost::reconcile(Layer& layer) const {
     props.defaultSize = type->prototype.defaultSize;
     if (type->prototype.hasRows && !props.hasRows) props.rows = type->prototype.rows;
     props.hasRows = type->prototype.hasRows;
+    if (type->prototype.hasTable && !props.hasTable) props.table = type->prototype.table;
+    props.hasTable = type->prototype.hasTable;
 }
 
 void PluginHost::reconcile(Composition& comp) const {
     for (Layer& l : comp.layers) reconcile(l);
+}
+
+bool PluginHost::importCsv(Layer& layer, const std::string& csv, std::string& error) {
+    PluginProps& props = layer.plugin;
+    if (!props.hasRows && !props.hasTable) {
+        error = "this object has no data";
+        return false;
+    }
+    const Cells cells = parseCsv(csv);
+    if (cells.empty()) {
+        error = "the file has no data";
+        return false;
+    }
+    const PluginObjectType* type = findType(props.objectType);
+    Plugin* plugin = type ? findPlugin(type->pluginId) : nullptr;
+    if (!type || type->importRef < 0 || !plugin || !plugin->L || !plugin->enabled) { // the standard reading
+        if (props.hasRows) {
+            std::vector<DataRow> rows = rowsFromCells(cells);
+            if (rows.empty()) {
+                error = "no line with a label and a number was found";
+                return false;
+            }
+            props.rows = std::move(rows);
+        } else {
+            props.table = tableFromCells(cells);
+        }
+        return true;
+    }
+    // import_csv(cells, o) returns { rows = ..., table = ..., params = { id = value } } (each optional).
+    lua_State* L = plugin->L;
+    const int top = lua_gettop(L);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, type->importRef);
+    pushCells(L, cells);
+    pushParams(L, layer, layer.inPoint);
+    g_budget = kCommandBudget;
+    bool ok = lua_pcall(L, 2, 1, 0) == LUA_OK;
+    if (!ok) {
+        error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "import_csv failed";
+    } else if (!lua_istable(L, -1)) {
+        error = "import_csv must return a table";
+        ok = false;
+    } else {
+        const int result = lua_gettop(L);
+        lua_getfield(L, result, "rows");
+        if (lua_istable(L, -1) && props.hasRows) props.rows = readRows(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, result, "table");
+        if (lua_istable(L, -1) && props.hasTable) props.table = readTable(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, result, "params");
+        if (lua_istable(L, -1))
+            for (PluginParam& p : props.params) {
+                lua_getfield(L, -1, p.id.c_str());
+                switch (p.kind) {
+                case PluginParamKind::Number:
+                    if (lua_isnumber(L, -1)) p.number.set(layer.inPoint, static_cast<float>(lua_tonumber(L, -1)));
+                    break;
+                case PluginParamKind::Text:
+                    if (lua_type(L, -1) == LUA_TSTRING) p.text = lua_tostring(L, -1);
+                    break;
+                case PluginParamKind::Toggle:
+                    if (lua_isboolean(L, -1)) p.toggle = lua_toboolean(L, -1);
+                    break;
+                case PluginParamKind::Choice:
+                    if (lua_type(L, -1) == LUA_TSTRING) {
+                        const auto it = std::find(p.choices.begin(), p.choices.end(), lua_tostring(L, -1));
+                        if (it != p.choices.end()) p.choice = static_cast<int>(it - p.choices.begin());
+                    }
+                    break;
+                case PluginParamKind::Color:
+                    if (!lua_isnil(L, -1)) p.color.set(layer.inPoint, readColor(L, -1, p.color.valueAt(layer.inPoint)));
+                    break;
+                }
+                lua_pop(L, 1);
+            }
+        lua_pop(L, 1);
+    }
+    if (!ok) plugin->drawError = error;
+    lua_settop(L, top);
+    return ok;
 }
 
 void PluginHost::draw(const Layer& layer, double t, render::PluginCanvas& c) {

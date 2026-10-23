@@ -3,10 +3,13 @@
 #include "app/PluginHost.h"
 #include "core/Math.h"
 #include "render/LogoMark.h"
+#include "ui/AppSignals.h"
 #include "ui/Theme.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QColorDialog>
+#include <QHBoxLayout>
 #include <QDrag>
 #include <QHash>
 #include <QImage>
@@ -28,6 +31,7 @@ Icon iconForPlugin(const std::string& name) {
     if (name == "bars" || name == "chart") return Icon::BarChart;
     if (name == "line_chart") return Icon::LineChart;
     if (name == "pie" || name == "donut") return Icon::PieChart;
+    if (name == "table") return Icon::Table;
     if (name == "text") return Icon::Text;
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) {
         std::string shape = shapeKindLabel(static_cast<ShapeKind>(i));
@@ -192,6 +196,37 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.triangleFilled(Pt(c.x - h * 0.4f, c.y - h * 0.2f), Pt(c.x + h * 0.4f, c.y - h * 0.2f),
                               Pt(c.x, c.y + h * 0.32f), col);
         break;
+    case Icon::ChevronLeft:
+        dl.triangleFilled(Pt(c.x + h * 0.25f, c.y - h * 0.4f), Pt(c.x - h * 0.3f, c.y),
+                              Pt(c.x + h * 0.25f, c.y + h * 0.4f), col);
+        break;
+    case Icon::Minimize:
+        dl.line(Pt(c.x - h * 0.55f, c.y + h * 0.1f), Pt(c.x + h * 0.55f, c.y + h * 0.1f), col, th * 1.3f);
+        break;
+    case Icon::Copy:
+        dl.rect(Pt(c.x - h * 0.7f, c.y - h * 0.7f), Pt(c.x + h * 0.25f, c.y + h * 0.35f), col, 2.0f, th);
+        dl.rect(Pt(c.x - h * 0.25f, c.y - h * 0.25f), Pt(c.x + h * 0.7f, c.y + h * 0.8f), col, 2.0f, th);
+        break;
+    case Icon::Paste:
+        dl.rect(Pt(c.x - h * 0.6f, c.y - h * 0.6f), Pt(c.x + h * 0.6f, c.y + h * 0.8f), col, 2.0f, th);
+        dl.rectFilled(Pt(c.x - h * 0.3f, c.y - h * 0.8f), Pt(c.x + h * 0.3f, c.y - h * 0.45f), col, 1.5f);
+        dl.line(Pt(c.x - h * 0.3f, c.y), Pt(c.x + h * 0.3f, c.y), col, th);
+        dl.line(Pt(c.x - h * 0.3f, c.y + h * 0.35f), Pt(c.x + h * 0.15f, c.y + h * 0.35f), col, th);
+        break;
+    case Icon::Transition: { // two overlapping clips
+        dl.rect(Pt(c.x - h * 0.85f, c.y - h * 0.55f), Pt(c.x + h * 0.15f, c.y + h * 0.55f), col, 2.0f, th);
+        dl.rectFilled(Pt(c.x - h * 0.15f, c.y - h * 0.55f), Pt(c.x + h * 0.85f, c.y + h * 0.55f), theme::withAlpha(col, 110), 2.0f);
+        dl.rect(Pt(c.x - h * 0.15f, c.y - h * 0.55f), Pt(c.x + h * 0.85f, c.y + h * 0.55f), col, 2.0f, th);
+        break;
+    }
+    case Icon::Table: {
+        const Pt a(c.x - h * 0.8f, c.y - h * 0.65f), b(c.x + h * 0.8f, c.y + h * 0.65f);
+        dl.rect(a, b, col, 2.0f, th);
+        dl.line(Pt(a.x, c.y - h * 0.2f), Pt(b.x, c.y - h * 0.2f), col, th);
+        dl.line(Pt(a.x, c.y + h * 0.22f), Pt(b.x, c.y + h * 0.22f), col, th);
+        dl.line(Pt(c.x - h * 0.2f, a.y), Pt(c.x - h * 0.2f, b.y), col, th);
+        break;
+    }
     case Icon::ChevronUp:
         dl.triangleFilled(Pt(c.x - h * 0.4f, c.y + h * 0.2f), Pt(c.x, c.y - h * 0.32f),
                               Pt(c.x + h * 0.4f, c.y + h * 0.2f), col);
@@ -486,6 +521,79 @@ QIcon makeIcon(Icon icon, Rgba color, int size) {
     return QIcon(pm);
 }
 
+namespace {
+
+Rgba toneColor(Tone t) {
+    switch (t) {
+    case Tone::Text: return theme::kText;
+    case Tone::TextDim: return theme::kTextDim;
+    case Tone::TextFaint: return theme::kTextFaint;
+    case Tone::Accent: return theme::kAccent;
+    case Tone::Danger: return theme::kDanger;
+    case Tone::Border: return theme::kBorder;
+    }
+    return theme::kText;
+}
+
+void applyTone(QWidget* w) {
+    const QVariant v = w->property("bemotionTone");
+    if (v.isValid()) w->setStyleSheet(QString("color: %1;").arg(theme::q(toneColor(static_cast<Tone>(v.toInt()))).name()));
+}
+
+} // namespace
+
+void setTone(QWidget* widget, Tone tone) {
+    static bool hooked = false;
+    if (!hooked) { // one listener recolors every toned widget
+        hooked = true;
+        QObject::connect(&AppSignals::get(), &AppSignals::appearanceChanged, [] {
+            for (QWidget* w : QApplication::allWidgets()) applyTone(w);
+        });
+    }
+    widget->setProperty("bemotionTone", static_cast<int>(tone));
+    applyTone(widget);
+}
+
+QIcon menuIcon(Icon icon, Rgba color) {
+    // Menus draw icons at 16 px: the glyph fills the square (makeIcon leaves room for a button's padding).
+    constexpr int size = 16;
+    QPixmap pm(size * 3, size * 3);
+    pm.setDevicePixelRatio(3.0);
+    pm.fill(Qt::transparent);
+    QPainter p(&pm);
+    Draw d(p);
+    drawIcon(d, icon, Pt(size * 0.5f, size * 0.5f), size * 0.9f, color);
+    p.end();
+    return QIcon(pm);
+}
+
+QWidget* lengthLimitRow(double seconds, std::function<void(double)> changed) {
+    auto* row = new QWidget;
+    auto* h = new QHBoxLayout(row);
+    h->setContentsMargins(0, 0, 0, 0);
+    h->setSpacing(10);
+    auto* on = new QCheckBox("Limit the length to");
+    on->setChecked(seconds > 0.0);
+    h->addWidget(on);
+    auto* value = new DragValue;
+    value->setRange(1.0f, 24.0f * 3600.0f);
+    value->setSpeed(0.5f);
+    value->setFormat("%.1f s");
+    value->setValue(static_cast<float>(seconds > 0.0 ? seconds : 60.0));
+    value->setFixedWidth(110);
+    value->setEnabled(seconds > 0.0);
+    h->addWidget(value);
+    h->addStretch();
+    QObject::connect(on, &QCheckBox::toggled, row, [=](bool checked) {
+        value->setEnabled(checked);
+        changed(checked ? value->value() : 0.0);
+    });
+    QObject::connect(value, &DragValue::valueChanged, row, [=](float v) {
+        if (on->isChecked()) changed(v);
+    });
+    return row;
+}
+
 std::string formatTimecode(double seconds, double fps) {
     if (seconds < 0) seconds = 0;
     const long long totalFrames = static_cast<long long>(std::floor(seconds * fps + 1e-6));
@@ -504,7 +612,7 @@ QLabel* sectionLabel(const QString& text, QWidget* parent) {
     f.setWeight(QFont::Bold);
     f.setLetterSpacing(QFont::AbsoluteSpacing, 0.6);
     l->setFont(f);
-    l->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    ui::setTone(l, ui::Tone::TextFaint);
     return l;
 }
 

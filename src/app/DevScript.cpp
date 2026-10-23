@@ -113,8 +113,10 @@ void DevScript::mouseButton(QWidget* window, int button, bool down) {
     }
 }
 
-void DevScript::step(QWidget* window) {
+void DevScript::step(QWidget* mainWindow) {
     ++frame_;
+    // Mouse coordinates are in the chosen window (see "window").
+    QWidget* window = other_ ? other_.data() : mainWindow;
     if (moveFrames_ > 0) {
         mouseX_ += (targetX_ - mouseX_) / moveFrames_;
         mouseY_ += (targetY_ - mouseY_) / moveFrames_;
@@ -137,6 +139,13 @@ void DevScript::step(QWidget* window) {
         if (c.op == "wait") {
             waitFrames_ = static_cast<int>(num(0, 1)) - 1;
             return;
+        }
+        if (c.op == "window") {
+            const QString title = QString::fromStdString(c.args.empty() ? "" : c.args[0]);
+            other_ = nullptr;
+            for (QWidget* w : QApplication::topLevelWidgets())
+                if (w != mainWindow && w->isVisible() && w->windowTitle() == title) other_ = w;
+            continue;
         }
         if (c.op == "move") {
             targetX_ = num(0);

@@ -3,8 +3,11 @@
 #include "app/Automation.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "app/Recovery.h"
 #include "app/RecentProjects.h"
 #include "app/Settings.h"
+#include "core/Arrange.h"
+#include "core/Clipboard.h"
 #include "core/Serialization.h"
 #include "media/AudioEngine.h"
 #include "media/MediaManager.h"
@@ -20,9 +23,11 @@
 #include "ui/panels/PropertiesPanel.h"
 #include "ui/panels/TimelinePanel.h"
 #include "ui/panels/ToolsPanel.h"
+#include "ui/panels/TransitionsPanel.h"
 #include "ui/panels/ViewportPanel.h"
 
 #include <AutoHideDockContainer.h>
+#include <DockAreaTitleBar.h>
 #include <DockAreaWidget.h>
 #include <DockManager.h>
 #include <DockWidget.h>
@@ -30,15 +35,21 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QMimeData>
+#include <QPainter>
 #include <QPlainTextEdit>
+#include <QPointer>
+#include <QSplitter>
 #include <QPushButton>
 #include <QTimer>
+#include <QUrl>
 
 #include <cfloat>
 #include <fstream>
@@ -52,6 +63,9 @@ namespace {
 
 std::filesystem::path layoutFile() { return platform::appDataDir() / "layout.ads"; }
 
+// Layers on the system clipboard: our own type, plus the same text for other apps.
+constexpr const char* kLayersMime = "application/x-bemotion-layers";
+
 // True while the user is in the middle of an edit: mouse held, or typing in a field.
 bool interacting() {
     if (QApplication::mouseButtons() != Qt::NoButton) return true;
@@ -63,6 +77,35 @@ bool typingInField() {
     QWidget* f = QApplication::focusWidget();
     return f && (qobject_cast<QLineEdit*>(f) || qobject_cast<QPlainTextEdit*>(f));
 }
+
+// The tab a minimized panel leaves on the window edge; the chevron points where it comes back from.
+class RestoreHandle : public QAbstractButton {
+public:
+    RestoreHandle(int edge, QWidget* parent) : QAbstractButton(parent), edge_(edge) {
+        setCursor(Qt::PointingHandCursor);
+        setFocusPolicy(Qt::NoFocus);
+        const bool upright = edge_ < 2;
+        setFixedSize(upright ? QSize(18, 56) : QSize(56, 18));
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        ui::Draw d(p);
+        const bool hot = underMouse();
+        const ui::Pt a(0.5f, 0.5f), b(width() - 0.5f, height() - 0.5f);
+        d.rectFilled(a, b, hot ? theme::kAccent : theme::withAlpha(theme::kBgHover, 240), 5.0f);
+        d.rect(a, b, hot ? theme::kAccent : theme::kBorder, 5.0f);
+        const ui::Icon icon = edge_ == 0 ? ui::Icon::ChevronRight : edge_ == 1 ? ui::Icon::ChevronLeft
+                              : edge_ == 2 ? ui::Icon::ChevronDown : ui::Icon::ChevronUp;
+        ui::drawIcon(d, icon, ui::Pt(width() * 0.5f, height() * 0.5f), 13.0f, hot ? theme::kOnAccent : theme::kText);
+    }
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+
+private:
+    int edge_;
+};
 
 } // namespace
 
@@ -82,10 +125,20 @@ EditorWindow::EditorWindow(Project project, std::filesystem::path path, RecentPr
     connect(timer_, &QTimer::timeout, this, &EditorWindow::tick);
     timer_->start(16);
     clock_.start();
+    sinceSave_.start();
+    // Unsaved changes are kept aside (crash recovery) and, if the user wants, saved regularly.
+    auto* keeper = new QTimer(this);
+    connect(keeper, &QTimer::timeout, this, [this] {
+        keepRecoveryCopy();
+        autosave();
+    });
+    keeper->start(20000);
 }
 
 EditorWindow::~EditorWindow() {
     qApp->removeEventFilter(this);
+    while (!minimized_.empty()) restoreMinimized(0); // minimized panels come back with the next project
+    recovery::discard(ctx_.path, ctx_.project.name); // closed normally: nothing to recover
     // The layout is remembered for the next project.
     const QByteArray state = docks_->saveState();
     std::ofstream out(layoutFile(), std::ios::binary | std::ios::trunc);
@@ -100,12 +153,21 @@ QString EditorWindow::title() const {
 // --- docks -----------------------------------------------------------------------------
 
 void EditorWindow::buildDocks() {
-    ads::CDockManager::setConfigFlags(ads::CDockManager::DefaultOpaqueConfig | ads::CDockManager::FocusHighlighting |
-                                      ads::CDockManager::DockAreaHasCloseButton | ads::CDockManager::AllTabsHaveCloseButton |
-                                      ads::CDockManager::DoubleClickUndocksWidget);
-    ads::CDockManager::setConfigFlag(ads::CDockManager::DoubleClickUndocksWidget, false); // double-click maximizes instead
-    ads::CDockManager::setAutoHideConfigFlags(ads::CDockManager::DefaultAutoHideConfig);
+    // No close, undock, tabs-menu or pin buttons: a panel header has its tabs and a minimize button.
+    // Panels still move by dragging their tab; View > Panels shows or hides them.
+    ads::CDockManager::setConfigFlags(ads::CDockManager::OpaqueSplitterResize | ads::CDockManager::FocusHighlighting |
+                                      ads::CDockManager::DockAreaHideDisabledButtons);
+    ads::CDockManager::setAutoHideConfigFlags(ads::CDockManager::AutoHideFeatureEnabled); // used by maximize
     docks_ = new ads::CDockManager(this);
+    docks_->installEventFilter(this); // restore handles follow its size
+    connect(docks_, &ads::CDockManager::dockAreaCreated, this, [this](ads::CDockAreaWidget* area) {
+        auto* minimize = new ui::IconButton(ui::Icon::Minimize, "Minimize panel  (double-click a tab to maximize)", 24);
+        minimize->setObjectName("minimizePanel");
+        connect(minimize, &QAbstractButton::clicked, this, [this, area] { minimizeArea(area); });
+        area->titleBar()->insertWidget(-1, minimize);
+        // The viewport's place cannot be minimized.
+        QTimer::singleShot(0, minimize, [minimize, area] { minimize->setVisible(!area->isCentralWidgetArea()); });
+    });
     // The docking library's own style sheet beats the application's: our colors go on top of it.
     const QString adsStyle = docks_->styleSheet();
     docks_->setStyleSheet(adsStyle + theme::dockStyleSheet());
@@ -118,14 +180,10 @@ void EditorWindow::buildDocks() {
     viewport_ = new ViewportPanel(ctx_);
     properties_ = new PropertiesPanel(ctx_);
     effects_ = new EffectsPanel(ctx_);
+    transitions_ = new TransitionsPanel(ctx_);
     timeline_ = new TimelinePanel(ctx_);
-    connect(timeline_, &TimelinePanel::toolsPanelRequested, this, [this] {
-        if (auto* d = dockWidgets_["Tools"]) {
-            d->toggleView(true);
-            d->setAsCurrentTab();
-            d->raise();
-        }
-    });
+    toolsPopover_ = new ToolsPopover(tools_, this);
+    connect(timeline_, &TimelinePanel::toolsPanelRequested, this, &EditorWindow::showTools);
 
     auto dock = [&](const char* name, QWidget* w) {
         auto* d = new ads::CDockWidget(docks_, name);
@@ -133,6 +191,15 @@ void EditorWindow::buildDocks() {
         d->setFeature(ads::CDockWidget::DockWidgetFloatable, true);
         dockWidgets_[name] = d;
         d->tabWidget()->installEventFilter(this); // double-click a tab: maximize / restore
+        // Shown again some other way (View > Panels, Reset Layout): its restore handle goes.
+        connect(d, &ads::CDockWidget::viewToggled, this, [this, d](bool open) {
+            if (!open) return;
+            for (size_t i = 0; i < minimized_.size(); ++i)
+                if (std::find(minimized_[i].docks.begin(), minimized_[i].docks.end(), d) != minimized_[i].docks.end()) {
+                    restoreMinimized(i);
+                    return;
+                }
+        });
         return d;
     };
     auto* vp = dock("Viewport", viewport_);
@@ -140,10 +207,10 @@ void EditorWindow::buildDocks() {
     auto* center = docks_->setCentralWidget(vp);
     auto* left = docks_->addDockWidget(ads::LeftDockWidgetArea, dock("Objects", objects_));
     docks_->addDockWidgetTabToArea(dock("Media", media_), left);
-    docks_->addDockWidgetTabToArea(dock("Tools", tools_), left);
     left->setCurrentIndex(0);
     auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock("Properties", properties_));
     docks_->addDockWidgetTabToArea(dock("Effects", effects_), right);
+    docks_->addDockWidgetTabToArea(dock("Transitions", transitions_), right);
     right->setCurrentIndex(0);
     auto* bottom = docks_->addDockWidget(ads::BottomDockWidgetArea, dock("Timeline", timeline_));
     (void)center;
@@ -157,8 +224,103 @@ void EditorWindow::buildDocks() {
         std::stringstream ss;
         ss << in.rdbuf();
         const std::string saved = ss.str();
-        if (!saved.empty()) docks_->restoreState(QByteArray(saved.data(), static_cast<qsizetype>(saved.size())));
+        // A layout saved before a panel existed would leave that panel out: then the default one is used.
+        bool complete = !saved.empty();
+        for (const auto& [name, d] : dockWidgets_) complete = complete && saved.find("\"" + name + "\"") != std::string::npos;
+        if (complete) docks_->restoreState(QByteArray(saved.data(), static_cast<qsizetype>(saved.size())));
     });
+}
+
+void EditorWindow::showTools() {
+    // Over the timeline's toolbar, where its tiles get dragged to.
+    const QPoint anchor = timeline_->isVisible() ? timeline_->mapTo(this, QPoint(4, 0)) : QPoint(width() / 2 - 210, height() / 2 + 200);
+    toolsPopover_->popup(anchor);
+}
+
+void EditorWindow::minimizeArea(ads::CDockAreaWidget* area) {
+    if (!area || area->isCentralWidgetArea()) return;
+    // Which window edge it goes to: the side of the viewport it sits on.
+    auto rectIn = [this](QWidget* w) { return QRect(w->mapTo(docks_, QPoint(0, 0)), w->size()); };
+    const QRect r = rectIn(area);
+    QRect center = docks_->rect();
+    if (ads::CDockAreaWidget* vp = dockWidgets_["Viewport"]->dockAreaWidget()) center = rectIn(vp);
+    Minimized m;
+    if (r.right() <= center.left() + 4) m.edge = 0;
+    else if (r.left() >= center.right() - 4) m.edge = 1;
+    else if (r.top() >= center.bottom() - 4) m.edge = 3;
+    else m.edge = 2;
+    m.along = m.edge < 2 ? static_cast<float>(r.center().y()) / std::max(1, docks_->height())
+                         : static_cast<float>(r.center().x()) / std::max(1, docks_->width());
+    m.current = area->currentDockWidget();
+    m.size = m.edge < 2 ? area->width() : area->height();
+    const QList<ads::CDockWidget*> open = area->openedDockWidgets();
+    m.docks.assign(open.begin(), open.end());
+    QStringList names;
+    for (ads::CDockWidget* d : m.docks) names << d->windowTitle();
+    auto* handle = new RestoreHandle(m.edge, docks_);
+    handle->setToolTip("Restore " + names.join(", "));
+    m.handle = handle;
+    connect(handle, &QAbstractButton::clicked, this, [this, handle] {
+        for (size_t i = 0; i < minimized_.size(); ++i)
+            if (minimized_[i].handle == handle) return restoreMinimized(i);
+    });
+    minimized_.push_back(m);
+    for (ads::CDockWidget* d : m.docks) d->toggleView(false);
+    placeRestoreHandles();
+    handle->show();
+}
+
+void EditorWindow::restoreMinimized(size_t index) {
+    if (index >= minimized_.size()) return;
+    const Minimized m = minimized_[index];
+    minimized_.erase(minimized_.begin() + static_cast<std::ptrdiff_t>(index)); // first: toggleView reports back here
+    m.handle->deleteLater();
+    for (ads::CDockWidget* d : m.docks) d->toggleView(true);
+    if (m.current) {
+        m.current->setAsCurrentTab();
+        // Back at the size it had (hidden, its place shrank to nothing).
+        auto resize = [this](ads::CDockAreaWidget* area, int size) {
+            auto* splitter = qobject_cast<QSplitter*>(area->parentWidget());
+            if (!splitter || size <= 0) return;
+            QList<int> sizes = splitter->sizes();
+            const int i = splitter->indexOf(area);
+            if (i < 0 || i >= sizes.size()) return;
+            // The space comes from the largest neighbor (usually the viewport).
+            int from = -1;
+            for (int k = 0; k < sizes.size(); ++k)
+                if (k != i && (from < 0 || sizes[k] > sizes[from])) from = k;
+            if (from < 0) return;
+            const int give = std::clamp(size - sizes[i], -sizes[i], std::max(0, sizes[from] - 80));
+            sizes[i] += give;
+            sizes[from] -= give;
+            splitter->setSizes(sizes);
+        };
+        if (ads::CDockAreaWidget* area = m.current->dockAreaWidget()) {
+            resize(area, m.size);
+            QPointer<ads::CDockAreaWidget> guard(area);
+            QTimer::singleShot(0, this, [guard, resize, size = m.size] {
+                if (guard) resize(guard, size);
+            });
+        }
+    }
+    placeRestoreHandles();
+}
+
+void EditorWindow::placeRestoreHandles() {
+    const QRect area = docks_->rect();
+    for (const Minimized& m : minimized_) {
+        QWidget* h = m.handle;
+        QPoint pos;
+        if (m.edge < 2) {
+            pos.setX(m.edge == 0 ? area.left() + 2 : area.right() - h->width() - 1);
+            pos.setY(std::clamp(static_cast<int>(area.height() * m.along) - h->height() / 2, 4, std::max(4, area.height() - h->height() - 4)));
+        } else {
+            pos.setY(m.edge == 2 ? area.top() + 2 : area.bottom() - h->height() - 1);
+            pos.setX(std::clamp(static_cast<int>(area.width() * m.along) - h->width() / 2, 4, std::max(4, area.width() - h->width() - 4)));
+        }
+        h->move(pos);
+        h->raise();
+    }
 }
 
 void EditorWindow::resetLayout() {
@@ -231,6 +393,11 @@ void EditorWindow::buildMenus() {
     edit->addAction(action(Action::Undo, "Undo", [this] { ctx_.undo(); }));
     edit->addAction(action(Action::Redo, "Redo", [this] { ctx_.redo(); }));
     edit->addSeparator();
+    edit->addAction(action(Action::Cut, "Cut", [this] {
+        if (copyToClipboard()) ctx_.deleteSelected();
+    }));
+    edit->addAction(action(Action::Copy, "Copy", [this] { copyToClipboard(); }));
+    edit->addAction(action(Action::Paste, "Paste", [this] { pasteFromClipboard(); }));
     edit->addAction(action(Action::Duplicate, "Duplicate", [this] { ctx_.duplicateSelected(); }));
     edit->addAction(action(Action::Delete, "Delete", [this] {
         if (!ctx_.selectedKeys.empty()) ctx_.deleteSelectedKeys();
@@ -264,6 +431,15 @@ void EditorWindow::buildMenus() {
     layer->addAction(action(Action::BringForward, "Bring Forward", [this] { ctx_.shiftSelected(-1); }));
     layer->addAction(action(Action::SendBackward, "Send Backward", [this] { ctx_.shiftSelected(1); }));
     layer->addAction(action(Action::SendToBack, "Send to Back", [this] { ctx_.shiftSelected(1000); }));
+    layer->addSeparator();
+    QMenu* arrangeMenu = layer->addMenu("Arrange");
+    arrangeMenu->setToolTipsVisible(true);
+    arrangeMenu->addAction("Distribute Horizontally", this, [this] { arrange(false, false); })
+        ->setToolTip("Even spacing from left to right (two layers spread across the frame)");
+    arrangeMenu->addAction("Distribute Vertically", this, [this] { arrange(false, true); })
+        ->setToolTip("Even spacing from top to bottom");
+    arrangeMenu->addAction("Stagger Start Times", this, [this] { arrange(true); })
+        ->setToolTip("Each selected layer starts 0.1 s after the one above it");
     connect(layer, &QMenu::aboutToShow, this, [this] {
         const bool any = !ctx_.selection.empty();
         for (Action a : {Action::CreateCompound, Action::BringToFront, Action::BringForward, Action::SendBackward, Action::SendToBack})
@@ -334,7 +510,8 @@ void EditorWindow::buildMenus() {
     });
     view->addSeparator();
     QMenu* panels = view->addMenu("Panels");
-    for (const char* name : {"Objects", "Media", "Tools", "Properties", "Effects", "Timeline"})
+    view->addAction("Tools...", this, [this] { showTools(); });
+    for (const char* name : {"Objects", "Media", "Properties", "Effects", "Transitions", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction("Reset Layout", this, [this] { resetLayout(); });
 
@@ -383,7 +560,7 @@ void EditorWindow::buildMenus() {
     row->setContentsMargins(0, 2, 8, 2);
     row->setSpacing(8);
     status_ = new QLabel;
-    status_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+    ui::setTone(status_, ui::Tone::Danger);
     row->addWidget(status_);
     auto* gear = new ui::IconButton(ui::Icon::Gear, "Settings", 28);
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
@@ -397,6 +574,7 @@ void EditorWindow::buildMenus() {
 }
 
 bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == docks_ && event->type() == QEvent::Resize) placeRestoreHandles();
     // Double-click a panel tab: maximize it (or bring the layout back).
     if (event->type() == QEvent::MouseButtonDblClick)
         if (auto* tab = qobject_cast<ads::CDockWidgetTab*>(watched)) {
@@ -437,6 +615,7 @@ void EditorWindow::tick() {
     viewport_->sync();
     properties_->sync();
     effects_->sync();
+    transitions_->sync();
     timeline_->sync();
 
     ctx_.commitIfIdle(interacting());
@@ -473,12 +652,14 @@ void EditorWindow::save() {
     std::string err;
     if (!ctx_.save(&err)) {
         platform::log("save failed: " + err);
-        status_->setText(QString::fromStdString("Save failed: " + err));
+        setStatus(QString::fromStdString("Save failed: " + err));
         return;
     }
     platform::log("saved " + platform::toUtf8(ctx_.path));
-    status_->clear();
+    setStatus({});
     recents_.touch(ctx_.path, ctx_.project.name);
+    recovery::discard(ctx_.path, ctx_.project.name);
+    sinceSave_.restart();
 }
 
 void EditorWindow::saveAs() {
@@ -489,11 +670,13 @@ void EditorWindow::saveAs() {
     if (!file) return;
     std::string err;
     if (!ctx_.saveTo(*file, &err)) {
-        status_->setText(QString::fromStdString("Save failed: " + err));
+        setStatus(QString::fromStdString("Save failed: " + err));
         return;
     }
-    status_->clear();
+    setStatus({});
     recents_.touch(ctx_.path, ctx_.project.name);
+    recovery::discard(ctx_.path, ctx_.project.name);
+    sinceSave_.restart();
 }
 
 bool EditorWindow::confirmClose() {
@@ -517,18 +700,87 @@ bool EditorWindow::confirmClose() {
     return true;
 }
 
+void EditorWindow::setStatus(const QString& text) {
+    // The menu bar's corner keeps the size it had: it is laid out again for the new text.
+    status_->setText(text);
+    status_->setToolTip(text);
+    status_->parentWidget()->adjustSize();
+    menuBar()->adjustSize();
+    menuBar()->updateGeometry();
+    menuBar()->update();
+}
+
+void EditorWindow::arrange(bool stagger, bool vertical) {
+    ctx_.playing = false;
+    std::string error;
+    const bool ok = stagger ? staggerLayers(ctx_.comp(), ctx_.selection, 0.1, &error)
+                            : distributeLayers(ctx_.comp(), ctx_.selection, vertical, ctx_.time, &error);
+    if (!ok) {
+        setStatus(QString::fromStdString("Arrange: " + error));
+        return;
+    }
+    setStatus({});
+    ctx_.touch();
+}
+
+bool EditorWindow::copyToClipboard() {
+    const std::string text = ctx_.copySelected();
+    if (text.empty()) return false;
+    auto* mime = new QMimeData;
+    const QByteArray bytes = QByteArray::fromStdString(text);
+    mime->setData(kLayersMime, bytes);
+    mime->setText(QString::fromUtf8(bytes));
+    QApplication::clipboard()->setMimeData(mime);
+    return true;
+}
+
+void EditorWindow::pasteFromClipboard() {
+    const QMimeData* mime = QApplication::clipboard()->mimeData();
+    if (!mime) return;
+    std::string text;
+    if (mime->hasFormat(kLayersMime)) text = mime->data(kLayersMime).toStdString();
+    else if (mime->hasText()) text = mime->text().toStdString();
+    ctx_.playing = false;
+    if (!text.empty() && ctx_.paste(text)) return;
+    // Files copied in the file manager: imported and placed at the playhead.
+    std::vector<std::filesystem::path> files;
+    for (const QUrl& url : mime->urls())
+        if (url.isLocalFile()) files.push_back(platform::fromUtf8(url.toLocalFile().toStdString()));
+    if (!files.empty()) dropFiles(files, false);
+}
+
+void EditorWindow::keepRecoveryCopy() {
+    // Only while there is something to lose; saving or closing removes it.
+    if (!ctx_.isDirty() || interacting()) return;
+    std::string err;
+    if (!recovery::keep(ctx_.project, ctx_.path, &err)) platform::log("could not keep a recovery copy: " + err);
+}
+
+void EditorWindow::autosave() {
+    const int minutes = settings().autosaveMinutes;
+    if (minutes <= 0 || ctx_.path.empty() || !ctx_.isDirty() || interacting()) return;
+    if (sinceSave_.isValid() && sinceSave_.elapsed() < minutes * 60000LL) return;
+    platform::log("autosaving");
+    save();
+}
+
+void EditorWindow::markRecovered() {
+    ctx_.touch(); // unsaved until the user saves
+    setStatus("Recovered: save to keep the changes");
+}
+
 void EditorWindow::runPluginCommand(const std::string& id) {
     std::string error;
     ctx_.playing = false;
     platform::log("running plugin command " + id);
     if (!PluginHost::get().runCommand(id, ctx_.project, ctx_.time, ctx_.selection, automationEnvironment(), error)) {
         platform::log("plugin command failed: " + error);
-        status_->setText(QString::fromStdString("Plugin: " + error));
+        setStatus(QString::fromStdString("Plugin: " + error));
         return;
     }
     ctx_.pruneSelection();
     ctx_.touch(); // one undo step
-    status_->clear();
+    setStatus({});
 }
 
 void EditorWindow::dropFiles(const std::vector<std::filesystem::path>& files, bool onMediaPanel) {

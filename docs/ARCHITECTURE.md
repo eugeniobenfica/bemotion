@@ -91,7 +91,8 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
 - **`Composition`** — size (16–16384 px), frame rate (1–240), background, the
   layer stack, media items, guides. **Index 0 of `layers` is the top-most
   layer.** The duration is derived: `fitDuration()` makes it end with the last
-  clip (at least `kMinCompDuration`, 1 s). Never set it as a user value.
+  clip (at least `kMinCompDuration`, 1 s, at most the optional `maxDuration`
+  length limit). Never set it as a user value.
 - **`Layer`** (`Layer.h`) — id, name, type (`Shape`, `Text`, `Camera`,
   `Plugin`, `Compound`, `Media`), timing (`inPoint` ≤ t < `outPoint`),
   `track`, `parent`, transform, the content of its type, effects. One struct
@@ -168,6 +169,13 @@ operations. Effect ids (`effectId`) are stable strings.
   changes the project and lets the editor commit (§7).
 - **`Describe`** — a compact text summary (for terminals and AIs).
 - **`Presets`** — Quick Animations: they write ordinary keyframes.
+- **`Transitions`** — a clip's way in and out (fade, slides, zoom, pop, spin),
+  written as keyframes at its edges with the preset engine.
+- **`Arrange`** — distribute layers evenly, stagger start times.
+- **`Clipboard`** — copy / paste of layers as text (compounds with their
+  contents, media items along), pasted at a time with fresh ids.
+- **`Data`** — CSV in and out, people's numbers (`1.234,5`, `R$ 12`), and the
+  two data shapes of plugin objects: chart rows and `DataTable`s.
 - **`Geometry`**, **`Snapping`** — shape outlines and trim paths; 1-D snapping.
 
 ## 4. Changing a project: the three paths
@@ -246,8 +254,16 @@ Rules:
     to know when to repaint.
 - **`EditorWindow`** — menus and shortcuts (`QAction`s from the keymap), the
   panels in Qt Advanced Docking System docks (layout saved in
-  `layout.ads`), and a **16 ms timer** (`tick()`) that drives playback, media,
-  audio, plugin reloads, undo commits and every panel's `sync()`.
+  `layout.ads`; a saved layout missing a newer panel is replaced by the
+  default), and a **16 ms timer** (`tick()`) that drives playback, media,
+  audio, plugin reloads, undo commits and every panel's `sync()`. A slower
+  timer keeps crash-recovery copies and autosaves (`app/Recovery`).
+  - Panel headers have only tabs and a **minimize** button (no close, undock,
+    tabs-menu or pin buttons): a minimized panel hides and leaves a handle on
+    the window edge that brings it back at its size. View > Panels shows or
+    hides panels; double-clicking a tab maximizes it.
+  - Floating helpers that are not panels (the Tools popover) are child widgets
+    of the window, not separate windows, so drag and drop keeps working.
 - **Panels** (`ui/panels`) follow one pattern:
   - `sync()` is called every tick. It computes a cheap **structure key** (what
     the widgets depend on: selected layer, its properties, …). If the key
@@ -266,7 +282,11 @@ Rules:
   Colors come from the named tokens (`theme::kText`, `kTextDim`, `kAccent`,
   `kBgPanel`, `kDanger`, …), never literals; the default accent is gold
   `#E8B931` on near-black. Docking widgets get their extra rules from
-  `theme::dockStyleSheet()`.
+  `theme::dockStyleSheet()`. **Themes change at run time**: custom-painted
+  widgets read the tokens when they paint; a label colored by a token uses
+  `ui::setTone(label, Tone::…)` (recolored on `appearanceChanged`), never a
+  style sheet with a baked color; screens that bake colors otherwise rebuild
+  on `appearanceChanged` (the home screen does).
 - **`Draw`** (`ui/Draw.h`) — the small drawing vocabulary over `QPainter` for
   custom-painted parts (`Rgba` packed 0xAABBGGRR, `Pt`). **Icons** are vector
   code in `Widgets.cpp` (`Icon` enum, `drawIcon`, `makeIcon`) — no icon files.
@@ -295,8 +315,13 @@ Rules:
   `platform::log()` writes `bemotion.log` (startup, projects, imports, saves,
   plugin and MCP calls, crashes).
 - **`Settings`** — user preferences in `settings.json` (theme, sizes,
-  shortcuts, toolbar, disabled plugins…) and the theme library. New settings
-  get defaults and are read tolerantly.
+  shortcuts, toolbar, disabled plugins, autosave, the default length limit…)
+  and the theme library. New settings get defaults and are read tolerantly.
+  The Settings window shows the essentials; *Advanced Options* (one switch for
+  every page) shows the rest.
+- **`Recovery`** — while a project has unsaved changes the editor keeps a copy
+  in `<app data>/recovery`; saving or closing normally removes it, and copies
+  left by a crash are offered back at the next start.
 - **`Automation`** — the command line for scripts and AIs and the helpers it
   shares with MCP (`automationEnvironment`, `renderFramesPng`, `exportProject`).
 - **`McpServer`** — `bemotion mcp`, the Model Context Protocol server (§10).
@@ -317,6 +342,11 @@ Rules:
   keep their parameter definitions, so projects still open without the plugin.
 - **Commands** (`register_command`, API 2) edit through operations with a
   `doc` object; they run on a copy (one undo step; nothing changes on error).
+- **Data** (API 3): objects declare `rows` (charts) or a `table`; an optional
+  `import_csv(cells, o)` maps a CSV file the host read to rows / table /
+  parameters (the plugin never opens files). Operations: `data.set`.
+- What every user needs belongs in the app, not in a plugin (arranging layers
+  and transitions are built in); plugins add kinds of objects and workflows.
 - **Permissions** in `plugin.json`: `edit` (commands), `media`
   (`media.import`). New capabilities that touch the user's files or the
   outside world must be new permissions.

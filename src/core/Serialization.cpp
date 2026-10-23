@@ -140,6 +140,7 @@ json encodePlugin(const PluginProps& p) {
         for (const DataRow& r : p.rows) rows.push_back({{"label", r.label}, {"value", r.value}, {"color", encode(r.color)}});
         j["rows"] = std::move(rows);
     }
+    if (p.hasTable) j["table"] = {{"header", p.table.header}, {"rows", p.table.rows}};
     return j;
 }
 
@@ -179,6 +180,18 @@ void decodePlugin(const json& j, PluginProps& p) {
         r.value = rj.value("value", 0.0f);
         if (rj.contains("color")) decode(rj["color"], r.color);
         p.rows.push_back(std::move(r));
+    }
+    p.hasTable = j.contains("table") && j["table"].is_object();
+    p.table = {};
+    if (p.hasTable) {
+        const json& tj = j["table"];
+        for (const auto& h : tj.value("header", json::array())) p.table.header.push_back(h.is_string() ? h.get<std::string>() : h.dump());
+        for (const auto& rj : tj.value("rows", json::array())) {
+            std::vector<std::string> row;
+            if (rj.is_array())
+                for (const auto& c : rj) row.push_back(c.is_string() ? c.get<std::string>() : c.dump());
+            p.table.rows.push_back(std::move(row));
+        }
     }
 }
 
@@ -318,6 +331,7 @@ std::string serializeProject(const Project& project) {
     comp["height"] = c.height;
     comp["fps"] = c.fps;
     comp["duration"] = c.duration;
+    if (c.maxDuration > 0.0) comp["max_duration"] = c.maxDuration;
     comp["background"] = encode(c.background);
     comp["next_layer_id"] = c.nextLayerId;
     comp["next_track_id"] = c.nextTrackId;
@@ -365,6 +379,7 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
             c.height = std::max(1, cj.value("height", 1080));
             c.fps = std::max(1.0, cj.value("fps", 30.0));
             c.duration = std::max(c.frameDuration(), cj.value("duration", 10.0));
+            if (cj.contains("max_duration") && cj["max_duration"].is_number()) c.maxDuration = cj["max_duration"].get<double>();
             if (cj.contains("background")) decode(cj["background"], c.background);
             uint64_t maxId = 0, maxTrack = 0;
             if (cj.contains("layers"))

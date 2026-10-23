@@ -315,7 +315,7 @@ MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), c
     mrow->setContentsMargins(0, 0, 0, 0);
     message_ = new QLabel;
     message_->setWordWrap(true);
-    message_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+    ui::setTone(message_, ui::Tone::Danger);
     mrow->addWidget(message_, 1);
     auto* dismiss = new QPushButton("Dismiss");
     connect(dismiss, &QPushButton::clicked, messageRow_, &QWidget::hide);
@@ -328,7 +328,7 @@ MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), c
     ecol->setContentsMargins(0, 12, 0, 0);
     auto* hint = new QLabel("No media yet. Import images, videos or audio, or drop files onto the window.");
     hint->setWordWrap(true);
-    hint->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    ui::setTone(hint, ui::Tone::TextFaint);
     ecol->addWidget(hint);
     auto* importBig = ui::accentButton("Import...");
     connect(importBig, &QPushButton::clicked, this, &MediaPanel::openImportDialog);

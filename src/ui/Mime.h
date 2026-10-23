@@ -16,7 +16,7 @@ inline constexpr int kDropCamera = -2;
 inline constexpr int kDropPlugin = -100;
 // A Media panel item: its media id.
 inline constexpr const char* kMediaMime = "application/x-bemotion-media";
-// A tool of the Tools panel: its index in toolCatalog().
+// A tool of the Tools popover: its index in toolCatalog().
 inline constexpr const char* kToolMime = "application/x-bemotion-tool";
 
 template <typename T>

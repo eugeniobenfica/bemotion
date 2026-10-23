@@ -5,6 +5,9 @@ add_library(bemotion_core STATIC
     core/Geometry.cpp
     core/History.cpp
     core/Animated.cpp
+    core/Arrange.cpp
+    core/Clipboard.cpp
+    core/Data.cpp
     core/Describe.cpp
     core/Ops.cpp
     core/Validate.cpp
@@ -12,7 +15,8 @@ add_library(bemotion_core STATIC
     core/Presets.cpp
     core/Project.cpp
     core/Serialization.cpp
-    core/Snapping.cpp)
+    core/Snapping.cpp
+    core/Transitions.cpp)
 target_include_directories(bemotion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion_core PUBLIC nlohmann_json::nlohmann_json)
 
@@ -34,6 +38,7 @@ add_executable(bemotion WIN32
     app/Platform.cpp
     app/PluginHost.cpp
     app/PresetLibrary.cpp
+    app/Recovery.cpp
     app/Settings.cpp
     app/RecentProjects.cpp
     export/Export.cpp
@@ -72,6 +77,7 @@ add_executable(bemotion WIN32
     ui/panels/TimelineGraph.cpp
     ui/panels/TimelinePanel.cpp
     ui/panels/ToolsPanel.cpp
+    ui/panels/TransitionsPanel.cpp
     ui/panels/ViewportPanel.cpp)
 set_target_properties(bemotion PROPERTIES AUTOMOC ON)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

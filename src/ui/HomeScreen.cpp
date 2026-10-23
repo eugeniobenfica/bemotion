@@ -2,6 +2,8 @@
 
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "app/Settings.h"
+#include "ui/AppSignals.h"
 #include "core/Serialization.h"
 #include "render/SceneRenderer.h"
 #include "ui/Dialogs.h"
@@ -15,6 +17,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QFileSystemWatcher>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -28,6 +31,7 @@
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -215,10 +219,40 @@ protected:
 
 HomeScreen::HomeScreen(RecentProjects& recents, QWidget* parent) : QWidget(parent), recents_(recents) {
     setAutoFillBackground(true);
+    auto* outer = new QHBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    buildUi();
+    // Colors are baked into the widgets: a new theme rebuilds them.
+    connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, this, [this] {
+        const QString search = search_->text();
+        buildUi();
+        search_->setText(search);
+        rebuildGrid();
+    });
+    // Projects saved, copied or removed in the projects folder show up by themselves.
+    watcher_ = new QFileSystemWatcher(this);
+    watcher_->addPath(QString::fromStdString(platform::toUtf8(platform::defaultProjectsDir())));
+    auto* later = new QTimer(this);
+    later->setSingleShot(true);
+    later->setInterval(400);
+    connect(watcher_, &QFileSystemWatcher::directoryChanged, later, qOverload<>(&QTimer::start));
+    connect(later, &QTimer::timeout, this, [this] {
+        if (isVisible()) refresh();
+    });
+}
+
+void HomeScreen::buildUi() {
+    if (content_) {
+        layout()->removeWidget(content_);
+        content_->deleteLater();
+    }
+    content_ = new QWidget;
+    layout()->addWidget(content_);
     QPalette pal = palette();
     pal.setColor(QPalette::Window, theme::q(theme::kBgDeep));
     setPalette(pal);
-    auto* row = new QHBoxLayout(this);
+    columns_ = 0;
+    auto* row = new QHBoxLayout(content_);
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(0);
 
@@ -256,7 +290,7 @@ HomeScreen::HomeScreen(RecentProjects& recents, QWidget* parent) : QWidget(paren
     side->addStretch(1);
     auto* line = new QFrame;
     line->setFrameShape(QFrame::HLine);
-    line->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kBorder).name()));
+    ui::setTone(line, ui::Tone::Border);
     side->addWidget(line);
     auto* footer = new QHBoxLayout;
     footer->setSpacing(6);
@@ -291,7 +325,9 @@ HomeScreen::HomeScreen(RecentProjects& recents, QWidget* parent) : QWidget(paren
     connect(search_, &QLineEdit::textChanged, this, [this] { rebuildGrid(); });
     head->addWidget(search_);
     main->addLayout(head);
-    main->addWidget(styled("Recently opened", theme::kTextFaint));
+    auto* where = styled("In your projects folder and recently opened", theme::kTextFaint);
+    where->setToolTip(QString::fromStdString(platform::toUtf8(platform::defaultProjectsDir())));
+    main->addWidget(where);
     errorRow_ = new QWidget;
     auto* er = new QHBoxLayout(errorRow_);
     er->setContentsMargins(0, 4, 0, 4);
@@ -309,6 +345,7 @@ HomeScreen::HomeScreen(RecentProjects& recents, QWidget* parent) : QWidget(paren
     scroll_->setFrameShape(QFrame::NoFrame);
     scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     scroll_->viewport()->setAutoFillBackground(false);
+    scroll_->viewport()->installEventFilter(this); // its width decides the columns
     main->addWidget(scroll_, 1);
     row->addLayout(main, 1);
 }
@@ -319,18 +356,58 @@ void HomeScreen::setError(const std::string& message) {
 }
 
 void HomeScreen::refresh() {
-    previews_.clear();
-    for (const auto& r : recents_.items()) {
-        Preview pv;
-        Project p;
-        if (loadProject(r.path, p)) {
-            PluginHost::get().reconcile(p.comp); // plugin objects (charts) as the editor would show them
-            const qreal dpr = devicePixelRatioF();
-            pv.thumbnail = renderThumbnail(p, QSize(static_cast<int>(400 * dpr), static_cast<int>(225 * dpr)));
-            pv.project = std::move(p);
-        }
-        previews_[r.path] = std::move(pv);
+    // Every project in the projects folder (and its subfolders), plus the ones opened from elsewhere.
+    namespace fs = std::filesystem;
+    entries_.clear();
+    auto modified = [](const fs::path& f) -> int64_t {
+        std::error_code ec;
+        const auto t = fs::last_write_time(f, ec);
+        if (ec) return 0;
+        using namespace std::chrono;
+        return duration_cast<seconds>(clock_cast<system_clock>(t).time_since_epoch()).count();
+    };
+    for (const RecentProject& r : recents_.items()) {
+        RecentProject e = r;
+        e.lastOpened = std::max(r.lastOpened, modified(r.path));
+        entries_.push_back(std::move(e));
     }
+    std::error_code ec;
+    int scanned = 0;
+    for (auto it = fs::recursive_directory_iterator(platform::defaultProjectsDir(), fs::directory_options::skip_permission_denied, ec);
+         !ec && it != fs::recursive_directory_iterator() && scanned < 500; it.increment(ec)) {
+        if (it.depth() >= 3) it.disable_recursion_pending();
+        std::error_code fe;
+        if (!it->is_regular_file(fe) || it->path().extension() != kProjectExtension) continue;
+        ++scanned;
+        const fs::path path = it->path();
+        if (std::any_of(entries_.begin(), entries_.end(), [&](const RecentProject& e) { return fs::equivalent(e.path, path, fe); }))
+            continue;
+        entries_.push_back({path, platform::toUtf8(path.stem()), modified(path)});
+    }
+    std::stable_sort(entries_.begin(), entries_.end(),
+                     [](const RecentProject& a, const RecentProject& b) { return a.lastOpened > b.lastOpened; });
+
+    // Previews: only projects changed since the last time are loaded again.
+    std::map<fs::path, Preview> previews;
+    for (RecentProject& e : entries_) {
+        const int64_t stamp = modified(e.path);
+        if (auto old = previews_.find(e.path); old != previews_.end() && old->second.stamp == stamp) {
+            previews[e.path] = std::move(old->second);
+        } else {
+            Preview pv;
+            pv.stamp = stamp;
+            Project p;
+            if (loadProject(e.path, p)) {
+                PluginHost::get().reconcile(p.comp); // plugin objects (charts) as the editor would show them
+                const qreal dpr = devicePixelRatioF();
+                pv.thumbnail = renderThumbnail(p, QSize(static_cast<int>(400 * dpr), static_cast<int>(225 * dpr)));
+                pv.project = std::move(p);
+            }
+            previews[e.path] = std::move(pv);
+        }
+        if (const Preview& pv = previews[e.path]; pv.project && !pv.project->name.empty()) e.name = pv.project->name;
+    }
+    previews_ = std::move(previews);
     rebuildGrid();
 }
 
@@ -341,9 +418,18 @@ void HomeScreen::resizeEvent(QResizeEvent* e) {
     if (cols != columns_) rebuildGrid();
 }
 
+bool HomeScreen::eventFilter(QObject* watched, QEvent* e) {
+    // A rebuilt screen (new theme) gets its final width after the grid was first laid out.
+    if (scroll_ && watched == scroll_->viewport() && e->type() == QEvent::Resize) {
+        const int cols = std::max(1, (scroll_->viewport()->width() + kGap) / (kCardMin + kGap));
+        if (cols != columns_) QMetaObject::invokeMethod(this, [this] { rebuildGrid(); }, Qt::QueuedConnection);
+    }
+    return QWidget::eventFilter(watched, e);
+}
+
 void HomeScreen::rebuildGrid() {
-    const auto& items = recents_.items();
-    count_->setText(QString("%1 recent project%2").arg(items.size()).arg(items.size() == 1 ? "" : "s"));
+    const auto& items = entries_;
+    count_->setText(QString("%1 project%2").arg(items.size()).arg(items.size() == 1 ? "" : "s"));
     const int avail = std::max(kCardMin, scroll_->viewport()->width() - 2);
     columns_ = std::max(1, (avail + kGap) / (kCardMin + kGap));
     const int cardW = (avail - kGap * (columns_ - 1)) / columns_;
@@ -396,17 +482,13 @@ void HomeScreen::rebuildGrid() {
             },
             [this, copy](QPoint at) {
                 QMenu menu;
-                menu.addAction("Open", [this, copy] {
+                menu.addAction(ui::menuIcon(ui::Icon::Play, theme::kTextDim), "Open", [this, copy] {
                     if (onOpen) onOpen(copy.path);
                 });
-                menu.addAction("Show in Folder", [copy] { platform::revealInFileManager(copy.path); });
+                menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Show in Folder",
+                               [copy] { platform::revealInFileManager(copy.path); });
                 menu.addSeparator();
-                menu.addAction("Remove from List", [this, copy] {
-                    recents_.remove(copy.path);
-                    previews_.erase(copy.path);
-                    QMetaObject::invokeMethod(this, [this] { rebuildGrid(); }, Qt::QueuedConnection);
-                });
-                menu.addAction(ui::makeIcon(ui::Icon::Trash, theme::kDanger, 16), "Delete Project...",
+                menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), "Delete Project...",
                                [this, copy] { confirmDelete(copy); });
                 menu.exec(at);
             });
@@ -441,6 +523,7 @@ void HomeScreen::confirmDelete(const RecentProject& item) {
     if (!std::filesystem::exists(item.path, ec) || platform::moveToTrash(item.path, &err)) {
         recents_.remove(item.path);
         previews_.erase(item.path);
+        std::erase_if(entries_, [&](const RecentProject& e) { return e.path == item.path; });
     } else {
         setError("Could not delete \"" + item.name + "\": " + err);
     }
@@ -484,6 +567,8 @@ void HomeScreen::openNewProjectDialog() {
     bg->setAlphaEnabled(false);
     bg->setColor(Color::fromHex(0x101012));
     form->addRow("Background", bg);
+    double limit = settings().maxDuration;
+    form->addRow("Length", ui::lengthLimitRow(limit, [&limit](double v) { limit = v; }));
     std::filesystem::path folderPath = platform::defaultProjectsDir();
     auto* folderRow = new QHBoxLayout;
     auto* folder = new QLineEdit(QString::fromStdString(platform::toUtf8(folderPath)));
@@ -541,7 +626,8 @@ void HomeScreen::openNewProjectDialog() {
     p.comp.width = static_cast<int>(std::lround(w->value()));
     p.comp.height = static_cast<int>(std::lround(h->value()));
     p.comp.fps = kFpsOptions[std::clamp(fps->currentIndex(), 0, static_cast<int>(std::size(kFpsOptions)) - 1)];
-    p.comp.fitDuration(); // grows as objects are added
+    p.comp.maxDuration = limit;
+    p.comp.fitDuration(); // grows as objects are added (up to the limit)
     p.comp.background = bg->color();
     if (onCreate) onCreate(uniqueProjectPath(folderPath, p.name), std::move(p));
 }

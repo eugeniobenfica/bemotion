@@ -43,7 +43,7 @@ bool matches(const std::string& text, const std::string& filter) {
 QLabel* faint(const QString& text) {
     auto* l = new QLabel(text);
     l->setWordWrap(true);
-    l->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    ui::setTone(l, ui::Tone::TextFaint);
     return l;
 }
 

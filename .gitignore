@@ -32,3 +32,7 @@ third_party/
 
 # Packages (tools/package-*.sh)
 dist/
+
+# Smoke test output (tools/smoke-test.sh)
+smoke/
+smoke-package/

@@ -77,6 +77,8 @@ void loadSettings() {
         s.uiFont = j.value("ui_font", s.uiFont);
         s.arrowFrames = std::clamp(j.value("arrow_frames", s.arrowFrames), 1, 1000);
         s.bigArrowFrames = std::clamp(j.value("big_arrow_frames", s.bigArrowFrames), 1, 1000);
+        s.maxDuration = std::clamp(j.value("max_duration", s.maxDuration), 0.0, 24.0 * 3600.0);
+        s.autosaveMinutes = std::clamp(j.value("autosave_minutes", s.autosaveMinutes), 0, 120);
         s.showIntro = j.value("show_intro", s.showIntro);
         s.welcomeAdded = j.value("welcome_added", s.welcomeAdded);
         if (j.contains("toolbar")) {
@@ -97,7 +99,8 @@ void saveSettings() {
               {"advanced", s.advanced}, {"snap_distance", s.snapDistance}, {"disabled_plugins", s.disabledPlugins},
               {"timeline_layer_row", s.timelineLayerRow}, {"timeline_property_row", s.timelinePropertyRow},
               {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}, {"ui_font", s.uiFont},
-              {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames}, {"show_intro", s.showIntro}, {"welcome_added", s.welcomeAdded}, {"toolbar", s.toolbar},
+              {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames},
+              {"max_duration", s.maxDuration}, {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"welcome_added", s.welcomeAdded}, {"toolbar", s.toolbar},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);

@@ -398,7 +398,7 @@ private:
         const bool sequence = job_.settings().format == exporting::Format::PngSequence;
         if (ok) {
             resultTitle_->setText("Export complete");
-            resultTitle_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kAccent).name()));
+            ui::setTone(resultTitle_, ui::Tone::Accent);
             resultInfo_->setText(QString("%1 frames in %2").arg(job_.framesTotal()).arg(QString::fromStdString(formatDuration(job_.elapsedSeconds()))));
             resultPath_->setText(QString::fromStdString(platform::toUtf8(job_.settings().output)));
         } else if (job_.cancelled()) {
@@ -408,7 +408,7 @@ private:
             resultPath_->clear();
         } else {
             resultTitle_->setText("Export failed");
-            resultTitle_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+            ui::setTone(resultTitle_, ui::Tone::Danger);
             resultInfo_->clear();
             resultPath_->setText(QString::fromStdString(job_.error()));
         }

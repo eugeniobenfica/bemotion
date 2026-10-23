@@ -5,6 +5,7 @@
 #include "app/DevScript.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "app/Recovery.h"
 #include "app/Settings.h"
 #include "core/Serialization.h"
 #include "media/AudioEngine.h"
@@ -24,8 +25,11 @@
 #include <QFontDatabase>
 #include <QIcon>
 #include <QImage>
+#include <QDateTime>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMimeData>
+#include <QPushButton>
 #include <QPixmap>
 #include <QResizeEvent>
 #include <QStackedWidget>
@@ -163,6 +167,9 @@ int Application::run(int argc, char** argv) {
 
     if (!projectArg.empty()) openProject(projectArg);
     else if (settings().showIntro) intro_->start(platform::assetsDir() / "welcome" / "Welcome.bemotion");
+    // Changes a crash left unsaved: offered once the window (and the intro) is out of the way.
+    if (intro_->isVisible()) connect(intro_, &IntroScreen::finished, this, [this] { QTimer::singleShot(0, this, [this] { offerRecovery(); }); });
+    else QTimer::singleShot(300, this, [this] { offerRecovery(); });
 
     const int result = QApplication::exec();
     platform::log("quitting");
@@ -368,6 +375,43 @@ void Application::goHome() {
     stack_->setCurrentWidget(home_);
     home_->refresh();
     updateTitle();
+}
+
+void Application::offerRecovery() {
+    const std::vector<recovery::Entry> entries = recovery::pending();
+    if (entries.empty()) return;
+    const recovery::Entry& e = entries.front();
+    QMessageBox box(window_);
+    box.setWindowTitle("Recover Unsaved Changes");
+    box.setText(QString("bemotion closed before \"%1\" was saved.").arg(QString::fromStdString(e.name)));
+    QString info = QString("Its changes up to %1 were kept. Recover them?")
+                       .arg(QDateTime::fromSecsSinceEpoch(e.savedAt).toString("hh:mm, dd MMM"));
+    if (entries.size() > 1) info += QString("\n\n%1 more project(s) can be recovered next time.").arg(entries.size() - 1);
+    box.setInformativeText(info);
+    QPushButton* recover = box.addButton("Recover", QMessageBox::AcceptRole);
+    recover->setProperty("accent", true);
+    QPushButton* discard = box.addButton("Discard", QMessageBox::DestructiveRole);
+    box.addButton("Later", QMessageBox::RejectRole);
+    box.setDefaultButton(recover);
+    box.exec();
+    if (box.clickedButton() == discard) {
+        recovery::discard(e);
+        return;
+    }
+    if (box.clickedButton() != recover) return;
+    Project project;
+    std::string err;
+    if (!loadProject(e.copy, project, &err)) {
+        home_->setError("Could not recover \"" + e.name + "\": " + err);
+        return;
+    }
+    platform::log("recovering " + e.name);
+    if (editor_ && !editor_->confirmClose()) return;
+    recovery::discard(e); // the editor keeps its own copy from now on
+    if (!e.original.empty()) recents_.touch(e.original, project.name);
+    PluginHost::get().reconcile(project.comp);
+    showEditor(std::move(project), e.original);
+    editor_->markRecovered();
 }
 
 void Application::updateTitle() { window_->setWindowTitle(editor_ ? editor_->title() : QString("bemotion")); }

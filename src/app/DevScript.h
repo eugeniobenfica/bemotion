@@ -17,6 +17,8 @@
 //   capture FILE           save the window (format from the extension: .png, .bmp, ...);
 //                          other open windows go to FILE-<window title>.<ext>
 //   drop FILE...           drop files on the window (as from the file manager)
+//   window TITLE           later mouse commands go to that open window ("Settings", a dialog...);
+//                          "window main" (or any title not open) goes back to the main window
 //   quit                   close the app (without asking to save)
 //
 // BEMOTION_SCRIPT_TRACE=<file> logs each command run, with its frame.
@@ -61,6 +63,7 @@ private:
     int buttons_ = 0;           // Qt::MouseButtons
     int modifiers_ = 0;         // Qt::KeyboardModifiers
     QPointer<QWidget> grabbed_; // receives moves and the release after a press
+    QPointer<QWidget> other_;   // the window mouse commands go to (null: the main one)
     int frame_ = 0, lastPressFrame_ = -100;
     QPoint lastPressPos_;
     std::string capture_;

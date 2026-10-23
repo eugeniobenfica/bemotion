@@ -38,7 +38,8 @@ struct PluginObjectType {
     std::string icon; // "chart", "bars", "pie", "line" or a built-in shape icon
     PluginProps prototype;
     std::vector<PluginIntro> intro;
-    int drawRef = -1; // Lua registry reference of the draw function
+    int drawRef = -1;   // Lua registry reference of the draw function
+    int importRef = -1; // ... of import_csv (optional): CSV cells -> rows / table / params
 };
 
 // An action a plugin adds to the Plugins menu: Lua that edits the project
@@ -98,6 +99,10 @@ public:
     void reconcile(Composition& comp) const;
 
     void draw(const Layer& layer, double time, render::PluginCanvas& canvas);
+
+    // Fills a plugin object's data (rows / table) from CSV text: through the object's own
+    // import_csv when it has one, else the standard reading (core/Data.h).
+    bool importCsv(Layer& layer, const std::string& csv, std::string& error);
 
     // Commands of enabled plugins, in load order.
     std::vector<const PluginCommand*> commands() const;

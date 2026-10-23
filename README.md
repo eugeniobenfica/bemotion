@@ -111,6 +111,9 @@ does.
   and get an animatable *Volume*
 - **Compounds** (Ctrl+G): group layers into one object with its own timeline
 - **Edit text in place**: double-click a text on the canvas
+- **Copy and paste** objects (Ctrl+C / Ctrl+X / Ctrl+V) in the timeline and
+  the viewport, between projects too; files copied in the file manager paste
+  as media
 
 </td>
 <td width="50%" valign="top">
@@ -121,6 +124,8 @@ does.
   custom cubic-bezier curve editor; Easy Ease with F9
 - **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
   Draw On… stackable, importable, savable
+- **Transitions** panel: Fade, Slide, Zoom, Pop, Spin at a clip's start, end
+  or both, with any duration — plain keyframes you can still edit
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…
   stackable, keyframable, with presets
 
@@ -132,10 +137,13 @@ does.
 ### ✦ Edit
 - **Timeline** with multi-clip tracks, trimming, cut tool (C), split at
   playhead (Ctrl+K), snapping to clips, keys and the playhead
-- **Your own toolbar**: drag tools and actions from the *Tools* panel into
-  the timeline's toolbar, reorder them, drag them out to remove
+- **Your own toolbar**: the toolbar's *+* opens every tool; drag them into
+  the toolbar, reorder them, drag them out to remove
 - **No fixed length**: the composition ends where its last clip ends and grows
-  as you add objects or extend clips
+  as you add objects — or set a length limit (15 s ads, 60 s shorts)
+- **Arrange**: distribute layers evenly, stagger their start times
+- **Autosave and recovery**: projects save themselves every few minutes, and
+  changes a crash would lose are offered back the next time
 - **Viewport** with box selection, rulers, guides and smart snapping
 - **Camera** with position, rotation and zoom
 
@@ -154,11 +162,12 @@ does.
 <td valign="top">
 
 ### ✦ Make it yours
-- Dark, Light and Midnight themes, any accent color, an advanced mode for
-  every UI color; import / export themes ([example](examples/themes))
+- Dark, Light and Midnight themes, any accent color; *Advanced Options* show
+  every UI color and fine-tuning setting; import / export themes
+  ([example](examples/themes))
 - Rebind every shortcut, pick the interface font and text size, timeline
   densities, frames per arrow press
-- Dockable panels: drag tabs anywhere, float them, pin one to auto-hide on the
+- Dockable panels: drag tabs anywhere, minimize a panel to a handle on the
   window edge, double-click a tab to maximize it
 
 </td>
@@ -167,9 +176,10 @@ does.
 ### ✦ Extend
 - **Plugins** are sandboxed Lua scripts that add new kinds of objects
 - The bundled **Charts** plugin draws animated column / bar, line / area and
-  donut charts from a data table you can paste from a spreadsheet
-- Plugin **commands** edit the project (the bundled *Layout* plugin
-  distributes, staggers and fades layers) — see [docs/PLUGINS.md](docs/PLUGINS.md)
+  donut charts and **tables**, from data you paste from a spreadsheet or
+  import from a **CSV** file
+- Plugin **commands** edit the project through the same operations as
+  scripts and AI tools — see [docs/PLUGINS.md](docs/PLUGINS.md)
 - **Robot-friendly**: scripts and AI assistants create and edit projects from
   the command line — `describe`, `apply` [operations](docs/OPERATIONS.md),
   Lua `script`s, `render` contact sheets to look at, `validate` — every change
@@ -183,10 +193,11 @@ does.
 <details>
 <summary><b>All the details</b></summary>
 
-- **Home screen** with recent projects (live thumbnails), search, the Welcome
-  project, a *⋯* menu on each card (show in folder, remove from the list,
-  delete to the Recycle Bin / Trash) and a *New Project* dialog with format
-  presets (Full HD, 4K, Vertical/Reels, Square…)
+- **Home screen** with every project in the projects folder (found by itself,
+  live thumbnails) plus the ones opened from elsewhere, search, the Welcome
+  project, a *⋯* menu on each card (show in folder, delete to the Recycle Bin
+  / Trash) and a *New Project* dialog with format presets (Full HD, 4K,
+  Vertical/Reels, Square…) and an optional length limit
 - **Media panel** (like After Effects' *Project* panel): images (PNG, JPEG,
   BMP, TGA, GIF, PSD, HDR), audio (WAV, MP3, FLAC, M4A/AAC, OGG/Opus, WMA, AIFF)
   and video (MP4, MOV, M4V, MKV, WebM, AVI, WMV, MPEG, MTS) on every platform,

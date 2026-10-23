@@ -1,6 +1,9 @@
 // Minimal, dependency-free unit tests for the document model.
 
 #include "core/Animated.h"
+#include "core/Arrange.h"
+#include "core/Clipboard.h"
+#include "core/Data.h"
 #include "core/Describe.h"
 #include "core/Ops.h"
 #include "core/Validate.h"
@@ -10,6 +13,7 @@
 #include "core/Project.h"
 #include "core/Serialization.h"
 #include "core/Snapping.h"
+#include "core/Transitions.h"
 
 #include <cmath>
 #include <cstdio>
@@ -679,6 +683,76 @@ void testValidateAndRepair() {
     CHECK(std::isfinite(p.comp.layers[1].transform.opacity.base) || std::isfinite(p.comp.layers[0].transform.opacity.base));
 }
 
+void testCsvAndNumbers() {
+    const Cells c = parseCsv("\xEF\xBB\xBFMonth;Sales\r\nJan;1.234,5\n\n\"Feb; late\";\"R$ 12\"\n");
+    CHECK(c.size() == 3);
+    CHECK(c[0][0] == "Month" && c[2][0] == "Feb; late");
+    float v = 0;
+    CHECK(parseNumber("1.234,5", v) && near(v, 1234.5f));
+    CHECK(parseNumber("1,234.5", v) && near(v, 1234.5f));
+    CHECK(parseNumber("R$ 12", v) && near(v, 12.0f));
+    CHECK(parseNumber("45%", v) && near(v, 45.0f));
+    CHECK(parseNumber("3,5", v) && near(v, 3.5f));
+    CHECK(!parseNumber("Jan", v));
+    const auto rows = rowsFromCells(c);
+    CHECK(rows.size() == 2 && rows[0].label == "Jan" && near(rows[0].value, 1234.5f) && near(rows[1].value, 12.0f));
+    const DataTable t = tableFromCells(parseCsv("a,b,c\n1,2\n"));
+    CHECK(t.header.size() == 3 && t.rows.size() == 1 && t.rows[0].size() == 3);
+    CHECK(parseCsv(toCsv(cellsOf(t))) == cellsOf(t));
+}
+
+void testLengthLimit() {
+    Project p;
+    run(p, R"({"op": "layer.add", "type": "rectangle", "duration": 8})");
+    CHECK(p.comp.duration > 7.9);
+    CHECK(run(p, R"({"op": "composition.set", "max_duration": 5})").ok);
+    CHECK(near(static_cast<float>(p.comp.duration), 5.0f));
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back) && near(static_cast<float>(back.comp.maxDuration), 5.0f));
+    CHECK(!run(p, R"({"op": "composition.set", "max_duration": -1})").ok);
+}
+
+void testCopyPaste() {
+    Project p;
+    run(p, R"([{"op": "layer.add", "type": "rectangle", "name": "A", "start": 1},
+               {"op": "layer.add", "type": "text", "name": "B", "start": 2},
+               {"op": "group", "layers": ["A", "B"], "name": "G"}])");
+    const uint64_t g = p.comp.layers.front().id;
+    const std::string clip = copyLayers(p.comp, {g});
+    CHECK(isCopiedLayers(clip) && !isCopiedLayers(serializeProject(p)));
+    const size_t before = p.comp.layers.size();
+    const auto added = pasteLayers(p.comp, clip, 4.0, 0);
+    CHECK(added.size() == 1 && p.comp.layers.size() == before + 3); // the compound and its two children
+    const Layer* copy = p.comp.findLayer(added[0]);
+    CHECK(copy && copy->type == LayerType::Compound && near(static_cast<float>(copy->inPoint), 4.0f));
+    CHECK(p.comp.descendantsOf(added[0]).size() == 2);
+    CHECK(validate(p).empty());
+    CHECK(pasteLayers(p.comp, "not a clip", 0, 0).empty());
+}
+
+void testArrangeAndTransitions() {
+    Project p;
+    run(p, R"([{"op": "layer.add", "type": "rectangle", "name": "A", "position": [100, 500]},
+               {"op": "layer.add", "type": "rectangle", "name": "B", "position": [900, 500]},
+               {"op": "layer.add", "type": "rectangle", "name": "C", "position": [300, 500]}])");
+    CHECK(run(p, R"({"op": "arrange.distribute", "layers": ["A", "B", "C"]})").ok);
+    auto x = [&](const char* name) {
+        for (const Layer& l : p.comp.layers)
+            if (l.name == name) return l.transform.position.valueAt(0).x;
+        return -1.0f;
+    };
+    CHECK(near(x("A"), 100) && near(x("C"), 500) && near(x("B"), 900));
+    CHECK(run(p, R"({"op": "arrange.stagger", "layers": "all", "step": 0.5})").ok);
+    CHECK(validate(p).empty());
+    CHECK(run(p, R"({"op": "transition.add", "layer": "A", "transition": "fade", "edge": "both", "duration": 0.5})").ok);
+    const Layer* a = nullptr;
+    for (const Layer& l : p.comp.layers)
+        if (l.name == "A") a = &l;
+    CHECK(a && a->transform.opacity.keyCount() == 4);
+    CHECK(near(a->transform.opacity.valueAt(a->inPoint), 0.0f) && near(a->transform.opacity.valueAt(a->inPoint + 1.0), 100.0f));
+    CHECK(!run(p, R"({"op": "transition.add", "layer": "A", "transition": "fdae"})").ok);
+}
+
 } // namespace
 
 int main() {
@@ -717,6 +791,10 @@ int main() {
         {"operations: compounds, effects, split, order", testOpsStructure},
         {"operations: file round trip and describe", testOpsRoundTrip},
         {"validate and repair", testValidateAndRepair},
+        {"csv and numbers", testCsvAndNumbers},
+        {"length limit", testLengthLimit},
+        {"copy and paste", testCopyPaste},
+        {"arrange and transitions", testArrangeAndTransitions},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

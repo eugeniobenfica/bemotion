@@ -1,9 +1,11 @@
--- Charts for bemotion: columns / bars, line / area and pie / donut.
+-- Charts for bemotion: columns / bars, line / area, pie / donut, and tables.
 --
--- Every chart reads its data from the object's table (label, value, color)
--- and animates with "Progress", which gets intro keyframes when the object is
+-- Every chart reads its data from the object's rows (label, value, color) and
+-- animates with "Progress", which gets intro keyframes when the object is
 -- created. "Trim Start / End" work like trim paths on every bar, the line and
--- every slice. See docs/PLUGINS.md for the plugin API.
+-- every slice. Tables show a grid of text cells whose rows come in one after
+-- another. Charts and tables import CSV files (Properties > Data > Import CSV).
+-- See docs/PLUGINS.md for the plugin API.
 
 local PALETTE = { "#E8B931", "#4F8EF7", "#3DBE8B", "#E5604D", "#A77BF3", "#3CC6D6", "#F28C38" }
 
@@ -13,6 +15,16 @@ local SAMPLE = {
   { "Mar", 51, PALETTE[3] },
   { "Apr", 76, PALETTE[4] },
   { "May", 93, PALETTE[5] },
+}
+
+local SAMPLE_TABLE = {
+  header = { "Player", "Team", "Goals", "Assists" },
+  rows = {
+    { "Ana Souza", "Lions", "12", "7" },
+    { "Bruno Lima", "Hawks", "9", "11" },
+    { "Carla Dias", "Lions", "8", "4" },
+    { "Diego Alves", "Wolves", "6", "9" },
+  },
 }
 
 local EASINGS = { "Ease Out", "Back Out", "Elastic", "Bounce", "Ease In Out", "Linear" }
@@ -190,10 +202,68 @@ local function grid(o, g, bx0, by0, bx1, by1, max, vertical)
   end
 end
 
+-- --- CSV import ---------------------------------------------------------------------
+
+-- Charts: the first column of numbers gives the values, the first column of words the
+-- labels; a header line above the numbers becomes the title (when there is none yet).
+local function import_chart(cells, o)
+  local width = 0
+  for _, r in ipairs(cells) do width = math.max(width, #r) end
+  local value_col, label_col
+  for c = 1, width do
+    local numeric, filled = 0, 0
+    for _, r in ipairs(cells) do
+      local cell = r[c]
+      if cell and cell ~= "" then
+        filled = filled + 1
+        if bemotion.number(cell) then numeric = numeric + 1 end
+      end
+    end
+    if filled > 0 then
+      if numeric * 2 >= filled then
+        value_col = value_col or c
+      else
+        label_col = label_col or c
+      end
+    end
+  end
+  if not value_col then error("no column of numbers found") end
+  local rows, params = {}, {}
+  for i, r in ipairs(cells) do
+    local v = bemotion.number(r[value_col] or "")
+    if v then
+      local label = label_col and r[label_col] or ("Item " .. (#rows + 1))
+      rows[#rows + 1] = { label, v, PALETTE[#rows % #PALETTE + 1] }
+    elseif i == 1 and o.title == "" and (r[value_col] or "") ~= "" then
+      params.title = r[value_col]
+    end
+  end
+  if #rows == 0 then error("no line with a number was found") end
+  return { rows = rows, params = params }
+end
+
+-- Tables: the first line is the header, unless it is all numbers (then columns get names).
+local function import_table(cells)
+  local first = cells[1] or {}
+  local all_numbers = #first > 0
+  for _, cell in ipairs(first) do
+    if cell ~= "" and not bemotion.number(cell) then all_numbers = false end
+  end
+  local header, start = first, 2
+  if all_numbers then
+    header, start = {}, 1
+    for c = 1, #first do header[c] = "Column " .. c end
+  end
+  local rows = {}
+  for i = start, #cells do rows[#rows + 1] = cells[i] end
+  return { table = { header = header, rows = rows } }
+end
+
 -- --- column / bar chart ---------------------------------------------------------
 
 bemotion.register_object {
   id = "bars",
+  import_csv = import_chart,
   name = "Bar Chart",
   description = "Columns or horizontal bars that grow in, one after another.",
   icon = "bars",
@@ -351,6 +421,7 @@ end
 
 bemotion.register_object {
   id = "line",
+  import_csv = import_chart,
   name = "Line Chart",
   description = "A line (or filled area) that draws itself from left to right.",
   icon = "line_chart",
@@ -437,6 +508,7 @@ bemotion.register_object {
 
 bemotion.register_object {
   id = "donut",
+  import_csv = import_chart,
   name = "Donut Chart",
   description = "Pie or donut slices that sweep in, with a legend.",
   icon = "pie",
@@ -522,6 +594,126 @@ bemotion.register_object {
           label = label .. "  " .. value_text(o, r.value)
         end
         g.text(label, lx + fs * 1.1, y, fs, bemotion.with_alpha(o.text_color, a * 0.9), "left")
+      end
+    end
+  end,
+}
+
+-- --- table ---------------------------------------------------------------------------
+
+bemotion.register_object {
+  id = "table",
+  name = "Table",
+  description = "A table of text and numbers whose rows come in one after another.",
+  icon = "table",
+  size = { 1100, 520 },
+  table = SAMPLE_TABLE,
+  import_csv = import_table,
+  params = concat(
+    { { id = "show_header", label = "Header Row", type = "toggle", default = true, group = "Table" },
+      { id = "header_color", label = "Header Color", type = "color", default = "#E8B931", group = "Table" },
+      { id = "header_text", label = "Header Text", type = "color", default = "#141417", group = "Table" },
+      { id = "row_color", label = "Row Color", type = "color", default = "#FFFFFF10", group = "Table" },
+      { id = "stripes", label = "Stripes", type = "toggle", default = true, group = "Table" },
+      { id = "stripe_color", label = "Stripe Color", type = "color", default = "#FFFFFF1C", group = "Table" },
+      { id = "corner", label = "Corner Radius", type = "number", default = 8, min = 0, max = 60,
+        format = "%.0f px", group = "Table" },
+      { id = "row_gap", label = "Row Gap", type = "number", default = 4, min = 0, max = 40,
+        format = "%.0f px", group = "Table" },
+      { id = "cell_padding", label = "Cell Padding", type = "number", default = 18, min = 0, max = 120,
+        format = "%.0f px", group = "Table" },
+      { id = "numbers_right", label = "Numbers Right", type = "toggle", default = true, group = "Table" },
+      { id = "background", label = "Background", type = "color", default = "#00000000", group = "Table" } },
+    { { id = "progress", label = "Progress", type = "number", default = 100, min = 0, max = 100,
+        format = "%.0f%%", group = "Animation", intro = { from = 0, duration = 1.4 } },
+      { id = "stagger", label = "Stagger", type = "number", default = 60, min = 0, max = 100,
+        format = "%.0f%%", group = "Animation" },
+      { id = "easing", label = "Easing", type = "choice", choices = EASINGS, default = "Ease Out", group = "Animation" },
+      { id = "reveal", label = "Reveal", type = "choice", choices = { "Slide Up", "Slide In", "Fade" },
+        default = "Slide Up", group = "Animation" } },
+    { { id = "highlight", label = "Highlight Row", type = "number", default = 0, min = 0, max = 100, step = 0.05,
+        format = "%.0f (0 = none)", group = "Sorting & Highlight" },
+      { id = "highlight_color", label = "Highlight Color", type = "color", default = "#E8B93155",
+        group = "Sorting & Highlight" } },
+    { { id = "title", label = "Title", type = "text", default = "", group = "Text" },
+      { id = "font_size", label = "Font Size", type = "number", default = 28, min = 6, max = 200,
+        format = "%.0f px", group = "Text" },
+      { id = "text_color", label = "Text Color", type = "color", default = "#FFFFFF", group = "Text" },
+      { id = "bold_first", label = "Bold First Column", type = "toggle", default = true, group = "Text" } }),
+  draw = function(o, g)
+    local header, rows = o.table.header, o.table.rows
+    local ncols = #header
+    for _, r in ipairs(rows) do ncols = math.max(ncols, #r) end
+    local x0, y0, x1, y1 = frame(o, g)
+    if ncols == 0 then return end
+    local lines = {}
+    if o.show_header then lines[1] = { cells = header, header = true } end
+    for i, r in ipairs(rows) do lines[#lines + 1] = { cells = r, index = i } end
+    if #lines == 0 then return end
+
+    -- Columns as wide as their longest text, then scaled to the width of the object.
+    local fs, pad = o.font_size, o.cell_padding
+    local widths, total = {}, 0
+    for c = 1, ncols do
+      local w = 0
+      for _, line in ipairs(lines) do w = math.max(w, g.measure(line.cells[c] or "", fs)) end
+      widths[c] = w + pad * 2
+      total = total + widths[c]
+    end
+    local scale = (x1 - x0) / math.max(total, 1)
+    for c = 1, ncols do widths[c] = widths[c] * scale end
+    local gap = o.row_gap
+    local row_h = math.min(fs * 2.1, ((y1 - y0) - gap * (#lines - 1)) / #lines)
+    if row_h <= 2 then return end
+    local size = math.min(fs * math.min(1, scale), row_h * 0.5)
+
+    -- Numbers line up on the right of their column.
+    local numeric = {}
+    for c = 1, ncols do
+      local count, filled = 0, 0
+      for _, r in ipairs(rows) do
+        if (r[c] or "") ~= "" then
+          filled = filled + 1
+          if bemotion.number(r[c]) then count = count + 1 end
+        end
+      end
+      numeric[c] = o.numbers_right and filled > 0 and count * 2 >= filled
+    end
+
+    local h = math.floor(o.highlight + 0.5)
+    for i, line in ipairs(lines) do
+      local e, t = item_progress(o, i, #lines)
+      local alpha = clamp(t * 2, 0, 1)
+      local y = y0 + (i - 1) * (row_h + gap)
+      local dx, dy = 0, 0
+      if o.reveal == "Slide Up" then dy = (1 - e) * row_h * 0.8
+      elseif o.reveal == "Slide In" then dx = -(1 - e) * (x1 - x0) * 0.15 end
+      if alpha > 0 then
+        local fill
+        if line.header then fill = o.header_color
+        elseif h > 0 and line.index == h then fill = o.highlight_color
+        elseif o.stripes and line.index % 2 == 0 then fill = o.stripe_color
+        else fill = o.row_color end
+        g.rect(x0 + dx, y + dy, x1 - x0, row_h, bemotion.with_alpha(fill, alpha), math.min(o.corner, row_h / 2))
+        local x = x0 + dx
+        local color = line.header and o.header_text or o.text_color
+        local dim = (h > 0 and not line.header and line.index ~= h) and 0.55 or 1
+        for c = 1, ncols do
+          local text = line.cells[c] or ""
+          if text ~= "" then
+            local bold = line.header or (o.bold_first and c == 1)
+            local tc = bemotion.with_alpha(color, alpha * dim)
+            local cy = y + dy + row_h / 2
+            if numeric[c] and not line.header then
+              g.text(text, x + widths[c] - pad * scale, cy, size, tc, "right", bold)
+            elseif numeric[c] then
+              g.text(text, x + widths[c] - pad * scale, cy, size, tc, "right", true)
+            else
+              g.text(text, x + pad * scale, cy, size, tc, "left", bold)
+            end
+          end
+          x = x + widths[c]
+        end
       end
     end
   end,

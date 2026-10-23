@@ -122,6 +122,12 @@ struct DataRow {
     Color color = Color::fromHex(0xE8B931);
 };
 
+// A table of text cells (plugin objects like tables): a header and rows of the same width.
+struct DataTable {
+    std::vector<std::string> header;
+    std::vector<std::vector<std::string>> rows;
+};
+
 struct PluginProps {
     std::string objectType; // "<plugin id>.<object id>", e.g. "charts.bar"
     AnimVec2 size{Vec2{900.0f, 540.0f}}; // the object frame; plugins draw inside +-size/2
@@ -129,6 +135,8 @@ struct PluginProps {
     std::vector<PluginParam> params;
     bool hasRows = false;
     std::vector<DataRow> rows;
+    bool hasTable = false;
+    DataTable table;
 
     PluginParam* find(const std::string& id);
 };

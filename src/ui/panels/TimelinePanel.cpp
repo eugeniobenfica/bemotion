@@ -277,7 +277,7 @@ private:
     TimelinePanel* panel_;
 };
 
-// The user's tools (Settings::toolbar, filled from the Tools panel) on a pill of their own.
+// The user's tools (Settings::toolbar, filled from the Tools popover) on a pill of their own.
 // Drag a tool along the bar to reorder it, out of the bar to remove it.
 class ToolPill : public QWidget {
 public:
@@ -323,7 +323,7 @@ protected:
             const int i = indexAt(he->pos());
             const auto ts = tools();
             if (i >= 0) QToolTip::showText(he->globalPos(), QString::fromStdString(ui::toolTooltip(ui::toolCatalog()[ts[i]])), this);
-            else if (i == -2) QToolTip::showText(he->globalPos(), "Add tools: drag them here from the Tools panel", this);
+            else if (i == -2) QToolTip::showText(he->globalPos(), "All tools: click to open them, then drag the ones you want here", this);
             else QToolTip::hideText();
             return true;
         }
@@ -484,7 +484,7 @@ void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
     auto* divider = new QFrame;
     divider->setFrameShape(QFrame::VLine);
     divider->setFixedHeight(s - 8);
-    divider->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kBorder).name()));
+    ui::setTone(divider, ui::Tone::Border);
     bar->addWidget(divider);
     bar->addSpacing(8);
     auto button = [&](ui::Icon icon, const QString& tip, std::function<void()> click) {
@@ -519,11 +519,11 @@ void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
     f.setPointSizeF(f.pointSizeF() * 1.15);
     f.setWeight(QFont::DemiBold);
     timecode_->setFont(f);
-    timecode_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kAccent).name()));
+    ui::setTone(timecode_, ui::Tone::Accent);
     bar->addWidget(timecode_);
     bar->addSpacing(6);
     frameInfo_ = new QLabel;
-    frameInfo_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    ui::setTone(frameInfo_, ui::Tone::TextFaint);
     bar->addWidget(frameInfo_);
 
     // Graph editor easing buttons (for the selected keyframes).
@@ -764,7 +764,7 @@ void TimelinePanel::syncBreadcrumb() {
     row->addWidget(top);
     for (size_t i = 0; i < path.size(); ++i) {
         auto* slash = new QLabel("/");
-        slash->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+        ui::setTone(slash, ui::Tone::TextFaint);
         row->addWidget(slash);
         const bool last = i + 1 == path.size();
         auto* b = new QPushButton(QString::fromStdString(path[i]->name));
@@ -781,7 +781,7 @@ void TimelinePanel::syncBreadcrumb() {
     }
     row->addSpacing(12);
     auto* note = new QLabel("Editing inside a compound  ·  Esc (with nothing selected) goes back");
-    note->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    ui::setTone(note, ui::Tone::TextFaint);
     row->addWidget(note);
     row->addStretch();
 }
@@ -863,8 +863,9 @@ void TimelinePanel::paintRuler(QPainter& p, int width) {
                 d.line({mx, h - 5}, {mx, h}, theme::kBorder);
             }
     }
+    // Past the end of the composition (nothing to mark while it is empty: it grows with its content).
     const float endX = timeToX(comp.duration);
-    d.rectFilled({endX, 0}, {x1, h}, theme::shade(90));
+    if (!comp.layers.empty()) d.rectFilled({endX, 0}, {x1, h}, theme::shade(90));
     // Playhead handle.
     const float ph = timeToX(ctx_.time);
     const Pt head[5] = {{ph - 6, 3}, {ph + 6, 3}, {ph + 6, 14}, {ph, 20}, {ph - 6, 14}};
@@ -899,7 +900,7 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
     d.line({x0 - 1, 0}, {x0 - 1, bottom}, theme::kBorder);
     d.pushClip({x0, 0}, {x1, bottom});
     const float endX = timeToX(ctx_.comp().duration);
-    if (endX < x1) d.rectFilled({endX, 0}, {x1, bottom}, theme::shade(80));
+    if (endX < x1 && !ctx_.comp().layers.empty()) d.rectFilled({endX, 0}, {x1, bottom}, theme::shade(80));
     const float ph = timeToX(ctx_.time);
     d.line({ph, 0}, {ph, bottom}, theme::kAccent, 1.5f);
     if (snapLineTime_ >= 0.0) { // what the dragged item snapped to
@@ -1233,7 +1234,7 @@ void TimelinePanel::showKeyMenu(QPoint global) {
     }
     col->addLayout(numbers);
     auto* startLabel = new QLabel("Start from:");
-    startLabel->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    ui::setTone(startLabel, ui::Tone::TextFaint);
     col->addWidget(startLabel);
     auto* starts = new QHBoxLayout;
     const std::pair<Easing, const char*> presets[] = {

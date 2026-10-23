@@ -17,7 +17,7 @@ struct Settings {
     std::string theme = "Dark"; // ThemeLibrary entry
     bool customAccent = false;  // false: use the theme's own accent
     theme::Rgba accent = theme::rgba(232, 185, 49);
-    bool advanced = false;      // show every option in the settings window
+    bool advanced = false;      // show every option in the settings window (all pages)
     // Advanced mode: colors edited by hand override the theme.
     bool customPalette = false;
     theme::Palette palette;
@@ -30,6 +30,8 @@ struct Settings {
     std::string uiFont = "Inter";      // interface font family (any installed one)
     int arrowFrames = 1;               // frames stepped by the arrow keys
     int bigArrowFrames = 10;           // ... with Shift (big step)
+    double maxDuration = 0.0;          // length limit of new projects, seconds (0: none)
+    int autosaveMinutes = 5;           // saves open projects this often (0: off)
     bool showIntro = true;             // the opening animation at startup
     bool welcomeAdded = false;         // the Welcome project was put in the projects list once
     std::vector<std::string> toolbar = ui::defaultToolbar(); // tool ids in the timeline's toolbar (ui/Tools.h)

@@ -33,6 +33,7 @@ struct Composition {
     int height = 1080;
     double fps = 30.0;
     double duration = 10.0; // seconds; follows the content (fitDuration)
+    double maxDuration = 0.0; // seconds; 0: no limit, else the composition never grows past it
     Color background = Color::fromHex(0x101012);
 
     // Rendering order: index 0 is the top-most layer. Layers of the same
@@ -47,7 +48,8 @@ struct Composition {
     const MediaItem* findMedia(uint64_t id) const;
     uint64_t addMedia(MediaItem item); // reuses an item already imported from the same path
 
-    // Makes the composition end where its last clip ends (at least kMinCompDuration).
+    // Makes the composition end where its last clip ends (at least kMinCompDuration, at most
+    // maxDuration when set).
     void fitDuration();
 
     double frameDuration() const { return 1.0 / fps; }

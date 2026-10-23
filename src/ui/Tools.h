@@ -1,8 +1,8 @@
 #pragma once
 
 // The tools and editing actions that can live in the timeline's toolbar. The
-// Tools panel lists all of them; the user drags the ones they want into the
-// toolbar (Settings::toolbar keeps the choice).
+// Tools popover (the toolbar's "+") lists all of them; the user drags the ones
+// they want into the toolbar (Settings::toolbar keeps the choice).
 
 #include "ui/Keymap.h"
 #include "ui/Widgets.h"

@@ -144,19 +144,24 @@ const Palette& current() { return g_current; }
 // Docking (Qt Advanced Docking System): added to its own style sheet, which wins over the application's.
 QString dockStyleSheet() {
     QString s;
+    const int r = static_cast<int>(std::clamp(g_current.rounding, 0.0f, 12.0f)) + 2;
     s += QString("ads--CDockContainerWidget, ads--CDockManager { background: %1; }\n"
                  "ads--CDockAreaWidget { background: %2; border: none; }\n"
-                 "ads--CDockAreaTitleBar { background: %1; border: none; }\n"
-                 "ads--CDockWidgetTab { background: %1; border: none; padding: 0 6px; }\n"
-                 "ads--CDockWidgetTab[activeTab=\"true\"] { background: %2; border-top: 2px solid %3; }\n"
+                 "ads--CDockAreaTitleBar { background: %1; border: none; padding: 0 2px 0 0; }\n"
+                 "ads--CDockWidgetTab { background: transparent; border: none; margin: 3px 1px 0 1px; padding: 0 9px;"
+                 " border-top-left-radius: %7px; border-top-right-radius: %7px; }\n"
+                 "ads--CDockWidgetTab:hover { background: %6; }\n"
+                 "ads--CDockWidgetTab[activeTab=\"true\"] { background: %2; }\n"
                  "ads--CDockWidgetTab QLabel { color: %4; }\n"
                  "ads--CDockWidgetTab[activeTab=\"true\"] QLabel { color: %5; }\n"
+                 "ads--CDockWidgetTab[focused=\"true\"] QLabel { color: %3; }\n"
                  "ads--CDockSplitter::handle { background: %1; }\n"
                  "ads--CAutoHideTab { background: %2; color: %4; padding: 6px 4px; border: none; }\n"
                  "ads--CAutoHideTab:hover { color: %5; background: %6; }\n"
                  "ads--CAutoHideSideBar { background: %1; border: none; }\n"
                  "ads--CDockWidget { background: %2; }\n")
-             .arg(css(kBgDeep), css(kBgPanel), css(kAccent), css(kTextDim), css(kText), css(kBgHover));
+             .arg(css(kBgDeep), css(kBgPanel), css(kAccent), css(kTextDim), css(kText), css(kBgHover))
+             .arg(r);
     return s;
 }
 
@@ -242,6 +247,7 @@ void apply(const Palette& p) {
              .arg(r)
              .arg(css(kTextFaint), css(kAccent), css(kOnAccent), css(kAccentHover), css(kAccentActive));
     s += QString("QPushButton[danger=\"true\"] { background: %1; color: white; }\n").arg(css(kDanger));
+    s += QString("QPushButton:checked { background: %1; color: %2; }\n").arg(css(accent(70)), css(kText));
     s += QString("QToolButton { background: transparent; border: none; border-radius: %2px; padding: 3px; }\n"
                  "QToolButton:hover { background: %1; }\n"
                  "QToolButton:checked { background: %3; }\n")

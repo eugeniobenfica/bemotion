@@ -1,6 +1,7 @@
 #include "ui/PagedWindow.h"
 
 #include "ui/Theme.h"
+#include "ui/Widgets.h"
 
 #include <QFrame>
 #include <QHBoxLayout>
@@ -39,7 +40,7 @@ PagedWindow::PagedWindow(const QString& title, std::vector<Page> pages, QWidget*
     row->addLayout(side);
     auto* line = new QFrame;
     line->setFrameShape(QFrame::VLine);
-    line->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kBorder).name()));
+    ui::setTone(line, ui::Tone::Border);
     row->addWidget(line);
     area_ = new QScrollArea;
     area_->setWidgetResizable(true);

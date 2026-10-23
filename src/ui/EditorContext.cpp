@@ -1,6 +1,7 @@
 #include "ui/EditorContext.h"
 
 #include "app/PluginHost.h"
+#include "core/Clipboard.h"
 #include "core/Serialization.h"
 
 #include <algorithm>
@@ -291,6 +292,18 @@ void EditorContext::duplicateSelected() {
     for (auto it = copies.rbegin(); it != copies.rend(); ++it)
         selection.push_back(comp().addLayer(std::move(it->first), it->second).id);
     touch();
+}
+
+std::string EditorContext::copySelected() { return copyLayers(comp(), selection); }
+
+bool EditorContext::paste(const std::string& text) {
+    if (scope && !comp().findLayer(scope)) scope = 0;
+    const std::vector<uint64_t> added = pasteLayers(comp(), text, time, std::max(0, comp().indexOf(primaryId())), scope);
+    if (added.empty()) return false;
+    selection = added;
+    selectedKeys.clear();
+    touch();
+    return true;
 }
 
 std::vector<uint64_t> EditorContext::selectedTracks() {

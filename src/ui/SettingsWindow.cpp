@@ -231,6 +231,7 @@ void addColorGrid(QVBoxLayout* col, Settings& s) {
     int i = 0;
     for (const Entry& e : kEntries) {
         auto* row = new QHBoxLayout;
+        row->setSpacing(10);
         auto* button = new ColorButton;
         const Rgba c = s.palette.*(e.field);
         button->setColor(Color{red(c) / 255.0f, green(c) / 255.0f, blue(c) / 255.0f, alpha(c) / 255.0f});
@@ -259,7 +260,7 @@ QWidget* themePage() {
         Settings& st = settings();
         const Settings d;
         st.theme = d.theme, st.customAccent = d.customAccent, st.accent = d.accent;
-        st.customPalette = false, st.advanced = d.advanced;
+        st.customPalette = false;
     });
     col->addWidget(sectionLabel("THEME"));
     auto* cards = new QGridLayout;
@@ -340,19 +341,11 @@ QWidget* themePage() {
     accents->addStretch();
     col->addLayout(accents);
 
-    col->addSpacing(10);
-    auto* advanced = new QCheckBox("Advanced mode");
-    advanced->setChecked(s.advanced);
-    QObject::connect(advanced, &QCheckBox::toggled, advanced, [](bool on) {
-        settings().advanced = on;
-        saveSettings();
-        if (g_window) QTimer::singleShot(0, g_window, [] {
-                if (g_window) g_window->rebuild();
-            });
-    });
-    col->addWidget(advanced);
-    col->addWidget(hintLabel("Shows every color and fine-tuning option. Your choices above stay as they are."));
-    if (!s.advanced) return page;
+    if (!s.advanced) {
+        col->addSpacing(8);
+        col->addWidget(hintLabel("Every color, corner rounding and theme sharing are in Advanced Options (bottom left)."));
+        return page;
+    }
 
     col->addSpacing(8);
     col->addWidget(sectionLabel("COLORS"));
@@ -431,9 +424,11 @@ QWidget* interfacePage() {
         st.showIntro = d.showIntro;
     });
     col->addWidget(sectionLabel("TIMELINE"));
-    col->addWidget(sliderRow("Clip row height", s.timelineLayerRow, 22.0f, 80.0f, "%.0f px"));
-    col->addWidget(sliderRow("Keyframe row height", s.timelinePropertyRow, 20.0f, 60.0f, "%.0f px"));
-    col->addWidget(sliderRow("Keyframe size", s.keyframeSize, 3.0f, 10.0f, "%.1f px", 0.5f));
+    if (s.advanced) {
+        col->addWidget(sliderRow("Clip row height", s.timelineLayerRow, 22.0f, 80.0f, "%.0f px"));
+        col->addWidget(sliderRow("Keyframe row height", s.timelinePropertyRow, 20.0f, 60.0f, "%.0f px"));
+        col->addWidget(sliderRow("Keyframe size", s.keyframeSize, 3.0f, 10.0f, "%.1f px", 0.5f));
+    }
     auto* presets = new QHBoxLayout;
     auto preset = [&](const char* label, float row, float prop, float key) {
         auto* b = new QPushButton(label);
@@ -510,7 +505,39 @@ QWidget* editorPage() {
         Settings& st = settings();
         const Settings d;
         st.snapDistance = d.snapDistance, st.arrowFrames = d.arrowFrames, st.bigArrowFrames = d.bigArrowFrames;
+        st.maxDuration = d.maxDuration, st.autosaveMinutes = d.autosaveMinutes;
     });
+    col->addWidget(sectionLabel("NEW PROJECTS"));
+    col->addWidget(lengthLimitRow(s.maxDuration, [](double v) {
+        settings().maxDuration = v;
+        saveSettings();
+    }));
+    col->addWidget(hintLabel("A project grows with its content. With a limit it stops there: handy for 15 s ads, "
+                             "60 s shorts and the like. Each new project can change it."));
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("SAVING"));
+    auto* autosave = new QCheckBox("Save open projects automatically");
+    autosave->setChecked(s.autosaveMinutes > 0);
+    col->addWidget(autosave);
+    static int minutes;
+    minutes = s.autosaveMinutes > 0 ? s.autosaveMinutes : 5;
+    QWidget* every = intSliderRow("Every (minutes)", minutes, 1, 30);
+    every->setEnabled(s.autosaveMinutes > 0);
+    for (QSlider* sl : every->findChildren<QSlider*>())
+        QObject::connect(sl, &QSlider::valueChanged, sl, [](int) {
+            settings().autosaveMinutes = minutes;
+            saveSettings();
+        });
+    QObject::connect(autosave, &QCheckBox::toggled, every, [every](bool on) {
+        settings().autosaveMinutes = on ? minutes : 0;
+        every->setEnabled(on);
+        saveSettings();
+    });
+    col->addWidget(every);
+    col->addWidget(hintLabel("Unsaved changes are also kept aside every few seconds: if bemotion closes unexpectedly, "
+                             "it offers them back the next time it opens."));
+    if (!s.advanced) return page;
+    col->addSpacing(8);
     col->addWidget(sectionLabel("PLAYHEAD"));
     col->addWidget(intSliderRow("Frames per arrow press", s.arrowFrames, 1, 60));
     col->addWidget(intSliderRow("Frames per big step", s.bigArrowFrames, 1, 300));
@@ -681,7 +708,7 @@ QWidget* pluginsPage() {
     for (const Plugin& p : host.plugins()) {
         auto* line = new QFrame;
         line->setFrameShape(QFrame::HLine);
-        line->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kBorder).name()));
+        ui::setTone(line, ui::Tone::Border);
         col->addWidget(line);
         auto* head = new QHBoxLayout;
         auto* enabled = new QCheckBox;
@@ -745,19 +772,37 @@ QWidget* pluginsPage() {
 
 void openSettings(SettingsTab tab) {
     if (!g_window) {
+        auto* footer = new QWidget;
+        auto* footerCol = new QVBoxLayout(footer);
+        footerCol->setContentsMargins(0, 0, 0, 0);
+        footerCol->setSpacing(6);
+        auto* advanced = new QCheckBox("Advanced Options");
+        advanced->setToolTip("Every page shows all its options (colors, sizes, fine-tuning)");
+        advanced->setChecked(settings().advanced);
+        QObject::connect(advanced, &QCheckBox::toggled, advanced, [](bool on) {
+            settings().advanced = on;
+            saveSettings();
+            if (g_window) QTimer::singleShot(0, g_window, [] {
+                    if (g_window) g_window->rebuild();
+                });
+        });
+        footerCol->addWidget(advanced);
         auto* resetAll = new QPushButton("Reset All");
         resetAll->setToolTip("Restore every setting to its default");
+        footerCol->addWidget(resetAll);
         g_window = new PagedWindow("Settings",
                                    {{"Theme", Icon::Palette, themePage},
                                     {"Interface", Icon::Sliders, interfacePage},
                                     {"Editor", Icon::Magnet, editorPage},
                                     {"Shortcuts", Icon::Text, shortcutsPage},
                                     {"Plugins", Icon::Plugin, pluginsPage}},
-                                   resetAll);
+                                   footer);
         g_window->resize(780, 600);
         QObject::connect(resetAll, &QPushButton::clicked, g_window, [] {
             if (QMessageBox::question(g_window, "Reset All", "Reset every setting to its default?") != QMessageBox::Yes) return;
+            const bool keepAdvanced = settings().advanced; // a view choice, not a preference
             settings() = Settings{};
+            settings().advanced = keepAdvanced;
             loadKeymap("{}");
             enableAllPlugins();
             emit AppSignals::get().shortcutsChanged();

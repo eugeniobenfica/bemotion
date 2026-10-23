@@ -3,6 +3,7 @@
 #include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "app/PresetLibrary.h"
+#include "core/Data.h"
 #include "core/Presets.h"
 #include "media/MediaManager.h"
 #include "render/Fonts.h"
@@ -25,13 +26,16 @@
 #include <QMenu>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QHeaderView>
 #include <QScrollBar>
+#include <QTableWidget>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <sstream>
 
 namespace bemotion {
@@ -41,14 +45,14 @@ namespace {
 QLabel* faint(const QString& text) {
     auto* l = new QLabel(text);
     l->setWordWrap(true);
-    l->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    ui::setTone(l, ui::Tone::TextFaint);
     return l;
 }
 
 QLabel* dim(const QString& text) {
     auto* l = new QLabel(text);
     l->setWordWrap(true);
-    l->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextDim).name()));
+    ui::setTone(l, ui::Tone::TextDim);
     return l;
 }
 
@@ -119,7 +123,8 @@ std::string PropertiesPanel::structureKey() {
     k << ctx_.selection.size() << ':';
     if (!layer) return k.str() + "comp";
     k << layer->id << ':' << static_cast<int>(layer->type) << ':' << static_cast<int>(layer->shape.kind) << ':' << layer->parent << ':'
-      << layer->plugin.objectType << ':' << layer->plugin.rows.size() << ':' << layer->media.mediaId << ':' << layer->media.hasAudio
+      << layer->plugin.objectType << ':' << layer->plugin.rows.size() << ':' << layer->plugin.table.rows.size() << 'x'
+      << layer->plugin.table.header.size() << ':' << layer->media.mediaId << ':' << layer->media.hasAudio
       << ':' << PresetLibrary::all().size() << ':' << presetMessage_;
     if (layer->type == LayerType::Compound)
         for (const Layer& c : ctx_.comp().layers)
@@ -253,7 +258,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
     }
     if (ctx_.selection.size() > 1) {
         auto* n = new QLabel(QString("%1 layers selected").arg(ctx_.selection.size()));
-        n->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kAccent).name()));
+        ui::setTone(n, ui::Tone::Accent);
         col->addWidget(n);
         col->addWidget(faint("Properties below belong to this layer. Quick animations apply to all selected layers."));
     }
@@ -513,11 +518,12 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             col->addWidget(s);
         }
         if (layer.plugin.hasRows) buildPluginData(col, layer);
+        if (layer.plugin.hasTable) buildPluginTable(col, layer);
         if (!PluginHost::get().findType(layer.plugin.objectType)) {
             auto* warn = new QLabel(QString("The plugin for this object (%1) is not installed or failed to load.")
                                         .arg(QString::fromStdString(layer.plugin.objectType)));
             warn->setWordWrap(true);
-            warn->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+            ui::setTone(warn, ui::Tone::Danger);
             col->addWidget(warn);
         }
     }
@@ -592,7 +598,7 @@ void PropertiesPanel::buildMediaSource(QVBoxLayout* col, Layer& layer) {
     const MediaItem* item = ctx_.comp().findMedia(layer.media.mediaId);
     if (!item) {
         auto* gone = new QLabel("The media of this layer was removed.");
-        gone->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+        ui::setTone(gone, ui::Tone::Danger);
         s->body()->addWidget(gone);
         col->addWidget(s);
         return;
@@ -608,7 +614,7 @@ void PropertiesPanel::buildMediaSource(QVBoxLayout* col, Layer& layer) {
     s->body()->addWidget(dim(QString::fromUtf8(info)));
     auto* path = missing ? new QLabel(QString::fromStdString("Missing: " + item->path)) : faint(QString::fromStdString(item->path));
     path->setWordWrap(true);
-    if (missing) path->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+    if (missing) ui::setTone(path, ui::Tone::Danger);
     s->body()->addWidget(path);
     if (missing) s->body()->addWidget(faint("Relink it from the Media panel (right-click the item)."));
     auto* row = new QHBoxLayout;
@@ -735,11 +741,144 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
             }
         QApplication::clipboard()->setText(QString::fromStdString(text));
     });
+    auto* csv = new QPushButton("Import CSV...");
+    csv->setToolTip("Replace the data with a CSV file (comma, semicolon or tab separated)");
+    const uint64_t layerId = layer.id;
+    connect(csv, &QPushButton::clicked, this, [this, layerId] { importCsv(layerId); });
     buttons->addWidget(add);
     buttons->addWidget(paste);
     buttons->addWidget(copy);
+    buttons->addWidget(csv);
     buttons->addStretch();
     s->body()->addLayout(buttons);
+    col->addWidget(s);
+}
+
+void PropertiesPanel::importCsv(uint64_t layerId) {
+    const auto file = platform::openFileDialog("Import CSV", "CSV or text table", "csv");
+    if (!file) return;
+    std::ifstream in(*file, std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    Layer* l = ctx_.comp().findLayer(layerId);
+    if (!l) return;
+    std::string error;
+    if (!PluginHost::get().importCsv(*l, ss.str(), error)) {
+        presetMessage_ = "Could not import " + platform::toUtf8(file->filename()) + ": " + error;
+    } else {
+        presetMessage_.clear();
+        ctx_.touch();
+    }
+    key_.clear(); // rebuilt with the new data
+}
+
+void PropertiesPanel::buildPluginTable(QVBoxLayout* col, Layer& layer) {
+    auto* s = new CollapsibleSection("Table");
+    const uint64_t id = layer.id;
+    auto tableOf = [this, id]() -> DataTable* {
+        Layer* l = ctx_.comp().findLayer(id);
+        return l ? &l->plugin.table : nullptr;
+    };
+    const DataTable& t = layer.plugin.table;
+    const int cols = static_cast<int>(t.header.size());
+    // Row 0 is the header (bold); the cells edit the table directly.
+    auto* grid = new QTableWidget(static_cast<int>(t.rows.size()) + 1, cols);
+    grid->horizontalHeader()->hide();
+    grid->verticalHeader()->setDefaultSectionSize(26);
+    grid->verticalHeader()->setMinimumWidth(24);
+    grid->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    grid->setVerticalHeaderLabels([&] {
+        QStringList l{"H"};
+        for (size_t r = 0; r < t.rows.size(); ++r) l << QString::number(r + 1);
+        return l;
+    }());
+    QFont bold = grid->font();
+    bold.setWeight(QFont::DemiBold);
+    for (int c = 0; c < cols; ++c) {
+        auto* h = new QTableWidgetItem(QString::fromStdString(t.header[c]));
+        h->setFont(bold);
+        grid->setItem(0, c, h);
+        for (int r = 0; r < static_cast<int>(t.rows.size()); ++r)
+            grid->setItem(r + 1, c, new QTableWidgetItem(QString::fromStdString(c < static_cast<int>(t.rows[r].size()) ? t.rows[r][c] : "")));
+    }
+    grid->setFixedHeight(std::min(320, 30 + 26 * grid->rowCount()));
+    connect(grid, &QTableWidget::cellChanged, this, [this, tableOf, grid](int row, int column) {
+        DataTable* table = tableOf();
+        if (!table || column >= static_cast<int>(table->header.size())) return;
+        const std::string text = grid->item(row, column) ? grid->item(row, column)->text().toStdString() : "";
+        if (row == 0) table->header[column] = text;
+        else if (row - 1 < static_cast<int>(table->rows.size())) {
+            auto& cells = table->rows[row - 1];
+            cells.resize(table->header.size());
+            cells[column] = text;
+        }
+        ctx_.touch();
+    });
+    s->body()->addWidget(grid);
+
+    auto edit = [this, tableOf](std::function<void(DataTable&)> fn) {
+        if (DataTable* table = tableOf()) {
+            fn(*table);
+            ctx_.touch();
+            key_.clear();
+        }
+    };
+    auto* buttons = new QHBoxLayout;
+    auto button = [&](const QString& text, const QString& tip, std::function<void()> click) {
+        auto* b = new QPushButton(text);
+        b->setToolTip(tip);
+        connect(b, &QPushButton::clicked, this, std::move(click));
+        buttons->addWidget(b);
+    };
+    button("+ Row", "Add a row at the end", [edit] {
+        edit([](DataTable& t) { t.rows.emplace_back(t.header.size()); });
+    });
+    button("+ Column", "Add a column on the right", [edit] {
+        edit([](DataTable& t) {
+            t.header.push_back("Column " + std::to_string(t.header.size() + 1));
+            for (auto& r : t.rows) r.resize(t.header.size());
+        });
+    });
+    button("- Row", "Remove the selected row (or the last one)", [edit, grid] {
+        const int sel = grid->currentRow();
+        edit([sel](DataTable& t) {
+            if (t.rows.empty()) return;
+            const int i = sel >= 1 && sel - 1 < static_cast<int>(t.rows.size()) ? sel - 1 : static_cast<int>(t.rows.size()) - 1;
+            t.rows.erase(t.rows.begin() + i);
+        });
+    });
+    button("- Column", "Remove the selected column (or the last one)", [edit, grid] {
+        const int sel = grid->currentColumn();
+        edit([sel](DataTable& t) {
+            if (t.header.size() <= 1) return;
+            const int i = sel >= 0 && sel < static_cast<int>(t.header.size()) ? sel : static_cast<int>(t.header.size()) - 1;
+            t.header.erase(t.header.begin() + i);
+            for (auto& r : t.rows)
+                if (i < static_cast<int>(r.size())) r.erase(r.begin() + i);
+        });
+    });
+    buttons->addStretch();
+    s->body()->addLayout(buttons);
+    auto* more = new QHBoxLayout;
+    auto* csv = new QPushButton("Import CSV...");
+    csv->setToolTip("Replace the table with a CSV file (comma, semicolon or tab separated)");
+    connect(csv, &QPushButton::clicked, this, [this, id] { importCsv(id); });
+    auto* paste = new QPushButton("Paste");
+    paste->setToolTip("Replace the table with cells from the clipboard (copied from a spreadsheet or CSV text)");
+    connect(paste, &QPushButton::clicked, this, [edit] {
+        const Cells cells = parseCsv(QApplication::clipboard()->text().toStdString());
+        if (!cells.empty()) edit([&cells](DataTable& t) { t = tableFromCells(cells); });
+    });
+    auto* copy = new QPushButton("Copy");
+    copy->setToolTip("Copy the table as CSV");
+    connect(copy, &QPushButton::clicked, this, [tableOf] {
+        if (DataTable* t = tableOf()) QApplication::clipboard()->setText(QString::fromStdString(toCsv(cellsOf(*t))));
+    });
+    more->addWidget(csv);
+    more->addWidget(paste);
+    more->addWidget(copy);
+    more->addStretch();
+    s->body()->addLayout(more);
     col->addWidget(s);
 }
 

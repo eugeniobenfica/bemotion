@@ -8,8 +8,12 @@
 #include "ui/Tools.h"
 #include "ui/Widgets.h"
 
+#include <QApplication>
 #include <QGridLayout>
+#include <QKeyEvent>
 #include <QLabel>
+#include <QMouseEvent>
+#include <QPainter>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QVBoxLayout>
@@ -68,7 +72,7 @@ void ToolsPanel::rebuild() {
     auto* hint = new QLabel("Drag tools into the timeline's toolbar. Drag them along it to reorder, out of it (or right-click) "
                             "to remove. A dot marks the ones already there.");
     hint->setWordWrap(true);
-    hint->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    ui::setTone(hint, ui::Tone::TextFaint);
     col->addWidget(hint);
     auto* reset = new QPushButton("Reset Toolbar");
     connect(reset, &QPushButton::clicked, this, [] {
@@ -79,6 +83,66 @@ void ToolsPanel::rebuild() {
     col->addWidget(reset, 0, Qt::AlignLeft);
     col->addStretch();
     setWidget(content);
+}
+
+ToolsPopover::ToolsPopover(ToolsPanel* panel, QWidget* host) : QFrame(host) {
+    auto* col = new QVBoxLayout(this);
+    col->setContentsMargins(6, 10, 6, 6);
+    col->setSpacing(4);
+    auto* head = new QHBoxLayout;
+    head->setContentsMargins(8, 0, 0, 0);
+    auto* title = new QLabel("Tools");
+    QFont f = title->font();
+    f.setWeight(QFont::DemiBold);
+    title->setFont(f);
+    head->addWidget(title, 1);
+    auto* close = new ui::IconButton(ui::Icon::Minimize, "Close (Esc)", 24);
+    connect(close, &QAbstractButton::clicked, this, &QWidget::hide);
+    head->addWidget(close);
+    col->addLayout(head);
+    col->addWidget(panel, 1);
+    resize(420, 400);
+    hide();
+}
+
+void ToolsPopover::popup(QPoint anchor) {
+    QWidget* host = parentWidget();
+    const int h = std::min(height(), host->height() - 16);
+    resize(width(), h);
+    QPoint at(anchor.x(), anchor.y() - h - 6);
+    if (at.y() < 8) at.setY(anchor.y() + 30); // no room above: below the anchor
+    at.setX(std::clamp(at.x(), 8, std::max(8, host->width() - width() - 8)));
+    at.setY(std::clamp(at.y(), 8, std::max(8, host->height() - h - 8)));
+    move(at);
+    show();
+    raise();
+    qApp->installEventFilter(this);
+}
+
+void ToolsPopover::hideEvent(QHideEvent* e) {
+    qApp->removeEventFilter(this);
+    QFrame::hideEvent(e);
+}
+
+bool ToolsPopover::eventFilter(QObject* watched, QEvent* event) {
+    if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape) {
+        hide();
+        return true;
+    }
+    if (event->type() == QEvent::MouseButtonPress) {
+        auto* w = qobject_cast<QWidget*>(watched);
+        const QPoint global = static_cast<QMouseEvent*>(event)->globalPosition().toPoint();
+        if (w && w->window() == window() && !rect().contains(mapFromGlobal(global))) hide();
+    }
+    return QFrame::eventFilter(watched, event);
+}
+
+void ToolsPopover::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    ui::Draw d(p);
+    const ui::Pt a(0.5f, 0.5f), b(width() - 0.5f, height() - 0.5f);
+    d.rectFilled(a, b, theme::kBgPanel, 10.0f);
+    d.rect(a, b, theme::kBorder, 10.0f);
 }
 
 void ToolsPanel::sync() {

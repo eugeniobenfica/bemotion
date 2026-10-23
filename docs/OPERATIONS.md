@@ -44,7 +44,8 @@ layer and then animate it.
 ## Composition
 
 **`composition.set`** — `name`, `width`, `height` (16–16384), `fps` (1–240),
-`background`. The duration follows the content: it ends with the last clip.
+`background`, `max_duration` (seconds; `0` = no limit). The duration follows
+the content: it ends with the last clip, but never passes `max_duration`.
 
 ## Layers
 
@@ -103,6 +104,33 @@ Removes every keyframe.
 
 **`effect.remove`** — `layer`, `index`. **`effect.set`** — `layer`, `index`,
 `enabled`, `samples` (motion blur, 2–64).
+
+## Transitions and arranging
+
+**`transition.add`** — `layer`, `transition` (`fade`, `slide_left`,
+`slide_right`, `slide_up`, `slide_down`, `zoom`, `pop`, `spin`), `edge` (`in`,
+`out` or `both`; default `in`), `duration` (seconds, default 0.5). Keyframes at
+the clip's start and/or end; keys already there are replaced.
+
+**`arrange.distribute`** — `layers` (list, or `"all"`), `axis` (`x` or `y`),
+`time` (default 0). Even spacing: three or more layers keep the outer two in
+place; two spread over the composition.
+
+**`arrange.stagger`** — `layers` (list, or `"all"`), `step` (seconds, default
+0.1). Each layer starts `step` after the one above it.
+
+## Data (charts and tables)
+
+**`data.set`** — `layer` (a plugin object with data) and one of:
+- `rows`: `[{"label": "Jan", "value": 42, "color": "#E8B931"}, ...]` (or
+  `[["Jan", 42], ...]`) for charts;
+- `table`: `{"header": ["Name", "Score"], "rows": [["Ana", "12"], ...]}` for
+  tables;
+- `csv`: CSV text (comma, semicolon or tab; `1.234,5` and `R$ 12` read as
+  numbers). Charts take a label column and the first numeric column; tables
+  take the first line as the header.
+
+`query.layer` shows an object's `rows` / `table`.
 
 ## Media
 

@@ -20,6 +20,7 @@ class QLabel;
 class QMenu;
 class QTimer;
 namespace ads {
+class CDockAreaWidget;
 class CDockManager;
 class CDockWidget;
 }
@@ -30,6 +31,8 @@ class RecentProjects;
 class ObjectsPanel;
 class MediaPanel;
 class ToolsPanel;
+class TransitionsPanel;
+class ToolsPopover;
 class ViewportPanel;
 class PropertiesPanel;
 class EffectsPanel;
@@ -54,6 +57,8 @@ public:
     // Asks to save unsaved changes; false when the user cancels.
     bool confirmClose();
     void applyShortcuts(); // after the keymap changed
+    // Opened from a crash-recovery copy: the changes count as unsaved.
+    void markRecovered();
 
 signals:
     void goHome();
@@ -71,8 +76,18 @@ private:
     void saveAs();
     void jumpToKeyframe(int direction);
     void runPluginCommand(const std::string& id);
+    void arrange(bool stagger, bool vertical = false);
+    void setStatus(const QString& text); // errors and notes next to the menus (empty clears)
+    bool copyToClipboard();
+    void pasteFromClipboard();
+    void keepRecoveryCopy();
+    void autosave();
     void resetLayout();
     void maximizeDock(ads::CDockWidget* dock);
+    void minimizeArea(ads::CDockAreaWidget* area);
+    void restoreMinimized(size_t index);
+    void showTools();
+    void placeRestoreHandles();
     QAction* action(ui::Action a, const QString& text, std::function<void()> fn);
 
     EditorContext ctx_;
@@ -84,15 +99,28 @@ private:
     ObjectsPanel* objects_ = nullptr;
     MediaPanel* media_ = nullptr;
     ToolsPanel* tools_ = nullptr;
+    ToolsPopover* toolsPopover_ = nullptr;
     ViewportPanel* viewport_ = nullptr;
     PropertiesPanel* properties_ = nullptr;
     EffectsPanel* effects_ = nullptr;
+    TransitionsPanel* transitions_ = nullptr;
     TimelinePanel* timeline_ = nullptr;
     std::map<std::string, ads::CDockWidget*> dockWidgets_;
+    // Minimized panels: hidden, with a handle on the window edge that brings them back.
+    struct Minimized {
+        std::vector<ads::CDockWidget*> docks;
+        ads::CDockWidget* current = nullptr;
+        int edge = 0;       // 0 left, 1 right, 2 top, 3 bottom
+        float along = 0.5f; // handle position along that edge (0..1)
+        int size = 0;       // its width / height, given back on restore
+        QWidget* handle = nullptr;
+    };
+    std::vector<Minimized> minimized_;
 
     std::map<ui::Action, QAction*> actions_;
     QTimer* timer_ = nullptr;
     QElapsedTimer clock_;
+    QElapsedTimer sinceSave_; // autosave interval
     QLabel* status_ = nullptr; // errors next to the menus
     QString lastTitle_;
     bool spaceDown_ = false;
