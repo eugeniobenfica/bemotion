@@ -445,10 +445,13 @@ automatically.
 that breaks and repairs it; make sure existing projects still pass
 (`bemotion validate` on the test projects).
 
-**A layer type** — a `LayerType` value, its props struct and factory, its
-properties, its drawing in `SceneRenderer`, serialization, its `layer.add`
-type and `layerTypeName`, an icon, an Objects panel tile. This touches many
-files: plan it as one change.
+**A layer type** — a `LayerType` value (at the end), its props struct and
+factory, its properties and `defaultPropertyValue`, its matrix and bounds, its
+drawing in `SceneRenderer`, serialization, the type range in `Validate`, its
+`layer.add` type and `layerTypeName`, hit testing and handles in the viewport,
+an icon, an Objects panel tile and drop kind, Properties rows for its
+non-animatable settings. This touches many files: plan it as one change
+(the Background type is a complete example).
 
 **A shortcut** — an `Action` with its default chord in `Keymap.cpp`, wired in
 `EditorWindow` (`action(...)`); it appears in Settings and Help automatically.
@@ -457,7 +460,8 @@ files: plan it as one change.
 `toolEnabled` / `toolActive` / `runTool` behavior.
 
 **A panel** — a `QWidget` with `sync()` (structure key + refresh), created and
-docked in `EditorWindow::buildDocks`, listed in *View › Panels*.
+docked in `EditorWindow::buildDocks`, listed in *View › Panels*. Saved layouts
+without it fall back to the default layout automatically.
 
 **A setting** — a field with a default in `Settings`, read and written in
 `Settings.cpp`, a control in `SettingsWindow.cpp`, and a reset in its page.
@@ -478,11 +482,13 @@ changes behavior.
   offscreen. CI runs it on the build and on the packages.
 - **Visual checks of the interface**: run the app with
   `BEMOTION_APPDATA=<scratch folder>` (**never** touch the user's real
-  settings), a `BEMOTION_SCRIPT=steps.txt` (mouse, keys, `capture`; see
-  `app/DevScript.h`) and look at the captures. `BEMOTION_SCRIPT_TRACE` logs
-  the steps; `QT_QPA_PLATFORM=offscreen` works without a screen. On Windows,
-  launch these runs from PowerShell or Python: MSYS2's shell sometimes starts
-  programs without their environment variables.
+  settings), a `BEMOTION_SCRIPT=steps.txt` (mouse, keys, `capture`, `window
+  TITLE` for other windows; see `app/DevScript.h`) and look at the captures.
+  `BEMOTION_SCRIPT_TRACE` logs the steps; `QT_QPA_PLATFORM=offscreen` works
+  without a screen. On Windows, launch these runs from PowerShell or Python:
+  MSYS2's shell sometimes starts programs without their environment variables.
+  Scripted input cannot drive a real drag (`QDrag`), a native file dialog or
+  the real cursor: test those paths another way and report what was not seen.
 - **Rendering checks**: `bemotion render <project> --count 6 --out sheet.png`.
 - Before committing: build, core tests, and the smoke test (or at least the
   part your change touches).
