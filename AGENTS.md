@@ -1,7 +1,9 @@
 # Notes for coding agents
 
-bemotion is a C++20 2D motion graphics animator (Qt 6 Widgets, Skia, FFmpeg,
-Lua plugins). **Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before
+bemotion is a free video editor with a special focus on 2D animation (C++20,
+Qt 6 Widgets, Skia, FFmpeg, Lua plugins). Its philosophy is in the README ("The
+idea"): calm rather than a cockpit, human and robot friendly, fast, a small core
+plus plugins, and an idea more than a technology. **Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) before
 changing code** — it is the source of truth for structure, conventions and
 recipes. The essentials:
 

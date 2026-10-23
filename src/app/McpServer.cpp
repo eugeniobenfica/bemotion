@@ -30,7 +30,8 @@ using json = nlohmann::json;
 constexpr const char* kProtocolVersions[] = {"2025-06-18", "2025-03-26", "2024-11-05"};
 
 constexpr const char* kInstructions =
-    "bemotion is a 2D motion graphics animator. Projects are .bemotion files; pass their full path in `project`.\n"
+    "bemotion is a video editor with a focus on 2D animation. Projects are .bemotion files; pass their full path in "
+    "`project`.\n"
     "Workflow: describe_project (ids, names, timing, what is animated) -> apply_operations (JSON operations; "
     "get_operations_reference lists them all) -> render_frames to LOOK at the result (always check visually) -> "
     "repeat -> export_video. For loops and layouts, run_lua is shorter. Refer to layers by id or unique name. "

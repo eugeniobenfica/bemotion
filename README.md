@@ -4,8 +4,8 @@
 
 # bemotion
 
-**Motion graphics, simplified.**<br>
-A minimal, open source 2D motion graphics animator — fast, focused and free.
+**Video editing with 2D animation at its heart.**<br>
+A free, open source video editor that stays calm, fast, and friendly to people and robots alike.
 
 [![Build](https://github.com/eugeniobenfica/bemotion/actions/workflows/build.yml/badge.svg)](https://github.com/eugeniobenfica/bemotion/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-E8B931?labelColor=141417)](LICENSE)
@@ -17,26 +17,54 @@ A minimal, open source 2D motion graphics animator — fast, focused and free.
 <sub>The intro above is an ordinary bemotion project, built from four shapes and two texts —<br>
 open <b>Welcome to bemotion</b> from the home screen and take it apart.</sub>
 
-[Features](#features) · [Getting started](#getting-started) · [Shortcuts](#keyboard-shortcuts) · [Plugins](docs/PLUGINS.md) · [Contributing](CONTRIBUTING.md)
+[The idea](#the-idea) · [Features](#features) · [Download](#download-windows) · [Getting started](#getting-started) · [Shortcuts](#keyboard-shortcuts) · [Plugins](docs/PLUGINS.md) · [Contributing](CONTRIBUTING.md)
 
 </div>
 
 ---
 
-bemotion gives you a clean, focused space to animate text, graphics and footage:
-drop an object on the canvas, set keyframes, pick an easing and press play.
-Everything is customizable — color, transform, stroke, typography, timing — while
-the most common moves are one click away through *Quick Animations*. It follows
-the conventions of After Effects and Premiere, so it feels familiar from the
-first minute.
+bemotion is a video editor in the spirit of Premiere — import footage, cut,
+arrange, mix and export — with a special focus on 2D animation: every property
+keyframable, a graph editor, motion paths, effects, text and shapes that move
+like they would in After Effects. Drop something on the timeline, animate it,
+press play.
 
-> 🇧🇷 **Resumo:** bemotion é um animador 2D minimalista e de código aberto para
-> motion graphics. Escrito em C++20 com Qt, Skia e FFmpeg, com foco em
-> simplicidade, liberdade de customização e uma interface limpa no modo escuro.
+> 🇧🇷 **Resumo:** bemotion é um editor de vídeo gratuito e de código aberto, no
+> espírito do Premiere, com foco especial em animação 2D. Sem cara de cabine de
+> avião: rápido, livre e amigável para pessoas e para robôs (scripts e IAs). Um
+> núcleo pequeno que funciona como "engine" e como app simples — você baixa o
+> essencial e instala os plugins de que precisa. bemotion é mais uma ideia do
+> que uma tecnologia: não se prende a linguagens nem frameworks e foi feito para
+> ser modificado e reescrito.
 
 <p align="center">
   <img src="docs/media/editor.png" width="100%" alt="The bemotion editor: viewport, properties and timeline">
 </p>
+
+## The idea
+
+- **A video editor first, an animator at heart.** Cut, arrange and mix footage
+  like in Premiere; animate anything like in After Effects — in one place.
+- **Not an airplane cockpit.** What you need is in front of you and the rest
+  stays out of the way. Panels, toolbar, shortcuts and colors are yours to
+  arrange.
+- **Human and robot friendly.** The same project can be edited by hand, by
+  scripts and by AI assistants — through the same rules, with the same undo.
+  Operations, a command line and an [MCP server](docs/AUTOMATION.md) are part
+  of the core, not an afterthought.
+- **Fast and light.** Starts in under a second, plays back in real time, runs
+  on any 64-bit PC.
+- **An engine and a basic app.** A small core you can drive headless — render,
+  export, edit from scripts — and a simple editor on top. Download the
+  essentials; add what you need as [plugins](docs/PLUGINS.md).
+- **Free.** No price, no account, no subscription, no watermark. Open source
+  under the MIT license.
+- **An idea more than a technology.** bemotion is defined by its philosophy, its
+  file format, its [operations](docs/OPERATIONS.md) and its
+  [architecture](docs/ARCHITECTURE.md) — not by a language or a framework. It is
+  built to be modified and, when it makes sense, rewritten (it already moved from
+  ImGui / OpenGL to Qt / Skia once). It will be kept going for as long as this
+  philosophy is useful.
 
 ## Features
 
@@ -62,8 +90,8 @@ first minute.
   custom cubic-bezier curve editor; Easy Ease with F9
 - **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
   Draw On… stackable, importable, savable
-- **Effects**: blur, color, distort, glow, drop shadow, motion blur… GPU
-  rendered, stackable, keyframable, with presets
+- **Effects**: blur, color, distort, glow, drop shadow, motion blur…
+  stackable, keyframable, with presets
 
 </td>
 </tr>
@@ -84,11 +112,10 @@ first minute.
 <td valign="top">
 
 ### ✦ Deliver
-- **Export** to MP4 / H.264 (built in on Windows), PNG sequences with
-  transparency, and with [FFmpeg](https://ffmpeg.org) MOV ProRes 4444, WebM VP9
-  and GIF
+- **Export** to MP4 / H.264, MOV ProRes 4444, WebM VP9, GIF and PNG sequences
+  with transparency — [FFmpeg](https://ffmpeg.org) is built in
 - Audio is mixed in: AAC in MP4, PCM in MOV, Opus in WebM, a `.wav` beside PNGs
-- Render from the command line for automation
+- Render, export and edit from the command line or an AI assistant
 
 </td>
 </tr>

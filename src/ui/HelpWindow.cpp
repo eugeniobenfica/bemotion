@@ -235,7 +235,7 @@ QWidget* aboutPage() {
     head->addLayout(names, 1);
     col->addLayout(head);
     col->addSpacing(6);
-    col->addWidget(paragraph("bemotion is a minimal 2D motion graphics animator. Drop text, shapes and charts on the canvas, set "
+    col->addWidget(paragraph("bemotion is a free video editor with a special focus on 2D animation. Bring in footage, cut and arrange it, drop text, shapes and charts on top, set "
                              "keyframes, shape the motion with paths and curves, add effects and export a video.",
                              theme::kText));
     col->addWidget(paragraph("The goal is simplicity without giving up control: the common moves are one click away (quick "

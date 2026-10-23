@@ -23,6 +23,14 @@ Contents: [1. Principles](#1-principles) ·
 
 ## 1. Principles
 
+bemotion is a video editor (in the spirit of Premiere) with 2D animation at its
+heart, free, calm rather than a cockpit, human and robot friendly, fast, and a
+small core extended by plugins — see "The idea" in the [README](../README.md).
+It is an idea more than a technology: the philosophy, the file format, the
+operations and this document define it, so any part can be replaced or
+rewritten without changing what bemotion is. The engineering principles that
+follow from that:
+
 1. **The core is the truth.** The document model (`src/core`) is plain C++20
    with no UI, graphics or OS code. Everything else is a view of it or a way
    to change it.
@@ -41,6 +49,14 @@ Contents: [1. Principles](#1-principles) ·
 7. **Simple and durable over clever.** Snapshot undo instead of inverse
    commands, plain structs, few dependencies with long lives (Qt, Skia,
    FFmpeg, Lua).
+8. **Replaceable parts.** Libraries stay behind small seams (`Platform`,
+   `ui::Draw`, the renderer, the encoders, `OpEnvironment`) and contracts are
+   written down (file format, operations, plugin API), so a part can be
+   rewritten — in another library or language — without touching the rest.
+9. **A small core, the rest as plugins.** The download stays essential; new
+   kinds of objects, commands and workflows go into plugins when they can.
+10. **Calm interface.** Show what is needed now; everything else one click away
+   and rearrangeable. No feature earns permanent space by default.
 
 ## 2. Layers and dependencies
 

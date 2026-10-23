@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(bemotion
     VERSION 0.1.0
-    DESCRIPTION "Minimal, open source 2D motion graphics animator"
+    DESCRIPTION "Free, open source video editor with a focus on 2D animation"
     LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
