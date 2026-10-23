@@ -9,6 +9,7 @@
 #include "ui/Mime.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
+#include "ui/SkiaQt.h"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkSurface.h"
@@ -252,7 +253,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
     frame_.fill(Qt::transparent);
     {
-        const SkImageInfo info = SkImageInfo::MakeN32Premul(px.width(), px.height());
+        const SkImageInfo info = qtImageInfo(px.width(), px.height());
         sk_sp<SkSurface> surface = SkSurfaces::WrapPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()));
         if (surface) {
             const float z = static_cast<float>(dpr);
@@ -289,6 +290,9 @@ void ViewportPanel::drawHudBackground(QPainter& p) {
     const QString text = QString::fromUtf8(info);
     const float tw = d.textWidth(text), lineH = 26.0f;
     const float left = (ctx_.showRulers ? kRuler : 0.0f) + 10.0f, y = height() - lineH - 10.0f;
+    // A narrow viewport keeps only the zoom controls.
+    const int controls = cameraButton_->isVisible() ? cameraButton_->x() : snapButton_->x();
+    if (left + tw + 16 + 8 > controls) return;
     d.rectFilled(Pt(left, y), Pt(left + tw + 16, y + lineH), theme::withAlpha(theme::kBgRaised, 220), theme::current().rounding);
     d.text(Pt(left + 8, y + (lineH - d.textHeight()) * 0.5f), theme::kTextDim, text);
 }
@@ -450,7 +454,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
         const qreal dpr = devicePixelRatioF();
         QImage ghostImg(static_cast<int>(width() * dpr), static_cast<int>(height() * dpr), QImage::Format_ARGB32_Premultiplied);
         ghostImg.fill(Qt::transparent);
-        if (auto surface = SkSurfaces::WrapPixels(SkImageInfo::MakeN32Premul(ghostImg.width(), ghostImg.height()), ghostImg.bits(),
+        if (auto surface = SkSurfaces::WrapPixels(qtImageInfo(ghostImg.width(), ghostImg.height()), ghostImg.bits(),
                                                   static_cast<size_t>(ghostImg.bytesPerLine()))) {
             const Affine m = Affine::scale(static_cast<float>(dpr)) * view.matrix() * ghost.matrixAt(t);
             render::drawLayer(surface->getCanvas(), ghost, t, m, zoom_ * static_cast<float>(dpr),

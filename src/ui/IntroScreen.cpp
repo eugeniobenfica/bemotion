@@ -2,6 +2,7 @@
 
 #include "core/Serialization.h"
 #include "render/SceneRenderer.h"
+#include "ui/SkiaQt.h"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkSurface.h"
@@ -72,7 +73,7 @@ void IntroScreen::paintEvent(QPaintEvent*) {
     const QSize px(static_cast<int>(std::ceil(width() * dpr)), static_cast<int>(std::ceil(height() * dpr)));
     if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
     frame_.fill(Qt::transparent);
-    const SkImageInfo info = SkImageInfo::MakeN32Premul(px.width(), px.height());
+    const SkImageInfo info = qtImageInfo(px.width(), px.height());
     if (sk_sp<SkSurface> surface = SkSurfaces::WrapPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()))) {
         const float zoom = std::min(static_cast<float>(px.width()) / comp.width, static_cast<float>(px.height()) / comp.height);
         const Vec2 origin{(px.width() - comp.width * zoom) * 0.5f, (px.height() - comp.height * zoom) * 0.5f};

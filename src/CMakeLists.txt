@@ -40,6 +40,7 @@ add_executable(bemotion WIN32
     render/Text.cpp
     ui/AppSignals.h
     ui/Draw.cpp
+    ui/SkiaQt.h
     ui/EditorContext.cpp
     ui/EditorWindow.cpp
     ui/ExportDialog.cpp

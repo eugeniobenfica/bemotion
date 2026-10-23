@@ -19,7 +19,7 @@ app="$out/bemotion.app"
 rm -rf "$app" "$out/bemotion.dmg"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$exe" "$app/Contents/MacOS/bemotion"
-cp -R "$build/assets" "$app/Contents/Resources/assets"
+cp -R "$(dirname "$exe")/assets" "$app/Contents/Resources/assets"
 
 # Icon: every size iconutil wants, from the 1024 px brand PNG.
 iconset="$out/bemotion.iconset"

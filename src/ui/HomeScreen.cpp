@@ -6,6 +6,7 @@
 #include "ui/Dialogs.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
+#include "ui/SkiaQt.h"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkSurface.h"
@@ -107,7 +108,7 @@ bool containsCaseInsensitive(const std::string& hay, const std::string& needle) 
 QImage renderThumbnail(const Project& project, QSize size) {
     QImage img(size, QImage::Format_ARGB32_Premultiplied);
     img.fill(QColor(10, 10, 12));
-    const SkImageInfo info = SkImageInfo::MakeN32Premul(size.width(), size.height());
+    const SkImageInfo info = qtImageInfo(size.width(), size.height());
     if (sk_sp<SkSurface> surface = SkSurfaces::WrapPixels(info, img.bits(), static_cast<size_t>(img.bytesPerLine()))) {
         const Composition& c = project.comp;
         const float pad = 12.0f;

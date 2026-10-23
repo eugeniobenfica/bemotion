@@ -20,7 +20,7 @@ rm -rf "$appdir"
 exe="$(find "$build" -maxdepth 3 -type f -name bemotion -perm -u+x | head -1)"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" "$appdir/usr/share/icons/hicolor/scalable/apps"
 cp "$exe" "$appdir/usr/bin/bemotion"
-cp -r "$build/assets" "$appdir/usr/bin/assets" # found next to the executable
+cp -r "$(dirname "$exe")/assets" "$appdir/usr/bin/assets" # found next to the executable
 cp "$root/assets/branding/icon.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/bemotion.svg"
 cat > "$appdir/usr/share/applications/bemotion.desktop" <<DESKTOP
 [Desktop Entry]

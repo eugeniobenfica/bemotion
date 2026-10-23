@@ -14,7 +14,7 @@ prefix="${MINGW_PREFIX:-/ucrt64}"
 mkdir -p "$out"
 cp "$build/bemotion.exe" "$out/"
 rm -rf "$out/assets"
-cp -r "$build/assets" "$out/assets"
+cp -r "$(dirname "$build/bemotion.exe")/assets" "$out/assets"
 
 # Qt libraries and plugins (platform, styles, image formats, ...). No network, TLS or touch
 # plugins: bemotion never goes online.
