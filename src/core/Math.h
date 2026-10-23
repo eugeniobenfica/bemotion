@@ -1,7 +1,7 @@
 #pragma once
 
 // Small, dependency-free math types used by the document model.
-// The UI layer converts these to/from ImGui types at the boundary.
+// The interface converts them to its own types (QPointF, ui::Pt) where it draws.
 
 #include <algorithm>
 #include <cmath>

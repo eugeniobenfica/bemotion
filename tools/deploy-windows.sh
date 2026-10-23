@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Makes a self-contained Windows folder of a bemotion build (run in an MSYS2 UCRT64 shell):
 #
-#   tools/deploy-windows.sh build-qt dist/bemotion
+#   tools/deploy-windows.sh build dist/bemotion
 #
 # Copies bemotion.exe and its assets, the Qt plugins it needs (windeployqt) and
 # every DLL it loads from the MSYS2 prefix (FFmpeg, ICU, HarfBuzz, the C++ runtime, ...).

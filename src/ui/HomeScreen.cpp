@@ -364,7 +364,9 @@ void HomeScreen::refresh() {
         const auto t = fs::last_write_time(f, ec);
         if (ec) return 0;
         using namespace std::chrono;
-        return duration_cast<seconds>(clock_cast<system_clock>(t).time_since_epoch()).count();
+        // File clock -> system clock through "now" (std::clock_cast is missing from libc++).
+        const auto sys = system_clock::now() + duration_cast<system_clock::duration>(t - fs::file_time_type::clock::now());
+        return duration_cast<seconds>(sys.time_since_epoch()).count();
     };
     for (const RecentProject& r : recents_.items()) {
         RecentProject e = r;
