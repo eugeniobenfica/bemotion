@@ -123,6 +123,12 @@ std::optional<fs::path> openFileDialog(const char* title, const char* filterName
     return fromQ(file);
 }
 
+std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions) {
+    const QString file = QFileDialog::getOpenFileName(dialogParent(), QString::fromUtf8(title), QString(), filterFor(filterName, extensions));
+    if (file.isEmpty()) return std::nullopt;
+    return fromQ(file);
+}
+
 std::vector<fs::path> openFilesDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions) {
     std::vector<fs::path> out;
     for (const QString& f : QFileDialog::getOpenFileNames(dialogParent(), QString::fromUtf8(title), QString(),

@@ -35,6 +35,8 @@ private:
     void buildPluginData(QVBoxLayout* col, Layer& layer);
     void buildPluginTable(QVBoxLayout* col, Layer& layer);
     void importCsv(uint64_t layerId); // asks for a file, fills the object's data
+    // A plugin object's file parameter: the chosen file's name; click to choose another.
+    QWidget* filePicker(uint64_t layerId, const std::string& paramId);
     void buildPresets(QVBoxLayout* col, Layer& layer);
 
     EditorContext& ctx_;

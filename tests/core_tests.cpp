@@ -17,6 +17,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <string>
 #include <vector>
@@ -753,6 +755,49 @@ void testArrangeAndTransitions() {
     CHECK(!run(p, R"({"op": "transition.add", "layer": "A", "transition": "fdae"})").ok);
 }
 
+void testFileParams() {
+    // A plugin object with a file parameter (like a 3D model), its path saved relative to the project.
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "bemotion-test-files";
+    fs::create_directories(dir / "models");
+    { std::ofstream(dir / "models" / "cube.obj") << "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n"; }
+    Project p;
+    Layer l;
+    l.type = LayerType::Plugin;
+    l.name = "Model";
+    l.outPoint = 2.0;
+    l.plugin.objectType = "models3d.model";
+    PluginParam file;
+    file.id = "model";
+    file.kind = PluginParamKind::File;
+    file.accept = {"obj", "glb"};
+    PluginParam shading;
+    shading.id = "shading";
+    shading.kind = PluginParamKind::Choice;
+    shading.choices = {"Smooth", "Flat"};
+    l.plugin.params = {file, shading};
+    p.comp.addLayer(l);
+    const std::string obj = (dir / "models" / "cube.obj").generic_string();
+    CHECK(run(p, (R"({"op": "param.set", "layer": "Model", "param": "model", "value": ")" + obj + R"("})").c_str()).ok);
+    CHECK(run(p, R"({"op": "param.set", "layer": "Model", "param": "shading", "value": "Flat"})").ok);
+    CHECK(!run(p, R"({"op": "param.set", "layer": "Model", "param": "shading", "value": "Flta"})").ok);
+    CHECK(!run(p, R"({"op": "param.set", "layer": "Model", "param": "model", "value": "missing.obj"})").ok);
+    CHECK(!run(p, (R"({"op": "param.set", "layer": "Model", "param": "model", "value": ")" + (dir / "a.txt").generic_string() + R"("})").c_str()).ok);
+    CHECK(saveProject(p, dir / "test.bemotion"));
+    // Moved together with its models, the project still finds them.
+    fs::remove_all(dir / "moved");
+    fs::create_directories(dir / "moved");
+    fs::copy(dir / "models", dir / "moved" / "models", fs::copy_options::recursive);
+    fs::copy_file(dir / "test.bemotion", dir / "moved" / "test.bemotion");
+    fs::remove_all(dir / "models");
+    Project back;
+    CHECK(loadProject(dir / "moved" / "test.bemotion", back));
+    const PluginParam* m = back.comp.layers.empty() ? nullptr : back.comp.layers[0].plugin.find("model");
+    CHECK(m && m->kind == PluginParamKind::File && fs::exists(fs::u8path(m->text)) && m->accept.size() == 2);
+    CHECK(back.comp.layers[0].plugin.find("shading")->choice == 1);
+    fs::remove_all(dir);
+}
+
 } // namespace
 
 int main() {
@@ -795,6 +840,7 @@ int main() {
         {"length limit", testLengthLimit},
         {"copy and paste", testCopyPaste},
         {"arrange and transitions", testArrangeAndTransitions},
+        {"file parameters", testFileParams},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

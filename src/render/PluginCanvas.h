@@ -9,6 +9,7 @@
 
 #include "core/Layer.h"
 #include "core/Math.h"
+#include "render/Mesh3D.h"
 #include "render/Text.h"
 
 #include <functional>
@@ -35,6 +36,8 @@ public:
     void text(const std::string& s, Vec2 at, float size, Color color, TextAnchor anchor = TextAnchor::Left,
               bool bold = false);
     float measure(const std::string& s, float size, bool bold = false) const;
+    // A 3D mesh, projected and lit (render/Mesh3D.h); the layer opacity applies.
+    void mesh(const Mesh& mesh, MeshView view);
 
 private:
     Color faded(Color c) const { return {c.r, c.g, c.b, c.a * opacity_}; }

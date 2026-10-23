@@ -32,6 +32,7 @@ Icon iconForPlugin(const std::string& name) {
     if (name == "line_chart") return Icon::LineChart;
     if (name == "pie" || name == "donut") return Icon::PieChart;
     if (name == "table") return Icon::Table;
+    if (name == "cube" || name == "model") return Icon::Cube;
     if (name == "text") return Icon::Text;
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) {
         std::string shape = shapeKindLabel(static_cast<ShapeKind>(i));
@@ -217,6 +218,21 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.rect(Pt(c.x - h * 0.85f, c.y - h * 0.55f), Pt(c.x + h * 0.15f, c.y + h * 0.55f), col, 2.0f, th);
         dl.rectFilled(Pt(c.x - h * 0.15f, c.y - h * 0.55f), Pt(c.x + h * 0.85f, c.y + h * 0.55f), theme::withAlpha(col, 110), 2.0f);
         dl.rect(Pt(c.x - h * 0.15f, c.y - h * 0.55f), Pt(c.x + h * 0.85f, c.y + h * 0.55f), col, 2.0f, th);
+        break;
+    }
+    case Icon::Cube: { // an outlined cube in a three-quarter view
+        const float s = h * 0.62f, d = h * 0.32f;
+        const Pt f0(c.x - s, c.y - s + d), f1(c.x + s - d, c.y - s + d), f2(c.x + s - d, c.y + s), f3(c.x - s, c.y + s);
+        const Pt b0(c.x - s + d, c.y - s), b1(c.x + s, c.y - s), b2(c.x + s, c.y + s - d);
+        dl.line(f0, f1, col, th);
+        dl.line(f1, f2, col, th);
+        dl.line(f2, f3, col, th);
+        dl.line(f3, f0, col, th);
+        dl.line(f0, b0, col, th);
+        dl.line(b0, b1, col, th);
+        dl.line(f1, b1, col, th);
+        dl.line(b1, b2, col, th);
+        dl.line(f2, b2, col, th);
         break;
     }
     case Icon::Table: {

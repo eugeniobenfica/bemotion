@@ -226,6 +226,9 @@ Rules:
   always use `qtImageInfo()` (`ui/SkiaQt.h`): BGRA premultiplied, named
   explicitly — Skia's "N32" means RGBA on macOS.
 - Plugin objects draw through `PluginCanvas` (simple primitives for Lua).
+  `Mesh3D` draws triangle meshes for them (3D models): orbit camera, one
+  light, back-to-front triangles in a single `drawVertices` — the 3D look
+  inside the 2D scene, not a 3D engine (no depth buffer, textures, shadows).
 - Media pictures come from `setMediaProvider` (installed by `MediaManager`).
 
 ## 6. Media and export
@@ -347,9 +350,16 @@ Rules:
   parameters (the plugin never opens files). Operations: `data.set`.
 - What every user needs belongs in the app, not in a plugin (arranging layers
   and transitions are built in); plugins add kinds of objects and workflows.
+- **Files and meshes** (API 4): a `file` parameter stores a path the user
+  picked (saved relative to the project too); with the `files` permission the
+  host reads it and hands the bytes to the plugin. `bemotion.cached` keeps
+  expensive results (a parsed model), `bemotion.mesh` / `g.mesh` build and
+  draw triangle meshes natively (`render/Mesh3D`). The 3D Models plugin is
+  built on this.
 - **Permissions** in `plugin.json`: `edit` (commands), `media`
-  (`media.import`). New capabilities that touch the user's files or the
-  outside world must be new permissions.
+  (`media.import`), `files` (read the files chosen in `file` parameters). New
+  capabilities that touch the user's files or the outside world must be new
+  permissions.
 - The API is versioned (`bemotion.api_version`); keep old plugins working.
 
 ## 10. Automation and AI

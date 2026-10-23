@@ -1,0 +1,10 @@
+{
+  "id": "models3d",
+  "name": "3D Models",
+  "version": "1.0.0",
+  "author": "bemotion",
+  "description": "Imported 3D models (glTF / GLB, OBJ, STL) as objects of the 2D scene: turn, light and animate them like anything else.",
+  "main": "main.lua",
+  "api": 4,
+  "permissions": ["files"]
+}

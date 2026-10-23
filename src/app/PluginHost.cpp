@@ -13,10 +13,12 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <new>
 #include <sstream>
 
 namespace bemotion {
@@ -403,6 +405,7 @@ PluginParamKind kindFromName(const std::string& s) {
     if (s == "toggle" || s == "bool") return PluginParamKind::Toggle;
     if (s == "choice") return PluginParamKind::Choice;
     if (s == "text" || s == "string") return PluginParamKind::Text;
+    if (s == "file") return PluginParamKind::File;
     return PluginParamKind::Number;
 }
 
@@ -488,6 +491,283 @@ void pushTable(lua_State* L, const DataTable& t) {
     lua_setfield(L, -2, "rows");
 }
 
+// bemotion.cached(key, fn): fn() once per key, with the command budget (parsing a file, building
+// a mesh); later calls return the same value. The plugin's cache empties when it grows large.
+int bmCached(lua_State* L) {
+    const char* key = luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+    lua_getfield(L, LUA_REGISTRYINDEX, "bemotion.cache");
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setfield(L, LUA_REGISTRYINDEX, "bemotion.cache");
+    }
+    const int cache = lua_gettop(L);
+    lua_getfield(L, cache, key);
+    if (!lua_isnil(L, -1)) return 1;
+    lua_pop(L, 1);
+    const int saved = g_budget;
+    g_budget = kCommandBudget;
+    lua_pushvalue(L, 2);
+    const int status = lua_pcall(L, 0, 1, 0);
+    g_budget = saved;
+    if (status != LUA_OK) return lua_error(L);
+    if (!lua_isnil(L, -1)) {
+        lua_getfield(L, cache, "__count");
+        const lua_Integer count = lua_tointeger(L, -1) + 1;
+        lua_pop(L, 1);
+        if (count > 24) { // a fresh cache (old models are let go)
+            lua_newtable(L);
+            lua_pushvalue(L, -1);
+            lua_setfield(L, LUA_REGISTRYINDEX, "bemotion.cache");
+            lua_replace(L, cache);
+        }
+        lua_pushinteger(L, count > 24 ? 1 : count);
+        lua_setfield(L, cache, "__count");
+        lua_pushvalue(L, -1);
+        lua_setfield(L, cache, key);
+    }
+    return 1;
+}
+
+// bemotion.json(text) -> the value (objects as tables, arrays 1-based); errors on bad JSON.
+int bmJson(lua_State* L) {
+    size_t n = 0;
+    const char* s = luaL_checklstring(L, 1, &n);
+    json j;
+    try {
+        j = json::parse(std::string(s, n));
+    } catch (const std::exception& e) {
+        return luaL_error(L, "bad JSON: %s", e.what());
+    }
+    pushJson(L, j);
+    return 1;
+}
+
+// bemotion.base64(text) -> the decoded bytes (data URIs inside .gltf files).
+int bmBase64(lua_State* L) {
+    size_t n = 0;
+    const char* s = luaL_checklstring(L, 1, &n);
+    std::string out;
+    out.reserve(n * 3 / 4);
+    unsigned acc = 0;
+    int bits = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const char c = s[i];
+        int v = c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52
+              : c == '+' || c == '-' ? 62 : c == '/' || c == '_' ? 63 : -1;
+        if (v < 0) continue; // padding, line breaks
+        acc = (acc << 6) | static_cast<unsigned>(v);
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out += static_cast<char>((acc >> bits) & 0xFF);
+        }
+    }
+    lua_pushlstring(L, out.data(), out.size());
+    return 1;
+}
+
+// --- meshes (bemotion.mesh, g.mesh) ------------------------------------------------------
+
+constexpr const char* kMeshType = "bemotion.mesh";
+
+// Numbers from a Lua array, or from a string of packed little-endian float32s.
+std::vector<float> readFloats(lua_State* L, int idx) {
+    std::vector<float> out;
+    idx = lua_absindex(L, idx);
+    if (lua_type(L, idx) == LUA_TSTRING) {
+        size_t n = 0;
+        const char* s = lua_tolstring(L, idx, &n);
+        out.resize(n / 4);
+        std::memcpy(out.data(), s, out.size() * 4);
+    } else if (lua_istable(L, idx)) {
+        const lua_Integer n = luaL_len(L, idx);
+        out.reserve(static_cast<size_t>(n));
+        for (lua_Integer i = 1; i <= n; ++i) {
+            lua_rawgeti(L, idx, i);
+            out.push_back(static_cast<float>(lua_tonumber(L, -1)));
+            lua_pop(L, 1);
+        }
+    }
+    return out;
+}
+
+// Indices: a Lua array (1-based) or packed unsigned integers of `size` bytes (0-based).
+std::vector<uint32_t> readIndices(lua_State* L, int idx, int size) {
+    std::vector<uint32_t> out;
+    idx = lua_absindex(L, idx);
+    if (lua_type(L, idx) == LUA_TSTRING) {
+        size_t n = 0;
+        const auto* s = reinterpret_cast<const unsigned char*>(lua_tolstring(L, idx, &n));
+        size = size == 1 || size == 2 ? size : 4;
+        out.resize(n / static_cast<size_t>(size));
+        for (size_t i = 0; i < out.size(); ++i) {
+            uint32_t v = 0;
+            for (int b = 0; b < size; ++b) v |= static_cast<uint32_t>(s[i * size + b]) << (8 * b);
+            out[i] = v;
+        }
+    } else if (lua_istable(L, idx)) {
+        const lua_Integer n = luaL_len(L, idx);
+        out.reserve(static_cast<size_t>(n));
+        for (lua_Integer i = 1; i <= n; ++i) {
+            lua_rawgeti(L, idx, i);
+            out.push_back(static_cast<uint32_t>(std::max<lua_Integer>(0, lua_tointeger(L, -1) - 1)));
+            lua_pop(L, 1);
+        }
+    }
+    return out;
+}
+
+// One part of bemotion.mesh{...}: its vertices, appended to `m` (with its matrix applied).
+void addMeshPart(lua_State* L, int part, render::Mesh& m) {
+    lua_getfield(L, part, "positions");
+    const std::vector<float> pos = readFloats(L, -1);
+    lua_pop(L, 1);
+    const size_t n = pos.size() / 3, base = m.vertexCount();
+    if (!n) return;
+    lua_getfield(L, part, "normals");
+    std::vector<float> nor = readFloats(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, part, "index_size");
+    const int indexSize = static_cast<int>(luaL_optinteger(L, -1, 4));
+    lua_pop(L, 1);
+    lua_getfield(L, part, "indices");
+    std::vector<uint32_t> idx = readIndices(L, -1, indexSize);
+    lua_pop(L, 1);
+    if (idx.empty()) {
+        idx.resize(n - n % 3);
+        for (size_t i = 0; i < idx.size(); ++i) idx[i] = static_cast<uint32_t>(i);
+    }
+    // Colors: per vertex (rgba, or rgb with color_size = 3) or one for the part.
+    lua_getfield(L, part, "color");
+    const Color partColor = readColor(L, -1, Color::fromHex(0xFFFFFF));
+    lua_pop(L, 1);
+    lua_getfield(L, part, "color_size");
+    const int colorSize = static_cast<int>(luaL_optinteger(L, -1, 4)) == 3 ? 3 : 4;
+    lua_pop(L, 1);
+    lua_getfield(L, part, "colors");
+    const std::vector<float> cols = readFloats(L, -1);
+    lua_pop(L, 1);
+    // The part's place in the model: a 4x4 matrix, column-major (as in glTF).
+    lua_getfield(L, part, "matrix");
+    std::vector<float> mat = readFloats(L, -1);
+    lua_pop(L, 1);
+    if (mat.size() != 16) mat = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    for (size_t i = 0; i < n; ++i) {
+        const float x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+        m.positions.insert(m.positions.end(), {mat[0] * x + mat[4] * y + mat[8] * z + mat[12], mat[1] * x + mat[5] * y + mat[9] * z + mat[13],
+                                               mat[2] * x + mat[6] * y + mat[10] * z + mat[14]});
+        Color c = partColor;
+        if (cols.size() >= (i + 1) * colorSize)
+            c = {cols[i * colorSize] * partColor.r, cols[i * colorSize + 1] * partColor.g, cols[i * colorSize + 2] * partColor.b,
+                 (colorSize == 4 ? cols[i * 4 + 3] : 1.0f) * partColor.a};
+        m.colors.push_back(c);
+    }
+    if (nor.size() == n * 3) {
+        for (size_t i = 0; i < n; ++i) {
+            const float x = nor[i * 3], y = nor[i * 3 + 1], z = nor[i * 3 + 2];
+            m.normals.insert(m.normals.end(), {mat[0] * x + mat[4] * y + mat[8] * z, mat[1] * x + mat[5] * y + mat[9] * z,
+                                               mat[2] * x + mat[6] * y + mat[10] * z});
+        }
+    } else {
+        m.normals.clear(); // a part without normals: they are all computed (Mesh::finish)
+        nor.clear();
+    }
+    for (uint32_t i : idx) m.indices.push_back(i < n ? static_cast<uint32_t>(base + i) : UINT32_MAX);
+}
+
+// bemotion.mesh{ positions, normals, colors | color, indices, matrix } or { parts = { {...}, ... } }
+// -> a mesh to draw with g.mesh (built once: keep it with bemotion.cached).
+int bmMesh(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    auto* m = static_cast<render::Mesh*>(lua_newuserdatauv(L, sizeof(render::Mesh), 0));
+    new (m) render::Mesh();
+    luaL_setmetatable(L, kMeshType);
+    lua_getfield(L, 1, "parts");
+    bool hadNormals = true;
+    auto add = [&](int part) {
+        const size_t before = m->normals.size();
+        const size_t verts = m->vertexCount();
+        addMeshPart(L, part, *m);
+        if (m->normals.size() == before && m->vertexCount() > verts) hadNormals = false;
+    };
+    if (lua_istable(L, -1)) {
+        const int parts = lua_gettop(L);
+        for (lua_Integer i = 1; i <= luaL_len(L, parts); ++i) {
+            lua_rawgeti(L, parts, i);
+            if (lua_istable(L, -1)) add(lua_gettop(L));
+            lua_pop(L, 1);
+            if (m->vertexCount() > 20000000) return luaL_error(L, "mesh too large (over 20 million vertices)");
+        }
+    } else {
+        add(1);
+    }
+    lua_pop(L, 1);
+    if (!hadNormals) m->normals.clear();
+    m->finish();
+    return 1;
+}
+
+int meshGc(lua_State* L) {
+    static_cast<render::Mesh*>(luaL_checkudata(L, 1, kMeshType))->~Mesh();
+    return 0;
+}
+
+// mesh.triangles, mesh.vertices
+int meshIndex(lua_State* L) {
+    const auto* m = static_cast<render::Mesh*>(luaL_checkudata(L, 1, kMeshType));
+    const std::string key = luaL_checkstring(L, 2);
+    if (key == "triangles") lua_pushinteger(L, static_cast<lua_Integer>(m->triangleCount()));
+    else if (key == "vertices") lua_pushinteger(L, static_cast<lua_Integer>(m->vertexCount()));
+    else lua_pushnil(L);
+    return 1;
+}
+
+// g.mesh(mesh, { width, height, rotation = {x, y, z}, zoom, offset = {x, y}, fov, light = {x, y, z},
+//                ambient, shine, tint, model_colors, flat, cull })
+int gMesh(lua_State* L) {
+    const auto* m = static_cast<render::Mesh*>(luaL_checkudata(L, 1, kMeshType));
+    render::MeshView v;
+    if (lua_istable(L, 2)) {
+        auto num = [&](const char* key, float fallback) { return fieldNumber(L, 2, key, 0, fallback); };
+        auto vec3 = [&](const char* key, float* out) {
+            lua_getfield(L, 2, key);
+            if (lua_istable(L, -1)) {
+                out[0] = fieldNumber(L, -1, "x", 1, out[0]);
+                out[1] = fieldNumber(L, -1, "y", 2, out[1]);
+                out[2] = fieldNumber(L, -1, "z", 3, out[2]);
+            }
+            lua_pop(L, 1);
+        };
+        v.frame = {num("width", v.frame.x), num("height", v.frame.y)};
+        vec3("rotation", v.rotation);
+        vec3("light", v.light);
+        float offset[3] = {0, 0, 0};
+        vec3("offset", offset);
+        v.offset = {offset[0], offset[1]};
+        v.zoom = num("zoom", v.zoom);
+        v.fov = num("fov", v.fov);
+        v.ambient = num("ambient", v.ambient);
+        v.shine = num("shine", v.shine);
+        lua_getfield(L, 2, "tint");
+        v.tint = readColor(L, -1, v.tint);
+        lua_pop(L, 1);
+        lua_getfield(L, 2, "flat");
+        v.flat = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, 2, "cull");
+        v.cullBack = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+        lua_getfield(L, 2, "model_colors");
+        v.meshColors = lua_isnil(L, -1) || lua_toboolean(L, -1);
+        lua_pop(L, 1);
+    }
+    canvas(L).mesh(*m, v);
+    return 0;
+}
+
 // bemotion.parse_csv(text) -> { {cell, ...}, ... } (rows of strings; see core/Data.h).
 int bmParseCsv(lua_State* L) {
     pushCells(L, parseCsv(luaL_checkstring(L, 1)));
@@ -554,6 +834,7 @@ int bmRegisterObject(lua_State* L) {
                 case PluginParamKind::Toggle: p.toggle = lua_toboolean(L, -1); break;
                 case PluginParamKind::Text: p.text = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : ""; break;
                 case PluginParamKind::Choice: break;
+                case PluginParamKind::File: break; // chosen by the user
                 }
                 const int def = lua_gettop(L);
                 if (p.kind == PluginParamKind::Choice) {
@@ -574,6 +855,21 @@ int bmRegisterObject(lua_State* L) {
                     }
                 }
                 lua_pop(L, 1); // default
+                if (p.kind == PluginParamKind::File) { // accept = { "glb", "obj" }
+                    lua_getfield(L, e, "accept");
+                    if (lua_istable(L, -1))
+                        for (lua_Integer c = 1; c <= luaL_len(L, -1); ++c) {
+                            lua_rawgeti(L, -1, c);
+                            if (lua_type(L, -1) == LUA_TSTRING) {
+                                std::string ext = lua_tostring(L, -1);
+                                if (!ext.empty() && ext[0] == '.') ext.erase(0, 1);
+                                for (char& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                                p.accept.push_back(ext);
+                            }
+                            lua_pop(L, 1);
+                        }
+                    lua_pop(L, 1);
+                }
                 lua_getfield(L, e, "intro");
                 if (lua_istable(L, -1) && p.kind == PluginParamKind::Number)
                     t.intro.push_back({p.id, fieldNumber(L, -1, "from", 0, 0), fieldNumber(L, -1, "duration", 0, 1)});
@@ -630,21 +926,87 @@ lua_State* newSandbox(const std::string& pluginId) {
                             {"color", bmColor},
                             {"mix", bmMix},                         {"with_alpha", bmWithAlpha}, {"format", bmFormat},
                             {"parse_csv", bmParseCsv},              {"number", bmNumber},
+                            {"cached", bmCached},                   {"json", bmJson},
+                            {"base64", bmBase64},                   {"mesh", bmMesh},
                             {nullptr, nullptr}};
+    luaL_newmetatable(L, kMeshType);
+    lua_pushcfunction(L, meshGc);
+    lua_setfield(L, -2, "__gc");
+    lua_pushcfunction(L, meshIndex);
+    lua_setfield(L, -2, "__index");
+    lua_pop(L, 1);
     luaL_newlib(L, api);
-    lua_pushinteger(L, 3); // 2: commands and operations; 3: tables, CSV import
+    lua_pushinteger(L, 4); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes
     lua_setfield(L, -2, "api_version");
     lua_setglobal(L, "bemotion");
 
     const luaL_Reg gfx[] = {{"rect", gRect},       {"rect_outline", gRectOutline}, {"circle", gCircle}, {"line", gLine},
                             {"polyline", gPolyline}, {"polygon", gPolygon},         {"arc", gArc},       {"text", gText},
-                            {"measure", gMeasure}, {nullptr, nullptr}};
+                            {"measure", gMeasure}, {"mesh", gMesh},       {nullptr, nullptr}};
     luaL_newlib(L, gfx);
     lua_setfield(L, LUA_REGISTRYINDEX, "bemotion.gfx");
 
     lua_pushstring(L, pluginId.c_str());
     lua_setfield(L, LUA_REGISTRYINDEX, "bemotion.plugin");
     return L;
+}
+
+// A file parameter: { path, name, ext, data, version } when the plugin may read files ("files"
+// permission) and the file is there, else nil. The bytes are read once per file version and kept
+// in the plugin's registry, so drawing every frame does not copy them.
+void pushFile(lua_State* L, const std::string& path) {
+    Plugin* plugin = pluginOf(L);
+    std::error_code ec;
+    const fs::path file = platform::fromUtf8(path);
+    if (path.empty() || !plugin || !plugin->may("files") || !fs::is_regular_file(file, ec)) {
+        lua_pushnil(L);
+        return;
+    }
+    const auto stamp = fs::last_write_time(file, ec).time_since_epoch().count();
+    const double version = static_cast<double>(stamp % 1000000000000LL) + static_cast<double>(fs::file_size(file, ec) % 1000000);
+    lua_getfield(L, LUA_REGISTRYINDEX, "bemotion.files");
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setfield(L, LUA_REGISTRYINDEX, "bemotion.files");
+    }
+    const int files = lua_gettop(L);
+    lua_getfield(L, files, path.c_str());
+    if (lua_istable(L, -1)) {
+        lua_getfield(L, -1, "version");
+        const bool current = lua_tonumber(L, -1) == version;
+        lua_pop(L, 1);
+        if (current) {
+            lua_remove(L, files);
+            return;
+        }
+    }
+    lua_pop(L, 1);
+    constexpr uintmax_t kMaxFile = 512u << 20;
+    if (fs::file_size(file, ec) > kMaxFile) {
+        lua_pop(L, 1);
+        lua_pushnil(L);
+        return;
+    }
+    const std::string data = readFile(file);
+    std::string ext = platform::toUtf8(file.extension());
+    if (!ext.empty()) ext.erase(0, 1);
+    for (char& ch : ext) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    lua_createtable(L, 0, 5);
+    lua_pushstring(L, path.c_str());
+    lua_setfield(L, -2, "path");
+    lua_pushstring(L, platform::toUtf8(file.filename()).c_str());
+    lua_setfield(L, -2, "name");
+    lua_pushstring(L, ext.c_str());
+    lua_setfield(L, -2, "ext");
+    lua_pushlstring(L, data.data(), data.size());
+    lua_setfield(L, -2, "data");
+    lua_pushnumber(L, version);
+    lua_setfield(L, -2, "version");
+    lua_pushvalue(L, -1);
+    lua_setfield(L, files, path.c_str());
+    lua_remove(L, files);
 }
 
 void pushParams(lua_State* L, const Layer& layer, double t) {
@@ -668,6 +1030,7 @@ void pushParams(lua_State* L, const Layer& layer, double t) {
             lua_pushstring(L, pp.choice < static_cast<int>(pp.choices.size()) ? pp.choices[pp.choice].c_str() : "");
             break;
         case PluginParamKind::Text: lua_pushstring(L, pp.text.c_str()); break;
+        case PluginParamKind::File: pushFile(L, pp.text); break;
         }
         lua_setfield(L, -2, pp.id.c_str());
     }
@@ -960,6 +1323,7 @@ void PluginHost::reconcile(Layer& layer) const {
         p.format = schema.format;
         p.defaultNumber = schema.defaultNumber;
         p.defaultColor = schema.defaultColor;
+        p.accept = schema.accept;
         if (p.kind == PluginParamKind::Choice) {
             const std::string current = p.choice < static_cast<int>(p.choices.size()) ? p.choices[p.choice] : "";
             p.choices = schema.choices;
@@ -1050,6 +1414,7 @@ bool PluginHost::importCsv(Layer& layer, const std::string& csv, std::string& er
                 case PluginParamKind::Color:
                     if (!lua_isnil(L, -1)) p.color.set(layer.inPoint, readColor(L, -1, p.color.valueAt(layer.inPoint)));
                     break;
+                case PluginParamKind::File: break; // only the user picks files
                 }
                 lua_pop(L, 1);
             }

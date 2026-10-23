@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstdio>
+#include <filesystem>
 #include <stdexcept>
 
 namespace bemotion {
@@ -226,6 +228,7 @@ public:
             {"arrange.distribute", &Applier::arrangeDistribute},
             {"arrange.stagger", &Applier::arrangeStagger},
             {"data.set", &Applier::dataSet},
+            {"param.set", &Applier::paramSet},
             {"media.import", &Applier::mediaImport},
             {"query.composition", &Applier::queryComposition},
             {"query.layers", &Applier::queryLayers},
@@ -662,6 +665,54 @@ private:
         return json::object();
     }
 
+    // A plugin object's toggle, choice, text or file parameter (numbers and colors are
+    // properties: property.set with "p.<id>").
+    json paramSet(const json& op) {
+        Layer& l = layer(op);
+        if (l.type != LayerType::Plugin) fail("layer \"" + l.name + "\" is not a plugin object (" + typeName(l) + ")");
+        const std::string id = text(field(op, "param"), "param");
+        PluginParam* p = l.plugin.find(id);
+        if (!p) {
+            std::vector<std::string> ids;
+            for (const PluginParam& q : l.plugin.params) ids.push_back(q.id);
+            fail("\"" + l.name + "\" has no parameter \"" + id + "\"" + suggest(id, ids));
+        }
+        const json& v = field(op, "value");
+        switch (p->kind) {
+        case PluginParamKind::Number:
+        case PluginParamKind::Color:
+            fail("\"" + id + "\" is animatable: use property.set with \"prop\": \"p." + id + "\"");
+        case PluginParamKind::Toggle: p->toggle = boolean(v, "value"); break;
+        case PluginParamKind::Text: p->text = text(v, "value"); break;
+        case PluginParamKind::Choice: {
+            const std::string c = text(v, "value");
+            const auto it = std::find(p->choices.begin(), p->choices.end(), c);
+            if (it == p->choices.end()) fail("\"" + c + "\" is not a choice of \"" + id + "\"" + suggest(c, p->choices));
+            p->choice = static_cast<int>(it - p->choices.begin());
+            break;
+        }
+        case PluginParamKind::File: {
+            const std::string path = text(v, "value");
+            if (!path.empty()) {
+                std::string ext = path.substr(path.find_last_of('.') == std::string::npos ? path.size() : path.find_last_of('.') + 1);
+                for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+                if (!p->accept.empty() && std::find(p->accept.begin(), p->accept.end(), ext) == p->accept.end())
+                    fail("\"" + id + "\" takes " + [&] {
+                        std::string list;
+                        for (const auto& a : p->accept) list += (list.empty() ? "." : ", .") + a;
+                        return list;
+                    }() + " files");
+                std::error_code ec;
+                if (!std::filesystem::is_regular_file(std::filesystem::u8path(path), ec)) fail("there is no file \"" + path + "\"");
+            }
+            p->text = path;
+            p->relative.clear();
+            break;
+        }
+        }
+        return json::object();
+    }
+
     // The data of a plugin object (charts: rows; tables: a table), from JSON or CSV text.
     json dataSet(const json& op) {
         Layer& l = layer(op);
@@ -778,6 +829,21 @@ private:
             j["rows"] = rows;
         }
         if (l.plugin.hasTable) j["table"] = {{"header", l.plugin.table.header}, {"rows", l.plugin.table.rows}};
+        if (l.type == LayerType::Plugin) { // the parameters that are not properties (param.set)
+            json params = json::object();
+            for (const PluginParam& pp : l.plugin.params)
+                switch (pp.kind) {
+                case PluginParamKind::Toggle: params[pp.id] = pp.toggle; break;
+                case PluginParamKind::Choice:
+                    params[pp.id] = {{"value", pp.choice < static_cast<int>(pp.choices.size()) ? pp.choices[pp.choice] : ""},
+                                     {"choices", pp.choices}};
+                    break;
+                case PluginParamKind::Text: params[pp.id] = pp.text; break;
+                case PluginParamKind::File: params[pp.id] = {{"file", pp.text}, {"accept", pp.accept}}; break;
+                default: break;
+                }
+            if (!params.empty()) j["params"] = params;
+        }
         json props = json::object();
         for (const PropertyRef& p : l.properties()) {
             json pj = {{"value", valueJson(p.kind, propertyValue(p, t))}};

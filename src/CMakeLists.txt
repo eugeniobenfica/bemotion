@@ -50,6 +50,7 @@ add_executable(bemotion WIN32
     media/MediaManager.cpp
     render/Fonts.cpp
     render/LogoMark.cpp
+    render/Mesh3D.cpp
     render/OffscreenRenderer.cpp
     render/PluginCanvas.cpp
     render/SceneRenderer.cpp

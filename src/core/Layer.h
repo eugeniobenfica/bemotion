@@ -94,7 +94,7 @@ struct TextProps {
 // parameter schema; the layer stores the parameters with their definitions so
 // projects stay readable (and editable) even when the plugin is missing.
 
-enum class PluginParamKind { Number, Color, Toggle, Choice, Text };
+enum class PluginParamKind { Number, Color, Toggle, Choice, Text, File };
 
 struct PluginParam {
     std::string id;
@@ -111,7 +111,9 @@ struct PluginParam {
     bool toggle = false;
     int choice = 0;
     std::vector<std::string> choices;
-    std::string text;
+    std::string text;                // Text: the text; File: the file's path (UTF-8, absolute)
+    std::string relative;            // File: the path relative to the project file (kept on save)
+    std::vector<std::string> accept; // File: extensions without the dot ("glb", "obj")
     std::string propertyId; // "p.<id>", kept here so PropertyRef::id stays valid
 };
 

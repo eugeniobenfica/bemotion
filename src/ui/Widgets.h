@@ -94,6 +94,7 @@ enum class Icon {
     Paste,
     Transition,
     Table,
+    Cube, // 3D models
 };
 
 Icon iconForLayer(const Layer& layer);

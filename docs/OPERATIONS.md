@@ -132,6 +132,12 @@ place; two spread over the composition.
 
 `query.layer` shows an object's `rows` / `table`.
 
+**`param.set`** — `layer` (a plugin object), `param` (its id), `value`: `true`
+/ `false` for toggles, one of the `choices` for choices, text, or a file path
+for file parameters (e.g. the model of a 3D Model). Numbers and colors are
+animatable: set them with `property.set` (`"prop": "p.<id>"`). `query.layer`
+lists an object's `params`.
+
 ## Media
 
 **`media.import`** → `{"media": id, "name", "kind", "width", "height",

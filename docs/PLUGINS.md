@@ -12,8 +12,8 @@ is a complete example.
 ```
 
 `api` is the version the plugin was written for: 1 objects, 2 commands and
-operations, 3 tables and CSV import. `bemotion.api_version` tells the running
-version.
+operations, 3 tables and CSV import, 4 files and 3D meshes.
+`bemotion.api_version` tells the running version.
 
 Scripts run in a sandbox (base, table, string, math and utf8 only — no files,
 OS or network) with an instruction budget per draw call.
@@ -34,6 +34,7 @@ bemotion.register_object {
     { id = "rounded", type = "toggle", default = true },
     { id = "style", type = "choice", choices = { "Flat", "Outline" }, default = "Flat" },
     { id = "caption", type = "text", default = "Hello" },
+    { id = "logo", type = "file", accept = { "glb", "obj" } },  -- API 4, needs the "files" permission
   },
   draw = function(o, g) ... end,
 }
@@ -64,6 +65,52 @@ Helpers: `bemotion.ease(name, t)` (`"ease_out"`, `"back_out"`, `"bounce"`…),
 by people — `"1.234,5"`, `"R$ 12"`, `"45%"` — or `nil`) and
 `bemotion.parse_csv(text)` (rows of cells; comma, semicolon or tab). `print`
 goes to the Plugin Manager log. Colors can be `"#RRGGBB[AA]"` strings or tables.
+
+## Files and 3D meshes (API 4)
+
+A `file` parameter lets the user pick a file in Properties (`accept` lists the
+extensions). The project stores its path (relative to the project too, so a
+moved folder still works). With the **`files` permission** in `plugin.json`,
+`o.<id>` is `{ path, name, ext, data, version }` — `data` is the file's bytes,
+read by bemotion; without it, or with no file chosen, it is `nil`. Plugins
+still never open files themselves.
+
+Parsing every frame would be slow: `bemotion.cached(key, fn)` runs `fn` once
+per key (with the larger command budget) and returns the same value
+afterwards. Key it by `file.path .. file.version`, so a changed file is read
+again. Helpers for reading: `string.unpack` (binary), `bemotion.json(text)`,
+`bemotion.base64(text)`.
+
+`bemotion.mesh{...}` builds a triangle mesh once (keep it with `cached`), and
+`g.mesh(mesh, view)` draws it projected, lit and depth sorted, fast (native):
+
+```lua
+local mesh = bemotion.cached(file.path .. file.version, function()
+  return bemotion.mesh {
+    parts = { -- one per material / node; or the fields below directly
+      { positions = { x, y, z, ... },     -- or packed float32 bytes
+        normals = { ... },                -- optional (computed: smooth)
+        indices = { 1, 2, 3, ... },       -- optional; or packed bytes + index_size = 1 | 2 | 4 (0-based)
+        color = "#E8B931",                -- or colors = { r, g, b, a, ... } per vertex (color_size = 3 for rgb)
+        matrix = { 16 numbers },          -- optional, column-major (glTF)
+      },
+    },
+  }
+end)
+g.mesh(mesh, {
+  width = o.width, height = o.height, -- the frame it fits in
+  rotation = { tilt, spin, roll },    -- degrees
+  zoom = 1, fov = 30,                 -- fov 0: orthographic
+  light = { x, y, z }, ambient = 0.35, shine = 0.25,
+  tint = "#FFFFFF", model_colors = true, flat = false, cull = false,
+})
+```
+
+`mesh.triangles` and `mesh.vertices` count them. It is a 2D drawing of a
+3D model, not a 3D engine: triangles are painted back to front (surfaces that
+cut through each other may sort wrongly), with one light and no textures or
+shadows. The bundled **3D Models** plugin (glTF / GLB, OBJ, STL) is a complete
+example.
 
 ## Data: rows, tables and CSV (API 3)
 
@@ -123,7 +170,7 @@ bemotion.register_command {
 A command is **one undo step**, and it runs on a copy: if it raises an error
 (or an operation fails), the project stays exactly as it was and the message
 goes to the plugin's log. Permissions: `edit` for commands, `media` to use
-`media.import`.
+`media.import`, `files` to read the files chosen in `file` parameters.
 
 The same `doc` API runs standalone scripts from the command line — the script
 receives `doc` as its argument (`local doc = ...`):

@@ -109,7 +109,7 @@ E enumFromId(const char* const (&ids)[N], const std::string& id, E fallback) {
 
 // --- plugin objects --------------------------------------------------------------
 
-constexpr const char* kParamKindIds[] = {"number", "color", "toggle", "choice", "text"};
+constexpr const char* kParamKindIds[] = {"number", "color", "toggle", "choice", "text", "file"};
 
 // Animated values (numbers, colors) are saved with the layer's properties ("p.<id>").
 json encodePlugin(const PluginProps& p) {
@@ -131,6 +131,11 @@ json encodePlugin(const PluginProps& p) {
             j["choices"] = pp.choices;
             break;
         case PluginParamKind::Text: j["value"] = pp.text; break;
+        case PluginParamKind::File:
+            j["value"] = pp.text;
+            if (!pp.relative.empty()) j["relative"] = pp.relative;
+            j["accept"] = pp.accept;
+            break;
         }
         params.push_back(std::move(j));
     }
@@ -170,6 +175,11 @@ void decodePlugin(const json& j, PluginProps& p) {
             pp.choice = std::clamp(pj.value("value", 0), 0, std::max(0, static_cast<int>(pp.choices.size()) - 1));
         }
         if (pp.kind == PluginParamKind::Text) pp.text = pj.value("value", std::string());
+        if (pp.kind == PluginParamKind::File) {
+            pp.text = pj.value("value", std::string());
+            pp.relative = pj.value("relative", std::string());
+            pp.accept = pj.value("accept", std::vector<std::string>{});
+        }
         p.params.push_back(std::move(pp));
     }
     p.hasRows = j.contains("rows");
@@ -440,11 +450,15 @@ std::string utf8FromPath(const std::filesystem::path& p) {
 bool saveProject(const Project& source, const std::filesystem::path& path, std::string* error) {
     // Media paths are also stored relative to the project, so a moved folder still finds its footage.
     Project project = source;
-    for (MediaItem& m : project.comp.media) {
+    auto relativeTo = [&](const std::string& file) {
         std::error_code rel;
-        const auto r = std::filesystem::relative(pathFromUtf8(m.path), path.parent_path(), rel);
-        m.relative = rel || r.empty() ? std::string() : utf8FromPath(r.generic_u8string());
-    }
+        const auto r = std::filesystem::relative(pathFromUtf8(file), path.parent_path(), rel);
+        return rel || r.empty() ? std::string() : utf8FromPath(r.generic_u8string());
+    };
+    for (MediaItem& m : project.comp.media) m.relative = relativeTo(m.path);
+    for (Layer& l : project.comp.layers) // files used by plugin objects (3D models...) travel the same way
+        for (PluginParam& pp : l.plugin.params)
+            if (pp.kind == PluginParamKind::File) pp.relative = pp.text.empty() ? std::string() : relativeTo(pp.text);
     std::error_code ec;
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
 
@@ -480,11 +494,15 @@ bool loadProject(const std::filesystem::path& path, Project& out, std::string* e
     std::stringstream ss;
     ss << f.rdbuf();
     if (!deserializeProject(ss.str(), out, error, repairs)) return false;
-    for (MediaItem& m : out.comp.media) { // the project's own folder first, then where the file was
+    auto resolve = [&](const std::string& relative, std::string& absolute) { // the project's own folder first, then where the file was
         std::error_code ec;
-        if (!m.relative.empty() && std::filesystem::exists(path.parent_path() / pathFromUtf8(m.relative), ec))
-            m.path = utf8FromPath((path.parent_path() / pathFromUtf8(m.relative)).lexically_normal());
-    }
+        if (!relative.empty() && std::filesystem::exists(path.parent_path() / pathFromUtf8(relative), ec))
+            absolute = utf8FromPath((path.parent_path() / pathFromUtf8(relative)).lexically_normal());
+    };
+    for (MediaItem& m : out.comp.media) resolve(m.relative, m.path);
+    for (Layer& l : out.comp.layers)
+        for (PluginParam& pp : l.plugin.params)
+            if (pp.kind == PluginParamKind::File) resolve(pp.relative, pp.text);
     return true;
 }
 

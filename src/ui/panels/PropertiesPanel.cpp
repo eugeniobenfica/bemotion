@@ -292,12 +292,74 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
     }
     if (layer.type == LayerType::Media) buildMediaSource(col, layer);
 
+    // Plugin groups made only of toggles / choices / text / files (no property rows): shown where the
+    // plugin declares them, before the next group with properties.
+    std::vector<std::string> loneDone;
+    auto addLoneGroup = [&](const std::string& group) {
+        if (layer.type != LayerType::Plugin || hasAnimatedParams(layer, group) ||
+            std::find(loneDone.begin(), loneDone.end(), group) != loneDone.end())
+            return;
+        loneDone.push_back(group);
+        auto* s = new CollapsibleSection(QString::fromStdString(group));
+        for (const PluginParam& q : layer.plugin.params) {
+            if (q.group != group) continue;
+            const std::string pid = q.id;
+            auto param = [this, id, pid]() -> PluginParam* {
+                Layer* l = ctx_.comp().findLayer(id);
+                return l ? l->plugin.find(pid) : nullptr;
+            };
+            if (q.kind == PluginParamKind::Toggle) {
+                auto* cb = new QCheckBox;
+                cb->setChecked(q.toggle);
+                connect(cb, &QCheckBox::toggled, this, [this, param](bool on) {
+                    if (PluginParam* pp = param()) {
+                        pp->toggle = on;
+                        ctx_.touch();
+                    }
+                });
+                s->addPlainRow(QString::fromStdString(q.label), cb);
+            } else if (q.kind == PluginParamKind::Choice) {
+                auto* combo = newCombo();
+                for (const auto& c : q.choices) combo->addItem(QString::fromStdString(c));
+                combo->setCurrentIndex(q.choice);
+                connect(combo, &QComboBox::currentIndexChanged, this, [this, param](int i) {
+                    if (PluginParam* pp = param(); pp && i >= 0) {
+                        pp->choice = i;
+                        ctx_.touch();
+                    }
+                });
+                s->addPlainRow(QString::fromStdString(q.label), combo);
+            } else if (q.kind == PluginParamKind::File) {
+                s->addPlainRow(QString::fromStdString(q.label), filePicker(id, pid));
+            } else if (q.kind == PluginParamKind::Text) {
+                auto* edit = new QLineEdit(QString::fromStdString(q.text));
+                connect(edit, &QLineEdit::textEdited, this, [this, param](const QString& t) {
+                    if (PluginParam* pp = param()) {
+                        pp->text = t.toStdString();
+                        ctx_.touch();
+                    }
+                });
+                s->addPlainRow(QString::fromStdString(q.label), edit);
+            }
+        }
+        col->addWidget(s);
+    };
+    auto addLoneGroupsBefore = [&](const std::string& group) {
+        const auto& params = layer.plugin.params;
+        if (std::none_of(params.begin(), params.end(), [&](const PluginParam& p) { return p.group == group; })) return; // Transform...
+        for (const PluginParam& p : params) {
+            if (p.group == group) return;
+            addLoneGroup(p.group);
+        }
+    };
+
     // Property groups in order, with their non-animatable settings first.
     CollapsibleSection* section = nullptr;
     std::string group;
     for (const PropertyRef& prop : layer.properties()) {
         if (prop.effectIndex >= 0) continue; // shown in the Effects tab
         if (!section || group != prop.group) {
+            if (layer.type == LayerType::Plugin) addLoneGroupsBefore(prop.group);
             group = prop.group;
             section = new CollapsibleSection(QString::fromUtf8(prop.group));
             col->addWidget(section);
@@ -345,6 +407,9 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                         });
                         break;
                     }
+                    case PluginParamKind::File:
+                        section->addPlainRow(QString::fromStdString(p.label), filePicker(id, pid));
+                        break;
                     case PluginParamKind::Text: {
                         auto* edit = new QLineEdit;
                         connect(edit, &QLineEdit::textEdited, this, [this, param](const QString& t) {
@@ -470,53 +535,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
     }
 
     if (layer.type == LayerType::Plugin) {
-        // Groups made only of toggles / choices / text never came up above.
-        std::vector<std::string> done;
-        for (const PluginParam& p : layer.plugin.params) {
-            if (hasAnimatedParams(layer, p.group) || std::find(done.begin(), done.end(), p.group) != done.end()) continue;
-            done.push_back(p.group);
-            auto* s = new CollapsibleSection(QString::fromStdString(p.group));
-            for (const PluginParam& q : layer.plugin.params) {
-                if (q.group != p.group) continue;
-                const std::string pid = q.id;
-                auto param = [this, id, pid]() -> PluginParam* {
-                    Layer* l = ctx_.comp().findLayer(id);
-                    return l ? l->plugin.find(pid) : nullptr;
-                };
-                if (q.kind == PluginParamKind::Toggle) {
-                    auto* cb = new QCheckBox;
-                    cb->setChecked(q.toggle);
-                    connect(cb, &QCheckBox::toggled, this, [this, param](bool on) {
-                        if (PluginParam* pp = param()) {
-                            pp->toggle = on;
-                            ctx_.touch();
-                        }
-                    });
-                    s->addPlainRow(QString::fromStdString(q.label), cb);
-                } else if (q.kind == PluginParamKind::Choice) {
-                    auto* combo = newCombo();
-                    for (const auto& c : q.choices) combo->addItem(QString::fromStdString(c));
-                    combo->setCurrentIndex(q.choice);
-                    connect(combo, &QComboBox::currentIndexChanged, this, [this, param](int i) {
-                        if (PluginParam* pp = param(); pp && i >= 0) {
-                            pp->choice = i;
-                            ctx_.touch();
-                        }
-                    });
-                    s->addPlainRow(QString::fromStdString(q.label), combo);
-                } else if (q.kind == PluginParamKind::Text) {
-                    auto* edit = new QLineEdit(QString::fromStdString(q.text));
-                    connect(edit, &QLineEdit::textEdited, this, [this, param](const QString& t) {
-                        if (PluginParam* pp = param()) {
-                            pp->text = t.toStdString();
-                            ctx_.touch();
-                        }
-                    });
-                    s->addPlainRow(QString::fromStdString(q.label), edit);
-                }
-            }
-            col->addWidget(s);
-        }
+        for (const PluginParam& p : layer.plugin.params) addLoneGroup(p.group); // the ones after the last property group
         if (layer.plugin.hasRows) buildPluginData(col, layer);
         if (layer.plugin.hasTable) buildPluginTable(col, layer);
         if (!PluginHost::get().findType(layer.plugin.objectType)) {
@@ -752,6 +771,69 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
     buttons->addStretch();
     s->body()->addLayout(buttons);
     col->addWidget(s);
+}
+
+QWidget* PropertiesPanel::filePicker(uint64_t layerId, const std::string& paramId) {
+    auto param = [this, layerId, paramId]() -> PluginParam* {
+        Layer* l = ctx_.comp().findLayer(layerId);
+        return l ? l->plugin.find(paramId) : nullptr;
+    };
+    auto* row = new QWidget;
+    auto* h = new QHBoxLayout(row);
+    h->setContentsMargins(0, 0, 0, 0);
+    h->setSpacing(4);
+    auto* choose = new QPushButton;
+    choose->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    choose->setStyleSheet("text-align: left;");
+    h->addWidget(choose, 1);
+    auto* clear = new ui::IconButton(ui::Icon::Trash, "No file", 24);
+    h->addWidget(clear);
+    connect(choose, &QPushButton::clicked, this, [this, param] {
+        PluginParam* pp = param();
+        if (!pp) return;
+        const std::vector<std::string> accept = pp->accept;
+        std::string what = "Supported files";
+        if (!accept.empty()) {
+            what.clear();
+            for (const auto& a : accept) what += (what.empty() ? "" : ", ") + a;
+            for (char& c : what) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+        }
+        if (auto file = platform::openFileDialog(("Choose " + pp->label).c_str(), what.c_str(), accept)) {
+            if (PluginParam* p2 = param()) {
+                p2->text = platform::toUtf8(*file);
+                p2->relative.clear();
+                ctx_.touch();
+            }
+        }
+    });
+    connect(clear, &QAbstractButton::clicked, this, [this, param] {
+        if (PluginParam* pp = param(); pp && !pp->text.empty()) {
+            pp->text.clear();
+            pp->relative.clear();
+            ctx_.touch();
+        }
+    });
+    // The plugin must be allowed to read files (plugin.json "permissions": ["files"]).
+    std::string pluginId;
+    if (const Layer* l = ctx_.comp().findLayer(layerId)) pluginId = l->plugin.objectType.substr(0, l->plugin.objectType.find('.'));
+    const Plugin* plugin = PluginHost::get().findPlugin(pluginId);
+    const bool allowed = plugin && plugin->may("files");
+    refreshers_.push_back([choose, clear, param, allowed] {
+        const PluginParam* pp = param();
+        if (!pp) return;
+        std::error_code ec;
+        const auto path = platform::fromUtf8(pp->text);
+        const bool missing = !pp->text.empty() && !std::filesystem::exists(path, ec);
+        QString text = pp->text.empty() ? QString("Choose...") : QString::fromStdString(platform::toUtf8(path.filename()));
+        if (missing) text = "Missing: " + text;
+        if (choose->text() != text) choose->setText(text);
+        choose->setToolTip(!allowed ? QString("This plugin is not allowed to read files (\"files\" permission)")
+                                    : pp->text.empty() ? QString("Choose a file") : QString::fromStdString(pp->text));
+        ui::setTone(choose, missing || !allowed ? ui::Tone::Danger : ui::Tone::Text);
+        clear->setVisible(!pp->text.empty());
+    });
+    refreshers_.back()();
+    return row;
 }
 
 void PropertiesPanel::importCsv(uint64_t layerId) {

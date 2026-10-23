@@ -96,4 +96,9 @@ void PluginCanvas::text(const std::string& s, Vec2 at, float size, Color color, 
     drawPlainText(canvas_, s, at, size, faded(color), anchor, bold);
 }
 
+void PluginCanvas::mesh(const Mesh& m, MeshView view) {
+    view.opacity *= opacity_;
+    drawMesh(canvas_, m, view);
+}
+
 } // namespace bemotion::render
