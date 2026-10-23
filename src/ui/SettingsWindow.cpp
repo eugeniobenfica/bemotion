@@ -1,460 +1,211 @@
-#include "ui/SettingsWindow.h"
+// The Settings window (appearance, interface, editor preferences, shortcuts
+// and plugins). One window shared by the home screen and the editor.
+
+#include "ui/Dialogs.h"
 
 #include "app/Platform.h"
-#include "app/Settings.h"
 #include "app/PluginHost.h"
+#include "app/Settings.h"
 #include "render/Fonts.h"
+#include "ui/AppSignals.h"
 #include "ui/Keymap.h"
-#include "ui/PluginsWindow.h"
+#include "ui/PagedWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
-#include <imgui.h>
-#include <imgui_stdlib.h>
+#include <QCheckBox>
+#include <QColorDialog>
+#include <QComboBox>
+#include <QCompleter>
+#include <QEvent>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QKeyEvent>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMessageBox>
+#include <QPainter>
+#include <QPlainTextEdit>
+#include <QPointer>
+#include <QPushButton>
+#include <QSlider>
+#include <QStyle>
+#include <QTimer>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <cctype>
-#include <cfloat>
+#include <cmath>
 #include <cstring>
+#include <functional>
 #include <string>
 
 namespace bemotion::ui {
 
 namespace {
 
-bool g_open = false;
-bool g_focus = false;
-int g_recenter = 0; // frames left to re-center (auto-resize settles a frame late)
-std::string g_message; // result of the last import/export
-std::string g_saveName;
+constexpr const char* kPluginDocsUrl = "https://github.com/eugeniobenfica/bemotion/blob/main/docs/PLUGINS.md";
 
-constexpr ImU32 kAccentChoices[] = {
-    IM_COL32(232, 185, 49, 255),  // gold
-    IM_COL32(242, 140, 40, 255),  // orange
-    IM_COL32(239, 111, 94, 255),  // coral
-    IM_COL32(233, 85, 154, 255),  // pink
-    IM_COL32(155, 108, 240, 255), // violet
-    IM_COL32(76, 141, 246, 255),  // blue
-    IM_COL32(46, 196, 182, 255),  // teal
-    IM_COL32(92, 196, 106, 255),  // green
+constexpr Rgba kAccentChoices[] = {
+    rgba(232, 185, 49),  // gold
+    rgba(242, 140, 40),  // orange
+    rgba(239, 111, 94),  // coral
+    rgba(233, 85, 154),  // pink
+    rgba(155, 108, 240), // violet
+    rgba(76, 141, 246),  // blue
+    rgba(46, 196, 182),  // teal
+    rgba(92, 196, 106),  // green
 };
 
-void changed() {
+QPointer<PagedWindow> g_window;
+std::string g_message; // result of the last import / export
+
+// Applies and saves; `rebuild` redraws the page (its colors come from the theme).
+void changed(bool rebuild = false) {
     applySettings();
     saveSettings();
+    emit AppSignals::get().appearanceChanged();
+    if (rebuild && g_window) QTimer::singleShot(0, g_window, [] {
+            if (g_window) g_window->rebuild();
+        });
 }
 
 // Theme card: a tiny preview of panel, raised surface, text and accent.
-bool themeCard(const theme::Palette& p, bool selected) {
-    const float fs = ImGui::GetFontSize();
-    const ImVec2 size(std::max(112.0f, fs * 7.5f), 50.0f + fs + 12.0f); // preview + a name row that fits the text
-    const ImVec2 a = ImGui::GetCursorScreenPos();
-    const ImVec2 b(a.x + size.x, a.y + size.y);
-    ImGui::PushID(p.name.c_str());
-    const bool clicked = ImGui::InvisibleButton("##theme", size);
-    const bool hovered = ImGui::IsItemHovered();
-    ImGui::PopID();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(a, b, p.bgDeep, 8.0f);
-    dl->AddRectFilled(ImVec2(a.x + 8, a.y + 8), ImVec2(a.x + 52, a.y + 46), p.bgPanel, 4.0f);
-    dl->AddRectFilled(ImVec2(a.x + 58, a.y + 8), ImVec2(b.x - 8, a.y + 24), p.bgRaised, 4.0f);
-    dl->AddRectFilled(ImVec2(a.x + 58, a.y + 30), ImVec2(b.x - 24, a.y + 42), p.accent, 3.0f);
-    dl->AddRectFilled(ImVec2(a.x + 14, a.y + 16), ImVec2(a.x + 44, a.y + 20), p.textDim, 2.0f);
-    dl->AddRectFilled(ImVec2(a.x + 14, a.y + 26), ImVec2(a.x + 36, a.y + 30), p.textFaint, 2.0f);
-    dl->PushClipRect(a, b, true);
-    dl->AddText(ImVec2(a.x + 8, b.y - fs - 7), p.text, p.name.c_str());
-    dl->PopClipRect();
-    if (selected || hovered)
-        // Drawn inside the card: a border outside it would be clipped at the page's edges.
-        dl->AddRect(ImVec2(a.x + 1, a.y + 1), ImVec2(b.x - 1, b.y - 1), selected ? theme::kAccent : theme::ink(60), 8.0f, 0,
-                    selected ? 2.0f : 1.0f);
-    return clicked;
-}
-
-bool swatch(const char* id, ImU32 color, bool selected) {
-    // The item is a little larger than the dot so the selection ring (and its
-    // anti-aliasing) always stays inside it and never gets clipped.
-    const float d = std::max(26.0f, ImGui::GetFrameHeight());
-    const ImVec2 a = ImGui::GetCursorScreenPos();
-    const bool clicked = ImGui::InvisibleButton(id, ImVec2(d, d));
-    const ImVec2 c(a.x + d * 0.5f, a.y + d * 0.5f);
-    const float r = d * 0.5f - 2.0f;
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (selected) dl->AddCircle(c, r, theme::kText, 0, 2.0f);
-    dl->AddCircleFilled(c, r - (selected ? 3.5f : 1.0f), color);
-    if (ImGui::IsItemHovered() && !selected) dl->AddCircle(c, r, theme::ink(90), 0, 1.0f);
-    return clicked;
-}
-
-void hint(const char* text) {
-    ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
-    ImGui::TextWrapped("%s", text);
-    ImGui::PopStyleColor();
-}
-
-void drawAppearance(Settings& s) {
-    sectionLabel("THEME");
-    const float avail = ImGui::GetContentRegionAvail().x;
-    float x = 0;
-    const float cardW = std::max(112.0f, ImGui::GetFontSize() * 7.5f) + 10.0f;
-    for (const LibraryTheme& t : ThemeLibrary::all()) {
-        if (x > 0 && x + cardW <= avail) ImGui::SameLine(0, 10);
-        else if (x > 0) x = 0;
-        if (themeCard(t.palette, !s.customPalette && s.theme == t.palette.name)) {
-            s.theme = t.palette.name;
-            s.customPalette = false;
-            changed();
-        }
-        x += cardW;
+class ThemeCard : public QAbstractButton {
+public:
+    ThemeCard(theme::Palette p, bool selected) : p_(std::move(p)), selected_(selected) {
+        setFixedSize(std::max(120, fontMetrics().horizontalAdvance(QString::fromStdString(p_.name)) + 20), 50 + fontMetrics().height() + 12);
+        setCursor(Qt::PointingHandCursor);
+        setToolTip(QString::fromStdString(p_.name));
     }
-    if (ImGui::Button("Import Theme...")) {
-        if (auto file = platform::openFileDialog("Import Theme", "bemotion theme", "json")) {
-            std::string name, error;
-            if (ThemeLibrary::importFile(*file, &name, &error)) {
-                s.theme = name;
-                s.customPalette = false;
-                changed();
-                g_message = "Imported \"" + name + "\".";
-            } else {
-                g_message = "Could not import: " + error;
-            }
-        }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Open Themes Folder")) platform::revealInFileManager(ThemeLibrary::userDir());
-    if (!g_message.empty()) hint(g_message.c_str());
 
-    ImGui::Spacing();
-    sectionLabel("ACCENT COLOR");
-    const theme::Palette base = [&] {
-        Settings copy = s;
-        copy.customAccent = false;
-        if (copy.customPalette) return copy.palette;
-        const LibraryTheme* t = ThemeLibrary::find(copy.theme);
-        return t ? t->palette : theme::darkPalette();
-    }();
-    if (swatch("##themeaccent", base.accent, !s.customAccent)) {
-        s.customAccent = false;
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        Draw d(painter);
+        const float w = static_cast<float>(width()), h = static_cast<float>(height());
+        d.rectFilled({0, 0}, {w, h}, p_.bgDeep, 8.0f);
+        d.rectFilled({8, 8}, {52, 46}, p_.bgPanel, 4.0f);
+        d.rectFilled({58, 8}, {w - 8, 24}, p_.bgRaised, 4.0f);
+        d.rectFilled({58, 30}, {w - 24, 42}, p_.accent, 3.0f);
+        d.rectFilled({14, 16}, {44, 20}, p_.textDim, 2.0f);
+        d.rectFilled({14, 26}, {36, 30}, p_.textFaint, 2.0f);
+        d.text({8, h - d.textHeight() - 6}, p_.text, p_.name);
+        if (selected_ || underMouse()) d.rect({1, 1}, {w - 1, h - 1}, selected_ ? theme::kAccent : theme::ink(60), 8.0f, selected_ ? 2.0f : 1.0f);
+    }
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+
+private:
+    theme::Palette p_;
+    bool selected_;
+};
+
+// A round color choice.
+class Swatch : public QAbstractButton {
+public:
+    Swatch(Rgba color, bool selected, const QString& tip) : color_(color), selected_(selected) {
+        setFixedSize(28, 28);
+        setCursor(Qt::PointingHandCursor);
+        setToolTip(tip);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        Draw d(p);
+        const Pt c(14, 14);
+        const float r = 12.0f;
+        if (selected_) d.circle(c, r, theme::kText, 2.0f);
+        d.circleFilled(c, r - (selected_ ? 3.5f : 1.0f), color_);
+        if (underMouse() && !selected_) d.circle(c, r, theme::ink(90));
+    }
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+
+private:
+    Rgba color_;
+    bool selected_;
+};
+
+// A labelled slider row editing a float setting.
+QWidget* sliderRow(const QString& label, float& value, float min, float max, const char* format, float step = 1.0f,
+                   const QString& tip = {}) {
+    auto* row = new QWidget;
+    auto* h = new QHBoxLayout(row);
+    h->setContentsMargins(0, 0, 0, 0);
+    auto* l = new QLabel(label);
+    l->setMinimumWidth(170);
+    h->addWidget(l);
+    auto* slider = new QSlider(Qt::Horizontal);
+    slider->setFixedWidth(220);
+    const int steps = static_cast<int>(std::lround((max - min) / step));
+    slider->setRange(0, steps);
+    slider->setValue(static_cast<int>(std::lround((value - min) / step)));
+    if (!tip.isEmpty()) slider->setToolTip(tip);
+    h->addWidget(slider);
+    auto* readout = new QLabel;
+    auto show = [readout, format](float v) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, format, v);
+        readout->setText(buf);
+    };
+    show(value);
+    h->addWidget(readout);
+    h->addStretch();
+    float* target = &value;
+    QObject::connect(slider, &QSlider::valueChanged, row, [=](int i) {
+        *target = min + i * step;
+        show(*target);
         changed();
-    }
-    if (ImGui::IsItemHovered()) tooltip("Theme default");
-    for (int i = 0; i < static_cast<int>(std::size(kAccentChoices)); ++i) {
-        ImGui::SameLine(0, 8);
-        ImGui::PushID(i);
-        if (swatch("##accent", kAccentChoices[i], s.customAccent && s.accent == kAccentChoices[i])) {
-            s.customAccent = true;
-            s.accent = kAccentChoices[i];
-            changed();
-        }
-        ImGui::PopID();
-    }
-    ImGui::SameLine(0, 12);
-    ImVec4 custom = theme::vec(s.customAccent ? s.accent : base.accent);
-    if (ImGui::ColorEdit3("Custom##accent", &custom.x, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel)) {
-        s.customAccent = true;
-        s.accent = ImGui::ColorConvertFloat4ToU32(ImVec4(custom.x, custom.y, custom.z, 1.0f));
+    });
+    return row;
+}
+
+QWidget* intSliderRow(const QString& label, int& value, int min, int max) {
+    auto* row = new QWidget;
+    auto* h = new QHBoxLayout(row);
+    h->setContentsMargins(0, 0, 0, 0);
+    auto* l = new QLabel(label);
+    l->setMinimumWidth(170);
+    h->addWidget(l);
+    auto* slider = new QSlider(Qt::Horizontal);
+    slider->setFixedWidth(220);
+    slider->setRange(min, max);
+    slider->setValue(value);
+    h->addWidget(slider);
+    auto* readout = new QLabel(QString::number(value));
+    h->addWidget(readout);
+    h->addStretch();
+    int* target = &value;
+    QObject::connect(slider, &QSlider::valueChanged, row, [=](int v) {
+        *target = v;
+        readout->setText(QString::number(v));
         changed();
-    }
-    if (ImGui::IsItemHovered()) tooltip("Pick any color");
+    });
+    return row;
 }
 
-void colorRow(const char* label, ImU32& color, Settings& s) {
-    ImVec4 v = theme::vec(color);
-    ImGui::TableNextColumn();
-    if (ImGui::ColorEdit4(label, &v.x, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_AlphaPreviewHalf)) {
-        color = ImGui::ColorConvertFloat4ToU32(v);
-        s.customPalette = true;
-        changed();
-    }
+theme::Palette basePalette(const Settings& s) {
+    if (s.customPalette) return s.palette;
+    const LibraryTheme* t = ThemeLibrary::find(s.theme);
+    return t ? t->palette : theme::darkPalette();
 }
 
-void drawAdvanced(Settings& s) {
-    sectionLabel("COLORS");
-    hint("Editing a color turns the current theme into your own custom palette.");
-    if (!s.customPalette) s.palette = effectivePalette(); // start from what is on screen
-    theme::Palette& p = s.palette;
-    if (ImGui::BeginTable("##colors", 2, ImGuiTableFlags_SizingStretchSame)) {
-        colorRow("Background", p.bgDeep, s);
-        colorRow("Panels", p.bgPanel, s);
-        colorRow("Inputs & cards", p.bgRaised, s);
-        colorRow("Hover", p.bgHover, s);
-        colorRow("Borders", p.border, s);
-        colorRow("Canvas surround", p.canvas, s);
-        colorRow("Text", p.text, s);
-        colorRow("Secondary text", p.textDim, s);
-        colorRow("Faint text", p.textFaint, s);
-        colorRow("Danger", p.danger, s);
-        colorRow("Snap lines", p.snap, s);
-        colorRow("Guides", p.guide, s);
-        ImGui::EndTable();
-    }
-    if (ImGui::Checkbox("Light theme (overlay strokes in black)", &p.light)) {
-        s.customPalette = true;
-        changed();
-    }
+// --- pages ---------------------------------------------------------------------------------
 
-    ImGui::Spacing();
-    sectionLabel("SHAPE & BEHAVIOR");
-    ImGui::SetNextItemWidth(200);
-    if (ImGui::SliderFloat("Corner rounding", &p.rounding, 0.0f, 12.0f, "%.0f px")) {
-        s.customPalette = true;
-        changed();
-    }
-
-    ImGui::Spacing();
-    sectionLabel("SHARE");
-    ImGui::SetNextItemWidth(200);
-    ImGui::InputTextWithHint("##themename", "Theme name", &g_saveName);
-    ImGui::SameLine();
-    ImGui::BeginDisabled(g_saveName.empty());
-    if (ImGui::Button("Save as Theme")) {
-        theme::Palette out = effectivePalette();
-        out.name = g_saveName;
-        std::string error;
-        if (ThemeLibrary::save(out, &error)) {
-            s.theme = out.name;
-            s.customPalette = false;
-            s.customAccent = false;
-            changed();
-            g_message = "Saved \"" + out.name + "\".";
-        } else {
-            g_message = error;
-        }
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    if (ImGui::Button("Export...")) {
-        theme::Palette out = effectivePalette();
-        if (!g_saveName.empty()) out.name = g_saveName;
-        if (auto file = platform::saveFileDialog("Export Theme", platform::fromUtf8(out.name + ".json"), "bemotion theme", "json")) {
-            std::string error;
-            g_message = ThemeLibrary::exportTo(out, *file, &error) ? "Exported to " + platform::toUtf8(*file) : error;
-        }
-    }
-    if (s.customPalette) {
-        ImGui::SameLine();
-        if (ImGui::Button("Reset to Theme")) {
-            s.customPalette = false;
-            changed();
-        }
-    }
-}
-
-} // namespace
-
-SettingsTab g_tab = SettingsTab::Theme;
-bool g_selectTab = false;
-
-void openSettings(SettingsTab tab) {
-    g_open = true;
-    g_focus = true;
-    g_recenter = 2;
-    g_tab = tab;
-    g_selectTab = true;
-}
-
-namespace {
-
-void drawUiFont(Settings& s);
-
-void drawInterface(Settings& s) {
-    sectionLabel("TIMELINE");
-    ImGui::SetNextItemWidth(240);
-    if (ImGui::SliderFloat("Clip row height", &s.timelineLayerRow, 22.0f, 80.0f, "%.0f px")) changed();
-    ImGui::SetNextItemWidth(240);
-    if (ImGui::SliderFloat("Keyframe row height", &s.timelinePropertyRow, 20.0f, 60.0f, "%.0f px")) changed();
-    ImGui::SetNextItemWidth(240);
-    if (ImGui::SliderFloat("Keyframe size", &s.keyframeSize, 3.0f, 10.0f, "%.1f px")) changed();
-    if (ImGui::Button("Compact")) s.timelineLayerRow = 26, s.timelinePropertyRow = 22, s.keyframeSize = 4, changed();
-    ImGui::SameLine();
-    if (ImGui::Button("Comfortable")) s.timelineLayerRow = 36, s.timelinePropertyRow = 30, s.keyframeSize = 5, changed();
-    ImGui::SameLine();
-    if (ImGui::Button("Large")) s.timelineLayerRow = 48, s.timelinePropertyRow = 38, s.keyframeSize = 6.5f, changed();
-
-    ImGui::Spacing();
-    sectionLabel("TEXT");
-    ImGui::SetNextItemWidth(240);
-    float percent = s.textScale * 100.0f;
-    if (ImGui::SliderFloat("Text size", &percent, 80.0f, 150.0f, "%.0f%%")) {
-        s.textScale = percent / 100.0f;
-        changed();
-    }
-    if (ImGui::IsItemHovered()) tooltip("Scales every label in the interface");
-    hint("Colors, corner rounding and themes are in the Theme page.");
-    ImGui::Spacing();
-    drawUiFont(s);
-    ImGui::Spacing();
-    sectionLabel("STARTUP");
-    if (ImGui::Checkbox("Play the intro animation", &s.showIntro)) changed();
-    hint("The bemotion logo animation shown when the app opens (a click or any key skips it).");
-}
-
-// Interface font: any installed family (searchable).
-std::string g_fontFilter;
-void drawUiFont(Settings& s) {
-    sectionLabel("FONT");
-    ImGui::SetNextItemWidth(240);
-    if (ImGui::BeginCombo("Interface font", s.uiFont.c_str(), ImGuiComboFlags_HeightLarge)) {
-        if (ImGui::IsWindowAppearing()) {
-            g_fontFilter.clear();
-            ImGui::SetKeyboardFocusHere();
-        }
-        ImGui::SetNextItemWidth(-FLT_MIN);
-        ImGui::InputTextWithHint("##uiFontFilter", "Search fonts", &g_fontFilter);
-        if (!Fonts::systemScanReady()) ImGui::TextDisabled("Looking for installed fonts...");
-        std::vector<std::string> shown;
-        for (const auto& f : Fonts::families()) {
-            std::string a = f, b = g_fontFilter;
-            for (char& c : a) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            for (char& c : b) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-            if (a.find(b) != std::string::npos) shown.push_back(f);
-        }
-        ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(shown.size()));
-        while (clipper.Step())
-            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-                if (ImGui::Selectable(shown[i].c_str(), shown[i] == s.uiFont)) {
-                    s.uiFont = shown[i];
-                    changed();
-                }
-        ImGui::EndCombo();
-    }
-    hint("Inter ships with bemotion. Other fonts come from your system.");
-}
-
-void drawEditor(Settings& s) {
-    sectionLabel("PLAYHEAD");
-    ImGui::SetNextItemWidth(240);
-    if (ImGui::SliderInt("Frames per arrow press", &s.arrowFrames, 1, 60)) changed();
-    ImGui::SetNextItemWidth(240);
-    if (ImGui::SliderInt("Frames per big step", &s.bigArrowFrames, 1, 300)) changed();
-    hint("Arrow keys step the playhead; the big step uses Shift + arrows by default (see Shortcuts).");
-    ImGui::Spacing();
-    sectionLabel("SNAPPING");
-    ImGui::SetNextItemWidth(240);
-    if (ImGui::SliderFloat("Snap distance", &s.snapDistance, 2.0f, 30.0f, "%.0f px")) changed();
-    hint("How close (on screen) an object, clip, keyframe or the playhead must get before it snaps. "
-         "Toggle snapping with S or the magnet button; hold Ctrl while dragging to ignore it.");
-}
-
-// --- shortcuts ---------------------------------------------------------------------------
-
-int g_capturing = -1; // action waiting for its new keys
-
-// The chord being pressed right now (a non-modifier key + held modifiers), or 0.
-ImGuiKeyChord pressedChord() {
-    const ImGuiIO& io = ImGui::GetIO();
-    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k) {
-        const ImGuiKey key = static_cast<ImGuiKey>(k);
-        if (key == ImGuiKey_LeftCtrl || key == ImGuiKey_RightCtrl || key == ImGuiKey_LeftShift || key == ImGuiKey_RightShift ||
-            key == ImGuiKey_LeftAlt || key == ImGuiKey_RightAlt || key == ImGuiKey_LeftSuper || key == ImGuiKey_RightSuper ||
-            (k >= ImGuiKey_MouseLeft && k <= ImGuiKey_MouseWheelY) || k >= ImGuiKey_ReservedForModCtrl)
-            continue;
-        if (!ImGui::IsKeyPressed(key, false)) continue;
-        ImGuiKeyChord chord = k;
-        if (io.KeyCtrl) chord |= ImGuiMod_Ctrl;
-        if (io.KeyShift) chord |= ImGuiMod_Shift;
-        if (io.KeyAlt) chord |= ImGuiMod_Alt;
-        return chord;
-    }
-    return 0;
-}
-
-void drawShortcuts() {
-    hint("Click a shortcut and press the new keys (Esc cancels). Single keys work when no text field is being edited.");
-    ImGui::Spacing();
-    const char* group = nullptr;
-    for (int i = 0; i < static_cast<int>(Action::Count); ++i) {
-        const Action a = static_cast<Action>(i);
-        const ActionInfo& info = actionInfo(a);
-        if (!group || std::strcmp(group, info.group) != 0) {
-            if (group) ImGui::EndTable();
-            group = info.group;
-            ImGui::Spacing();
-            std::string upper = group;
-            for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-            sectionLabel(upper.c_str());
-            ImGui::BeginTable(group, 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings);
-            ImGui::TableSetupColumn("action", ImGuiTableColumnFlags_WidthFixed, 200.0f);
-            ImGui::TableSetupColumn("keys", ImGuiTableColumnFlags_WidthFixed, 170.0f);
-            ImGui::TableSetupColumn("tools", ImGuiTableColumnFlags_WidthStretch);
-        }
-        ImGui::PushID(i);
-        ImGui::TableNextRow();
-        ImGui::TableNextColumn();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(info.label);
-        ImGui::TableNextColumn();
-        const bool capturing = g_capturing == i;
-        if (capturing) {
-            ImGui::PushStyleColor(ImGuiCol_Button, theme::kAccentSoft);
-            ImGui::Button("Press keys...", ImVec2(-FLT_MIN, 0));
-            ImGui::PopStyleColor();
-            if (ImGui::IsKeyPressed(ImGuiKey_Escape, false)) g_capturing = -1;
-            else if (const ImGuiKeyChord chord = pressedChord()) {
-                setChord(a, chord);
-                g_capturing = -1;
-                changed();
-            }
-        } else {
-            const std::string name = chordName(chordOf(a));
-            if (ImGui::Button(name.empty() ? "(none)" : name.c_str(), ImVec2(-FLT_MIN, 0))) g_capturing = i;
-        }
-        ImGui::TableNextColumn();
-        if (chordOf(a) != info.defaultChord) {
-            if (iconButton("##reset", Icon::Reset, ImGui::GetFrameHeight(), "Back to the default")) resetChord(a), changed();
-            ImGui::SameLine();
-        }
-        if (chordOf(a)) {
-            if (iconButton("##clear", Icon::Trash, ImGui::GetFrameHeight(), "Remove this shortcut")) setChord(a, 0), changed();
-            const Action other = actionWithChord(chordOf(a), a);
-            if (other != Action::Count) {
-                ImGui::SameLine();
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextColored(theme::vec(theme::kDanger), "also %s", actionInfo(other).label);
-            }
-        }
-        ImGui::PopID();
-    }
-    if (group) ImGui::EndTable();
-}
-
-// One sidebar entry: icon + label, highlighted when selected.
-bool sidebarItem(const char* label, Icon icon, bool selected) {
-    const float h = ImGui::GetFrameHeight() + 10.0f;
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float w = ImGui::GetContentRegionAvail().x;
-    const bool clicked = ImGui::InvisibleButton(label, ImVec2(w, h));
-    const bool hovered = ImGui::IsItemHovered();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (selected || hovered) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), selected ? theme::kAccentSoft : theme::kBgHover, 6.0f);
-    if (selected) dl->AddRectFilled(ImVec2(p.x, p.y + 8), ImVec2(p.x + 3, p.y + h - 8), theme::kAccent, 2.0f);
-    const ImU32 col = selected ? theme::kText : theme::kTextDim;
-    drawIcon(dl, icon, ImVec2(p.x + 22, p.y + h * 0.5f), 16.0f, selected ? theme::kAccent : col);
-    dl->AddText(ImVec2(p.x + 42, p.y + (h - ImGui::GetFontSize()) * 0.5f), col, label);
-    return clicked;
-}
-
-} // namespace
-
-namespace {
-
-// Page title with a quick "Reset" to that page's defaults on the right.
-bool pageHeader(const char* title) {
-    ImGui::PushFont(Fonts::uiBold(), ImGui::GetFontSize() * 1.15f);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(title);
-    ImGui::PopFont();
-    const float w = ImGui::CalcTextSize("Reset").x + ImGui::GetStyle().FramePadding.x * 2 + 22.0f;
-    ImGui::SameLine();
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - w));
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const bool clicked = ImGui::Button("    Reset");
-    drawIcon(ImGui::GetWindowDrawList(), Icon::Reset, ImVec2(p.x + 14, p.y + ImGui::GetFrameHeight() * 0.5f), 12.0f,
-             theme::kTextDim);
-    tooltip("Restore this page's defaults");
-    ImGui::Spacing();
-    return clicked;
+void addPageHeader(QVBoxLayout* col, const QString& title, std::function<void()> reset) {
+    auto* row = new QHBoxLayout;
+    row->addWidget(pageTitle(title), 1);
+    auto* b = new QPushButton(makeIcon(Icon::Reset, theme::kTextDim, 16), "Reset");
+    b->setToolTip("Restore this page's defaults");
+    QObject::connect(b, &QPushButton::clicked, b, [reset] {
+        reset();
+        changed(true);
+    });
+    row->addWidget(b);
+    col->addLayout(row);
+    col->addSpacing(4);
 }
 
 void enableAllPlugins() {
@@ -462,114 +213,560 @@ void enableAllPlugins() {
     settings().disabledPlugins.clear();
 }
 
-void resetPage(SettingsTab tab) {
-    Settings& s = settings();
-    const Settings d; // defaults
-    switch (tab) {
-    case SettingsTab::Theme:
-        s.theme = d.theme, s.customAccent = d.customAccent, s.accent = d.accent;
-        s.customPalette = false, s.advanced = d.advanced;
-        break;
-    case SettingsTab::Interface:
-        s.timelineLayerRow = d.timelineLayerRow, s.timelinePropertyRow = d.timelinePropertyRow;
-        s.keyframeSize = d.keyframeSize, s.textScale = d.textScale, s.uiFont = d.uiFont;
-        s.showIntro = d.showIntro;
-        break;
-    case SettingsTab::Editor:
-        s.snapDistance = d.snapDistance, s.arrowFrames = d.arrowFrames, s.bigArrowFrames = d.bigArrowFrames;
-        break;
-    case SettingsTab::Shortcuts: loadKeymap("{}"); break;
-    case SettingsTab::Plugins: enableAllPlugins(); break;
+void addColorGrid(QVBoxLayout* col, Settings& s) {
+    struct Entry {
+        const char* label;
+        Rgba theme::Palette::*field;
+    };
+    static constexpr Entry kEntries[] = {
+        {"Background", &theme::Palette::bgDeep},    {"Panels", &theme::Palette::bgPanel},
+        {"Inputs & cards", &theme::Palette::bgRaised}, {"Hover", &theme::Palette::bgHover},
+        {"Borders", &theme::Palette::border},       {"Canvas surround", &theme::Palette::canvas},
+        {"Text", &theme::Palette::text},            {"Secondary text", &theme::Palette::textDim},
+        {"Faint text", &theme::Palette::textFaint}, {"Danger", &theme::Palette::danger},
+        {"Snap lines", &theme::Palette::snap},      {"Guides", &theme::Palette::guide},
+    };
+    auto* grid = new QGridLayout;
+    grid->setHorizontalSpacing(16);
+    int i = 0;
+    for (const Entry& e : kEntries) {
+        auto* row = new QHBoxLayout;
+        auto* button = new ColorButton;
+        const Rgba c = s.palette.*(e.field);
+        button->setColor(Color{red(c) / 255.0f, green(c) / 255.0f, blue(c) / 255.0f, alpha(c) / 255.0f});
+        auto field = e.field;
+        QObject::connect(button, &ColorButton::colorChanged, button, [field](Color v) {
+            Settings& st = settings();
+            auto byte = [](float x) { return static_cast<int>(std::lround(std::clamp(x, 0.0f, 1.0f) * 255)); };
+            st.palette.*field = rgba(byte(v.r), byte(v.g), byte(v.b), byte(v.a));
+            st.customPalette = true;
+            changed();
+        });
+        QObject::connect(button, &ColorButton::editFinished, button, [] { changed(true); });
+        row->addWidget(button);
+        row->addWidget(new QLabel(e.label), 1);
+        grid->addLayout(row, i / 2, i % 2);
+        ++i;
     }
-    changed();
+    col->addLayout(grid);
+}
+
+QWidget* themePage() {
+    Settings& s = settings();
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    addPageHeader(col, "Theme", [] {
+        Settings& st = settings();
+        const Settings d;
+        st.theme = d.theme, st.customAccent = d.customAccent, st.accent = d.accent;
+        st.customPalette = false, st.advanced = d.advanced;
+    });
+    col->addWidget(sectionLabel("THEME"));
+    auto* cards = new QGridLayout;
+    cards->setSpacing(10);
+    cards->setAlignment(Qt::AlignLeft);
+    int n = 0;
+    for (const LibraryTheme& t : ThemeLibrary::all()) {
+        auto* card = new ThemeCard(t.palette, !s.customPalette && s.theme == t.palette.name);
+        const std::string name = t.palette.name;
+        QObject::connect(card, &QAbstractButton::clicked, card, [name] {
+            settings().theme = name;
+            settings().customPalette = false;
+            changed(true);
+        });
+        cards->addWidget(card, n / 4, n % 4);
+        ++n;
+    }
+    col->addLayout(cards);
+    auto* row = new QHBoxLayout;
+    auto* import = new QPushButton("Import Theme...");
+    QObject::connect(import, &QPushButton::clicked, import, [] {
+        if (auto file = platform::openFileDialog("Import Theme", "bemotion theme", "json")) {
+            std::string name, error;
+            if (ThemeLibrary::importFile(*file, &name, &error)) {
+                settings().theme = name;
+                settings().customPalette = false;
+                g_message = "Imported \"" + name + "\".";
+            } else {
+                g_message = "Could not import: " + error;
+            }
+            changed(true);
+        }
+    });
+    auto* folder = new QPushButton("Open Themes Folder");
+    QObject::connect(folder, &QPushButton::clicked, folder, [] { platform::revealInFileManager(ThemeLibrary::userDir()); });
+    row->addWidget(import);
+    row->addWidget(folder);
+    row->addStretch();
+    col->addLayout(row);
+    if (!g_message.empty()) col->addWidget(hintLabel(QString::fromStdString(g_message)));
+
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("ACCENT COLOR"));
+    const theme::Palette base = [&] {
+        Settings copy = s;
+        copy.customAccent = false;
+        return basePalette(copy);
+    }();
+    auto* accents = new QHBoxLayout;
+    accents->setSpacing(8);
+    auto* themeAccent = new Swatch(base.accent, !s.customAccent, "Theme default");
+    QObject::connect(themeAccent, &QAbstractButton::clicked, themeAccent, [] {
+        settings().customAccent = false;
+        changed(true);
+    });
+    accents->addWidget(themeAccent);
+    for (Rgba c : kAccentChoices) {
+        auto* sw = new Swatch(c, s.customAccent && s.accent == c, "");
+        QObject::connect(sw, &QAbstractButton::clicked, sw, [c] {
+            settings().customAccent = true;
+            settings().accent = c;
+            changed(true);
+        });
+        accents->addWidget(sw);
+    }
+    accents->addSpacing(8);
+    auto* custom = new QPushButton("Custom...");
+    custom->setToolTip("Pick any color");
+    QObject::connect(custom, &QPushButton::clicked, custom, [custom] {
+        const Rgba cur = settings().customAccent ? settings().accent : basePalette(settings()).accent;
+        const QColor picked = QColorDialog::getColor(qcolor(cur), custom->window(), "Accent Color");
+        if (!picked.isValid()) return;
+        settings().customAccent = true;
+        settings().accent = rgba(picked.red(), picked.green(), picked.blue());
+        changed(true);
+    });
+    accents->addWidget(custom);
+    accents->addStretch();
+    col->addLayout(accents);
+
+    col->addSpacing(10);
+    auto* advanced = new QCheckBox("Advanced mode");
+    advanced->setChecked(s.advanced);
+    QObject::connect(advanced, &QCheckBox::toggled, advanced, [](bool on) {
+        settings().advanced = on;
+        saveSettings();
+        if (g_window) QTimer::singleShot(0, g_window, [] {
+                if (g_window) g_window->rebuild();
+            });
+    });
+    col->addWidget(advanced);
+    col->addWidget(hintLabel("Shows every color and fine-tuning option. Your choices above stay as they are."));
+    if (!s.advanced) return page;
+
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("COLORS"));
+    col->addWidget(hintLabel("Editing a color turns the current theme into your own custom palette."));
+    if (!s.customPalette) s.palette = effectivePalette(); // start from what is on screen
+    addColorGrid(col, s);
+    auto* light = new QCheckBox("Light theme (overlay strokes in black)");
+    light->setChecked(s.palette.light);
+    QObject::connect(light, &QCheckBox::toggled, light, [](bool on) {
+        settings().palette.light = on;
+        settings().customPalette = true;
+        changed(true);
+    });
+    col->addWidget(light);
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("SHAPE"));
+    col->addWidget(sliderRow("Corner rounding", s.palette.rounding, 0.0f, 12.0f, "%.0f px"));
+
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("SHARE"));
+    auto* share = new QHBoxLayout;
+    auto* name = new QLineEdit;
+    name->setPlaceholderText("Theme name");
+    name->setFixedWidth(200);
+    share->addWidget(name);
+    auto* save = new QPushButton("Save as Theme");
+    QObject::connect(save, &QPushButton::clicked, save, [name] {
+        if (name->text().trimmed().isEmpty()) return;
+        theme::Palette out = effectivePalette();
+        out.name = name->text().trimmed().toStdString();
+        std::string error;
+        if (ThemeLibrary::save(out, &error)) {
+            settings().theme = out.name;
+            settings().customPalette = false;
+            settings().customAccent = false;
+            g_message = "Saved \"" + out.name + "\".";
+        } else {
+            g_message = error;
+        }
+        changed(true);
+    });
+    share->addWidget(save);
+    auto* exportButton = new QPushButton("Export...");
+    QObject::connect(exportButton, &QPushButton::clicked, exportButton, [name] {
+        theme::Palette out = effectivePalette();
+        if (!name->text().trimmed().isEmpty()) out.name = name->text().trimmed().toStdString();
+        if (auto file = platform::saveFileDialog("Export Theme", platform::fromUtf8(out.name + ".json"), "bemotion theme", "json")) {
+            std::string error;
+            g_message = ThemeLibrary::exportTo(out, *file, &error) ? "Exported to " + platform::toUtf8(*file) : error;
+            if (g_window) g_window->rebuild();
+        }
+    });
+    share->addWidget(exportButton);
+    if (s.customPalette) {
+        auto* reset = new QPushButton("Reset to Theme");
+        QObject::connect(reset, &QPushButton::clicked, reset, [] {
+            settings().customPalette = false;
+            changed(true);
+        });
+        share->addWidget(reset);
+    }
+    share->addStretch();
+    col->addLayout(share);
+    return page;
+}
+
+QWidget* interfacePage() {
+    Settings& s = settings();
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    addPageHeader(col, "Interface", [] {
+        Settings& st = settings();
+        const Settings d;
+        st.timelineLayerRow = d.timelineLayerRow, st.timelinePropertyRow = d.timelinePropertyRow;
+        st.keyframeSize = d.keyframeSize, st.textScale = d.textScale, st.uiFont = d.uiFont;
+        st.showIntro = d.showIntro;
+    });
+    col->addWidget(sectionLabel("TIMELINE"));
+    col->addWidget(sliderRow("Clip row height", s.timelineLayerRow, 22.0f, 80.0f, "%.0f px"));
+    col->addWidget(sliderRow("Keyframe row height", s.timelinePropertyRow, 20.0f, 60.0f, "%.0f px"));
+    col->addWidget(sliderRow("Keyframe size", s.keyframeSize, 3.0f, 10.0f, "%.1f px", 0.5f));
+    auto* presets = new QHBoxLayout;
+    auto preset = [&](const char* label, float row, float prop, float key) {
+        auto* b = new QPushButton(label);
+        QObject::connect(b, &QPushButton::clicked, b, [row, prop, key] {
+            Settings& st = settings();
+            st.timelineLayerRow = row, st.timelinePropertyRow = prop, st.keyframeSize = key;
+            changed(true);
+        });
+        presets->addWidget(b);
+    };
+    preset("Compact", 26, 22, 4);
+    preset("Comfortable", 36, 30, 5);
+    preset("Large", 48, 38, 6.5f);
+    presets->addStretch();
+    col->addLayout(presets);
+
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("TEXT"));
+    static float percent;
+    percent = s.textScale * 100.0f;
+    QWidget* text = sliderRow("Text size", percent, 80.0f, 150.0f, "%.0f%%", 5.0f, "Scales every label in the interface");
+    // The slider edits `percent`; mirror it into the setting.
+    for (QSlider* sl : text->findChildren<QSlider*>())
+        QObject::connect(sl, &QSlider::valueChanged, sl, [](int) {
+            settings().textScale = percent / 100.0f;
+            changed();
+        });
+    col->addWidget(text);
+    col->addWidget(hintLabel("Colors, corner rounding and themes are in the Theme page."));
+
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("FONT"));
+    auto* fontRow = new QHBoxLayout;
+    auto* fl = new QLabel("Interface font");
+    fl->setMinimumWidth(170);
+    fontRow->addWidget(fl);
+    auto* font = new QComboBox;
+    font->setEditable(true);
+    font->setInsertPolicy(QComboBox::NoInsert);
+    for (const auto& f : Fonts::families()) font->addItem(QString::fromStdString(f));
+    font->setCurrentText(QString::fromStdString(s.uiFont));
+    font->completer()->setFilterMode(Qt::MatchContains);
+    font->completer()->setCompletionMode(QCompleter::PopupCompletion);
+    font->setFixedWidth(240);
+    QObject::connect(font, &QComboBox::activated, font, [font](int) {
+        const std::string f = font->currentText().toStdString();
+        if (!Fonts::hasFamily(f)) return;
+        settings().uiFont = f;
+        changed();
+    });
+    fontRow->addWidget(font);
+    fontRow->addStretch();
+    col->addLayout(fontRow);
+    col->addWidget(hintLabel("Inter ships with bemotion. Other fonts come from your system."));
+
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("STARTUP"));
+    auto* intro = new QCheckBox("Play the intro animation");
+    intro->setChecked(s.showIntro);
+    QObject::connect(intro, &QCheckBox::toggled, intro, [](bool on) {
+        settings().showIntro = on;
+        saveSettings();
+    });
+    col->addWidget(intro);
+    col->addWidget(hintLabel("The bemotion logo animation shown when the app opens (a click or any key skips it)."));
+    return page;
+}
+
+QWidget* editorPage() {
+    Settings& s = settings();
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    addPageHeader(col, "Editor", [] {
+        Settings& st = settings();
+        const Settings d;
+        st.snapDistance = d.snapDistance, st.arrowFrames = d.arrowFrames, st.bigArrowFrames = d.bigArrowFrames;
+    });
+    col->addWidget(sectionLabel("PLAYHEAD"));
+    col->addWidget(intSliderRow("Frames per arrow press", s.arrowFrames, 1, 60));
+    col->addWidget(intSliderRow("Frames per big step", s.bigArrowFrames, 1, 300));
+    col->addWidget(hintLabel("Arrow keys step the playhead; the big step uses Shift + arrows by default (see Shortcuts)."));
+    col->addSpacing(8);
+    col->addWidget(sectionLabel("SNAPPING"));
+    col->addWidget(sliderRow("Snap distance", s.snapDistance, 2.0f, 30.0f, "%.0f px"));
+    col->addWidget(hintLabel("How close (on screen) an object, clip, keyframe or the playhead must get before it snaps. "
+                             "Toggle snapping with S or the magnet button; hold Ctrl while dragging to ignore it."));
+    return page;
+}
+
+// Click it, then press the new keys (Esc cancels).
+class ShortcutButton : public QPushButton {
+public:
+    explicit ShortcutButton(Action action) : action_(action) {
+        setMinimumWidth(170);
+        refreshText();
+        connect(this, &QPushButton::clicked, this, [this] {
+            capturing_ = true;
+            setText("Press keys...");
+            setProperty("accent", true);
+            style()->unpolish(this);
+            style()->polish(this);
+            grabKeyboard();
+        });
+    }
+
+protected:
+    bool event(QEvent* e) override {
+        // While capturing, every key (shortcuts included) comes here.
+        if (capturing_ && e->type() == QEvent::ShortcutOverride) {
+            e->accept();
+            return true;
+        }
+        return QPushButton::event(e);
+    }
+    void keyPressEvent(QKeyEvent* e) override {
+        if (!capturing_) {
+            QPushButton::keyPressEvent(e);
+            return;
+        }
+        const int key = e->key();
+        if (key == Qt::Key_Control || key == Qt::Key_Shift || key == Qt::Key_Alt || key == Qt::Key_Meta || key == Qt::Key_unknown) return;
+        if (key != Qt::Key_Escape || e->modifiers() != Qt::NoModifier) {
+            setChord(action_, e->keyCombination().toCombined());
+            saveSettings();
+            emit AppSignals::get().shortcutsChanged();
+        }
+        stop();
+        if (g_window) QTimer::singleShot(0, g_window, [] {
+                if (g_window) g_window->rebuild(); // conflicts may have changed
+            });
+    }
+    void focusOutEvent(QFocusEvent* e) override {
+        if (capturing_) stop();
+        QPushButton::focusOutEvent(e);
+    }
+
+private:
+    void stop() {
+        capturing_ = false;
+        releaseKeyboard();
+        setProperty("accent", false);
+        style()->unpolish(this);
+        style()->polish(this);
+        refreshText();
+    }
+    void refreshText() {
+        const std::string name = chordName(chordOf(action_));
+        setText(name.empty() ? "(none)" : QString::fromStdString(name));
+    }
+    Action action_;
+    bool capturing_ = false;
+};
+
+QWidget* shortcutsPage() {
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    addPageHeader(col, "Shortcuts", [] {
+        loadKeymap("{}");
+        emit AppSignals::get().shortcutsChanged();
+    });
+    col->addWidget(hintLabel("Click a shortcut and press the new keys (Esc cancels)."));
+    const char* group = nullptr;
+    QGridLayout* grid = nullptr;
+    int row = 0;
+    for (int i = 0; i < static_cast<int>(Action::Count); ++i) {
+        const Action a = static_cast<Action>(i);
+        const ActionInfo& info = actionInfo(a);
+        if (!group || std::strcmp(group, info.group) != 0) {
+            group = info.group;
+            std::string upper = group;
+            for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            col->addSpacing(6);
+            col->addWidget(sectionLabel(QString::fromStdString(upper)));
+            grid = new QGridLayout;
+            grid->setColumnMinimumWidth(0, 200);
+            grid->setColumnStretch(2, 1);
+            grid->setVerticalSpacing(4);
+            col->addLayout(grid);
+            row = 0;
+        }
+        grid->addWidget(new QLabel(info.label), row, 0);
+        grid->addWidget(new ShortcutButton(a), row, 1);
+        auto* tools = new QHBoxLayout;
+        tools->setSpacing(4);
+        if (chordOf(a) != info.defaultChord) {
+            auto* reset = new IconButton(Icon::Reset, "Back to the default", 24);
+            QObject::connect(reset, &QAbstractButton::clicked, reset, [a] {
+                resetChord(a);
+                saveSettings();
+                emit AppSignals::get().shortcutsChanged();
+                if (g_window) QTimer::singleShot(0, g_window, [] { if (g_window) g_window->rebuild(); });
+            });
+            tools->addWidget(reset);
+        }
+        if (chordOf(a)) {
+            auto* clear = new IconButton(Icon::Trash, "Remove this shortcut", 24);
+            QObject::connect(clear, &QAbstractButton::clicked, clear, [a] {
+                setChord(a, 0);
+                saveSettings();
+                emit AppSignals::get().shortcutsChanged();
+                if (g_window) QTimer::singleShot(0, g_window, [] { if (g_window) g_window->rebuild(); });
+            });
+            tools->addWidget(clear);
+            const Action other = actionWithChord(chordOf(a), a);
+            if (other != Action::Count) tools->addWidget(paragraph(QString("also %1").arg(actionInfo(other).label), theme::kDanger));
+        }
+        tools->addStretch();
+        grid->addLayout(tools, row, 2);
+        ++row;
+    }
+    return page;
+}
+
+QWidget* pluginsPage() {
+    PluginHost& host = PluginHost::get();
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    addPageHeader(col, "Plugins", [] { enableAllPlugins(); });
+    auto* buttons = new QHBoxLayout;
+    auto* install = accentButton("Install Plugin...");
+    QObject::connect(install, &QPushButton::clicked, install, [] {
+        if (auto manifest = platform::openFileDialog("Install Plugin (choose its plugin.json)", "bemotion plugin", "json")) {
+            std::string error;
+            g_message = PluginHost::get().install(*manifest, &error) ? "Plugin installed." : "Could not install: " + error;
+            emit AppSignals::get().pluginsChanged();
+            if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
+        }
+    });
+    auto* folder = new QPushButton("Open Plugins Folder");
+    QObject::connect(folder, &QPushButton::clicked, folder, [] { platform::revealInFileManager(PluginHost::userDir()); });
+    auto* reload = new QPushButton("Reload");
+    QObject::connect(reload, &QPushButton::clicked, reload, [] {
+        PluginHost::get().requestReload();
+        emit AppSignals::get().pluginsChanged();
+        if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
+    });
+    auto* docs = new QPushButton("Write a Plugin");
+    QObject::connect(docs, &QPushButton::clicked, docs, [] { platform::openWithDefaultApp(kPluginDocsUrl); });
+    for (QPushButton* b : {install, folder, reload, docs}) buttons->addWidget(b);
+    buttons->addStretch();
+    col->addLayout(buttons);
+    if (!g_message.empty()) col->addWidget(hintLabel(QString::fromStdString(g_message)));
+    col->addWidget(hintLabel("Plugins add new kinds of objects. They run in a sandbox: no access to your files or the network."));
+
+    for (const Plugin& p : host.plugins()) {
+        auto* line = new QFrame;
+        line->setFrameShape(QFrame::HLine);
+        line->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kBorder).name()));
+        col->addWidget(line);
+        auto* head = new QHBoxLayout;
+        auto* enabled = new QCheckBox;
+        enabled->setChecked(p.enabled);
+        enabled->setToolTip(p.enabled ? "Enabled" : "Disabled");
+        const std::string id = p.id;
+        QObject::connect(enabled, &QCheckBox::toggled, enabled, [id](bool on) {
+            PluginHost::get().setEnabled(id, on);
+            emit AppSignals::get().pluginsChanged();
+        });
+        head->addWidget(enabled);
+        auto* name = new QLabel(QString::fromStdString(p.name));
+        QFont f = name->font();
+        f.setPointSizeF(f.pointSizeF() * 1.1);
+        f.setWeight(QFont::DemiBold);
+        name->setFont(f);
+        head->addWidget(name);
+        head->addWidget(hintLabel(QString::fromStdString("v" + p.version + (p.author.empty() ? "" : "  ·  " + p.author))));
+        if (p.builtin) head->addWidget(paragraph("built-in", theme::kAccent));
+        head->addStretch();
+        auto* show = new QPushButton("Show Folder");
+        const std::filesystem::path dir = p.dir;
+        QObject::connect(show, &QPushButton::clicked, show, [dir] { platform::revealInFileManager(dir); });
+        head->addWidget(show);
+        col->addLayout(head);
+        auto* body = new QVBoxLayout;
+        body->setContentsMargins(28, 0, 0, 0);
+        if (!p.description.empty()) body->addWidget(paragraph(QString::fromStdString(p.description), theme::kText));
+        if (!p.error.empty()) {
+            body->addWidget(paragraph(QString::fromStdString("Failed to load: " + p.error), theme::kDanger));
+        } else {
+            std::string objects;
+            for (const PluginObjectType* t : host.objectTypes())
+                if (t->pluginId == p.id) objects += (objects.empty() ? "" : ", ") + t->name;
+            if (!objects.empty()) body->addWidget(hintLabel(QString::fromStdString("Objects: " + objects)));
+        }
+        if (!p.drawError.empty()) body->addWidget(paragraph(QString::fromStdString("Last error: " + p.drawError), theme::kDanger));
+        if (!p.log.empty()) {
+            auto* toggle = new QPushButton(QString("Log (%1)").arg(p.log.size()));
+            toggle->setCheckable(true);
+            auto* log = new QPlainTextEdit;
+            log->setReadOnly(true);
+            log->setMaximumHeight(140);
+            QString text;
+            for (const auto& l : p.log) text += QString::fromStdString(l) + "\n";
+            log->setPlainText(text);
+            log->hide();
+            QObject::connect(toggle, &QPushButton::toggled, log, &QWidget::setVisible);
+            auto* tr = new QHBoxLayout;
+            tr->addWidget(toggle);
+            tr->addStretch();
+            body->addLayout(tr);
+            body->addWidget(log);
+        }
+        col->addLayout(body);
+    }
+    return page;
 }
 
 } // namespace
 
-void drawSettings() {
-    if (!g_open) return;
-    Settings& s = settings();
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    // Always fits the screen; pages scroll inside.
-    const ImVec2 size(std::min(780.0f, vp->WorkSize.x * 0.92f), std::min(600.0f, vp->WorkSize.y * 0.88f));
-    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f, vp->WorkPos.y + vp->WorkSize.y * 0.5f),
-                            g_recenter > 0 ? ImGuiCond_Always : ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (g_recenter > 0) --g_recenter;
-    ImGui::SetNextWindowSize(size, ImGuiCond_Appearing);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(520, 360), vp->WorkSize);
-    if (g_focus) {
-        ImGui::SetNextWindowFocus();
-        g_focus = false;
-    }
-    if (!ImGui::Begin("Settings", &g_open, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::End();
-        return;
-    }
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape)) g_open = false;
-
-    struct Page {
-        SettingsTab tab;
-        const char* label;
-        Icon icon;
-    };
-    static constexpr Page kPages[] = {{SettingsTab::Theme, "Theme", Icon::Palette},
-                                      {SettingsTab::Interface, "Interface", Icon::Sliders},
-                                      {SettingsTab::Editor, "Editor", Icon::Magnet},
-                                      {SettingsTab::Shortcuts, "Shortcuts", Icon::Text},
-                                      {SettingsTab::Plugins, "Plugins", Icon::Plugin}};
-    ImGui::BeginChild("##sidebar", ImVec2(170, 0), ImGuiChildFlags_None);
-    for (const Page& p : kPages)
-        if (sidebarItem(p.label, p.icon, g_tab == p.tab)) g_tab = p.tab;
-    // Everything back to how bemotion ships.
-    ImGui::SetCursorPosY(std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - ImGui::GetFrameHeight() - 8));
-    if (ImGui::Button("Reset All", ImVec2(-FLT_MIN, 0))) ImGui::OpenPopup("##resetAll");
-    tooltip("Restore every setting to its default");
-    if (ImGui::BeginPopup("##resetAll")) {
-        ImGui::TextUnformatted("Reset every setting to its default?");
-        if (accentButton("Reset All")) {
+void openSettings(SettingsTab tab) {
+    if (!g_window) {
+        auto* resetAll = new QPushButton("Reset All");
+        resetAll->setToolTip("Restore every setting to its default");
+        g_window = new PagedWindow("Settings",
+                                   {{"Theme", Icon::Palette, themePage},
+                                    {"Interface", Icon::Sliders, interfacePage},
+                                    {"Editor", Icon::Magnet, editorPage},
+                                    {"Shortcuts", Icon::Text, shortcutsPage},
+                                    {"Plugins", Icon::Plugin, pluginsPage}},
+                                   resetAll);
+        g_window->resize(780, 600);
+        QObject::connect(resetAll, &QPushButton::clicked, g_window, [] {
+            if (QMessageBox::question(g_window, "Reset All", "Reset every setting to its default?") != QMessageBox::Yes) return;
             settings() = Settings{};
             loadKeymap("{}");
             enableAllPlugins();
-            changed();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
+            emit AppSignals::get().shortcutsChanged();
+            emit AppSignals::get().toolbarChanged();
+            changed(true);
+        });
     }
-    ImGui::EndChild();
-    ImGui::SameLine(0, 0);
-    {
-        const ImVec2 a = ImGui::GetCursorScreenPos();
-        ImGui::GetWindowDrawList()->AddLine(ImVec2(a.x + 6, a.y), ImVec2(a.x + 6, a.y + ImGui::GetContentRegionAvail().y),
-                                            theme::kBorder);
-        ImGui::Dummy(ImVec2(14, 0));
-        ImGui::SameLine(0, 0);
-    }
-    ImGui::BeginChild("##page", ImVec2(0, 0), ImGuiChildFlags_None);
-    const char* titles[] = {"Theme", "Interface", "Editor", "Shortcuts", "Plugins"};
-    if (pageHeader(titles[static_cast<int>(g_tab)])) resetPage(g_tab);
-    switch (g_tab) {
-    case SettingsTab::Theme:
-        drawAppearance(s);
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-        if (ImGui::Checkbox("Advanced mode", &s.advanced)) saveSettings();
-        hint("Shows every color and fine-tuning option. Your choices above stay as they are.");
-        if (s.advanced) {
-            ImGui::Spacing();
-            drawAdvanced(s);
-        }
-        break;
-    case SettingsTab::Interface: drawInterface(s); break;
-    case SettingsTab::Editor: drawEditor(s); break;
-    case SettingsTab::Shortcuts: drawShortcuts(); break;
-    case SettingsTab::Plugins: drawPluginsTab(); break;
-    }
-    ImGui::EndChild();
-    g_selectTab = false;
-    ImGui::End();
+    g_window->showPage(static_cast<int>(tab));
+    g_window->present();
 }
 
 } // namespace bemotion::ui

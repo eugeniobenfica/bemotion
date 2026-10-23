@@ -4,276 +4,1099 @@
 #include "core/Snapping.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
-#include "render/Fonts.h"
+#include "ui/AppSignals.h"
+#include "ui/Mime.h"
+#include "ui/PropertyRow.h"
 #include "ui/Theme.h"
 #include "ui/Tools.h"
 #include "ui/Widgets.h"
 #include "ui/panels/EffectsPanel.h"
-#include "ui/panels/ViewportPanel.h"
-#include "ui/panels/PropertiesPanel.h"
 
-#include <imgui.h>
-#include <imgui_internal.h> // BeginDragDropTargetCustom
-#include <imgui_stdlib.h>
+#include <QApplication>
+#include <QDrag>
+#include <QFrame>
+#include <QGuiApplication>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMenu>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QPainterPath>
+#include <QPushButton>
+#include <QToolTip>
+#include <QVBoxLayout>
+#include <QWheelEvent>
+#include <QWidgetAction>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 
 namespace bemotion {
+
+using ui::Pt;
+using ui::Rgba;
 
 namespace {
 
 constexpr float kRulerHeight = 26.0f;
 // Row sizes come from Settings > Interface.
 float layerRowHeight() { return settings().timelineLayerRow; }
-float propRowHeight() { return settings().timelinePropertyRow; }
+float propRowHeight() { return std::max(26.0f, settings().timelinePropertyRow); }
 float groupRowHeight() { return std::max(18.0f, settings().timelinePropertyRow * 0.8f); }
 constexpr float kEdgeGrab = 6.0f;
 float keyRadius() { return settings().keyframeSize; }
+// Left column of a track row.
+constexpr float kButton = 20.0f;
+constexpr float kExpandX = 6.0f, kVisX = 30.0f, kLockX = 54.0f, kChipX = 78.0f, kNameX = 110.0f;
 
-ImU32 toU32(Color c, float alpha = 1.0f) { return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, c.a * alpha)); }
+Qt::KeyboardModifiers mods() { return QGuiApplication::keyboardModifiers(); }
+bool ctrlHeld() { return mods() & Qt::ControlModifier; }
+bool shiftHeld() { return mods() & Qt::ShiftModifier; }
 
-// Cubic-bezier timing editor: drag the two handles. Returns true while edited.
-bool curveEditor(BezierEase& c, float size) {
-    const ImVec2 pad(10.0f, 34.0f); // vertical room for overshoot
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    const ImVec2 total(size + pad.x * 2, size + pad.y * 2);
-    ImGui::InvisibleButton("##curve", total);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 p0(origin.x + pad.x, origin.y + pad.y + size); // (0,0) bottom-left
-    auto toScreen = [&](float x, float y) { return ImVec2(p0.x + x * size, p0.y - y * size); };
-    dl->AddRectFilled(origin, ImVec2(origin.x + total.x, origin.y + total.y), theme::kBgDeep, 4.0f);
-    dl->AddRect(toScreen(0, 1), toScreen(1, 0), theme::ink(30));
-    for (int i = 1; i < 4; ++i) {
-        const float g = i / 4.0f;
-        dl->AddLine(toScreen(g, 0), toScreen(g, 1), theme::ink(12));
-        dl->AddLine(toScreen(0, g), toScreen(1, g), theme::ink(12));
-    }
-    const ImVec2 a = toScreen(0, 0), b = toScreen(1, 1);
-    const ImVec2 h1 = toScreen(c.x1, c.y1), h2 = toScreen(c.x2, c.y2);
-    dl->AddLine(a, h1, theme::kTextFaint, 1.0f);
-    dl->AddLine(b, h2, theme::kTextFaint, 1.0f);
-    dl->AddBezierCubic(a, h1, h2, b, theme::kAccent, 2.5f);
-
-    // Handle dragging: the grabbed handle is remembered in window storage.
-    ImGuiStorage* st = ImGui::GetStateStorage();
-    const ImGuiID key = ImGui::GetID("##curvegrab");
-    int grab = st->GetInt(key, 0);
-    const ImVec2 m = ImGui::GetIO().MousePos;
-    auto dist = [&](ImVec2 p) { return std::hypot(p.x - m.x, p.y - m.y); };
-    if (ImGui::IsItemActivated()) grab = dist(h1) <= dist(h2) ? 1 : 2;
-    if (!ImGui::IsItemActive()) grab = 0;
-    st->SetInt(key, grab);
-    bool changed = false;
-    if (grab) {
-        const float x = std::clamp((m.x - p0.x) / size, 0.0f, 1.0f);
-        const float y = std::clamp((p0.y - m.y) / size, -0.5f, 1.5f);
-        (grab == 1 ? c.x1 : c.x2) = x;
-        (grab == 1 ? c.y1 : c.y2) = y;
-        changed = true;
-    }
-    for (int i = 1; i <= 2; ++i) {
-        const ImVec2 h = i == 1 ? h1 : h2;
-        const bool hot = grab == i || (grab == 0 && ImGui::IsItemHovered() && dist(h) < 9.0f);
-        dl->AddCircleFilled(h, hot ? 6.0f : 5.0f, hot ? theme::kText : theme::kAccent);
-    }
-    return changed;
+Rgba toRgba(Color c, float alpha = 1.0f) {
+    auto byte = [](float v) { return static_cast<int>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255)); };
+    return ui::rgba(byte(c.r), byte(c.g), byte(c.b), byte(c.a * alpha));
 }
 
 double snapDelta(double seconds, double fps) { return std::round(seconds * fps) / fps; }
 
 // Keyframe glyph: the shape hints at the easing of the outgoing segment.
-void drawKeyGlyph(ImDrawList* dl, ImVec2 c, float r, Easing easing, ImU32 fill, ImU32 outline) {
+void drawKeyGlyph(ui::Draw& d, Pt c, float r, Easing easing, Rgba fill, Rgba outline) {
     if (easing == Easing::Linear) {
-        ui::drawDiamond(dl, c, r, fill, outline);
+        ui::drawDiamond(d, c, r, fill, outline);
     } else if (easing == Easing::Hold) {
-        const ImVec2 a(c.x - r * 0.8f, c.y - r * 0.8f), b(c.x + r * 0.8f, c.y + r * 0.8f);
-        dl->AddRectFilled(a, b, fill, 1.5f);
-        dl->AddRect(a, b, outline, 1.5f, 0, 1.3f);
+        const Pt a(c.x - r * 0.8f, c.y - r * 0.8f), b(c.x + r * 0.8f, c.y + r * 0.8f);
+        d.rectFilled(a, b, fill, 1.5f);
+        d.rect(a, b, outline, 1.5f, 1.3f);
     } else {
-        dl->AddCircleFilled(c, r * 0.85f, fill);
-        dl->AddCircle(c, r * 0.85f, outline, 0, 1.3f);
+        d.circleFilled(c, r * 0.85f, fill);
+        d.circle(c, r * 0.85f, outline, 1.3f);
     }
 }
 
+std::vector<uint64_t> clipsOfTrack(const Composition& comp, uint64_t track) {
+    std::vector<uint64_t> ids;
+    for (const Layer& l : comp.layers)
+        if (l.track == track) ids.push_back(l.id);
+    return ids;
+}
+
+std::string rowKey(uint64_t layer, const PropertyRef& p) {
+    return std::to_string(layer) + "/" + std::to_string(p.effectIndex) + "/" + p.id;
+}
+
+// Cubic-bezier timing editor: drag the two handles.
+class CurveEditor : public QWidget {
+public:
+    CurveEditor(BezierEase curve, std::function<void(const BezierEase&)> changed)
+        : curve_(curve), changed_(std::move(changed)) {
+        setFixedSize(static_cast<int>(kSize + kPadX * 2), static_cast<int>(kSize + kPadY * 2));
+        setMouseTracking(true);
+    }
+    void setCurve(const BezierEase& c) {
+        curve_ = c;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        ui::Draw d(p);
+        d.rectFilled({0, 0}, {float(width()), float(height())}, theme::kBgDeep, 4.0f);
+        d.rect(at(0, 1), at(1, 0), theme::ink(30));
+        for (int i = 1; i < 4; ++i) {
+            const float g = i / 4.0f;
+            d.line(at(g, 0), at(g, 1), theme::ink(12));
+            d.line(at(0, g), at(1, g), theme::ink(12));
+        }
+        const Pt a = at(0, 0), b = at(1, 1), h1 = at(curve_.x1, curve_.y1), h2 = at(curve_.x2, curve_.y2);
+        d.line(a, h1, theme::kTextFaint);
+        d.line(b, h2, theme::kTextFaint);
+        d.bezier(a, h1, h2, b, theme::kAccent, 2.5f);
+        for (int i = 1; i <= 2; ++i) {
+            const Pt h = i == 1 ? h1 : h2;
+            const bool hot = grab_ == i || (grab_ == 0 && hover_ == i);
+            d.circleFilled(h, hot ? 6.0f : 5.0f, hot ? theme::kText : theme::kAccent);
+        }
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        grab_ = nearest(e->position());
+        mouseMoveEvent(e);
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if (!grab_) {
+            const int n = nearest(e->position());
+            const Pt h = n == 1 ? at(curve_.x1, curve_.y1) : at(curve_.x2, curve_.y2);
+            const int hv = std::hypot(h.x - e->position().x(), h.y - e->position().y()) < 9.0 ? n : 0;
+            if (hv != hover_) hover_ = hv, update();
+            return;
+        }
+        const float x = std::clamp(static_cast<float>(e->position().x() - kPadX) / kSize, 0.0f, 1.0f);
+        const float y = std::clamp(static_cast<float>(kPadY + kSize - e->position().y()) / kSize, -0.5f, 1.5f);
+        (grab_ == 1 ? curve_.x1 : curve_.x2) = x;
+        (grab_ == 1 ? curve_.y1 : curve_.y2) = y;
+        changed_(curve_);
+        update();
+    }
+    void mouseReleaseEvent(QMouseEvent*) override {
+        grab_ = 0;
+        update();
+    }
+
+private:
+    static constexpr float kSize = 180.0f, kPadX = 10.0f, kPadY = 34.0f; // vertical room for overshoot
+    Pt at(float x, float y) const { return {kPadX + x * kSize, kPadY + kSize - y * kSize}; }
+    int nearest(QPointF m) const {
+        const Pt h1 = at(curve_.x1, curve_.y1), h2 = at(curve_.x2, curve_.y2);
+        auto dist = [&](Pt p) { return std::hypot(p.x - m.x(), p.y - m.y()); };
+        return dist(h1) <= dist(h2) ? 1 : 2;
+    }
+    BezierEase curve_;
+    std::function<void(const BezierEase&)> changed_;
+    int grab_ = 0, hover_ = 0;
+};
+
 } // namespace
 
-void TimelinePanel::draw(EditorContext& ctx) {
-    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
-    ui::nextPanelWindowClass();
-    if (!ImGui::Begin(kWindowName, &open, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
-        ImGui::End();
-        return;
-    }
-    if (ui::panelIsMinimized()) { // only the tab shows
-        ui::panelMinimizeButton();
-        ImGui::End();
-        return;
-    }
-    snapLineTime_ = -1.0;
-    if (pendingTool_ >= 0) ui::runTool(ctx, ui::toolCatalog()[pendingTool_]); // clicked in the toolbar last frame
-    pendingTool_ = -1;
-    if (pendingCompound_ == 1) ctx.createCompound();
-    if (pendingCompound_ == 2) ctx.releaseSelectedCompounds();
-    pendingCompound_ = 0;
-    if (pendingDelete_) {
-        if (!ctx.selectedKeys.empty()) ctx.deleteSelectedKeys();
-        else ctx.deleteSelected();
-        pendingDelete_ = false;
-    }
-    Composition& comp = ctx.comp();
-    if (ctx.scope && !comp.findLayer(ctx.scope)) ctx.scope = 0; // closed by undo / delete
-    drawToolbar(ctx);
-    drawBreadcrumb(ctx);
+// --- body widgets ------------------------------------------------------------------------------
 
-    const ImVec2 area = ImGui::GetCursorScreenPos();
-    const ImVec2 avail = ImGui::GetContentRegionAvail();
-    leftWidth_ = std::clamp(leftWidth_, 220.0f, std::max(220.0f, avail.x * 0.5f));
-    trackX0_ = area.x + leftWidth_;
-    trackW_ = std::max(50.0f, avail.x - leftWidth_);
+class TimelineRuler : public QWidget {
+public:
+    explicit TimelineRuler(TimelinePanel* panel) : panel_(panel) {
+        setFixedHeight(static_cast<int>(kRulerHeight));
+        setMouseTracking(true);
+    }
 
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        panel_->paintRuler(p, width());
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        if (e->button() != Qt::LeftButton || e->position().x() < panel_->trackX0()) return;
+        EditorContext& ctx = panel_->ctx_;
+        panel_->collectTimeSnapTargets({}, false);
+        panel_->timeTargets_.erase(panel_->timeTargets_.begin() + 2); // the playhead itself (see collectTimeSnapTargets)
+        // Grabbing the playhead keeps the grab point: it moves with the mouse instead of
+        // jumping to it, and snapping tests where the playhead is, not the cursor.
+        const float mx = static_cast<float>(e->position().x());
+        panel_->playheadGrab_ = std::fabs(mx - panel_->timeToX(ctx.time)) <= 8.0f ? ctx.time - panel_->xToTime(mx) : 0.0;
+        panel_->drag_ = TimelinePanel::Drag::Playhead;
+        mouseMoveEvent(e);
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        setCursor(e->position().x() >= panel_->trackX0() ? Qt::SizeHorCursor : Qt::ArrowCursor);
+        if (panel_->drag_ != TimelinePanel::Drag::Playhead) return;
+        EditorContext& ctx = panel_->ctx_;
+        ctx.playing = false;
+        double t = panel_->xToTime(static_cast<float>(e->position().x())) + panel_->playheadGrab_;
+        // With the magnet on (or Shift held) the playhead snaps to clip edges and keyframes.
+        if ((ctx.snapping || shiftHeld()) && !ctrlHeld()) t = panel_->snappedDelta({0.0}, t, true);
+        ctx.setTime(t);
+        panel_->relayout();
+    }
+    void mouseReleaseEvent(QMouseEvent*) override {
+        panel_->drag_ = TimelinePanel::Drag::None;
+        panel_->snapLineTime_ = -1.0;
+        panel_->relayout();
+    }
+    void wheelEvent(QWheelEvent* e) override { panel_->wheel(e); }
+
+private:
+    TimelinePanel* panel_;
+};
+
+class TimelineRows : public QWidget {
+public:
+    explicit TimelineRows(TimelinePanel* panel) : panel_(panel) {
+        setMouseTracking(true);
+        setAcceptDrops(true);
+        setFocusPolicy(Qt::ClickFocus);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        panel_->paintRows(p, size());
+    }
+    void resizeEvent(QResizeEvent*) override { panel_->relayout(); }
+    void mousePressEvent(QMouseEvent* e) override { panel_->rowsPress(e); }
+    void mouseMoveEvent(QMouseEvent* e) override { panel_->rowsMove(e); }
+    void mouseReleaseEvent(QMouseEvent* e) override { panel_->rowsRelease(e); }
+    void mouseDoubleClickEvent(QMouseEvent* e) override { panel_->rowsDoubleClick(e); }
+    void wheelEvent(QWheelEvent* e) override { panel_->wheel(e); }
+    void leaveEvent(QEvent*) override {
+        panel_->hoverX_ = -1.0f;
+        update();
+    }
+    void dragEnterEvent(QDragEnterEvent* e) override {
+        if (e->mimeData()->hasFormat(ui::kObjectMime) || e->mimeData()->hasFormat(ui::kMediaMime)) e->acceptProposedAction();
+    }
+    void dragMoveEvent(QDragMoveEvent* e) override {
+        double t = 0;
+        int gap = 0;
+        if (!panel_->dropTimeAndGap(e->position(), t, gap)) return;
+        uint64_t mediaId = 0;
+        const MediaItem* item = ui::readMime(e->mimeData(), ui::kMediaMime, mediaId) ? panel_->ctx_.comp().findMedia(mediaId) : nullptr;
+        panel_->dropActive_ = true;
+        panel_->dropTime_ = t;
+        panel_->dropLength_ = item && item->kind != MediaKind::Image ? item->duration : kDefaultLayerLength;
+        e->acceptProposedAction();
+        update();
+    }
+    void dragLeaveEvent(QDragLeaveEvent*) override {
+        panel_->dropActive_ = false;
+        panel_->snapLineTime_ = -1.0;
+        update();
+    }
+    void dropEvent(QDropEvent* e) override {
+        EditorContext& ctx = panel_->ctx_;
+        double t = 0;
+        int gap = 0;
+        panel_->dropActive_ = false;
+        panel_->snapLineTime_ = -1.0;
+        if (!panel_->dropTimeAndGap(e->position(), t, gap)) return;
+        uint64_t mediaId = 0;
+        int kind = 0;
+        Layer* l = nullptr;
+        if (ui::readMime(e->mimeData(), ui::kMediaMime, mediaId)) l = ctx.addMedia(mediaId, std::nullopt, t);
+        else if (ui::readMime(e->mimeData(), ui::kObjectMime, kind)) l = ctx.addObject(kind, ctx.comp().center(), t);
+        if (l) {
+            ctx.comp().moveTracks({l->track}, gap);
+            ctx.touch();
+        }
+        e->acceptProposedAction();
+        panel_->relayout();
+    }
+
+private:
+    TimelinePanel* panel_;
+};
+
+// The user's tools (Settings::toolbar, filled from the Tools panel) on a pill of their own.
+// Drag a tool along the bar to reorder it, out of the bar to remove it.
+class ToolPill : public QWidget {
+public:
+    explicit ToolPill(TimelinePanel* panel) : panel_(panel) {
+        setMouseTracking(true);
+        setAcceptDrops(true);
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    }
+    QSize sizeHint() const override {
+        const int n = static_cast<int>(tools().size());
+        return {static_cast<int>(kPad * 2 + n * (kSize + kGap) + kSize * 0.8f + 8), static_cast<int>(kSize + 2)};
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        ui::Draw d(p);
+        d.rectFilled({0, 0}, {float(width()), float(height())}, theme::kBgDeep, 7.0f);
+        const auto ts = tools();
+        EditorContext& ctx = panel_->ctx_;
+        const auto& catalog = ui::toolCatalog();
+        for (int i = 0; i < static_cast<int>(ts.size()); ++i) {
+            const ui::ToolInfo& tool = catalog[ts[i]];
+            const QRectF r = buttonRect(i);
+            const bool enabled = ui::toolEnabled(ctx, tool), active = ui::toolActive(ctx, tool);
+            if (active) d.rectFilled(Pt(r.topLeft()), Pt(r.bottomRight()), theme::accent(50), 5.0f);
+            else if (hover_ == i && enabled) d.rectFilled(Pt(r.topLeft()), Pt(r.bottomRight()), theme::kBgHover, 5.0f);
+            ui::drawIcon(d, tool.icon, Pt(r.center()), kSize * 0.6f,
+                         !enabled ? theme::kTextFaint : active ? theme::kAccent : hover_ == i ? theme::kText : theme::kTextDim);
+        }
+        const QRectF plus = plusRect();
+        if (hover_ == -2) d.rectFilled(Pt(plus.topLeft()), Pt(plus.bottomRight()), theme::kBgHover, 5.0f);
+        ui::drawIcon(d, ui::Icon::Plus, Pt(plus.center()), kSize * 0.45f, hover_ == -2 ? theme::kText : theme::kTextFaint);
+        if (dropAt_ >= 0) {
+            const float x = dropAt_ < static_cast<int>(ts.size()) ? static_cast<float>(buttonRect(dropAt_).left()) - 1.0f
+                                                                  : static_cast<float>(plusRect().left()) - 1.0f;
+            d.line({x, 1}, {x, float(height()) - 1}, theme::kAccent, 2.0f);
+        }
+    }
+    bool event(QEvent* e) override {
+        if (e->type() == QEvent::ToolTip) {
+            auto* he = static_cast<QHelpEvent*>(e);
+            const int i = indexAt(he->pos());
+            const auto ts = tools();
+            if (i >= 0) QToolTip::showText(he->globalPos(), QString::fromStdString(ui::toolTooltip(ui::toolCatalog()[ts[i]])), this);
+            else if (i == -2) QToolTip::showText(he->globalPos(), "Add tools: drag them here from the Tools panel", this);
+            else QToolTip::hideText();
+            return true;
+        }
+        return QWidget::event(e);
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        pressed_ = indexAt(e->position());
+        pressPos_ = e->position();
+        if (e->button() == Qt::RightButton && pressed_ >= 0) {
+            const int at = pressed_;
+            QMenu menu;
+            menu.addAction("Remove from Toolbar", [this, at] { removeAt(at); });
+            menu.addAction("Customize...", [this] { emit panel_->toolsPanelRequested(); });
+            menu.exec(e->globalPosition().toPoint());
+            pressed_ = -1;
+        }
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if ((e->buttons() & Qt::LeftButton) && pressed_ >= 0 && (e->position() - pressPos_).manhattanLength() > 6) {
+            const int from = pressed_;
+            pressed_ = -1;
+            const int index = tools()[from];
+            auto* drag = new QDrag(this);
+            drag->setMimeData(ui::makeMime(ui::kToolMime, index));
+            drag->setPixmap(ui::makeIcon(ui::toolCatalog()[index].icon, theme::kAccent, 24).pixmap(24, 24));
+            // Dropped anywhere but a toolbar: it leaves the bar.
+            if (drag->exec(Qt::MoveAction | Qt::CopyAction) == Qt::IgnoreAction) {
+                const std::string id = ui::toolCatalog()[index].id;
+                auto& bar = settings().toolbar;
+                if (auto it = std::find(bar.begin(), bar.end(), id); it != bar.end()) {
+                    bar.erase(it);
+                    changed();
+                }
+            }
+            return;
+        }
+        const int h = indexAt(e->position());
+        if (h != hover_) hover_ = h, update();
+    }
+    void mouseReleaseEvent(QMouseEvent* e) override {
+        if (e->button() != Qt::LeftButton) return;
+        const int i = indexAt(e->position());
+        if (i == pressed_ && i >= 0) {
+            const ui::ToolInfo& tool = ui::toolCatalog()[tools()[i]];
+            if (ui::toolEnabled(panel_->ctx_, tool)) ui::runTool(panel_->ctx_, tool);
+            panel_->relayout();
+        } else if (i == -2 && pressed_ == -2) {
+            emit panel_->toolsPanelRequested();
+        }
+        pressed_ = -1;
+        update();
+    }
+    void leaveEvent(QEvent*) override {
+        hover_ = -1;
+        update();
+    }
+    void dragEnterEvent(QDragEnterEvent* e) override {
+        if (e->mimeData()->hasFormat(ui::kToolMime)) e->acceptProposedAction();
+    }
+    void dragMoveEvent(QDragMoveEvent* e) override {
+        const auto ts = tools();
+        int at = 0;
+        while (at < static_cast<int>(ts.size()) && e->position().x() > buttonRect(at).center().x()) ++at;
+        dropAt_ = at;
+        e->acceptProposedAction();
+        update();
+    }
+    void dragLeaveEvent(QDragLeaveEvent*) override {
+        dropAt_ = -1;
+        update();
+    }
+    void dropEvent(QDropEvent* e) override {
+        int index = -1;
+        int at = dropAt_;
+        dropAt_ = -1;
+        if (!ui::readMime(e->mimeData(), ui::kToolMime, index) || index < 0 || index >= static_cast<int>(ui::toolCatalog().size()))
+            return;
+        auto& bar = settings().toolbar;
+        const std::string id = ui::toolCatalog()[index].id;
+        // Already there (a move, or the same tool dropped again): take it out first.
+        if (auto it = std::find(bar.begin(), bar.end(), id); it != bar.end()) {
+            if (static_cast<int>(it - bar.begin()) < at) --at;
+            bar.erase(it);
+        }
+        bar.insert(bar.begin() + std::clamp(at, 0, static_cast<int>(bar.size())), id);
+        e->setDropAction(Qt::MoveAction);
+        e->accept();
+        changed();
+    }
+
+private:
+    static constexpr float kSize = 26.0f, kPad = 3.0f, kGap = 2.0f;
+    // Catalog indices of the bar's tools (unknown ids skipped).
+    static std::vector<int> tools() {
+        std::vector<int> out;
+        for (const std::string& id : settings().toolbar)
+            if (const int i = ui::toolIndex(id); i >= 0) out.push_back(i);
+        return out;
+    }
+    QRectF buttonRect(int i) const { return {kPad + i * (kSize + kGap), 1.0, kSize, kSize}; }
+    QRectF plusRect() const {
+        const float x = kPad + static_cast<float>(tools().size()) * (kSize + kGap) + 2.0f;
+        return {x, 1.0 + kSize * 0.1, kSize * 0.8, kSize * 0.8};
+    }
+    int indexAt(QPointF p) const {
+        const int n = static_cast<int>(tools().size());
+        for (int i = 0; i < n; ++i)
+            if (buttonRect(i).contains(p)) return i;
+        return plusRect().adjusted(-2, -3, 2, 3).contains(p) ? -2 : -1;
+    }
+    void removeAt(int i) {
+        auto& bar = settings().toolbar;
+        const auto ts = tools();
+        if (i < 0 || i >= static_cast<int>(ts.size())) return;
+        if (auto it = std::find(bar.begin(), bar.end(), std::string(ui::toolCatalog()[ts[i]].id)); it != bar.end()) bar.erase(it);
+        changed();
+    }
+    void changed() {
+        saveSettings();
+        emit ui::AppSignals::get().toolbarChanged();
+    }
+
+    TimelinePanel* panel_;
+    int hover_ = -1, pressed_ = -1, dropAt_ = -1;
+    QPointF pressPos_;
+};
+
+// --- panel -------------------------------------------------------------------------------------
+
+TimelinePanel::TimelinePanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), ctx_(ctx) {
+    auto* col = new QVBoxLayout(this);
+    col->setContentsMargins(6, 6, 6, 4);
+    col->setSpacing(4);
+    auto* bar = new QHBoxLayout;
+    bar->setSpacing(2);
+    buildToolbar(bar);
+    col->addLayout(bar);
+    breadcrumb_ = new QWidget;
+    breadcrumb_->hide();
+    col->addWidget(breadcrumb_);
+    ruler_ = new TimelineRuler(this);
+    col->addWidget(ruler_);
+    rows_ = new TimelineRows(this);
+    col->addWidget(rows_, 1);
+    connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] {
+        pill_->updateGeometry();
+        pill_->update();
+    });
+    connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, this, [this] { relayout(); });
+}
+
+void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
+    const int s = 26;
+    pill_ = new ToolPill(this);
+    bar->addWidget(pill_);
+    // Timeline functions, set apart from the tools by a divider.
+    bar->addSpacing(8);
+    auto* divider = new QFrame;
+    divider->setFrameShape(QFrame::VLine);
+    divider->setFixedHeight(s - 8);
+    divider->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kBorder).name()));
+    bar->addWidget(divider);
+    bar->addSpacing(8);
+    auto button = [&](ui::Icon icon, const QString& tip, std::function<void()> click) {
+        auto* b = new ui::IconButton(icon, tip, s);
+        connect(b, &QAbstractButton::clicked, this, [this, click] {
+            click();
+            sync();
+        });
+        bar->addWidget(b);
+        return b;
+    };
+    snap_ = button(ui::Icon::Magnet, "Snapping (S): clips, keyframes and objects snap. Hold Ctrl to bypass",
+                   [this] { ctx_.snapping = !ctx_.snapping; });
+    bar->addSpacing(12);
+    button(ui::Icon::ToStart, "Go to start (Home)", [this] {
+        ctx_.playing = false;
+        ctx_.setTime(0.0);
+    });
+    button(ui::Icon::StepBack, "Previous frame (Left)", [this] { ctx_.stepFrames(-1); });
+    play_ = button(ui::Icon::Play, "Play / Pause (Space)", [this] { ctx_.playing = !ctx_.playing; });
+    play_->setActive(true);
+    button(ui::Icon::StepForward, "Next frame (Right)", [this] { ctx_.stepFrames(1); });
+    button(ui::Icon::ToEnd, "Go to end (End)", [this] {
+        ctx_.playing = false;
+        ctx_.setTime(ctx_.comp().duration);
+    });
+    loop_ = button(ui::Icon::Loop, "Loop playback", [this] { ctx_.loop = !ctx_.loop; });
+
+    bar->addSpacing(14);
+    timecode_ = new QLabel;
+    QFont f = timecode_->font();
+    f.setPointSizeF(f.pointSizeF() * 1.15);
+    f.setWeight(QFont::DemiBold);
+    timecode_->setFont(f);
+    timecode_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kAccent).name()));
+    bar->addWidget(timecode_);
+    bar->addSpacing(6);
+    frameInfo_ = new QLabel;
+    frameInfo_->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    bar->addWidget(frameInfo_);
+
+    // Graph editor easing buttons (for the selected keyframes).
+    bar->addSpacing(16);
+    const std::pair<const char*, const char*> eases[] = {
+        {"Easy Ease", "Smooth in and out of the selected keyframes (F9)"},
+        {"Ease In", "Slow down into the selected keyframes (Shift+F9)"},
+        {"Ease Out", "Speed up out of the selected keyframes (Ctrl+Shift+F9)"},
+        {"Linear", "Constant speed"},
+        {"Hold", "Jump to the next keyframe's value"},
+    };
+    const Ease kinds[] = {Ease::EasyEase, Ease::EaseIn, Ease::EaseOut, Ease::Linear, Ease::Hold};
+    for (int i = 0; i < 5; ++i) {
+        auto* b = new QPushButton(eases[i].first);
+        b->setToolTip(eases[i].second);
+        const Ease e = kinds[i];
+        connect(b, &QPushButton::clicked, this, [this, e] {
+            applyEase(ctx_, e);
+            relayout();
+        });
+        b->hide();
+        bar->addWidget(b);
+        easeButtons_.push_back(b);
+    }
+    bar->addStretch(1);
+
+    // Right-aligned controls: icons only.
+    graph_ = button(ui::Icon::Graph, "Graph Editor: edit the curves of the selected layer's keyframes", [this] {
+        graphMode_ = !graphMode_;
+        graphDrag_ = {};
+        relayout();
+    });
+    animOnly_ = button(ui::Icon::Diamond, "Show only animated properties", [this] {
+        animatedOnly_ = !animatedOnly_;
+        relayout();
+    });
+    bar->addSpacing(8);
+    button(ui::Icon::ZoomOut, "Zoom out (Ctrl+Wheel)", [this] { zoomAround(trackX0() + trackW() * 0.5f, 1.0 / 1.5); });
+    button(ui::Icon::ZoomIn, "Zoom in (Ctrl+Wheel)", [this] { zoomAround(trackX0() + trackW() * 0.5f, 1.5); });
+    button(ui::Icon::Reset, "Fit the whole composition", [this] {
+        pxPerSec_ = 0.0;
+        relayout();
+    });
+}
+
+QWidget* TimelinePanel::rowsWidget() const { return rows_; }
+
+float TimelinePanel::trackW() const { return std::max(50.0f, static_cast<float>(rows_->width()) - leftWidth_); }
+
+void TimelinePanel::zoomAround(float x, double factor) {
+    const double t = xToTime(x);
+    pxPerSec_ *= factor;
+    clampView();
+    scroll_ = std::max(0.0, t - (x - trackX0()) / pxPerSec_);
+    relayout();
+}
+
+void TimelinePanel::clampView() {
+    const Composition& comp = ctx_.comp();
+    leftWidth_ = std::clamp(300.0f, 220.0f, std::max(220.0f, rows_->width() * 0.5f));
+    const double w = trackW();
     // Clips may run past the composition end: keep them reachable.
     double contentEnd = comp.duration;
     for (const Layer& l : comp.layers) contentEnd = std::max(contentEnd, l.outPoint);
-    const double minPx = trackW_ / (contentEnd * 4.0);
+    const double minPx = w / (std::max(contentEnd, 0.1) * 4.0);
     if (pxPerSec_ <= 0.0) {
-        pxPerSec_ = (trackW_ - 24.0) / std::max(comp.duration, 2.0 * kDefaultLayerLength); // room to grow
+        pxPerSec_ = (w - 24.0) / std::max(comp.duration, 2.0 * kDefaultLayerLength); // room to grow
         scroll_ = 0.0;
     }
     pxPerSec_ = std::clamp(pxPerSec_, std::min(minPx, 4000.0), 4000.0);
     // Some room past the end: the playhead can go there to add objects (the composition grows).
-    scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, contentEnd + kDefaultLayerLength - (trackW_ - 24.0) / pxPerSec_));
+    scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, contentEnd + kDefaultLayerLength - (w - 24.0) / pxPerSec_));
+}
 
-    drawRuler(ctx, area.x, area.y, avail.x);
-
-    // --- body ----------------------------------------------------------------
-    ImGuiIO& io = ImGui::GetIO();
-    ImGui::SetCursorScreenPos(ImVec2(area.x, area.y + kRulerHeight));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 0));
-    const ImGuiWindowFlags bodyFlags = ImGuiWindowFlags_NoScrollbar | (io.KeyCtrl ? ImGuiWindowFlags_NoScrollWithMouse : 0);
-    ImGui::BeginChild("##body", ImVec2(avail.x, std::max(1.0f, avail.y - kRulerHeight)), ImGuiChildFlags_None, bodyFlags);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 winPos = ImGui::GetWindowPos();
-    const ImVec2 winSize = ImGui::GetWindowSize();
-    const float x0 = winPos.x;
-
-    // Zoom (Ctrl+wheel) around the mouse, horizontal scroll (Shift+wheel).
-    if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && io.MouseWheel != 0.0f) {
-        if (io.KeyCtrl) {
-            const double mouseT = xToTime(io.MousePos.x);
-            pxPerSec_ = std::clamp(pxPerSec_ * std::pow(1.2, io.MouseWheel), std::min(minPx, 4000.0), 4000.0);
-            scroll_ = std::max(0.0, mouseT - (io.MousePos.x - trackX0_) / pxPerSec_);
-        } else if (io.KeyShift) {
-            scroll_ = std::max(0.0, scroll_ - io.MouseWheel * 60.0 / pxPerSec_);
-        }
-    }
-
-    rows_.clear();
-    clips_.clear();
-    auto& layers = comp.layers;
-    if (graphMode_) {
-        drawGraphEditor(ctx, x0, winPos.y, winSize.y);
+void TimelinePanel::wheel(QWheelEvent* e) {
+    const float steps = e->angleDelta().y() / 120.0f;
+    if (e->modifiers() & Qt::ControlModifier) {
+        zoomAround(static_cast<float>(e->position().x()), std::pow(1.2, steps));
+    } else if (e->modifiers() & Qt::ShiftModifier || e->angleDelta().x() != 0) {
+        const float s = e->angleDelta().x() != 0 ? e->angleDelta().x() / 120.0f : steps;
+        scroll_ = std::max(0.0, scroll_ - s * 60.0 / pxPerSec_);
+        relayout();
     } else {
+        scrollY_ -= steps * 40.0f;
+        relayout();
+    }
+    e->accept();
+}
+
+// --- layout -------------------------------------------------------------------------------------
+
+void TimelinePanel::computeItems() {
+    Composition& comp = ctx_.comp();
+    if (ctx_.scope && !comp.findLayer(ctx_.scope)) ctx_.scope = 0; // closed by undo / delete
+    clampView();
+    items_.clear();
+    clips_.clear();
+    if (graphMode_) return;
+    auto& layers = comp.layers;
     const auto trackRows = comp.trackRows();
+    float y = -scrollY_;
     for (int r = 0; r < static_cast<int>(trackRows.size()); ++r) {
         const TrackRow& row = trackRows[r];
         // A compound's contents live in its own timeline (double-click it to open).
         const uint64_t owner = comp.findLayer(layers[row.first].parent) ? layers[row.first].parent : 0; // orphans: top level
-        if (owner != ctx.scope) continue;
-        ImGui::PushID(static_cast<int>(row.track));
-        drawTrackRow(ctx, row, r, x0, avail.x);
-        if (expanded_.count(row.track)) {
-            // Property rows belong to the primary clip if it is on this track, else the first clip.
-            Layer* focus = &layers[row.first];
-            for (int i = row.first; i < row.first + row.count; ++i)
-                if (layers[i].id == ctx.primaryId()) focus = &layers[i];
-            ImGui::PushID(static_cast<int>(focus->id));
-            const char* group = nullptr;
-            bool groupOpen = true;
-            bool effectsHeader = false, effectsOpen = true; // effects nest under one "Effects" group, like After Effects
-            for (const PropertyRef& prop : focus->properties()) {
-                if (animatedOnly_ && !prop.anim->isAnimated()) continue;
-                if (prop.effectIndex >= 0 && !effectsHeader) {
-                    effectsHeader = true;
-                    effectsOpen = drawGroupRow(row.track, "Effects", x0, avail.x);
-                }
-                if (prop.effectIndex >= 0 && !effectsOpen) continue;
-                if (!group || std::strcmp(group, prop.group) != 0) {
-                    group = prop.group;
-                    groupOpen = drawGroupRow(row.track, group, x0, avail.x, prop.effectIndex >= 0 ? 16.0f : 0.0f);
-                }
-                if (groupOpen) drawPropertyRow(ctx, *focus, prop, x0, avail.x);
+        if (owner != ctx_.scope) continue;
+        // The clip that represents the track: the primary selection if it is here, otherwise the first clip.
+        Layer* focus = &layers[row.first];
+        for (int i = row.first; i < row.first + row.count; ++i)
+            if (layers[i].id == ctx_.primaryId()) focus = &layers[i];
+        Item track;
+        track.kind = Item::Track;
+        track.top = y;
+        track.h = layerRowHeight();
+        track.rowIndex = r;
+        track.track = row.track;
+        track.first = row.first;
+        track.count = row.count;
+        track.layer = focus->id;
+        items_.push_back(track);
+        y += track.h;
+        for (int i = row.first; i < row.first + row.count; ++i)
+            clips_.push_back({layers[i].id, track.top, track.top + track.h, timeToX(layers[i].inPoint), timeToX(layers[i].outPoint)});
+        if (!expanded_.count(row.track)) continue;
+
+        const char* group = nullptr;
+        bool groupOpen = true;
+        bool effectsHeader = false, effectsOpen = true; // effects nest under one "Effects" group, like After Effects
+        auto addGroup = [&](const std::string& label, float indent) {
+            Item g;
+            g.kind = Item::Group;
+            g.top = y;
+            g.h = groupRowHeight();
+            g.track = row.track;
+            g.groupLabel = label;
+            g.groupKey = std::to_string(row.track) + "/" + label;
+            g.indent = indent;
+            items_.push_back(g);
+            y += g.h;
+            return !collapsedGroups_.count(g.groupKey);
+        };
+        for (const PropertyRef& prop : focus->properties()) {
+            if (animatedOnly_ && !prop.anim->isAnimated()) continue;
+            if (prop.effectIndex >= 0 && !effectsHeader) {
+                effectsHeader = true;
+                effectsOpen = addGroup("Effects", 0.0f);
             }
-            ImGui::PopID();
+            if (prop.effectIndex >= 0 && !effectsOpen) continue;
+            if (!group || std::strcmp(group, prop.group) != 0) {
+                group = prop.group;
+                groupOpen = addGroup(group, prop.effectIndex >= 0 ? 16.0f : 0.0f);
+            }
+            if (!groupOpen) continue;
+            Item p;
+            p.kind = Item::Prop;
+            p.top = y;
+            p.h = propRowHeight();
+            p.track = row.track;
+            p.layer = focus->id;
+            p.prop = prop.id;
+            p.effectIndex = prop.effectIndex;
+            items_.push_back(p);
+            y += p.h;
         }
-        ImGui::PopID();
     }
-
-    // Empty space below the rows: click to deselect, drag to box-select.
-    const float y = ImGui::GetCursorScreenPos().y;
     rowsBottom_ = y;
-    const float rest = std::max(layerRowHeight(), winPos.y + winSize.y - y);
-    ImGui::SetCursorScreenPos(ImVec2(x0, y));
-    ImGui::InvisibleButton("##empty", ImVec2(avail.x, rest));
-    if (ImGui::IsItemActivated()) beginMarquee(ctx);
-
-    applyPendingDrop(ctx);
-    updateMarquee(ctx, dl);
-    handleObjectDrop(ctx, dl, x0, avail.x);
-    if (layers.empty()) {
-        const char* hint = "Add text or graphics from the Objects panel to start animating.";
-        const ImVec2 ts = ImGui::CalcTextSize(hint);
-        dl->AddText(ImVec2(winPos.x + (winSize.x - ts.x) * 0.5f, y + 24), theme::kTextFaint, hint);
+    contentHeight_ = y + scrollY_;
+    // Keep the rows on screen when the content shrinks.
+    const float maxScroll = std::max(0.0f, contentHeight_ + layerRowHeight() - static_cast<float>(rows_->height()));
+    if (scrollY_ > maxScroll || scrollY_ < 0.0f) {
+        scrollY_ = std::clamp(scrollY_, 0.0f, maxScroll);
+        computeItems();
     }
-
-    } // rows
-
-    // Column divider, area past the end of the composition, playhead.
-    const float bodyTop = winPos.y, bodyBottom = winPos.y + winSize.y;
-    dl->AddLine(ImVec2(trackX0_ - 1, bodyTop), ImVec2(trackX0_ - 1, bodyBottom), theme::kBorder);
-    dl->PushClipRect(ImVec2(trackX0_, bodyTop), ImVec2(trackX0_ + trackW_, bodyBottom), true);
-    const float endX = timeToX(comp.duration);
-    if (endX < trackX0_ + trackW_)
-        dl->AddRectFilled(ImVec2(endX, bodyTop), ImVec2(trackX0_ + trackW_, bodyBottom), theme::shade(80));
-    const float ph = timeToX(ctx.time);
-    dl->AddLine(ImVec2(ph, bodyTop), ImVec2(ph, bodyBottom), theme::kAccent, 1.5f);
-    if (snapLineTime_ >= 0.0) { // what the dragged item snapped to
-        const float sx = timeToX(snapLineTime_);
-        dl->AddLine(ImVec2(sx, bodyTop), ImVec2(sx, bodyBottom), theme::kSnap, 1.0f);
-    }
-
-    // Razor tool: show where the cut will happen.
-    const bool overTracks = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
-                            io.MousePos.x >= trackX0_ && io.MousePos.y < rowsBottom_;
-    if (ctx.tool == Tool::Razor && overTracks) {
-        const float cx = timeToX(comp.snapToFrame(xToTime(io.MousePos.x)));
-        for (float yy = bodyTop; yy < rowsBottom_; yy += 8.0f)
-            dl->AddLine(ImVec2(cx, yy), ImVec2(cx, std::min(yy + 4.0f, rowsBottom_)), theme::kDanger, 1.5f);
-        ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-    }
-    dl->PopClipRect();
-
-    if (restacking_ && drag_ != Drag::None)
-        drawDropIndicator(dl, dropTargetAt(ctx, io.MousePos.y, drag_), x0, avail.x);
-
-    ImGui::EndChild();
-    ImGui::PopStyleVar();
-
-    drawKeyContextMenu(ctx);
-    ui::panelMinimizeButton();
-    ImGui::End();
 }
 
-void TimelinePanel::drawWaveform(ImDrawList* dl, const Layer& layer, ImVec2 a, ImVec2 b, ImU32 color) const {
+void TimelinePanel::placeRowWidgets() {
+    std::set<std::string> used;
+    for (const Item& item : items_) {
+        if (item.kind != Item::Prop) continue;
+        auto ref = findProperty(ctx_, item.layer, item.prop, item.effectIndex);
+        if (!ref) continue;
+        const std::string key = rowKey(item.layer, *ref);
+        used.insert(key);
+        auto& row = rowWidgets_[key];
+        if (!row) row = std::make_unique<PropertyRow>(ctx_, item.layer, *ref, rows_);
+        QWidget* w = row->widget();
+        const int h = 24;
+        w->setGeometry(30, static_cast<int>(item.top + (item.h - h) * 0.5f), static_cast<int>(leftWidth_) - 30 - 8, h);
+        const bool onScreen = item.top + item.h > 0 && item.top < rows_->height();
+        if (w->isVisible() != onScreen) w->setVisible(onScreen);
+    }
+    for (auto it = rowWidgets_.begin(); it != rowWidgets_.end();) {
+        if (used.count(it->first)) {
+            ++it;
+            continue;
+        }
+        QWidget* w = it->second->widget();
+        // Never pull a widget away from under an edit in progress.
+        if (w->isAncestorOf(QApplication::focusWidget())) {
+            w->hide();
+            ++it;
+            continue;
+        }
+        it = rowWidgets_.erase(it);
+    }
+}
+
+void TimelinePanel::relayout() {
+    computeItems();
+    placeRowWidgets();
+    rows_->update();
+    ruler_->update();
+}
+
+void TimelinePanel::syncBreadcrumb() {
+    // Composition > Compound > ...: where this timeline is; click a level to go back up.
+    std::vector<const Layer*> path;
+    for (const Layer* l = ctx_.comp().findLayer(ctx_.scope); l && path.size() < 32; l = ctx_.comp().findLayer(l->parent))
+        path.insert(path.begin(), l);
+    std::string key;
+    for (const Layer* l : path) key += std::to_string(l->id) + l->name + "/";
+    if (key == breadcrumbKey_) return;
+    breadcrumbKey_ = key;
+    delete breadcrumb_->layout();
+    for (QWidget* w : breadcrumb_->findChildren<QWidget*>(Qt::FindDirectChildrenOnly)) delete w;
+    breadcrumb_->setVisible(!path.empty());
+    if (path.empty()) return;
+    auto* row = new QHBoxLayout(breadcrumb_);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(6);
+    auto* top = new QPushButton("Composition");
+    const uint64_t first = path.front()->id;
+    connect(top, &QPushButton::clicked, this, [this, first] {
+        ctx_.scope = 0;
+        ctx_.select(first);
+        relayout();
+    });
+    row->addWidget(top);
+    for (size_t i = 0; i < path.size(); ++i) {
+        auto* slash = new QLabel("/");
+        slash->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+        row->addWidget(slash);
+        const bool last = i + 1 == path.size();
+        auto* b = new QPushButton(QString::fromStdString(path[i]->name));
+        if (last) b->setProperty("accent", true);
+        else {
+            const uint64_t scope = path[i]->id, next = path[i + 1]->id;
+            connect(b, &QPushButton::clicked, this, [this, scope, next] {
+                ctx_.scope = scope;
+                ctx_.select(next);
+                relayout();
+            });
+        }
+        row->addWidget(b);
+    }
+    row->addSpacing(12);
+    auto* note = new QLabel("Editing inside a compound  ·  Esc (with nothing selected) goes back");
+    note->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    row->addWidget(note);
+    row->addStretch();
+}
+
+void TimelinePanel::sync() {
+    if (!isVisible()) return;
+    const Composition& comp = ctx_.comp();
+    timecode_->setText(QString::fromStdString(ui::formatTimecode(ctx_.time, comp.fps)));
+    frameInfo_->setText(QString("frame %1 / %2  ·  %3 fps").arg(comp.frameAt(ctx_.time)).arg(comp.frameCount() - 1).arg(comp.fps, 0, 'g', 4));
+    play_->setIcon(ctx_.playing ? ui::Icon::Pause : ui::Icon::Play);
+    snap_->setActive(ctx_.snapping);
+    loop_->setActive(ctx_.loop);
+    graph_->setActive(graphMode_);
+    animOnly_->setActive(animatedOnly_);
+    for (QPushButton* b : easeButtons_) {
+        b->setVisible(graphMode_);
+        b->setEnabled(!ctx_.selectedKeys.empty());
+    }
+    syncBreadcrumb();
+
+    // Repaint when anything the timeline shows changed (and now and then for audio waveforms
+    // finishing their decode).
+    std::string sig = std::to_string(ctx_.revision()) + ":" + std::to_string(ctx_.time) + ":" + std::to_string(ctx_.scope) + ":" +
+                      std::to_string(static_cast<int>(ctx_.tool)) + ":" + std::to_string(ctx_.selectedKeys.size()) + ":";
+    for (uint64_t id : ctx_.selection) sig += std::to_string(id) + ",";
+    for (const KeySelection& k : ctx_.selectedKeys) sig += std::to_string(k.keyUid) + ",";
+    if (sig != signature_ || ++idleSyncs_ > 30) {
+        signature_ = sig;
+        idleSyncs_ = 0;
+        relayout();
+        pill_->update();
+    }
+    for (auto& [key, row] : rowWidgets_)
+        if (row->widget()->isVisible()) row->refresh();
+}
+
+// --- painting -------------------------------------------------------------------------------
+
+void TimelinePanel::paintRuler(QPainter& p, int width) {
+    const Composition& comp = ctx_.comp();
+    ui::Draw d(p);
+    const float w = static_cast<float>(width), h = kRulerHeight;
+    d.rectFilled({0, 0}, {w, h}, theme::kBgDeep, 5.0f);
+    const QFont base = p.font();
+    QFont small = base;
+    small.setPointSizeF(base.pointSizeF() * 0.8);
+    small.setWeight(QFont::DemiBold);
+    p.setFont(small);
+    d.text({12, 6}, theme::kTextFaint, QString("LAYERS"));
+    QFont ticks = base;
+    ticks.setPointSizeF(base.pointSizeF() * 0.9);
+    p.setFont(ticks);
+
+    const float x0 = trackX0(), x1 = x0 + trackW();
+    d.pushClip({x0, 0}, {x1, h});
+    // Pick a tick spacing that keeps labels readable.
+    const double fd = comp.frameDuration();
+    const double candidates[] = {fd, fd * 2, fd * 5, fd * 10, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300};
+    double major = candidates[std::size(candidates) - 1];
+    for (double c : candidates)
+        if (c * pxPerSec_ >= 64.0) {
+            major = c;
+            break;
+        }
+    const double minor = major / 5.0 >= fd * 0.999 && (major / 5.0) * pxPerSec_ >= 6.0 ? major / 5.0 : 0.0;
+    const double tStart = std::floor(scroll_ / major) * major;
+    const double tEnd = xToTime(x1);
+    for (double t = tStart; t <= tEnd + major; t += major) {
+        const float x = timeToX(t);
+        d.line({x, h - 10}, {x, h}, theme::kTextFaint);
+        char label[32];
+        const double whole = std::round(t);
+        if (std::fabs(t - whole) < 1e-6) std::snprintf(label, sizeof(label), "%.0fs", whole);
+        else std::snprintf(label, sizeof(label), "%df", static_cast<int>(std::lround((t - std::floor(t)) * comp.fps)));
+        d.text({x + 4, 3}, theme::kTextDim, std::string(label));
+        if (minor > 0.0)
+            for (int i = 1; i < 5; ++i) {
+                const float mx = timeToX(t + minor * i);
+                d.line({mx, h - 5}, {mx, h}, theme::kBorder);
+            }
+    }
+    const float endX = timeToX(comp.duration);
+    d.rectFilled({endX, 0}, {x1, h}, theme::shade(90));
+    // Playhead handle.
+    const float ph = timeToX(ctx_.time);
+    const Pt head[5] = {{ph - 6, 3}, {ph + 6, 3}, {ph + 6, 14}, {ph, 20}, {ph - 6, 14}};
+    d.polyFilled(head, 5, theme::kAccent);
+    d.line({ph, 18}, {ph, h}, theme::kAccent, 1.5f);
+    d.popClip();
+}
+
+void TimelinePanel::paintRows(QPainter& p, QSize size) {
+    computeItems();
+    ui::Draw d(p);
+    const float width = static_cast<float>(size.width()), bottom = static_cast<float>(size.height());
+    if (graphMode_) {
+        paintGraph(p, size);
+    } else {
+        for (const Item& item : items_) {
+            if (item.top > bottom || item.top + item.h < 0) continue;
+            switch (item.kind) {
+            case Item::Track: paintTrack(p, item, width); break;
+            case Item::Group: paintGroup(p, item, width); break;
+            case Item::Prop: paintPropKeys(p, item, width); break;
+            }
+        }
+        if (ctx_.comp().layers.empty()) {
+            const QString hint = "Add text or graphics from the Objects panel to start animating.";
+            d.text({(width - d.textWidth(hint)) * 0.5f, rowsBottom_ + 24}, theme::kTextFaint, hint);
+        }
+    }
+
+    // Column divider, area past the end of the composition, playhead.
+    const float x0 = trackX0(), x1 = x0 + trackW();
+    d.line({x0 - 1, 0}, {x0 - 1, bottom}, theme::kBorder);
+    d.pushClip({x0, 0}, {x1, bottom});
+    const float endX = timeToX(ctx_.comp().duration);
+    if (endX < x1) d.rectFilled({endX, 0}, {x1, bottom}, theme::shade(80));
+    const float ph = timeToX(ctx_.time);
+    d.line({ph, 0}, {ph, bottom}, theme::kAccent, 1.5f);
+    if (snapLineTime_ >= 0.0) { // what the dragged item snapped to
+        const float sx = timeToX(snapLineTime_);
+        d.line({sx, 0}, {sx, bottom}, theme::kSnap, 1.0f);
+    }
+    // Razor tool: show where the cut will happen.
+    if (!graphMode_ && ctx_.tool == Tool::Razor && hoverX_ >= x0) {
+        const float cx = timeToX(ctx_.comp().snapToFrame(xToTime(hoverX_)));
+        for (float yy = 0; yy < rowsBottom_; yy += 8.0f) d.line({cx, yy}, {cx, std::min(yy + 4.0f, rowsBottom_)}, theme::kDanger, 1.5f);
+    }
+    d.popClip();
+
+    // Where a vertical clip / track drag lands.
+    if (restacking_ && (drag_ == Drag::LayerMove || drag_ == Drag::LayerName)) {
+        const DropTarget target = dropTargetAt(dragY_, drag_);
+        if (target.valid && !target.newTrack) { // joining an existing track: outline that row
+            for (const Item& r : items_) {
+                if (r.kind != Item::Track || r.track != target.track) continue;
+                const Rgba col = target.fits ? theme::kAccent : theme::kDanger;
+                d.rectFilled({x0, r.top + 1}, {width - 2, r.top + r.h - 1}, target.fits ? theme::accent(30) : theme::withAlpha(theme::kDanger, 30), 4.0f);
+                d.rect({x0, r.top + 1}, {width - 2, r.top + r.h - 1}, col, 4.0f, 2.0f);
+            }
+        } else if (target.valid) {
+            // The gap is in visible-track order (see dropGapAt).
+            float y = rowsBottom_;
+            int visible = 0;
+            for (const Item& r : items_)
+                if (r.kind == Item::Track) {
+                    if (visible == target.gap) {
+                        y = r.top;
+                        break;
+                    }
+                    ++visible;
+                }
+            d.line({4, y}, {width - 4, y}, theme::kAccent, 2.0f);
+            d.circleFilled({6, y}, 4.0f, theme::kAccent);
+        }
+    }
+    // Box selection.
+    if (marquee_) {
+        const QRectF r = QRectF(marqueeStart_, marqueeEnd_).normalized();
+        if (r.width() >= 3 || r.height() >= 3) {
+            d.rectFilled(Pt(r.topLeft()), Pt(r.bottomRight()), theme::accent(22));
+            d.rect(Pt(r.topLeft()), Pt(r.bottomRight()), theme::accent(160));
+        }
+    }
+    // An object or media item dragged in: a new row at the gap, starting at the drop time.
+    if (dropActive_) {
+        float gy = rowsBottom_;
+        int visible = 0;
+        for (const Item& r : items_)
+            if (r.kind == Item::Track) {
+                if (visible == dropGap_) {
+                    gy = r.top;
+                    break;
+                }
+                ++visible;
+            }
+        if (items_.empty()) gy = 4;
+        const float tx = timeToX(dropTime_);
+        d.line({0, gy}, {width, gy}, theme::kAccent, 2.0f);
+        d.rectFilled({tx, gy - 9}, {std::max(tx + 60, timeToX(dropTime_ + dropLength_)), gy + 9}, theme::accent(60), 4.0f);
+        d.line({tx, 0}, {tx, bottom}, theme::kAccent, 1.0f);
+        d.text({tx + 6, gy - 8}, theme::kText, ui::formatTimecode(dropTime_, ctx_.comp().fps));
+    }
+}
+
+void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
+    ui::Draw d(p);
+    auto& layers = ctx_.comp().layers;
+    if (item.first + item.count > static_cast<int>(layers.size())) return;
+    const float y = item.top, h = item.h;
+    const Layer* focus = ctx_.comp().findLayer(item.layer);
+    if (!focus) return;
+    bool anySelected = false;
+    for (int i = item.first; i < item.first + item.count; ++i) anySelected |= ctx_.isSelected(layers[i].id);
+    const bool hasPrimary = focus->id == ctx_.primaryId();
+    if (anySelected) {
+        d.rectFilled({0, y}, {width, y + h}, theme::accent(hasPrimary ? 34 : 24));
+        d.rectFilled({0, y + 2}, {3, y + h - 2}, theme::kAccent, 1.5f);
+    }
+    d.line({0, y + h - 1}, {width, y + h - 1}, theme::ink(10));
+
+    // --- left column: controls and name ---------------------------------------
+    const float cy = y + h * 0.5f;
+    ui::drawIcon(d, expanded_.count(item.track) ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, {kExpandX + kButton * 0.5f, cy},
+                 kButton * 0.6f, theme::kTextDim);
+    ui::drawIcon(d, focus->visible ? ui::Icon::Eye : ui::Icon::EyeOff, {kVisX + kButton * 0.5f, cy}, kButton * 0.65f,
+                 focus->visible ? theme::kTextDim : theme::kTextFaint);
+    ui::drawIcon(d, focus->locked ? ui::Icon::Lock : ui::Icon::Unlock, {kLockX + kButton * 0.5f, cy}, kButton * 0.65f,
+                 focus->locked ? theme::kAccent : theme::kTextFaint);
+    d.rectFilled({kChipX + 2, y + 8}, {kChipX + 5, y + h - 8}, toRgba(labelColor(focus->label)), 2.0f);
+    ui::drawIcon(d, ui::iconForLayer(*focus), {kChipX + 18, cy}, 14.0f, anySelected ? theme::kAccent : theme::kTextDim);
+    const float nameW = std::max(10.0f, leftWidth_ - kNameX - 8);
+    if (renaming_ != focus->id) {
+        const Rgba col = focus->visible ? (anySelected ? theme::kText : theme::kTextDim) : theme::kTextFaint;
+        d.pushClip({kNameX, y}, {kNameX + nameW, y + h});
+        const float textY = y + (h - d.textHeight()) * 0.5f;
+        d.text({kNameX, textY}, col, focus->name);
+        if (item.count > 1) { // e.g. a track that was cut into pieces
+            const QString badge = QString("%1 clips").arg(item.count);
+            d.text({kNameX + nameW - d.textWidth(badge), textY}, theme::kTextFaint, badge);
+        }
+        d.popClip();
+    }
+
+    // --- track: clip bars ------------------------------------------------------
+    const float x0 = trackX0(), x1 = x0 + trackW();
+    d.pushClip({x0, y}, {x1, y + h});
+    const bool expanded = expanded_.count(item.track) > 0;
+    for (int i = item.first; i < item.first + item.count; ++i) {
+        Layer& layer = layers[i];
+        const bool selected = ctx_.isSelected(layer.id);
+        const bool primary = ctx_.primaryId() == layer.id;
+        const float bx1 = timeToX(layer.inPoint), bx2 = timeToX(layer.outPoint);
+        const Color lc = labelColor(layer.label);
+        const Pt a(bx1 + 1, y + 4), b(bx2 - 1, y + h - 4); // 1px gap shows cut points
+        d.rectFilled(a, b, toRgba(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
+        if (selected) d.rect(a, b, primary ? theme::kText : theme::ink(170), 5.0f, primary ? 1.8f : 1.3f);
+        if (layer.type == LayerType::Media && layer.media.hasAudio) paintWaveform(p, layer, a, b, toRgba(lc, 0.75f));
+        d.rectFilled({bx1 + 3, y + 9}, {bx1 + 5, y + h - 9}, toRgba(lc, 0.8f), 1.0f);
+        d.rectFilled({bx2 - 5, y + 9}, {bx2 - 3, y + h - 9}, toRgba(lc, 0.8f), 1.0f);
+        d.pushClip({std::max(bx1, x0), y}, {std::min(bx2, x1), y + h});
+        d.text({std::max(bx1, x0) + 10, y + (h - d.textHeight()) * 0.5f}, theme::ink(150), layer.name);
+        d.popClip();
+        // Summary of the clip's keyframes (within the clip only, e.g. after a cut).
+        if (!expanded)
+            for (const PropertyRef& pr : layer.properties())
+                for (int k = 0; k < pr.anim->keyCount(); ++k) {
+                    const double kt = pr.anim->keyTime(k);
+                    if (kt < layer.inPoint - kTimeEpsilon || kt > layer.outPoint + kTimeEpsilon) continue;
+                    ui::drawDiamond(d, {timeToX(kt), y + h - 7}, 3.0f, theme::ink(200), 0);
+                }
+    }
+    d.popClip();
+}
+
+void TimelinePanel::paintGroup(QPainter& p, const Item& item, float width) {
+    ui::Draw d(p);
+    const float y = item.top, h = item.h, x0 = item.indent;
+    d.rectFilled({0, y}, {width, y + h}, theme::shade(60));
+    const bool open = !collapsedGroups_.count(item.groupKey);
+    ui::drawIcon(d, open ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, {x0 + 36, y + h * 0.5f}, 12.0f, theme::kTextDim);
+    p.save();
+    QFont f = p.font();
+    f.setPointSizeF(f.pointSizeF() * 0.85);
+    f.setWeight(QFont::DemiBold);
+    p.setFont(f);
+    d.text({x0 + 48, y + (h - d.textHeight()) * 0.5f}, theme::kTextDim, item.groupLabel);
+    p.restore();
+}
+
+void TimelinePanel::paintPropKeys(QPainter& p, const Item& item, float width) {
+    ui::Draw d(p);
+    Layer* layer = ctx_.comp().findLayer(item.layer);
+    auto ref = findProperty(ctx_, item.layer, item.prop, item.effectIndex);
+    if (!layer || !ref) return;
+    const AnimatedBase& anim = *ref->anim;
+    const float y = item.top, h = item.h;
+    // Selection tint: light for rows of the selected layer, stronger where keys are selected.
+    const bool hasSelectedKey = std::any_of(ctx_.selectedKeys.begin(), ctx_.selectedKeys.end(), [&](const KeySelection& k) {
+        return k.layerId == layer->id && k.propertyId == item.prop;
+    });
+    const Rgba rowBg = hasSelectedKey ? theme::accent(40) : ctx_.isSelected(layer->id) ? theme::accent(14) : theme::shade(40);
+    d.rectFilled({0, y}, {width, y + h}, rowBg);
+    if (hasSelectedKey) d.rectFilled({0, y + 2}, {3, y + h - 2}, theme::kAccent, 1.5f);
+
+    const float x0 = trackX0(), x1 = x0 + trackW(), cy = y + h * 0.5f;
+    d.pushClip({x0, y}, {x1, y + h});
+    // Shade time where the clip does not exist: keyframes can't go there.
+    d.rectFilled({x0, y}, {timeToX(layer->inPoint), y + h}, theme::shade(70));
+    d.rectFilled({timeToX(layer->outPoint), y}, {x1, y + h}, theme::shade(70));
+    for (int k = 0; k + 1 < anim.keyCount(); ++k) {
+        const float xa = timeToX(anim.keyTime(k)), xb = timeToX(anim.keyTime(k + 1));
+        d.line({xa, cy}, {xb, cy}, anim.keyEasing(k) == Easing::Hold ? theme::ink(25) : theme::accent(70), 1.5f);
+    }
+    for (int k = 0; k < anim.keyCount(); ++k) {
+        const bool sel = ctx_.isKeySelected({layer->id, item.prop, anim.keyUid(k)});
+        const float kx = timeToX(anim.keyTime(k));
+        const bool hot = hoverX_ >= 0 && std::fabs(hoverX_ - kx) <= keyRadius() + 2 && rows_->underMouse() &&
+                         rows_->mapFromGlobal(QCursor::pos()).y() >= y && rows_->mapFromGlobal(QCursor::pos()).y() < y + h;
+        const Rgba fill = sel ? theme::kAccent : (hot ? theme::kText : theme::kTextDim);
+        drawKeyGlyph(d, {kx, cy}, keyRadius() + (sel ? 1.0f : 0.0f), anim.keyEasing(k), fill, sel ? theme::kAccentHover : theme::kBgDeep);
+    }
+    d.popClip();
+}
+
+void TimelinePanel::paintWaveform(QPainter& p, const Layer& layer, QPointF a, QPointF b, uint32_t color) const {
     const media::AudioData data = media::MediaManager::get().audio(layer.media.mediaId);
     if (!data || data->empty()) return;
     const std::vector<float>& s = *data;
     const size_t frames = s.size() / 2;
-    const float x1 = std::max(a.x + 6, trackX0_), x2 = std::min(b.x - 6, trackX0_ + trackW_);
-    const float mid = (a.y + b.y) * 0.5f, half = (b.y - a.y) * 0.42f;
+    const float x1 = std::max(static_cast<float>(a.x()) + 6, trackX0()), x2 = std::min(static_cast<float>(b.x()) - 6, trackX0() + trackW());
+    const float mid = static_cast<float>(a.y() + b.y()) * 0.5f, half = static_cast<float>(b.y() - a.y()) * 0.42f;
     constexpr float kStep = 2.0f;
+    QPainterPath path;
     for (float x = x1; x < x2; x += kStep) {
         // Peak of the source samples under this column (sparsely sampled: enough for a sketch).
         const double t0 = layer.media.sourceTime(xToTime(x)), t1 = layer.media.sourceTime(xToTime(x + kStep));
@@ -286,717 +1109,394 @@ void TimelinePanel::drawWaveform(ImDrawList* dl, const Layer& layer, ImVec2 a, I
         for (size_t i = i0; i < i1; i += stride) peak = std::max({peak, std::fabs(s[i * 2]), std::fabs(s[i * 2 + 1])});
         const float gain = std::clamp(layer.media.volume.valueAt(xToTime(x)) * 0.01f, 0.0f, 2.0f);
         const float hh = std::max(0.5f, std::sqrt(std::min(1.0f, peak * gain)) * half); // sqrt: quiet audio stays visible
-        dl->AddRectFilled(ImVec2(x, mid - hh), ImVec2(x + kStep - 0.6f, mid + hh), color);
+        path.addRect(QRectF(x, mid - hh, kStep - 0.6f, hh * 2));
     }
+    p.fillPath(path, ui::qcolor(color));
 }
 
-void TimelinePanel::handleObjectDrop(EditorContext& ctx, ImDrawList* dl, float x0, float width) {
-    // Objects dragged from the Objects panel drop at a time (x) and between rows (y).
-    const ImVec2 winPos = ImGui::GetWindowPos(), winSize = ImGui::GetWindowSize();
-    const ImRect area(ImVec2(x0, winPos.y), ImVec2(x0 + width, winPos.y + winSize.y));
-    if (!ImGui::BeginDragDropTargetCustom(area, ImGui::GetID("##objectDrop"))) return;
-    constexpr ImGuiDragDropFlags flags = ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
-    const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(kObjectPayload, flags);
-    uint64_t mediaId = 0;
-    if (!payload && (payload = ImGui::AcceptDragDropPayload(kMediaPayload, flags))) mediaId = *static_cast<const uint64_t*>(payload->Data);
-    if (payload) {
-        const ImVec2 m = ImGui::GetIO().MousePos;
-        double t = std::max(0.0, xToTime(std::max(m.x, trackX0_)));
-        if (ctx.snapping && !ImGui::GetIO().KeyCtrl) { // snaps to clips, keys and the playhead like everything else
-            collectTimeSnapTargets(ctx, {}, false);
-            t = snappedDelta(ctx, {0.0}, t);
-        } else {
-            t = ctx.comp().snapToFrame(t);
-        }
-        const int gap = dropGapAt(m.y);
-        float gy = rows_.empty() ? winPos.y + 4 : rows_.back().bottom;
-        for (const RowRect& r : rows_)
-            if (r.index == gap) {
-                gy = r.top;
-                break;
-            }
-        // Where it lands: a new row at the gap, starting at t.
-        const float tx = timeToX(t);
-        dl->AddLine(ImVec2(x0, gy), ImVec2(x0 + width, gy), theme::kAccent, 2.0f);
-        const MediaItem* item = mediaId ? ctx.comp().findMedia(mediaId) : nullptr;
-        const double end = t + (item && item->kind != MediaKind::Image ? item->duration : kDefaultLayerLength);
-        dl->AddRectFilled(ImVec2(tx, gy - 9), ImVec2(std::max(tx + 60, timeToX(end)), gy + 9), theme::accent(60), 4.0f);
-        dl->AddLine(ImVec2(tx, winPos.y), ImVec2(tx, winPos.y + winSize.y), theme::kAccent, 1.0f);
-        char label[48];
-        std::snprintf(label, sizeof label, "  %s", ui::formatTimecode(t, ctx.comp().fps).c_str());
-        dl->AddText(ImVec2(tx + 2, gy - 8), theme::kText, label);
-        if (payload->IsDelivery()) {
-            Layer* l = mediaId ? ctx.addMedia(mediaId, std::nullopt, t)
-                               : ctx.addObject(*static_cast<const int*>(payload->Data), ctx.comp().center(), t);
-            if (l) {
-                ctx.comp().moveTracks({l->track}, gap);
-                ctx.touch();
-            }
-        }
-    }
-    ImGui::EndDragDropTarget();
+// --- input ------------------------------------------------------------------------------------
+
+const TimelinePanel::Item* TimelinePanel::itemAt(float y) const {
+    for (const Item& item : items_)
+        if (y >= item.top && y < item.top + item.h) return &item;
+    return nullptr;
 }
 
-void TimelinePanel::drawBreadcrumb(EditorContext& ctx) {
-    if (!ctx.scope) return;
-    // Composition > Compound > ...: where this timeline is; click a level to go back up.
-    std::vector<const Layer*> path;
-    for (const Layer* l = ctx.comp().findLayer(ctx.scope); l && path.size() < 32; l = ctx.comp().findLayer(l->parent))
-        path.insert(path.begin(), l);
-    ImGui::PushStyleColor(ImGuiCol_Button, theme::kBgRaised);
-    if (ImGui::SmallButton("Composition")) {
-        ctx.scope = 0;
-        ctx.select(path.empty() ? 0 : path.front()->id);
-    }
-    for (size_t i = 0; i < path.size(); ++i) {
-        ImGui::SameLine(0, 6);
-        ImGui::TextColored(theme::vec(theme::kTextFaint), "/");
-        ImGui::SameLine(0, 6);
-        ImGui::PushID(static_cast<int>(i));
-        const bool last = i + 1 == path.size();
-        if (last) ImGui::PushStyleColor(ImGuiCol_Button, theme::kAccentSoft);
-        if (ImGui::SmallButton(path[i]->name.c_str()) && !last) {
-            ctx.scope = path[i]->id;
-            ctx.select(path[i + 1]->id);
-        }
-        if (last) ImGui::PopStyleColor();
-        ImGui::PopID();
-    }
-    ImGui::PopStyleColor();
-    ImGui::SameLine(0, 12);
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "Editing inside a compound  ·  Esc (with nothing selected) goes back");
-}
-
-void TimelinePanel::drawToolbar(EditorContext& ctx) {
-    Composition& comp = ctx.comp();
-    const float s = 26.0f;
-    const float toolbarRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-    drawToolGroup(ctx, s);
-
-    // Timeline functions, set apart from the tools by a divider.
-    ImGui::SameLine(0, 10);
-    {
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x, p.y + 4), ImVec2(p.x, p.y + s - 4), theme::kBorder, 1.0f);
-        ImGui::Dummy(ImVec2(1, s));
-    }
-    ImGui::SameLine(0, 10);
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
-    if (ui::iconButton("##snap", ui::Icon::Magnet, s, "Snapping (S): clips, keyframes and objects snap. Hold Ctrl to bypass", ctx.snapping))
-        ctx.snapping = !ctx.snapping;
-    ImGui::SameLine(0, 14);
-    if (ui::iconButton("##start", ui::Icon::ToStart, s, "Go to start (Home)")) {
-        ctx.playing = false;
-        ctx.setTime(0.0);
-    }
-    ImGui::SameLine();
-    if (ui::iconButton("##prev", ui::Icon::StepBack, s, "Previous frame (Left)")) ctx.stepFrames(-1);
-    ImGui::SameLine();
-    if (ui::iconButton("##play", ctx.playing ? ui::Icon::Pause : ui::Icon::Play, s, "Play / Pause (Space)", true))
-        ctx.playing = !ctx.playing;
-    ImGui::SameLine();
-    if (ui::iconButton("##next", ui::Icon::StepForward, s, "Next frame (Right)")) ctx.stepFrames(1);
-    ImGui::SameLine();
-    if (ui::iconButton("##end", ui::Icon::ToEnd, s, "Go to end (End)")) {
-        ctx.playing = false;
-        ctx.setTime(comp.duration);
-    }
-    ImGui::SameLine();
-    if (ui::iconButton("##loop", ui::Icon::Loop, s, "Loop playback", ctx.loop)) ctx.loop = !ctx.loop;
-    ImGui::PopStyleVar();
-
-    ImGui::SameLine(0, 16);
-    ImGui::PushFont(Fonts::uiBold(), Fonts::kUiSize * 1.15f);
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 2);
-    ImGui::TextColored(theme::vec(theme::kAccent), "%s", ui::formatTimecode(ctx.time, comp.fps).c_str());
-    ImGui::PopFont();
-    ImGui::SameLine();
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 3);
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "frame %d / %d  ·  %.4g fps", comp.frameAt(ctx.time),
-                       comp.frameCount() - 1, comp.fps);
-
-    // Graph editor easing buttons (for the selected keyframes).
-    if (graphMode_) {
-        ImGui::SameLine(0, 20);
-        const bool any = !ctx.selectedKeys.empty();
-        ImGui::BeginDisabled(!any);
-        if (ImGui::SmallButton("Easy Ease")) applyEase(ctx, Ease::EasyEase);
-        ui::tooltip("Smooth in and out of the selected keyframes (F9)");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Ease In")) applyEase(ctx, Ease::EaseIn);
-        ui::tooltip("Slow down into the selected keyframes (Shift+F9)");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Ease Out")) applyEase(ctx, Ease::EaseOut);
-        ui::tooltip("Speed up out of the selected keyframes (Ctrl+Shift+F9)");
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Linear")) applyEase(ctx, Ease::Linear);
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Hold")) applyEase(ctx, Ease::Hold);
-        ImGui::EndDisabled();
-    }
-
-    // Right-aligned controls: icons only.
-    const float rightW = s * 5 + 2 * 4 + 12;
-    ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 10, toolbarRight - rightW));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
-    if (ui::iconButton("##graph", ui::Icon::Graph, s, "Graph Editor: edit the curves of the selected layer's keyframes",
-                       graphMode_))
-        graphMode_ = !graphMode_;
-    ImGui::SameLine();
-    if (ui::iconButton("##animOnly", ui::Icon::Diamond, s, "Show only animated properties", animatedOnly_))
-        animatedOnly_ = !animatedOnly_;
-    ImGui::SameLine(0, 10);
-    if (ui::iconButton("##zoomOut", ui::Icon::ZoomOut, s, "Zoom out (Ctrl+Wheel)")) pxPerSec_ /= 1.5;
-    ImGui::SameLine();
-    if (ui::iconButton("##zoomIn", ui::Icon::ZoomIn, s, "Zoom in (Ctrl+Wheel)")) pxPerSec_ *= 1.5;
-    ImGui::SameLine();
-    if (ui::iconButton("##fit", ui::Icon::Reset, s, "Fit the whole composition")) pxPerSec_ = 0.0;
-    ImGui::PopStyleVar();
-}
-
-void TimelinePanel::drawToolGroup(EditorContext& ctx, float s) {
-    // The user's tools (Settings::toolbar, filled from the Tools panel) on a pill of their own.
-    auto& bar = settings().toolbar;
-    const auto& catalog = ui::toolCatalog();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float pad = 3.0f;
-    const ImVec2 start = ImGui::GetCursorScreenPos();
-    dl->ChannelsSplit(2);
-    dl->ChannelsSetCurrent(1);
-    ImGui::SetCursorScreenPos(ImVec2(start.x + pad, start.y));
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(2, 4));
-    std::vector<float> centers; // screen x of each button, for drop positions
-    int removeAt = -1;
-    for (int i = 0; i < static_cast<int>(bar.size()); ++i) {
-        const int index = ui::toolIndex(bar[i]);
-        if (index < 0) continue;
-        const ui::ToolInfo& tool = catalog[index];
-        if (i > 0) ImGui::SameLine();
-        ImGui::PushID(i);
-        centers.push_back(ImGui::GetCursorScreenPos().x + s * 0.5f);
-        const bool enabled = ui::toolEnabled(ctx, tool);
-        ImGui::BeginDisabled(!enabled);
-        if (ui::iconButton("##tool", tool.icon, s, nullptr, ui::toolActive(ctx, tool))) pendingTool_ = index;
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort))
-            ImGui::SetTooltip("%s", ui::toolTooltip(tool).c_str());
-        if (ImGui::BeginPopupContextItem("##toolctx")) {
-            if (ImGui::MenuItem("Remove from Toolbar")) removeAt = i;
-            if (ImGui::MenuItem("Customize...")) wantToolsPanel = true;
-            ImGui::EndPopup();
-        }
-        // Drag along the bar to reorder, out of it to remove.
-        if (ImGui::BeginDragDropSource()) {
-            ImGui::SetDragDropPayload(ui::kToolPayload, &index, sizeof(index));
-            draggingTool_ = i;
-            ImGui::TextUnformatted(tool.label);
-            ImGui::EndDragDropSource();
-        }
-        ImGui::PopID();
-    }
-    // Opens the Tools panel, where more tools wait.
-    if (!bar.empty()) ImGui::SameLine();
-    if (ui::iconButton("##moreTools", ui::Icon::Plus, s * 0.8f, "Add tools: drag them here from the Tools panel"))
-        wantToolsPanel = true;
-    ImGui::PopStyleVar();
-    ImGui::SameLine(0, 0);
-    const ImVec2 end(ImGui::GetCursorScreenPos().x + pad, start.y + s);
-    ImGui::Dummy(ImVec2(pad, s));
-    dl->ChannelsSetCurrent(0);
-    const ImRect pill(ImVec2(start.x, start.y - 1), ImVec2(end.x, end.y + 1));
-    dl->AddRectFilled(pill.Min, pill.Max, theme::kBgDeep, 7.0f);
-    dl->ChannelsMerge();
-
-    // Dropping tools (from the Tools panel or the bar itself).
-    const ImRect target(ImVec2(pill.Min.x - 6, pill.Min.y - 4), ImVec2(pill.Max.x + 24, pill.Max.y + 4));
-    bool overBar = ImGui::IsMouseHoveringRect(target.Min, target.Max, false);
-    if (ImGui::BeginDragDropTargetCustom(target, ImGui::GetID("##toolDrop"))) {
-        constexpr ImGuiDragDropFlags flags = ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
-        if (const ImGuiPayload* payload = ImGui::AcceptDragDropPayload(ui::kToolPayload, flags)) {
-            const float mx = ImGui::GetIO().MousePos.x;
-            int at = 0;
-            while (at < static_cast<int>(centers.size()) && mx > centers[at]) ++at;
-            const float x = at < static_cast<int>(centers.size()) ? centers[at] - s * 0.5f - 1.0f
-                                                                   : (centers.empty() ? pill.Min.x + pad : centers.back() + s * 0.5f + 1.0f);
-            dl->AddLine(ImVec2(x, pill.Min.y - 2), ImVec2(x, pill.Max.y + 2), theme::kAccent, 2.0f);
-            if (payload->IsDelivery()) {
-                const std::string id = catalog[*static_cast<const int*>(payload->Data)].id;
-                // Already there (a move, or the same tool dropped again): take it out first.
-                if (auto it = std::find(bar.begin(), bar.end(), id); it != bar.end()) {
-                    if (static_cast<int>(it - bar.begin()) < at) --at;
-                    bar.erase(it);
-                }
-                bar.insert(bar.begin() + std::clamp(at, 0, static_cast<int>(bar.size())), id);
-                saveSettings();
-                draggingTool_ = -1;
-            }
-        }
-        ImGui::EndDragDropTarget();
-    }
-    // A toolbar button dropped anywhere else leaves the bar.
-    if (draggingTool_ >= 0 && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
-        if (!overBar && draggingTool_ < static_cast<int>(bar.size())) removeAt = draggingTool_;
-        draggingTool_ = -1;
-    }
-    if (removeAt >= 0 && removeAt < static_cast<int>(bar.size())) {
-        bar.erase(bar.begin() + removeAt);
-        saveSettings();
-    }
-}
-
-void TimelinePanel::drawRuler(EditorContext& ctx, float x0, float y0, float width) {
-    const Composition& comp = ctx.comp();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x0 + width, y0 + kRulerHeight), theme::kBgDeep, 5.0f);
-    ImGui::PushFont(Fonts::uiBold(), Fonts::kUiSize * 0.8f);
-    dl->AddText(ImVec2(x0 + 12, y0 + 6), theme::kTextFaint, "LAYERS");
-    ImGui::PopFont();
-
-    // Scrub area.
-    ImGui::SetCursorScreenPos(ImVec2(trackX0_, y0));
-    ImGui::InvisibleButton("##ruler", ImVec2(trackW_, kRulerHeight));
-    if (ImGui::IsItemActivated()) {
-        collectTimeSnapTargets(ctx, {}, false);
-        timeTargets_.erase(timeTargets_.begin() + 2); // the playhead itself (see collectTimeSnapTargets)
-        // Grabbing the playhead keeps the grab point: it moves with the mouse instead of
-        // jumping to it, and snapping tests where the playhead is, not the cursor.
-        const float mx = ImGui::GetIO().MousePos.x;
-        playheadGrab_ = std::fabs(mx - timeToX(ctx.time)) <= 8.0f ? ctx.time - xToTime(mx) : 0.0;
-    }
-    if (ImGui::IsItemActive()) {
-        ctx.playing = false;
-        const ImGuiIO& io = ImGui::GetIO();
-        double t = xToTime(io.MousePos.x) + playheadGrab_;
-        // With the magnet on (or Shift held) the playhead snaps to clip edges and keyframes.
-        // The targets were collected once on press, so the playhead never snaps to itself.
-        if ((ctx.snapping || io.KeyShift) && !io.KeyCtrl) {
-            const bool was = ctx.snapping;
-            ctx.snapping = true;
-            t = snappedDelta(ctx, {0.0}, t);
-            ctx.snapping = was;
-        }
-        ctx.setTime(t);
-    }
-    if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-
-    dl->PushClipRect(ImVec2(trackX0_, y0), ImVec2(trackX0_ + trackW_, y0 + kRulerHeight), true);
-
-    // Pick a tick spacing that keeps labels readable.
-    const double fd = comp.frameDuration();
-    const double candidates[] = {fd, fd * 2, fd * 5, fd * 10, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300};
-    double major = candidates[std::size(candidates) - 1];
-    for (double c : candidates)
-        if (c * pxPerSec_ >= 64.0) {
-            major = c;
-            break;
-        }
-    const double minor = major / 5.0 >= fd * 0.999 && (major / 5.0) * pxPerSec_ >= 6.0 ? major / 5.0 : 0.0;
-
-    const double tStart = std::floor(scroll_ / major) * major;
-    const double tEnd = xToTime(trackX0_ + trackW_);
-    for (double t = tStart; t <= tEnd + major; t += major) {
-        const float x = timeToX(t);
-        dl->AddLine(ImVec2(x, y0 + kRulerHeight - 10), ImVec2(x, y0 + kRulerHeight), theme::kTextFaint);
-        char label[32];
-        const double whole = std::round(t);
-        if (std::fabs(t - whole) < 1e-6) std::snprintf(label, sizeof(label), "%.0fs", whole);
-        else std::snprintf(label, sizeof(label), "%df", static_cast<int>(std::lround((t - std::floor(t)) * comp.fps)));
-        dl->AddText(ImVec2(x + 4, y0 + 4), theme::kTextDim, label);
-        if (minor > 0.0)
-            for (int i = 1; i < 5; ++i) {
-                const float mx = timeToX(t + minor * i);
-                dl->AddLine(ImVec2(mx, y0 + kRulerHeight - 5), ImVec2(mx, y0 + kRulerHeight), theme::kBorder);
-            }
-    }
-
-    const float endX = timeToX(comp.duration);
-    dl->AddRectFilled(ImVec2(endX, y0), ImVec2(trackX0_ + trackW_, y0 + kRulerHeight), theme::shade(90));
-
-    // Playhead handle.
-    const float ph = timeToX(ctx.time);
-    const ImVec2 head[5] = {ImVec2(ph - 6, y0 + 3), ImVec2(ph + 6, y0 + 3), ImVec2(ph + 6, y0 + 14), ImVec2(ph, y0 + 20),
-                            ImVec2(ph - 6, y0 + 14)};
-    dl->AddConvexPolyFilled(head, 5, theme::kAccent);
-    dl->AddLine(ImVec2(ph, y0 + 18), ImVec2(ph, y0 + kRulerHeight), theme::kAccent, 1.5f);
-    dl->PopClipRect();
-}
-
-void TimelinePanel::drawTrackRow(EditorContext& ctx, const TrackRow& row, int rowIndex, float x0, float width) {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImGuiIO& io = ImGui::GetIO();
-    auto& layers = ctx.comp().layers;
-    const float y = ImGui::GetCursorScreenPos().y;
-    const float h = layerRowHeight();
-    rows_.push_back({rowIndex, row.track, y, y + h});
-
-    // The clip that represents the track in the left column: the primary
-    // selection if it is here, otherwise the first clip.
-    Layer* focus = &layers[row.first];
-    bool anySelected = false;
-    for (int i = row.first; i < row.first + row.count; ++i) {
-        anySelected |= ctx.isSelected(layers[i].id);
-        if (layers[i].id == ctx.primaryId()) focus = &layers[i];
-    }
-    const bool hasPrimary = focus->id == ctx.primaryId();
-
-    if (anySelected) {
-        dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), theme::accent(hasPrimary ? 34 : 24));
-        dl->AddRectFilled(ImVec2(x0, y + 2), ImVec2(x0 + 3, y + h - 2), theme::kAccent, 1.5f);
-    }
-    dl->AddLine(ImVec2(x0, y + h - 1), ImVec2(x0 + width, y + h - 1), theme::ink(10));
-
-    // --- left column: controls and name ---------------------------------------
-    const float btn = 20.0f;
-    const float by = y + (h - btn) * 0.5f;
-    ImGui::SetCursorScreenPos(ImVec2(x0 + 6, by));
-    const bool isExpanded = expanded_.count(row.track) > 0;
-    if (ui::iconButton("##expand", isExpanded ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, btn, "Show properties")) {
-        if (isExpanded) expanded_.erase(row.track);
-        else expanded_.insert(row.track);
-    }
-    // Visibility and lock act on the whole track.
-    ImGui::SameLine();
-    if (ui::iconButton("##vis", focus->visible ? ui::Icon::Eye : ui::Icon::EyeOff, btn,
-                       focus->visible ? "Hide track" : "Show track")) {
-        const bool visible = !focus->visible;
-        for (int i = row.first; i < row.first + row.count; ++i) layers[i].visible = visible;
-        ctx.touch();
-    }
-    ImGui::SameLine();
-    if (ui::iconButton("##lock", focus->locked ? ui::Icon::Lock : ui::Icon::Unlock, btn,
-                       focus->locked ? "Unlock track" : "Lock track", focus->locked)) {
-        const bool locked = !focus->locked;
-        for (int i = row.first; i < row.first + row.count; ++i) layers[i].locked = locked;
-        ctx.touch();
-    }
-    ImGui::SameLine();
-    const ImVec2 chip = ImGui::GetCursorScreenPos();
-    dl->AddRectFilled(ImVec2(chip.x + 2, y + 8), ImVec2(chip.x + 5, y + h - 8), toU32(labelColor(focus->label)), 2.0f);
-    ui::drawIcon(dl, ui::iconForLayer(*focus), ImVec2(chip.x + 18, y + h * 0.5f), 14.0f,
-                 anySelected ? theme::kAccent : theme::kTextDim);
-
-
-    const float nameX = chip.x + 32;
-    const float nameW = std::max(10.0f, x0 + leftWidth_ - nameX - 8);
-    ImGui::SetCursorScreenPos(ImVec2(nameX, y + (h - ImGui::GetFrameHeight()) * 0.5f));
-    if (renaming_ == focus->id) {
-        ImGui::SetNextItemWidth(nameW);
-        if (focusRename_) {
-            ImGui::SetKeyboardFocusHere();
-            focusRename_ = false;
-        }
-        if (ImGui::InputText("##rename", &focus->name, ImGuiInputTextFlags_AutoSelectAll)) ctx.touch();
-        if (ImGui::IsItemDeactivated()) renaming_ = 0;
-    } else {
-        ImGui::SetCursorScreenPos(ImVec2(nameX, y));
-        ImGui::InvisibleButton("##name", ImVec2(nameW, h));
-        if (ImGui::IsItemActivated()) {
-            clickTrack(ctx, row);
-            if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, Drag::LayerName, focus->id);
-        }
-        if (ImGui::IsItemActive() && drag_ == Drag::LayerName) updateLayerDrag(ctx);
-        if (ImGui::IsItemDeactivated() && drag_ == Drag::LayerName) endLayerDrag(ctx);
-        if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-            if (focus->type == LayerType::Compound) {
-                ctx.enterScope(focus->id); // its timeline opens
-            } else {
-                renaming_ = focus->id;
-                focusRename_ = true;
-            }
-        }
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !anySelected) clickTrack(ctx, row);
-        if (ImGui::BeginPopupContextItem("##trackctx")) {
-            if (ImGui::MenuItem("Rename")) {
-                renaming_ = focus->id;
-                focusRename_ = true;
-            }
-            if (ImGui::MenuItem("Duplicate", "Ctrl+D")) ctx.duplicateSelected();
-            if (ImGui::MenuItem("Split at Playhead", "Ctrl+K")) ctx.splitSelectedAtPlayhead();
-            ImGui::Separator();
-            // Deferred to the next frame: these add / remove layers while rows are being drawn.
-            if (ImGui::MenuItem("Create Compound", "Ctrl+G")) pendingCompound_ = 1;
-            if (ImGui::MenuItem("Release Compound", "Ctrl+Shift+G", false, ctx.selectionHasCompound())) pendingCompound_ = 2;
-            if (ImGui::BeginMenu("Effect")) {
-                effectMenuItems(ctx);
-                ImGui::EndMenu();
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem("Bring to Front", "Ctrl+Shift+]")) ctx.shiftSelected(-1000);
-            if (ImGui::MenuItem("Bring Forward", "Ctrl+]")) ctx.shiftSelected(-1);
-            if (ImGui::MenuItem("Send Backward", "Ctrl+[")) ctx.shiftSelected(1);
-            if (ImGui::MenuItem("Send to Back", "Ctrl+Shift+[")) ctx.shiftSelected(1000);
-            ImGui::Separator();
-            if (ImGui::MenuItem("Delete", "Del")) pendingDelete_ = true;
-            ImGui::EndPopup();
-        }
-        const ImU32 col = focus->visible ? (anySelected ? theme::kText : theme::kTextDim) : theme::kTextFaint;
-        dl->PushClipRect(ImVec2(nameX, y), ImVec2(nameX + nameW, y + h), true);
-        const float textY = y + (h - ImGui::GetTextLineHeight()) * 0.5f;
-        dl->AddText(ImVec2(nameX, textY), col, focus->name.c_str());
-        if (row.count > 1) { // e.g. a track that was cut into pieces
-            char badge[16];
-            std::snprintf(badge, sizeof(badge), "%d clips", row.count);
-            const float bw = ImGui::CalcTextSize(badge).x;
-            dl->AddText(ImVec2(nameX + nameW - bw, textY), theme::kTextFaint, badge);
-        }
-        dl->PopClipRect();
-    }
-
-    // --- track: clip bars ------------------------------------------------------
-    ImGui::SetCursorScreenPos(ImVec2(trackX0_, y));
-    ImGui::InvisibleButton("##track", ImVec2(trackW_, h));
-    const bool hovered = ImGui::IsItemHovered();
-    const float mx = io.MousePos.x;
-
-    // Clip under the mouse; edges win over bodies so adjacent clips can be trimmed.
+int TimelinePanel::clipHit(const Item& track, float mx, Drag& mode) const {
+    // Edges win over bodies so adjacent clips can be trimmed.
+    const auto& layers = ctx_.comp().layers;
     int hit = -1;
-    Drag hitMode = Drag::None;
-    for (int i = row.first; i < row.first + row.count; ++i) {
+    mode = Drag::None;
+    for (int i = track.first; i < track.first + track.count && i < static_cast<int>(layers.size()); ++i) {
         const float bx1 = timeToX(layers[i].inPoint), bx2 = timeToX(layers[i].outPoint);
-        if (std::fabs(mx - bx1) < kEdgeGrab) hit = i, hitMode = Drag::LayerIn;
-        else if (std::fabs(mx - bx2) < kEdgeGrab && hitMode != Drag::LayerIn) hit = i, hitMode = Drag::LayerOut;
-        else if (mx > bx1 && mx < bx2 && hit < 0) hit = i, hitMode = Drag::LayerMove;
+        if (std::fabs(mx - bx1) < kEdgeGrab) hit = i, mode = Drag::LayerIn;
+        else if (std::fabs(mx - bx2) < kEdgeGrab && mode != Drag::LayerIn) hit = i, mode = Drag::LayerOut;
+        else if (mx > bx1 && mx < bx2 && hit < 0) hit = i, mode = Drag::LayerMove;
     }
-
-    if (ctx.tool == Tool::Razor) {
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && hit >= 0) ctx.splitLayerAt(layers[hit].id, xToTime(mx));
-    } else {
-        if (hovered && drag_ == Drag::None && (hitMode == Drag::LayerIn || hitMode == Drag::LayerOut))
-            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-        if (ImGui::IsItemActivated()) {
-            if (hit >= 0 && layers[hit].type == LayerType::Compound && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                ctx.enterScope(layers[hit].id);
-            } else if (hit >= 0) {
-                const uint64_t id = layers[hit].id;
-                clickLayer(ctx, id);
-                if (!io.KeyCtrl && !io.KeyShift) beginLayerDrag(ctx, hitMode, id);
-            } else {
-                beginMarquee(ctx); // empty track space: box selection
-            }
-        }
-        const bool barDrag = drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut;
-        // The dragged clip may change track mid-frame; match by row activity instead of clip.
-        if (ImGui::IsItemActive() && barDrag) updateLayerDrag(ctx);
-        if (ImGui::IsItemDeactivated() && barDrag) endLayerDrag(ctx);
-    }
-
-    dl->PushClipRect(ImVec2(trackX0_, y), ImVec2(trackX0_ + trackW_, y + h), true);
-    for (int i = row.first; i < row.first + row.count; ++i) {
-        const Layer& layer = layers[i];
-        const bool selected = ctx.isSelected(layer.id);
-        const bool primary = ctx.primaryId() == layer.id;
-        const float bx1 = timeToX(layer.inPoint), bx2 = timeToX(layer.outPoint);
-        clips_.push_back({layer.id, y, y + h, bx1, bx2});
-
-        const Color lc = labelColor(layer.label);
-        const ImVec2 a(bx1 + 1, y + 4), b(bx2 - 1, y + h - 4); // 1px gap shows cut points
-        dl->AddRectFilled(a, b, toU32(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
-        if (selected)
-            dl->AddRect(a, b, primary ? theme::kText : theme::ink(170), 5.0f, 0, primary ? 1.8f : 1.3f);
-        if (layer.type == LayerType::Media && layer.media.hasAudio) drawWaveform(dl, layer, a, b, toU32(lc, 0.75f));
-        dl->AddRectFilled(ImVec2(bx1 + 3, y + 9), ImVec2(bx1 + 5, y + h - 9), toU32(lc, 0.8f), 1.0f);
-        dl->AddRectFilled(ImVec2(bx2 - 5, y + 9), ImVec2(bx2 - 3, y + h - 9), toU32(lc, 0.8f), 1.0f);
-        dl->PushClipRect(ImVec2(std::max(bx1, trackX0_), y), ImVec2(std::min(bx2, trackX0_ + trackW_), y + h), true);
-        dl->AddText(ImVec2(std::max(bx1, trackX0_) + 10, y + (h - ImGui::GetTextLineHeight()) * 0.5f),
-                    theme::ink(150), layer.name.c_str());
-        dl->PopClipRect();
-
-        // Summary of the clip's keyframes (within the clip only, e.g. after a cut).
-        if (!isExpanded) {
-            for (const PropertyRef& p : const_cast<Layer&>(layer).properties())
-                for (int k = 0; k < p.anim->keyCount(); ++k) {
-                    const double kt = p.anim->keyTime(k);
-                    if (kt < layer.inPoint - kTimeEpsilon || kt > layer.outPoint + kTimeEpsilon) continue;
-                    ui::drawDiamond(dl, ImVec2(timeToX(kt), y + h - 7), 3.0f, theme::ink(200), 0);
-                }
-        }
-    }
-    dl->PopClipRect();
-
-    ImGui::SetCursorScreenPos(ImVec2(x0, y + h));
-    ImGui::Dummy(ImVec2(0, 0));
+    return hit;
 }
 
-bool TimelinePanel::drawGroupRow(uint64_t track, const char* group, float x0, float width, float indent) {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float y = ImGui::GetCursorScreenPos().y;
-    const float h = groupRowHeight();
-    const std::string key = std::to_string(track) + "/" + group;
-    const bool open = !collapsedGroups_.count(key);
-
-    dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), theme::shade(60));
-    x0 += indent;
-    ImGui::SetCursorScreenPos(ImVec2(x0 + 24, y));
-    ImGui::PushID(group);
-    if (ImGui::InvisibleButton("##group", ImVec2(leftWidth_ - 30 - indent, h))) {
-        if (open) collapsedGroups_.insert(key);
-        else collapsedGroups_.erase(key);
-    }
-    ImGui::PopID();
-    const ImU32 col = ImGui::IsItemHovered() ? theme::kText : theme::kTextDim;
-    ui::drawIcon(dl, open ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, ImVec2(x0 + 36, y + h * 0.5f), 12.0f, col);
-    ImGui::PushFont(Fonts::uiBold(), Fonts::kUiSize * 0.82f);
-    dl->AddText(ImVec2(x0 + 48, y + (h - ImGui::GetFontSize()) * 0.5f), col, group);
-    ImGui::PopFont();
-
-    ImGui::SetCursorScreenPos(ImVec2(x0 - indent, y + h));
-    ImGui::Dummy(ImVec2(0, 0));
-    return open;
-}
-
-void TimelinePanel::drawPropertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop, float x0, float width) {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImGuiIO& io = ImGui::GetIO();
-    const float y = ImGui::GetCursorScreenPos().y;
-    const float h = propRowHeight();
-    AnimatedBase& anim = *prop.anim;
-    ImGui::PushID(prop.id);
-
-    // Selection tint: light for rows of the selected layer, stronger where keys are selected.
-    const bool hasSelectedKey = std::any_of(ctx.selectedKeys.begin(), ctx.selectedKeys.end(), [&](const KeySelection& k) {
-        return k.layerId == layer.id && k.propertyId == prop.id;
-    });
-    const ImU32 rowBg = hasSelectedKey ? theme::accent(40)
-                        : ctx.isSelected(layer.id) ? theme::accent(14)
-                                                   : theme::shade(40);
-    dl->AddRectFilled(ImVec2(x0, y), ImVec2(x0 + width, y + h), rowBg);
-    if (hasSelectedKey) dl->AddRectFilled(ImVec2(x0, y + 2), ImVec2(x0 + 3, y + h - 2), theme::kAccent, 1.5f);
-
-    // --- left: keyframe toggle, label, editable value, reset ---------------------
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 2));
-    const float frameH = ImGui::GetFrameHeight();
-    const float widgetY = y + (h - frameH) * 0.5f;
-    ImGui::SetCursorScreenPos(ImVec2(x0 + 30, widgetY));
-    keyframeToggle(ctx, layer, prop);
-    const float textY = y + (h - ImGui::GetTextLineHeight()) * 0.5f;
-    dl->AddText(ImVec2(x0 + 56, textY), anim.isAnimated() ? theme::kText : theme::kTextDim, prop.label);
-
-    const float resetX = x0 + leftWidth_ - 8 - frameH;
-    const float valueW = prop.kind == PropertyKind::Vec2 ? 128.0f : prop.kind == PropertyKind::Color ? 110.0f : 72.0f;
-    ImGui::SetCursorScreenPos(ImVec2(resetX - 4 - valueW, widgetY));
-    propertyValueWidget(ctx, prop, valueW);
-    ImGui::SetCursorScreenPos(ImVec2(resetX, widgetY));
-    resetButton(ctx, layer, prop);
-    ImGui::PopStyleVar();
-
-    // --- track: keyframes ------------------------------------------------------
-    ImGui::SetCursorScreenPos(ImVec2(trackX0_, y));
-    ImGui::InvisibleButton("##keys", ImVec2(trackW_, h), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-    const float cy = y + h * 0.5f;
-
-    int hoveredKey = -1;
-    if (ImGui::IsItemHovered())
-        for (int k = 0; k < anim.keyCount(); ++k)
-            if (std::fabs(io.MousePos.x - timeToX(anim.keyTime(k))) <= keyRadius() + 2) hoveredKey = k;
-
-    if (ImGui::IsItemActivated()) {
-        if (hoveredKey >= 0) {
-            ctx.select(layer.id); // key selection is limited to one layer
-            const KeySelection ks{layer.id, prop.id, anim.keyUid(hoveredKey)};
-            const bool isSel = ctx.isKeySelected(ks);
-            if (io.KeyShift || io.KeyCtrl) {
-                if (isSel) std::erase(ctx.selectedKeys, ks);
-                else ctx.selectedKeys.push_back(ks);
-            } else if (!isSel) {
-                ctx.selectedKeys = {ks};
-            }
-            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) openKeyMenu_ = true;
-            else beginKeyDrag(ctx);
-            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) ctx.setTime(anim.keyTime(hoveredKey));
-        } else if (!io.KeyShift) {
-            ctx.clearKeySelection();
-            ctx.select(layer.id);
-        }
-    }
-    if (ImGui::IsItemActive() && drag_ == Drag::Keys) updateKeyDrag(ctx);
-    if (ImGui::IsItemDeactivated() && drag_ == Drag::Keys) endKeyDrag(ctx);
-
-    dl->PushClipRect(ImVec2(trackX0_, y), ImVec2(trackX0_ + trackW_, y + h), true);
-    // Shade time where the clip does not exist: keyframes can't go there.
-    const float clipX1 = timeToX(layer.inPoint), clipX2 = timeToX(layer.outPoint);
-    dl->AddRectFilled(ImVec2(trackX0_, y), ImVec2(clipX1, y + h), theme::shade(70));
-    dl->AddRectFilled(ImVec2(clipX2, y), ImVec2(trackX0_ + trackW_, y + h), theme::shade(70));
-    for (int k = 0; k + 1 < anim.keyCount(); ++k) {
-        const float xa = timeToX(anim.keyTime(k)), xb = timeToX(anim.keyTime(k + 1));
-        const ImU32 lineCol = anim.keyEasing(k) == Easing::Hold ? theme::ink(25) : theme::accent(70);
-        dl->AddLine(ImVec2(xa, cy), ImVec2(xb, cy), lineCol, 1.5f);
-    }
-    for (int k = 0; k < anim.keyCount(); ++k) {
-        const bool sel = ctx.isKeySelected({layer.id, prop.id, anim.keyUid(k)});
-        const ImU32 fill = sel ? theme::kAccent : (k == hoveredKey ? theme::kText : theme::kTextDim);
-        const ImU32 outline = sel ? theme::kAccentHover : theme::kBgDeep;
-        drawKeyGlyph(dl, ImVec2(timeToX(anim.keyTime(k)), cy), keyRadius() + (sel ? 1.0f : 0.0f), anim.keyEasing(k), fill,
-                     outline);
-    }
-    if (hoveredKey >= 0) ui::tooltip(easingLabel(anim.keyEasing(hoveredKey)));
-    dl->PopClipRect();
-
-    ImGui::PopID();
-    ImGui::SetCursorScreenPos(ImVec2(x0, y + h));
-    ImGui::Dummy(ImVec2(0, 0));
-}
-
-void TimelinePanel::clickLayer(EditorContext& ctx, uint64_t id) {
-    const ImGuiIO& io = ImGui::GetIO();
-    if (io.KeyCtrl) ctx.toggleSelected(id);
-    else if (io.KeyShift) ctx.selectRange(id);
-    else if (!ctx.isSelected(id)) ctx.select(id);
-    else if (ctx.primaryId() != id) { // keep the group, make this one primary
-        std::erase(ctx.selection, id);
-        ctx.selection.push_back(id);
-        ctx.clearKeySelection();
+void TimelinePanel::clickLayer(uint64_t id) {
+    if (ctrlHeld()) ctx_.toggleSelected(id);
+    else if (shiftHeld()) ctx_.selectRange(id);
+    else if (!ctx_.isSelected(id)) ctx_.select(id);
+    else if (ctx_.primaryId() != id) { // keep the group, make this one primary
+        std::erase(ctx_.selection, id);
+        ctx_.selection.push_back(id);
+        ctx_.clearKeySelection();
     }
 }
 
-namespace {
-std::vector<uint64_t> clipsOfTrack(const Composition& comp, uint64_t track) {
-    std::vector<uint64_t> ids;
-    for (const Layer& l : comp.layers)
-        if (l.track == track) ids.push_back(l.id);
-    return ids;
-}
-} // namespace
-
-void TimelinePanel::clickTrack(EditorContext& ctx, const TrackRow& row) {
-    const ImGuiIO& io = ImGui::GetIO();
-    const auto ids = clipsOfTrack(ctx.comp(), row.track);
-    const bool all = std::all_of(ids.begin(), ids.end(), [&](uint64_t id) { return ctx.isSelected(id); });
-    if (io.KeyCtrl) {
+void TimelinePanel::clickTrack(const Item& row) {
+    const auto ids = clipsOfTrack(ctx_.comp(), row.track);
+    if (ids.empty()) return;
+    const bool all = std::all_of(ids.begin(), ids.end(), [&](uint64_t id) { return ctx_.isSelected(id); });
+    if (ctrlHeld()) {
         for (uint64_t id : ids)
-            if (all) std::erase(ctx.selection, id);
-            else if (!ctx.isSelected(id)) ctx.selection.push_back(id);
-        ctx.clearKeySelection();
-    } else if (io.KeyShift) {
-        ctx.selectRange(ids.front());
+            if (all) std::erase(ctx_.selection, id);
+            else if (!ctx_.isSelected(id)) ctx_.selection.push_back(id);
+        ctx_.clearKeySelection();
+    } else if (shiftHeld()) {
+        ctx_.selectRange(ids.front());
     } else if (!all) { // keep a multi-track selection when clicking one of its tracks
-        ctx.select(ids.front());
-        for (size_t i = 1; i < ids.size(); ++i) ctx.selection.push_back(ids[i]);
+        ctx_.select(ids.front());
+        for (size_t i = 1; i < ids.size(); ++i) ctx_.selection.push_back(ids[i]);
     }
 }
 
-void TimelinePanel::beginLayerDrag(EditorContext& ctx, Drag mode, uint64_t id) {
-    const Layer* layer = ctx.comp().findLayer(id);
+void TimelinePanel::showTrackMenu(QPoint global) {
+    QMenu menu;
+    menu.setToolTipsVisible(true);
+    const uint64_t focus = ctx_.primaryId();
+    menu.addAction("Rename", [this, focus] {
+        computeItems();
+        for (const Item& it : items_)
+            if (it.kind == Item::Track && it.layer == focus) startRename(it);
+    });
+    menu.addAction("Duplicate\tCtrl+D", [this] { ctx_.duplicateSelected(); });
+    menu.addAction("Split at Playhead\tCtrl+K", [this] { ctx_.splitSelectedAtPlayhead(); });
+    menu.addSeparator();
+    menu.addAction("Create Compound\tCtrl+G", [this] { ctx_.createCompound(); });
+    menu.addAction("Release Compound\tCtrl+Shift+G", [this] { ctx_.releaseSelectedCompounds(); })->setEnabled(ctx_.selectionHasCompound());
+    fillEffectMenu(menu.addMenu("Effect"), ctx_);
+    menu.addSeparator();
+    menu.addAction("Bring to Front\tCtrl+Shift+]", [this] { ctx_.shiftSelected(-1000); });
+    menu.addAction("Bring Forward\tCtrl+]", [this] { ctx_.shiftSelected(-1); });
+    menu.addAction("Send Backward\tCtrl+[", [this] { ctx_.shiftSelected(1); });
+    menu.addAction("Send to Back\tCtrl+Shift+[", [this] { ctx_.shiftSelected(1000); });
+    menu.addSeparator();
+    menu.addAction("Delete\tDel", [this] { ctx_.deleteSelected(); });
+    menu.exec(global);
+    relayout();
+}
+
+void TimelinePanel::showKeyMenu(QPoint global) {
+    QMenu menu;
+    const int n = static_cast<int>(ctx_.selectedKeys.size());
+    menu.addSection(QString("%1 keyframe%2").arg(n).arg(n == 1 ? "" : "s"));
+    for (int i = 0; i < static_cast<int>(Easing::Count); ++i) {
+        const auto e = static_cast<Easing>(i);
+        if (e == Easing::Custom) continue;
+        menu.addAction(easingLabel(e), [this, e] { ctx_.setSelectedKeysEasing(e); });
+    }
+    // Custom Curve: the bezier editor, its four numbers and some starting points.
+    QMenu* custom = menu.addMenu("Custom Curve");
+    auto* box = new QWidget;
+    auto* col = new QVBoxLayout(box);
+    col->setContentsMargins(8, 8, 8, 8);
+    auto* editor = new CurveEditor(ctx_.selectedKeysCurve(), [this](const BezierEase& c) { ctx_.setSelectedKeysCurve(c); });
+    col->addWidget(editor);
+    auto* numbers = new QHBoxLayout;
+    std::vector<ui::DragValue*> values;
+    BezierEase start = ctx_.selectedKeysCurve();
+    float* fields[4] = {&start.x1, &start.y1, &start.x2, &start.y2};
+    auto current = std::make_shared<BezierEase>(start);
+    auto apply = [this, editor, current] {
+        current->x1 = std::clamp(current->x1, 0.0f, 1.0f);
+        current->x2 = std::clamp(current->x2, 0.0f, 1.0f);
+        ctx_.setSelectedKeysCurve(*current);
+        editor->setCurve(*current);
+    };
+    for (int i = 0; i < 4; ++i) {
+        auto* v = new ui::DragValue;
+        v->setRange(i % 2 == 0 ? 0.0f : -1.0f, i % 2 == 0 ? 1.0f : 2.0f);
+        v->setSpeed(0.005f);
+        v->setFormat("%.2f");
+        v->setValue(*fields[i]);
+        connect(v, &ui::DragValue::valueChanged, &menu, [current, apply, i](float x) {
+            float* f[4] = {&current->x1, &current->y1, &current->x2, &current->y2};
+            *f[i] = x;
+            apply();
+        });
+        numbers->addWidget(v);
+        values.push_back(v);
+    }
+    col->addLayout(numbers);
+    auto* startLabel = new QLabel("Start from:");
+    startLabel->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    col->addWidget(startLabel);
+    auto* starts = new QHBoxLayout;
+    const std::pair<Easing, const char*> presets[] = {
+        {Easing::Linear, "Lin"}, {Easing::EaseIn, "In"}, {Easing::EaseOut, "Out"}, {Easing::EaseInOut, "In Out"}, {Easing::BackOut, "Back"}};
+    for (const auto& [e, label] : presets) {
+        auto* b = new QPushButton(label);
+        connect(b, &QPushButton::clicked, &menu, [current, apply, values, e] {
+            *current = bezierFor(e);
+            const float f[4] = {current->x1, current->y1, current->x2, current->y2};
+            for (int i = 0; i < 4; ++i) values[i]->setValue(f[i]);
+            apply();
+        });
+        starts->addWidget(b);
+    }
+    col->addLayout(starts);
+    auto* action = new QWidgetAction(custom);
+    action->setDefaultWidget(box);
+    custom->addAction(action);
+    if (ctx_.selectionHasPathKeys()) {
+        menu.addSection("Motion path");
+        menu.addAction("Auto Bezier", [this] { ctx_.setSelectedKeysPath(PathMode::Auto); });
+        menu.addAction("Linear (corner)", [this] { ctx_.setSelectedKeysPath(PathMode::Linear); });
+        menu.addAction("Custom Handles", [this] { ctx_.setSelectedKeysPath(PathMode::Custom); });
+    }
+    menu.addSeparator();
+    menu.addAction("Delete\tDel", [this] { ctx_.deleteSelectedKeys(); });
+    menu.exec(global);
+    relayout();
+}
+
+void TimelinePanel::startRename(const Item& track) {
+    Layer* layer = ctx_.comp().findLayer(track.layer);
+    if (!layer) return;
+    delete rename_;
+    renaming_ = layer->id;
+    rename_ = new QLineEdit(QString::fromStdString(layer->name), rows_);
+    const int h = 24;
+    rename_->setGeometry(static_cast<int>(kNameX) - 4, static_cast<int>(track.top + (track.h - h) * 0.5f),
+                         static_cast<int>(leftWidth_ - kNameX - 4), h);
+    rename_->selectAll();
+    rename_->show();
+    rename_->setFocus();
+    const uint64_t id = layer->id;
+    connect(rename_, &QLineEdit::textEdited, this, [this, id](const QString& t) {
+        if (Layer* l = ctx_.comp().findLayer(id)) {
+            l->name = t.toStdString();
+            ctx_.touch();
+        }
+    });
+    connect(rename_, &QLineEdit::editingFinished, this, [this] {
+        renaming_ = 0;
+        if (rename_) rename_->deleteLater();
+        rename_ = nullptr;
+        rows_->update();
+    });
+}
+
+void TimelinePanel::rowsPress(QMouseEvent* e) {
+    computeItems();
+    const QPointF pos = e->position();
+    const float x = static_cast<float>(pos.x()), y = static_cast<float>(pos.y());
+    if (graphMode_) {
+        graphPress(e);
+        return;
+    }
+    const bool left = e->button() == Qt::LeftButton, right = e->button() == Qt::RightButton;
+    const Item* item = itemAt(y);
+    if (!item) { // empty space below the rows: click to deselect, drag to box-select
+        if (left) beginMarquee(pos);
+        relayout();
+        return;
+    }
+    auto& layers = ctx_.comp().layers;
+    if (item->kind == Item::Track) {
+        const Item row = *item;
+        if (x < leftWidth_) {
+            auto inButton = [&](float bx) { return left && x >= bx && x < bx + kButton; };
+            Layer* focus = ctx_.comp().findLayer(row.layer);
+            if (!focus) return;
+            if (inButton(kExpandX)) {
+                if (expanded_.count(row.track)) expanded_.erase(row.track);
+                else expanded_.insert(row.track);
+            } else if (inButton(kVisX)) { // visibility and lock act on the whole track
+                const bool visible = !focus->visible;
+                for (int i = row.first; i < row.first + row.count; ++i) layers[i].visible = visible;
+                ctx_.touch();
+            } else if (inButton(kLockX)) {
+                const bool locked = !focus->locked;
+                for (int i = row.first; i < row.first + row.count; ++i) layers[i].locked = locked;
+                ctx_.touch();
+            } else if (right) {
+                bool anySelected = false;
+                for (int i = row.first; i < row.first + row.count; ++i) anySelected |= ctx_.isSelected(layers[i].id);
+                if (!anySelected) clickTrack(row);
+                showTrackMenu(e->globalPosition().toPoint());
+                return;
+            } else if (left && x >= kChipX) {
+                clickTrack(row);
+                if (!ctrlHeld() && !shiftHeld()) beginLayerDrag(Drag::LayerName, row.layer, pos);
+            }
+            relayout();
+            return;
+        }
+        // Track area.
+        Drag mode = Drag::None;
+        const int hit = clipHit(row, x, mode);
+        if (ctx_.tool == Tool::Razor) {
+            if (left && hit >= 0) ctx_.splitLayerAt(layers[hit].id, xToTime(x));
+        } else if (right) {
+            if (hit >= 0 && !ctx_.isSelected(layers[hit].id)) ctx_.select(layers[hit].id);
+            if (hit >= 0) showTrackMenu(e->globalPosition().toPoint());
+            return;
+        } else if (left) {
+            if (hit >= 0) {
+                const uint64_t id = layers[hit].id;
+                clickLayer(id);
+                if (!ctrlHeld() && !shiftHeld()) beginLayerDrag(mode, id, pos);
+            } else {
+                beginMarquee(pos); // empty track space: box selection
+            }
+        }
+        relayout();
+        return;
+    }
+    if (item->kind == Item::Group) {
+        if (left && x < leftWidth_) {
+            if (collapsedGroups_.count(item->groupKey)) collapsedGroups_.erase(item->groupKey);
+            else collapsedGroups_.insert(item->groupKey);
+        }
+        relayout();
+        return;
+    }
+    // Property row: keyframes.
+    if (x < trackX0()) return;
+    Layer* layer = ctx_.comp().findLayer(item->layer);
+    auto ref = findProperty(ctx_, item->layer, item->prop, item->effectIndex);
+    if (!layer || !ref) return;
+    AnimatedBase& anim = *ref->anim;
+    int hoveredKey = -1;
+    for (int k = 0; k < anim.keyCount(); ++k)
+        if (std::fabs(x - timeToX(anim.keyTime(k))) <= keyRadius() + 2) hoveredKey = k;
+    if (hoveredKey >= 0) {
+        ctx_.select(layer->id); // key selection is limited to one layer
+        const KeySelection ks{layer->id, item->prop, anim.keyUid(hoveredKey)};
+        const bool isSel = ctx_.isKeySelected(ks);
+        if (shiftHeld() || ctrlHeld()) {
+            if (isSel && !right) std::erase(ctx_.selectedKeys, ks);
+            else if (!isSel) ctx_.selectedKeys.push_back(ks);
+        } else if (!isSel) {
+            ctx_.selectedKeys = {ks};
+        }
+        if (right) {
+            showKeyMenu(e->globalPosition().toPoint());
+            return;
+        }
+        if (left) beginKeyDrag(pos);
+    } else if (left && !shiftHeld()) {
+        ctx_.clearKeySelection();
+        ctx_.select(layer->id);
+    }
+    relayout();
+}
+
+void TimelinePanel::rowsDoubleClick(QMouseEvent* e) {
+    computeItems();
+    if (graphMode_ || e->button() != Qt::LeftButton) return;
+    const float x = static_cast<float>(e->position().x());
+    const Item* item = itemAt(static_cast<float>(e->position().y()));
+    if (!item) return;
+    auto& layers = ctx_.comp().layers;
+    if (item->kind == Item::Track) {
+        if (x >= kNameX && x < leftWidth_) {
+            const Layer* focus = ctx_.comp().findLayer(item->layer);
+            if (focus && focus->type == LayerType::Compound) ctx_.enterScope(focus->id); // its timeline opens
+            else startRename(*item);
+        } else if (x >= trackX0()) {
+            Drag mode;
+            const int hit = clipHit(*item, x, mode);
+            if (hit >= 0 && layers[hit].type == LayerType::Compound) ctx_.enterScope(layers[hit].id);
+        }
+    } else if (item->kind == Item::Prop && x >= trackX0()) {
+        if (auto ref = findProperty(ctx_, item->layer, item->prop, item->effectIndex))
+            for (int k = 0; k < ref->anim->keyCount(); ++k)
+                if (std::fabs(x - timeToX(ref->anim->keyTime(k))) <= keyRadius() + 2) ctx_.setTime(ref->anim->keyTime(k));
+    }
+    drag_ = Drag::None;
+    relayout();
+}
+
+void TimelinePanel::rowsMove(QMouseEvent* e) {
+    const QPointF pos = e->position();
+    hoverX_ = static_cast<float>(pos.x());
+    if (graphMode_) {
+        graphMove(e);
+        return;
+    }
+    if (drag_ == Drag::Keys) {
+        updateKeyDrag(pos);
+        return;
+    }
+    if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName) {
+        updateLayerDrag(pos);
+        return;
+    }
+    if (marquee_) {
+        updateMarquee(pos);
+        return;
+    }
+    // Hover feedback: trim cursor on clip edges, razor, the easing of a keyframe.
+    computeItems();
+    const Item* item = itemAt(static_cast<float>(pos.y()));
+    Qt::CursorShape cursor = Qt::ArrowCursor;
+    if (item && item->kind == Item::Track && pos.x() >= trackX0()) {
+        Drag mode;
+        clipHit(*item, static_cast<float>(pos.x()), mode);
+        if (ctx_.tool == Tool::Razor) cursor = Qt::PointingHandCursor;
+        else if (mode == Drag::LayerIn || mode == Drag::LayerOut) cursor = Qt::SizeHorCursor;
+    }
+    rows_->setCursor(cursor);
+    if (item && item->kind == Item::Prop && pos.x() >= trackX0()) {
+        if (auto ref = findProperty(ctx_, item->layer, item->prop, item->effectIndex))
+            for (int k = 0; k < ref->anim->keyCount(); ++k)
+                if (std::fabs(pos.x() - timeToX(ref->anim->keyTime(k))) <= keyRadius() + 2)
+                    QToolTip::showText(e->globalPosition().toPoint(), easingLabel(ref->anim->keyEasing(k)), rows_);
+    }
+    rows_->update();
+}
+
+void TimelinePanel::rowsRelease(QMouseEvent* e) {
+    const QPointF pos = e->position();
+    if (graphMode_) {
+        graphRelease(e);
+        return;
+    }
+    if (drag_ == Drag::Keys) endKeyDrag();
+    else if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName) endLayerDrag(pos);
+    if (marquee_) marquee_ = false;
+    snapLineTime_ = -1.0;
+    relayout();
+}
+
+void TimelinePanel::beginLayerDrag(Drag mode, uint64_t id, QPointF pos) {
+    const Layer* layer = ctx_.comp().findLayer(id);
     if (!layer) return;
     drag_ = mode;
     dragLayer_ = id;
-    dragStartX_ = ImGui::GetIO().MousePos.x;
-    dragStartY_ = ImGui::GetIO().MousePos.y;
+    dragStart_ = pos;
+    dragY_ = static_cast<float>(pos.y());
     dragOrigIn_ = layer->inPoint;
     dragOrigOut_ = layer->outPoint;
     dragApplied_ = 0.0;
     restacking_ = false;
     dragClips_.clear();
     // A compound moving in time brings everything inside it along.
-    std::vector<uint64_t> moving = mode == Drag::LayerMove ? ctx.selectionWithContents() : std::vector<uint64_t>{id};
-    dragMoving_ = moving;
-    for (uint64_t m : moving)
-        if (const Layer* l = ctx.comp().findLayer(m)) dragClips_.push_back({m, l->inPoint, l->outPoint});
-    collectTimeSnapTargets(ctx, moving, false);
+    dragMoving_ = mode == Drag::LayerMove ? ctx_.selectionWithContents() : std::vector<uint64_t>{id};
+    for (uint64_t m : dragMoving_)
+        if (const Layer* l = ctx_.comp().findLayer(m)) dragClips_.push_back({m, l->inPoint, l->outPoint});
+    collectTimeSnapTargets(dragMoving_, false);
 }
 
-void TimelinePanel::collectTimeSnapTargets(EditorContext& ctx, const std::vector<uint64_t>& movingClips, bool movingKeys) {
-    const Composition& comp = ctx.comp();
-    timeTargets_ = {0.0, comp.duration, ctx.time}; // composition ends and the playhead
+void TimelinePanel::collectTimeSnapTargets(const std::vector<uint64_t>& movingClips, bool movingKeys) {
+    const Composition& comp = ctx_.comp();
+    timeTargets_ = {0.0, comp.duration, ctx_.time}; // composition ends and the playhead
     auto isDraggedKey = [&](uint64_t layerId, const char* prop, uint32_t uid) {
         if (!movingKeys) return false;
         for (const auto& [sel, orig] : dragKeys_)
@@ -1013,9 +1513,10 @@ void TimelinePanel::collectTimeSnapTargets(EditorContext& ctx, const std::vector
     }
 }
 
-double TimelinePanel::snappedDelta(EditorContext& ctx, const std::vector<double>& base, double rawDelta) {
+double TimelinePanel::snappedDelta(const std::vector<double>& base, double rawDelta, bool force) {
     // Test the raw (unrounded) position so a target is caught before frame rounding jumps past it.
-    if (ctx.snapping && !ImGui::GetIO().KeyCtrl) {
+    snapLineTime_ = -1.0;
+    if ((ctx_.snapping || force) && !ctrlHeld()) {
         std::vector<double> edges;
         for (double b : base) edges.push_back(b + rawDelta);
         if (const SnapResult r = snap1D(edges, timeTargets_, settings().snapDistance / pxPerSec_); r.snapped) { // screen pixels
@@ -1023,17 +1524,15 @@ double TimelinePanel::snappedDelta(EditorContext& ctx, const std::vector<double>
             return rawDelta + r.offset;
         }
     }
-    return snapDelta(rawDelta, ctx.comp().fps);
+    return snapDelta(rawDelta, ctx_.comp().fps);
 }
 
-void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
-    const ImGuiIO& io = ImGui::GetIO();
-    Composition& comp = ctx.comp();
-    const float dx = io.MousePos.x - dragStartX_, dy = io.MousePos.y - dragStartY_;
-    if ((drag_ == Drag::LayerName || drag_ == Drag::LayerMove) && std::fabs(dy) > layerRowHeight() * 0.6f)
-        restacking_ = true;
-    if (restacking_) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-
+void TimelinePanel::updateLayerDrag(QPointF pos) {
+    Composition& comp = ctx_.comp();
+    const float dx = static_cast<float>(pos.x() - dragStart_.x()), dy = static_cast<float>(pos.y() - dragStart_.y());
+    dragY_ = static_cast<float>(pos.y());
+    if ((drag_ == Drag::LayerName || drag_ == Drag::LayerMove) && std::fabs(dy) > layerRowHeight() * 0.6f) restacking_ = true;
+    rows_->setCursor(restacking_ ? Qt::SizeVerCursor : drag_ == Drag::LayerMove ? Qt::ArrowCursor : Qt::SizeHorCursor);
     Layer* layer = comp.findLayer(dragLayer_);
     if (!layer) return;
     const double raw = dx / pxPerSec_;
@@ -1042,7 +1541,7 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
     case Drag::LayerMove: {
         std::vector<double> edges;
         for (const ClipStart& c : dragClips_) edges.insert(edges.end(), {c.in, c.out});
-        const double delta = frozen ? 0.0 : snappedDelta(ctx, edges, raw);
+        const double delta = frozen ? 0.0 : snappedDelta(edges, raw);
         // Clips never overlap others on their track: stop at the neighbors.
         double lo = 0, hi = 0;
         comp.timeShiftLimits(dragMoving_, lo, hi);
@@ -1051,176 +1550,169 @@ void TimelinePanel::updateLayerDrag(EditorContext& ctx) {
             for (uint64_t id : dragMoving_)
                 if (Layer* l = comp.findLayer(id)) l->shiftTime(step);
             dragApplied_ += step;
-            ctx.touch();
+            ctx_.touch();
         }
         break;
     }
-    case Drag::LayerIn: {
-        comp.setInPoint(layer->id, dragOrigIn_ + snappedDelta(ctx, {dragOrigIn_}, raw));
-        ctx.touch();
+    case Drag::LayerIn:
+        comp.setInPoint(layer->id, dragOrigIn_ + snappedDelta({dragOrigIn_}, raw));
+        ctx_.touch();
         break;
-    }
-    case Drag::LayerOut: {
-        comp.setOutPoint(layer->id, dragOrigOut_ + snappedDelta(ctx, {dragOrigOut_}, raw));
-        ctx.touch();
+    case Drag::LayerOut:
+        comp.setOutPoint(layer->id, dragOrigOut_ + snappedDelta({dragOrigOut_}, raw));
+        ctx_.touch();
         break;
-    }
     default: break;
     }
+    relayout();
 }
 
-void TimelinePanel::endLayerDrag(EditorContext& ctx) {
-    const ImGuiIO& io = ImGui::GetIO();
+void TimelinePanel::endLayerDrag(QPointF pos) {
+    computeItems();
     if (restacking_) {
-        // This runs while the dragged row is drawn, before the rows below it
-        // are laid out: finish the drop once the whole list is known.
-        pendingDrop_ = true;
-        pendingDropY_ = io.MousePos.y;
-        pendingDropMode_ = drag_;
-    } else if (std::fabs(io.MousePos.x - dragStartX_) < 3.0f && std::fabs(io.MousePos.y - dragStartY_) < 3.0f &&
-               !io.KeyCtrl && !io.KeyShift) {
+        const DropTarget t = dropTargetAt(static_cast<float>(pos.y()), drag_);
+        if (t.valid) {
+            if (drag_ == Drag::LayerName) {
+                const auto tracks = ctx_.selectedTracks();
+                int above = 0, visible = 0; // selected tracks above the gap leave the list first
+                for (const Item& r : items_)
+                    if (r.kind == Item::Track) {
+                        if (visible < t.gap && std::find(tracks.begin(), tracks.end(), r.track) != tracks.end()) ++above;
+                        ++visible;
+                    }
+                // The gap counts visible tracks; moveTracks counts every row.
+                int target = static_cast<int>(ctx_.comp().trackRows().size());
+                visible = 0;
+                for (const Item& r : items_)
+                    if (r.kind == Item::Track) {
+                        if (visible == t.gap) {
+                            target = r.rowIndex;
+                            break;
+                        }
+                        ++visible;
+                    }
+                ctx_.moveSelectedTracksTo(target - above);
+            } else if (t.newTrack) {
+                int target = static_cast<int>(ctx_.comp().trackRows().size()), visible = 0;
+                for (const Item& r : items_)
+                    if (r.kind == Item::Track) {
+                        if (visible == t.gap) {
+                            target = r.rowIndex;
+                            break;
+                        }
+                        ++visible;
+                    }
+                ctx_.moveSelectedClipsToNewTrack(target);
+            } else if (t.fits) {
+                ctx_.moveSelectedClipsToTrack(t.track);
+            }
+        }
+    } else if (std::fabs(pos.x() - dragStart_.x()) < 3.0 && std::fabs(pos.y() - dragStart_.y()) < 3.0 && !ctrlHeld() && !shiftHeld()) {
         // A plain click inside a multi-selection keeps just this clip (or this track's clips).
         if (drag_ == Drag::LayerName) {
-            if (const Layer* l = ctx.comp().findLayer(dragLayer_)) {
-                const auto ids = clipsOfTrack(ctx.comp(), l->track);
-                ctx.select(ids.front());
-                for (size_t i = 1; i < ids.size(); ++i) ctx.selection.push_back(ids[i]);
+            if (const Layer* l = ctx_.comp().findLayer(dragLayer_)) {
+                const auto ids = clipsOfTrack(ctx_.comp(), l->track);
+                ctx_.select(ids.front());
+                for (size_t i = 1; i < ids.size(); ++i) ctx_.selection.push_back(ids[i]);
             }
         } else {
-            ctx.select(dragLayer_);
+            ctx_.select(dragLayer_);
         }
     }
     drag_ = Drag::None;
     restacking_ = false;
+    rows_->setCursor(Qt::ArrowCursor);
 }
 
-TimelinePanel::DropTarget TimelinePanel::dropTargetAt(EditorContext& ctx, float y, Drag mode) const {
+int TimelinePanel::dropGapAt(float y) const {
+    int gap = 0, visible = 0;
+    for (const Item& r : items_)
+        if (r.kind == Item::Track) {
+            if (y > r.top + r.h * 0.5f) gap = visible + 1;
+            ++visible;
+        }
+    return gap;
+}
+
+TimelinePanel::DropTarget TimelinePanel::dropTargetAt(float y, Drag mode) const {
     DropTarget t;
-    if (rows_.empty()) return t;
+    const bool anyTrack = std::any_of(items_.begin(), items_.end(), [](const Item& i) { return i.kind == Item::Track; });
+    if (!anyTrack) return t;
     t.valid = true;
     t.gap = dropGapAt(y);
     if (mode != Drag::LayerMove) return t; // name drags reorder whole tracks
-
-    // Clips: the middle of a row joins that track, its edges (or the space
-    // between rows) create a new track.
+    // Clips: the middle of a row joins that track, its edges (or the space between rows) create a new track.
     constexpr float kEdge = 7.0f;
-    for (const RowRect& r : rows_) {
-        if (y < r.top || y >= r.bottom) continue;
-        if (y < r.top + kEdge) t.gap = r.index;
-        else if (y > r.bottom - kEdge) t.gap = r.index + 1;
+    int visible = 0;
+    for (const Item& r : items_) {
+        if (r.kind != Item::Track) continue;
+        const int index = visible++;
+        if (y < r.top || y >= r.top + r.h) continue;
+        if (y < r.top + kEdge) t.gap = index;
+        else if (y > r.top + r.h - kEdge) t.gap = index + 1;
         else {
             t.newTrack = false;
             t.track = r.track;
-            const auto& sel = ctx.selection;
+            const auto& sel = ctx_.selection;
             const bool alreadyThere = std::all_of(sel.begin(), sel.end(), [&](uint64_t id) {
-                const Layer* l = ctx.comp().findLayer(id);
+                const Layer* l = ctx_.comp().findLayer(id);
                 return l && l->track == r.track;
             });
             if (alreadyThere) t.valid = false;
-            else t.fits = ctx.comp().clipsFitTrack(sel, r.track);
+            else t.fits = ctx_.comp().clipsFitTrack(sel, r.track);
         }
         break;
     }
     return t;
 }
 
-void TimelinePanel::applyPendingDrop(EditorContext& ctx) {
-    if (!pendingDrop_) return;
-    pendingDrop_ = false;
-    const DropTarget t = dropTargetAt(ctx, pendingDropY_, pendingDropMode_);
-    if (!t.valid) return;
-    if (pendingDropMode_ == Drag::LayerName) {
-        const auto tracks = ctx.selectedTracks();
-        int above = 0; // selected tracks above the gap leave the list first
-        for (const RowRect& r : rows_)
-            if (r.index < t.gap && std::find(tracks.begin(), tracks.end(), r.track) != tracks.end()) ++above;
-        ctx.moveSelectedTracksTo(t.gap - above);
-    } else if (t.newTrack) {
-        ctx.moveSelectedClipsToNewTrack(t.gap);
-    } else if (t.fits) {
-        ctx.moveSelectedClipsToTrack(t.track);
-    }
-}
-
-void TimelinePanel::beginMarquee(EditorContext& ctx) {
-    const ImGuiIO& io = ImGui::GetIO();
-    const bool additive = io.KeyCtrl || io.KeyShift;
+void TimelinePanel::beginMarquee(QPointF pos) {
+    const bool additive = ctrlHeld() || shiftHeld();
     marquee_ = true;
-    marqueeStart_ = io.MousePos;
-    marqueeBase_ = additive ? ctx.selection : std::vector<uint64_t>{};
-    if (!additive) ctx.select(0);
-    ctx.clearKeySelection();
+    marqueeStart_ = marqueeEnd_ = pos;
+    marqueeBase_ = additive ? ctx_.selection : std::vector<uint64_t>{};
+    if (!additive) ctx_.select(0);
+    ctx_.clearKeySelection();
 }
 
-void TimelinePanel::updateMarquee(EditorContext& ctx, ImDrawList* dl) {
-    if (!marquee_) return;
-    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        marquee_ = false;
-        return;
-    }
-    const ImVec2 m = ImGui::GetIO().MousePos;
-    const ImVec2 a(std::min(marqueeStart_.x, m.x), std::min(marqueeStart_.y, m.y));
-    const ImVec2 b(std::max(marqueeStart_.x, m.x), std::max(marqueeStart_.y, m.y));
-    if (b.x - a.x < 3.0f && b.y - a.y < 3.0f) return; // still a click
-
+void TimelinePanel::updateMarquee(QPointF pos) {
+    marqueeEnd_ = pos;
+    const QRectF r = QRectF(marqueeStart_, marqueeEnd_).normalized();
+    if (r.width() < 3 && r.height() < 3) return; // still a click
+    computeItems();
     // Clips whose row the box touches; inside the track area the box must also touch the clip.
-    ctx.selection = marqueeBase_;
+    ctx_.selection = marqueeBase_;
     for (const ClipRect& c : clips_) {
-        const bool vertical = c.bottom > a.y && c.top < b.y;
-        const bool horizontal = a.x < trackX0_ || (c.x2 > a.x && c.x1 < b.x);
-        if (vertical && horizontal && !ctx.isSelected(c.id)) ctx.selection.push_back(c.id);
+        const bool vertical = c.bottom > r.top() && c.top < r.bottom();
+        const bool horizontal = r.left() < trackX0() || (c.x2 > r.left() && c.x1 < r.right());
+        if (vertical && horizontal && !ctx_.isSelected(c.id)) ctx_.selection.push_back(c.id);
     }
-    dl->AddRectFilled(a, b, theme::accent(22));
-    dl->AddRect(a, b, theme::accent(160));
+    relayout();
 }
 
-int TimelinePanel::dropGapAt(float y) const {
-    int gap = 0;
-    for (const RowRect& r : rows_)
-        if (y > (r.top + r.bottom) * 0.5f) gap = r.index + 1;
-    return gap;
-}
-
-void TimelinePanel::drawDropIndicator(ImDrawList* dl, const DropTarget& target, float x0, float width) const {
-    if (!target.valid) return;
-    if (!target.newTrack) { // joining an existing track: outline that row
-        for (const RowRect& r : rows_) {
-            if (r.track != target.track) continue;
-            const ImU32 col = target.fits ? theme::kAccent : theme::kDanger;
-            dl->AddRectFilled(ImVec2(trackX0_, r.top + 1), ImVec2(x0 + width - 2, r.bottom - 1),
-                              target.fits ? theme::accent(30) : theme::withAlpha(theme::kDanger, 30), 4.0f);
-            dl->AddRect(ImVec2(trackX0_, r.top + 1), ImVec2(x0 + width - 2, r.bottom - 1), col, 4.0f, 0, 2.0f);
-        }
-        return;
-    }
-    float y = rowsBottom_;
-    for (const RowRect& r : rows_)
-        if (r.index == target.gap) y = r.top;
-    dl->AddLine(ImVec2(x0 + 4, y), ImVec2(x0 + width - 4, y), theme::kAccent, 2.0f);
-    dl->AddCircleFilled(ImVec2(x0 + 6, y), 4.0f, theme::kAccent);
-}
-
-void TimelinePanel::beginKeyDrag(EditorContext& ctx) {
+void TimelinePanel::beginKeyDrag(QPointF pos) {
     drag_ = Drag::Keys;
-    dragStartX_ = ImGui::GetIO().MousePos.x;
+    dragStart_ = pos;
+    keysMoved_ = false;
     dragKeys_.clear();
-    for (const auto& sel : ctx.selectedKeys) {
-        Layer* layer = ctx.comp().findLayer(sel.layerId);
+    for (const auto& sel : ctx_.selectedKeys) {
+        Layer* layer = ctx_.comp().findLayer(sel.layerId);
         if (!layer) continue;
         auto props = layer->properties();
         if (PropertyRef* p = layer->findProperty(props, sel.propertyId.c_str()))
             if (const int i = p->anim->findKeyByUid(sel.keyUid); i >= 0) dragKeys_.emplace_back(sel, p->anim->keyTime(i));
     }
-    collectTimeSnapTargets(ctx, {}, true);
+    collectTimeSnapTargets({}, true);
 }
 
-void TimelinePanel::updateKeyDrag(EditorContext& ctx) {
-    if (!ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.0f)) return;
+void TimelinePanel::updateKeyDrag(QPointF pos) {
+    if (!keysMoved_ && std::fabs(pos.x() - dragStart_.x()) < 2.0) return;
+    keysMoved_ = true;
     std::vector<double> edges;
     for (const auto& [sel, orig] : dragKeys_) edges.push_back(orig);
-    const double delta = snappedDelta(ctx, edges, (ImGui::GetIO().MousePos.x - dragStartX_) / pxPerSec_);
+    const double delta = snappedDelta(edges, (pos.x() - dragStart_.x()) / pxPerSec_);
     for (const auto& [sel, orig] : dragKeys_) {
-        Layer* layer = ctx.comp().findLayer(sel.layerId);
+        Layer* layer = ctx_.comp().findLayer(sel.layerId);
         if (!layer) continue;
         auto props = layer->properties();
         if (PropertyRef* p = layer->findProperty(props, sel.propertyId.c_str()))
@@ -1230,20 +1722,21 @@ void TimelinePanel::updateKeyDrag(EditorContext& ctx) {
                 p->anim->sortKeys();
             }
     }
-    ctx.touch();
+    ctx_.touch();
+    relayout();
 }
 
-void TimelinePanel::endKeyDrag(EditorContext& ctx) {
+void TimelinePanel::endKeyDrag() {
     drag_ = Drag::None;
     for (const auto& [sel, orig] : dragKeys_) {
-        Layer* layer = ctx.comp().findLayer(sel.layerId);
+        Layer* layer = ctx_.comp().findLayer(sel.layerId);
         if (!layer) continue;
         auto props = layer->properties();
         if (PropertyRef* p = layer->findProperty(props, sel.propertyId.c_str())) p->anim->removeDuplicateKeys();
     }
     // Drop selections whose key was merged away.
-    std::erase_if(ctx.selectedKeys, [&](const KeySelection& sel) {
-        Layer* layer = ctx.comp().findLayer(sel.layerId);
+    std::erase_if(ctx_.selectedKeys, [&](const KeySelection& sel) {
+        Layer* layer = ctx_.comp().findLayer(sel.layerId);
         if (!layer) return true;
         auto props = layer->properties();
         PropertyRef* p = layer->findProperty(props, sel.propertyId.c_str());
@@ -1252,52 +1745,30 @@ void TimelinePanel::endKeyDrag(EditorContext& ctx) {
     dragKeys_.clear();
 }
 
-void TimelinePanel::drawKeyContextMenu(EditorContext& ctx) {
-    if (openKeyMenu_) {
-        ImGui::OpenPopup("##keymenu");
-        openKeyMenu_ = false;
+bool TimelinePanel::dropTimeAndGap(QPointF pos, double& t, int& gap) {
+    computeItems();
+    t = std::max(0.0, xToTime(std::max(static_cast<float>(pos.x()), trackX0())));
+    if (ctx_.snapping && !ctrlHeld()) { // snaps to clips, keys and the playhead like everything else
+        collectTimeSnapTargets({}, false);
+        t = snappedDelta({0.0}, t);
+    } else {
+        t = ctx_.comp().snapToFrame(t);
     }
-    if (!ImGui::BeginPopup("##keymenu")) return;
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "%d keyframe%s", static_cast<int>(ctx.selectedKeys.size()),
-                       ctx.selectedKeys.size() == 1 ? "" : "s");
-    ImGui::Separator();
-    for (int i = 0; i < static_cast<int>(Easing::Count); ++i) {
-        const auto e = static_cast<Easing>(i);
-        if (e == Easing::Custom) continue;
-        if (ImGui::MenuItem(easingLabel(e))) ctx.setSelectedKeysEasing(e);
-    }
-    if (ImGui::BeginMenu("Custom Curve")) {
-        if (ImGui::IsWindowAppearing()) curveEdit_ = ctx.selectedKeysCurve();
-        if (curveEditor(curveEdit_, 180.0f)) ctx.setSelectedKeysCurve(curveEdit_);
-        ImGui::SetNextItemWidth(220.0f);
-        if (ImGui::DragFloat4("##bez", &curveEdit_.x1, 0.005f, -1.0f, 2.0f, "%.2f")) {
-            curveEdit_.x1 = std::clamp(curveEdit_.x1, 0.0f, 1.0f);
-            curveEdit_.x2 = std::clamp(curveEdit_.x2, 0.0f, 1.0f);
-            ctx.setSelectedKeysCurve(curveEdit_);
-        }
-        ImGui::TextColored(theme::vec(theme::kTextFaint), "Start from:");
-        const Easing starts[] = {Easing::Linear, Easing::EaseIn, Easing::EaseOut, Easing::EaseInOut, Easing::BackOut};
-        for (Easing e : starts) {
-            if (e != starts[0]) ImGui::SameLine();
-            const char* label = e == Easing::EaseInOut ? "In Out" : e == Easing::BackOut ? "Back" : e == Easing::EaseIn ? "In"
-                              : e == Easing::EaseOut ? "Out" : "Lin";
-            if (ImGui::SmallButton(label)) {
-                curveEdit_ = bezierFor(e);
-                ctx.setSelectedKeysCurve(curveEdit_);
+    gap = dropGapAt(static_cast<float>(pos.y()));
+    // The gap counts visible tracks; moveTracks counts every row.
+    int visible = 0;
+    int target = static_cast<int>(ctx_.comp().trackRows().size());
+    for (const Item& r : items_)
+        if (r.kind == Item::Track) {
+            if (visible == gap) {
+                target = r.rowIndex;
+                break;
             }
+            ++visible;
         }
-        ImGui::EndMenu();
-    }
-    if (ctx.selectionHasPathKeys()) {
-        ImGui::Separator();
-        ImGui::TextColored(theme::vec(theme::kTextFaint), "Motion path");
-        if (ImGui::MenuItem("Auto Bezier")) ctx.setSelectedKeysPath(PathMode::Auto);
-        if (ImGui::MenuItem("Linear (corner)")) ctx.setSelectedKeysPath(PathMode::Linear);
-        if (ImGui::MenuItem("Custom Handles")) ctx.setSelectedKeysPath(PathMode::Custom);
-    }
-    ImGui::Separator();
-    if (ImGui::MenuItem("Delete", "Del")) ctx.deleteSelectedKeys();
-    ImGui::EndPopup();
+    dropGap_ = gap;
+    gap = target;
+    return true;
 }
 
 } // namespace bemotion

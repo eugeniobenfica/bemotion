@@ -1,10 +1,13 @@
 #include "media/MediaManager.h"
 
 #include "media/MediaIO.h"
-#include "render/GL.h"
 #include "render/SceneRenderer.h"
 
+#include "include/core/SkData.h"
+#include "include/core/SkImageInfo.h"
+
 #include <chrono>
+#include <cmath>
 #include <future>
 #include <map>
 #include <mutex>
@@ -15,43 +18,26 @@ namespace {
 
 std::filesystem::path pathOf(const std::string& utf8) { return std::filesystem::path(std::u8string(utf8.begin(), utf8.end())); }
 
-GLuint makeTexture() {
-    GLuint tex = 0;
-    glGenTextures(1, &tex);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, 0x812F); // GL_CLAMP_TO_EDGE
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, 0x812F);
-    return tex;
+// Straight RGBA -> an immutable Skia image (copied; mipmaps for still pictures that get scaled down).
+sk_sp<SkImage> toImage(int w, int h, const std::vector<uint8_t>& rgba, bool mipmaps) {
+    if (w <= 0 || h <= 0 || rgba.size() < static_cast<size_t>(w) * h * 4) return nullptr;
+    const SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType, kUnpremul_SkAlphaType);
+    sk_sp<SkImage> img = SkImages::RasterFromData(info, SkData::MakeWithCopy(rgba.data(), rgba.size()), static_cast<size_t>(w) * 4);
+    return img && mipmaps ? img->withDefaultMipmaps() : img;
 }
-
-void upload(GLuint tex, int w, int h, const std::vector<uint8_t>& rgba, bool sameSize) {
-    GLint previous = 0;
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &previous);
-    glBindTexture(GL_TEXTURE_2D, tex);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    if (sameSize) glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-    else glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
-    glBindTexture(GL_TEXTURE_2D, static_cast<GLuint>(previous));
-}
-
-ImTextureID asId(GLuint tex) { return static_cast<ImTextureID>(static_cast<uintptr_t>(tex)); }
 
 } // namespace
 
 struct MediaManager::Impl {
-    struct Image {
+    struct Picture { // an image, or a video's thumbnail
         std::string path;
-        GLuint tex = 0;
-        std::string error;
+        sk_sp<SkImage> image;
     };
-    struct Video { // per layer
+    struct Video { // per (composition, layer)
         std::string path;
         std::unique_ptr<VideoReader> reader;
-        GLuint tex = 0;
-        int w = 0, h = 0;
-        double shown = -1.0; // source time of the uploaded frame
+        sk_sp<SkImage> image;
+        double shown = -1.0; // source time of `image`
         std::vector<uint8_t> rgba;
         int lastUse = 0;
     };
@@ -61,14 +47,14 @@ struct MediaManager::Impl {
         std::future<std::pair<std::vector<float>, std::string>> job;
         std::string error;
     };
-    std::map<uint64_t, Image> images;     // by media id (images, video thumbnails)
+    std::map<uint64_t, Picture> pictures; // by media id
     // By composition and layer: an export renders its own snapshot of the composition, so it gets
     // readers of its own instead of seeking the editor's back and forth.
     std::map<std::pair<const Composition*, uint64_t>, Video> videos;
     int tick = 0;
-    std::map<uint64_t, Audio> audios;     // by media id
+    std::map<uint64_t, Audio> audios; // by media id
     std::map<uint64_t, std::string> errors;
-    mutable std::mutex mutex;             // audios: read by the audio engine from other threads
+    mutable std::mutex mutex; // audios: read by the audio engine from other threads
 };
 
 MediaManager& MediaManager::get() {
@@ -89,11 +75,7 @@ void MediaManager::install() {
 
 void MediaManager::release() {
     Impl& m = impl();
-    for (auto& [id, img] : m.images)
-        if (img.tex) glDeleteTextures(1, &img.tex);
-    for (auto& [id, v] : m.videos)
-        if (v.tex) glDeleteTextures(1, &v.tex);
-    m.images.clear();
+    m.pictures.clear();
     m.videos.clear();
     render::setMediaProvider({});
 }
@@ -125,21 +107,16 @@ void MediaManager::update(const Composition& comp) {
     ++m.tick;
     for (auto it = m.videos.begin(); it != m.videos.end();) {
         const bool gone = it->first.first == &comp ? !comp.findLayer(it->first.second) : m.tick - it->second.lastUse > 120;
-        if (gone) {
-            if (it->second.tex) glDeleteTextures(1, &it->second.tex);
-            it = m.videos.erase(it);
-        } else {
-            ++it;
-        }
+        it = gone ? m.videos.erase(it) : std::next(it);
     }
 }
 
-ImTextureID MediaManager::thumbnail(const MediaItem& item) {
+sk_sp<SkImage> MediaManager::thumbnail(const MediaItem& item) {
     Impl& m = impl();
-    Impl::Image& img = m.images[item.id];
-    if (img.path == item.path) return asId(img.tex);
-    img.path = item.path;
-    img.error.clear();
+    Impl::Picture& pic = m.pictures[item.id];
+    if (pic.path == item.path) return pic.image;
+    pic.path = item.path;
+    pic.image = nullptr;
     std::vector<uint8_t> rgba;
     int w = 0, h = 0;
     std::string error;
@@ -153,45 +130,36 @@ ImTextureID MediaManager::thumbnail(const MediaItem& item) {
         }
     }
     if (!ok) {
-        img.error = error;
         if (!error.empty()) m.errors[item.id] = error;
-        return 0;
+        return nullptr;
     }
-    if (!img.tex) img.tex = makeTexture();
-    upload(img.tex, w, h, rgba, false);
-    return asId(img.tex);
+    pic.image = toImage(w, h, rgba, item.kind == MediaKind::Image);
+    return pic.image;
 }
 
-ImTextureID MediaManager::frameFor(const Composition& comp, const Layer& layer, double t) {
+sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& layer, double t) {
     const MediaItem* item = comp.findMedia(layer.media.mediaId);
-    if (!item || !item->hasVideo) return 0;
+    if (!item || !item->hasVideo) return nullptr;
     if (item->kind == MediaKind::Image) return thumbnail(*item); // the full image
     Impl& m = impl();
     Impl::Video& v = m.videos[{&comp, layer.id}];
     v.lastUse = m.tick;
     if (v.path != item->path) {
-        if (v.tex) glDeleteTextures(1, &v.tex);
         v = {};
         v.path = item->path;
+        v.lastUse = m.tick;
         std::string error;
         v.reader = VideoReader::open(pathOf(item->path), &error);
-        if (!v.reader) {
-            m.errors[item->id] = error;
-            return 0;
-        }
+        if (!v.reader) m.errors[item->id] = error;
     }
-    if (!v.reader) return 0;
+    if (!v.reader) return nullptr;
     const double source = std::clamp(layer.media.sourceTime(t), 0.0, std::max(0.0, item->duration));
     const double frame = item->fps > 0 ? 1.0 / item->fps : 1.0 / 30.0;
-    if (v.tex && std::fabs(source - v.shown) < frame * 0.5) return asId(v.tex); // this frame is already up
-    if (!v.reader->frameAt(source, v.rgba)) return v.tex ? asId(v.tex) : 0;
-    const int w = v.reader->width(), h = v.reader->height();
-    const bool sameSize = v.tex && w == v.w && h == v.h;
-    if (!v.tex) v.tex = makeTexture();
-    upload(v.tex, w, h, v.rgba, sameSize);
-    v.w = w, v.h = h;
+    if (v.image && std::fabs(source - v.shown) < frame * 0.5) return v.image; // this frame is already decoded
+    if (!v.reader->frameAt(source, v.rgba)) return v.image;
+    v.image = toImage(v.reader->width(), v.reader->height(), v.rgba, false);
     v.shown = source;
-    return asId(v.tex);
+    return v.image;
 }
 
 AudioData MediaManager::audio(uint64_t mediaId) const {

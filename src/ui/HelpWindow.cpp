@@ -1,16 +1,25 @@
-#include "ui/HelpWindow.h"
+// Help window: keyboard shortcuts (drawn as key caps), about the project,
+// credits and the license.
+
+#include "ui/Dialogs.h"
 
 #include "app/Platform.h"
-#include "render/Fonts.h"
+#include "ui/AppSignals.h"
 #include "ui/Keymap.h"
+#include "ui/PagedWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
-#include <imgui.h>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QPainter>
+#include <QPlainTextEdit>
+#include <QPointer>
+#include <QPushButton>
+#include <QVBoxLayout>
 
-#include <algorithm>
 #include <cctype>
-#include <cfloat>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -20,9 +29,6 @@ namespace bemotion::ui {
 namespace {
 
 constexpr const char* kRepoUrl = "https://github.com/eugeniobenfica/bemotion";
-
-bool g_open = false;
-HelpTab g_tab = HelpTab::Shortcuts;
 
 struct Shortcut {
     const char* keys; // "+" joins keys, " / " separates alternatives
@@ -40,7 +46,7 @@ const std::vector<Shortcut>& mouseGestures() {
         {"Alt+Drag", "Break a motion path handle into a corner"},
         {"Shift+Drag", "Constrain a move, uniform scale, 15° rotation"},
         {"Ctrl+Drag", "Move without snapping"},
-        {"`", "Maximize the panel under the mouse (again to restore)"},
+        {"Double Click a tab", "Maximize that panel (again to restore)"},
     };
     return items;
 }
@@ -52,14 +58,17 @@ struct Credit {
     const char* use;
 };
 constexpr Credit kCredits[] = {
-    {"Dear ImGui", "Omar Cornut and contributors", "MIT", "the whole user interface"},
-    {"GLFW", "Marcus Geelnard, Camilla Löwy", "zlib", "windows, input and OpenGL context"},
+    {"Qt 6", "The Qt Company and contributors", "LGPL 3", "windows, widgets, input and the whole user interface"},
+    {"Qt Advanced Docking System", "Uwe Kindler and contributors", "LGPL 2.1", "dockable, tabbed and floating panels"},
+    {"Skia", "Google and the Skia authors", "BSD 3-Clause", "drawing shapes, text, images and effects"},
+    {"HarfBuzz", "The HarfBuzz developers", "MIT", "text shaping (ligatures, complex scripts)"},
+    {"ICU", "Unicode, Inc.", "Unicode License", "bidirectional text and line breaking"},
+    {"FFmpeg", "The FFmpeg developers", "LGPL 2.1+ / GPL", "video and audio import, MP4 / ProRes / WebM / GIF export"},
     {"nlohmann/json", "Niels Lohmann", "MIT", "project, settings, preset and theme files"},
-    {"stb", "Sean Barrett", "MIT / Public Domain", "font scanning, image import and PNG export"},
-    {"miniaudio", "David Reid", "MIT-0 / Public Domain", "audio playback and WAV / MP3 / FLAC decoding"},
+    {"stb", "Sean Barrett", "MIT / Public Domain", "image import and PNG export"},
+    {"miniaudio", "David Reid", "MIT-0 / Public Domain", "audio playback"},
     {"Lua 5.4", "PUC-Rio (Lua.org)", "MIT", "the plugin scripting language"},
     {"Inter", "Rasmus Andersson", "SIL Open Font License 1.1", "the interface typeface"},
-    {"FFmpeg (optional)", "The FFmpeg developers", "LGPL / GPL", "ProRes, WebM and GIF export when installed"},
 };
 
 constexpr const char* kLicense =
@@ -77,48 +86,111 @@ constexpr const char* kLicense =
     "TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE "
     "SOFTWARE.";
 
-void paragraph(const char* text, ImU32 color = 0) {
-    ImGui::PushStyleColor(ImGuiCol_Text, color ? color : theme::kTextDim);
-    ImGui::TextWrapped("%s", text);
-    ImGui::PopStyleColor();
-}
-
-void title(const char* text) {
-    ImGui::PushFont(Fonts::uiBold(), ImGui::GetFontSize() * 1.15f);
-    ImGui::TextUnformatted(text);
-    ImGui::PopFont();
-    ImGui::Spacing();
-}
-
-void shortcutTable(const char* id, const std::vector<std::pair<std::string, std::string>>& rows) {
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) return;
-    ImGui::TableSetupColumn("keys", ImGuiTableColumnFlags_WidthFixed, 270.0f);
-    ImGui::TableSetupColumn("action", ImGuiTableColumnFlags_WidthStretch);
-    for (const auto& [keys, action] : rows) {
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        if (keys.empty()) ImGui::TextDisabled("(none)");
-        else keyCaps(keys.c_str());
-        ImGui::TableSetColumnIndex(1);
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(action.c_str());
+// "Ctrl+Shift+Z / Ctrl+Y" drawn as key caps.
+class KeyCaps : public QWidget {
+public:
+    explicit KeyCaps(std::string keys) : keys_(std::move(keys)) {
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        setMinimumHeight(fontMetrics().height() + 12);
+        setMinimumWidth(static_cast<int>(layoutWidth()));
     }
-    ImGui::EndTable();
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        Draw d(p);
+        float x = 0;
+        const float h = static_cast<float>(fontMetrics().height() + 8);
+        for (const Part& part : parts()) {
+            if (part.separator) {
+                const float w = d.textWidth(part.text);
+                d.text({x + 3, (h - d.textHeight()) * 0.5f}, theme::kTextFaint, part.text);
+                x += w + 6;
+                continue;
+            }
+            const float w = std::max(h, d.textWidth(part.text) + 14.0f);
+            const float r = std::min(6.0f, h * 0.25f);
+            d.rectFilled({x, 2}, {x + w, h + 2}, theme::kBorder, r); // the key's side
+            d.rectFilled({x, 0}, {x + w, h}, theme::kBgRaised, r);
+            d.rect({x, 0}, {x + w, h}, theme::kBorder, r);
+            d.text({x + (w - d.textWidth(part.text)) * 0.5f, (h - d.textHeight()) * 0.5f}, theme::kText, part.text);
+            x += w + 3;
+        }
+    }
+
+private:
+    struct Part {
+        QString text;
+        bool separator;
+    };
+    std::vector<Part> parts() const {
+        std::vector<Part> out;
+        const std::string& text = keys_;
+        size_t start = 0;
+        bool firstCombo = true;
+        while (start <= text.size()) {
+            size_t end = text.find(" / ", start);
+            if (end == std::string::npos) end = text.size();
+            const std::string combo = text.substr(start, end - start);
+            if (!firstCombo) out.push_back({" / ", true});
+            firstCombo = false;
+            // "+" joins keys, except a key that is itself "+".
+            size_t k = 0;
+            bool firstKey = true;
+            while (k <= combo.size()) {
+                size_t plus = combo.find('+', k + 1);
+                if (plus == std::string::npos) plus = combo.size();
+                if (!firstKey) out.push_back({"+", true});
+                firstKey = false;
+                out.push_back({QString::fromStdString(combo.substr(k, plus - k)), false});
+                k = plus + 1;
+                if (plus >= combo.size()) break;
+            }
+            start = end + 3;
+            if (end >= text.size()) break;
+        }
+        return out;
+    }
+    float layoutWidth() const {
+        const QFontMetricsF fm(font());
+        const float h = static_cast<float>(fm.height() + 8);
+        float x = 0;
+        for (const Part& part : parts())
+            x += part.separator ? static_cast<float>(fm.horizontalAdvance(part.text)) + 6 : std::max(h, static_cast<float>(fm.horizontalAdvance(part.text)) + 14.0f) + 3;
+        return x + 4;
+    }
+    std::string keys_;
+};
+
+void shortcutTable(QVBoxLayout* col, const std::vector<std::pair<std::string, std::string>>& rows) {
+    auto* grid = new QGridLayout;
+    grid->setColumnMinimumWidth(0, 270);
+    grid->setColumnStretch(1, 1);
+    grid->setVerticalSpacing(4);
+    int r = 0;
+    for (const auto& [keys, action] : rows) {
+        if (keys.empty()) grid->addWidget(hintLabel("(none)"), r, 0);
+        else grid->addWidget(new KeyCaps(keys), r, 0);
+        grid->addWidget(new QLabel(QString::fromStdString(action)), r, 1);
+        ++r;
+    }
+    col->addLayout(grid);
 }
 
-void drawShortcuts() {
-    title("Keyboard shortcuts");
-    paragraph("Change any of them in Settings > Shortcuts.");
-    ImGui::Spacing();
+QWidget* shortcutsPage() {
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    col->addWidget(pageTitle("Keyboard shortcuts"));
+    col->addWidget(paragraph("Change any of them in Settings > Shortcuts."));
     std::vector<std::pair<std::string, std::string>> rows;
     const char* group = nullptr;
     auto flush = [&] {
         if (!group) return;
         std::string upper = group;
         for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        sectionLabel(upper.c_str());
-        shortcutTable(group, rows);
-        ImGui::Spacing();
+        col->addSpacing(6);
+        col->addWidget(sectionLabel(QString::fromStdString(upper)));
+        shortcutTable(col, rows);
         rows.clear();
     };
     for (int i = 0; i < static_cast<int>(Action::Count); ++i) {
@@ -128,182 +200,123 @@ void drawShortcuts() {
         rows.emplace_back(chordName(chordOf(static_cast<Action>(i))), info.label);
     }
     flush();
-    sectionLabel("MOUSE");
+    col->addSpacing(6);
+    col->addWidget(sectionLabel("MOUSE"));
     for (const Shortcut& m : mouseGestures()) rows.emplace_back(m.keys, m.action);
-    shortcutTable("mouse", rows);
+    shortcutTable(col, rows);
+    return page;
 }
 
-void drawAbout() {
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    drawLogoMark(dl, ImVec2(p.x + 24, p.y + 24), 23.0f, theme::kAccent);
-    ImGui::SetCursorScreenPos(ImVec2(p.x + 62, p.y + 2));
-    ImGui::PushFont(Fonts::uiBold(), ImGui::GetFontSize() * 1.6f);
-    ImGui::TextUnformatted("bemotion");
-    ImGui::PopFont();
-    ImGui::SetCursorScreenPos(ImVec2(p.x + 62, ImGui::GetCursorScreenPos().y - 2));
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "Version %s  ·  free and open source", BEMOTION_VERSION);
-    ImGui::SetCursorScreenPos(ImVec2(p.x, std::max(ImGui::GetCursorScreenPos().y, p.y + 56)));
-    ImGui::Spacing();
-    paragraph("bemotion is a minimal 2D motion graphics animator. Drop text, shapes and charts on the canvas, set "
-              "keyframes, shape the motion with paths and curves, add effects and export a video.",
-              theme::kText);
-    ImGui::Spacing();
-    paragraph("The goal is simplicity without giving up control: the common moves are one click away (quick "
-              "animations, effect presets, snapping), while every property stays animatable and the interface "
-              "follows the industry standards motion designers already know. Themes and plugins let anyone shape it "
-              "to their taste and extend it.");
-    ImGui::Spacing();
-    paragraph("Written in C++20 with Dear ImGui and OpenGL. Plugins are sandboxed Lua scripts.");
-    ImGui::Spacing();
-    ImGui::Spacing();
-    if (accentButton("View on GitHub")) platform::openWithDefaultApp(kRepoUrl);
-    ImGui::SameLine();
-    if (ImGui::Button("Report an Issue")) platform::openWithDefaultApp(std::string(kRepoUrl) + "/issues");
-    ImGui::SameLine();
-    if (ImGui::Button("Write a Plugin")) platform::openWithDefaultApp(std::string(kRepoUrl) + "/blob/main/docs/PLUGINS.md");
-}
+class Mark : public QWidget {
+public:
+    Mark() { setFixedSize(48, 48); }
 
-void drawCredits() {
-    title("Credits");
-    paragraph("Created by Eugênio Benfica and the bemotion contributors. bemotion stands on the shoulders of these "
-              "open source projects:");
-    ImGui::Spacing();
-    for (const Credit& c : kCredits) {
-        ImGui::PushFont(Fonts::uiBold(), 0.0f);
-        ImGui::TextUnformatted(c.name);
-        ImGui::PopFont();
-        ImGui::SameLine();
-        ImGui::TextColored(theme::vec(theme::kAccent), "%s", c.license);
-        ImGui::TextColored(theme::vec(theme::kTextDim), "%s  ·  %s", c.by, c.use);
-        ImGui::Spacing();
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        drawLogoMark(p, {24, 24}, 23.0f, theme::kAccent);
     }
-    paragraph("Thank you to everyone who builds, tests, reports and shares.", theme::kTextFaint);
+};
+
+QWidget* aboutPage() {
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    auto* head = new QHBoxLayout;
+    head->setSpacing(14);
+    head->addWidget(new Mark);
+    auto* names = new QVBoxLayout;
+    names->setSpacing(0);
+    auto* title = pageTitle("bemotion");
+    QFont f = title->font();
+    f.setPointSizeF(f.pointSizeF() * 1.4);
+    title->setFont(f);
+    names->addWidget(title);
+    names->addWidget(hintLabel(QString("Version %1  ·  free and open source").arg(BEMOTION_VERSION)));
+    head->addLayout(names, 1);
+    col->addLayout(head);
+    col->addSpacing(6);
+    col->addWidget(paragraph("bemotion is a minimal 2D motion graphics animator. Drop text, shapes and charts on the canvas, set "
+                             "keyframes, shape the motion with paths and curves, add effects and export a video.",
+                             theme::kText));
+    col->addWidget(paragraph("The goal is simplicity without giving up control: the common moves are one click away (quick "
+                             "animations, effect presets, snapping), while every property stays animatable and the interface "
+                             "follows the industry standards motion designers already know. Themes and plugins let anyone shape "
+                             "it to their taste and extend it."));
+    col->addWidget(paragraph("Written in C++20 with Qt and Skia; video through FFmpeg. Plugins are sandboxed Lua scripts."));
+    col->addSpacing(10);
+    auto* buttons = new QHBoxLayout;
+    auto* github = accentButton("View on GitHub");
+    QObject::connect(github, &QPushButton::clicked, [] { platform::openWithDefaultApp(kRepoUrl); });
+    auto* issue = new QPushButton("Report an Issue");
+    QObject::connect(issue, &QPushButton::clicked, [] { platform::openWithDefaultApp(std::string(kRepoUrl) + "/issues"); });
+    auto* plugin = new QPushButton("Write a Plugin");
+    QObject::connect(plugin, &QPushButton::clicked, [] { platform::openWithDefaultApp(std::string(kRepoUrl) + "/blob/main/docs/PLUGINS.md"); });
+    buttons->addWidget(github);
+    buttons->addWidget(issue);
+    buttons->addWidget(plugin);
+    buttons->addStretch();
+    col->addLayout(buttons);
+    return page;
 }
 
-void drawLicense() {
-    title("License");
-    paragraph("bemotion is free software under the MIT license: use it for anything, including commercial work, "
-              "and change and share it, as long as the notice below travels with it. Your projects and exported "
-              "videos are entirely yours.",
-              theme::kText);
-    ImGui::Spacing();
-    ImGui::BeginChild("##license", ImVec2(0, 0), ImGuiChildFlags_Borders);
-    paragraph(kLicense);
-    ImGui::EndChild();
+QWidget* creditsPage() {
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    col->addWidget(pageTitle("Credits"));
+    col->addWidget(paragraph("Created by Eugênio Benfica and the bemotion contributors. bemotion stands on the shoulders of these "
+                             "open source projects:"));
+    col->addSpacing(6);
+    for (const Credit& c : kCredits) {
+        auto* row = new QHBoxLayout;
+        auto* name = new QLabel(c.name);
+        QFont f = name->font();
+        f.setWeight(QFont::DemiBold);
+        name->setFont(f);
+        row->addWidget(name);
+        row->addWidget(paragraph(c.license, theme::kAccent));
+        row->addStretch();
+        col->addLayout(row);
+        col->addWidget(paragraph(QString("%1  ·  %2").arg(c.by, c.use)));
+        col->addSpacing(4);
+    }
+    col->addWidget(hintLabel("Thank you to everyone who builds, tests, reports and shares."));
+    return page;
 }
 
-bool sidebarItem(const char* label, Icon icon, bool selected) {
-    const float h = ImGui::GetFrameHeight() + 10.0f;
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float w = ImGui::GetContentRegionAvail().x;
-    const bool clicked = ImGui::InvisibleButton(label, ImVec2(w, h));
-    const bool hovered = ImGui::IsItemHovered();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (selected || hovered) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), selected ? theme::kAccentSoft : theme::kBgHover, 6.0f);
-    if (selected) dl->AddRectFilled(ImVec2(p.x, p.y + 8), ImVec2(p.x + 3, p.y + h - 8), theme::kAccent, 2.0f);
-    const ImU32 col = selected ? theme::kText : theme::kTextDim;
-    drawIcon(dl, icon, ImVec2(p.x + 22, p.y + h * 0.5f), 16.0f, selected ? theme::kAccent : col);
-    dl->AddText(ImVec2(p.x + 42, p.y + (h - ImGui::GetFontSize()) * 0.5f), col, label);
-    return clicked;
-}
-
-// One key cap: rounded, slightly raised.
-void keyCap(const std::string& key) {
-    const ImVec2 ts = ImGui::CalcTextSize(key.c_str());
-    const float h = ImGui::GetFrameHeight() - 2.0f;
-    const float w = std::max(h, ts.x + 14.0f);
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    ImGui::Dummy(ImVec2(w, h + 2.0f));
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float r = std::min(6.0f, h * 0.25f);
-    dl->AddRectFilled(ImVec2(p.x, p.y + 2), ImVec2(p.x + w, p.y + h + 2), theme::kBorder, r); // the key's side
-    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), theme::kBgRaised, r);
-    dl->AddRect(p, ImVec2(p.x + w, p.y + h), theme::kBorder, r);
-    dl->AddText(ImVec2(p.x + (w - ts.x) * 0.5f, p.y + (h - ts.y) * 0.5f), theme::kText, key.c_str());
+QWidget* licensePage() {
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    col->addWidget(pageTitle("License"));
+    col->addWidget(paragraph("bemotion is free software under the MIT license: use it for anything, including commercial work, "
+                             "and change and share it, as long as the notice below travels with it. Your projects and exported "
+                             "videos are entirely yours.",
+                             theme::kText));
+    auto* text = new QPlainTextEdit(kLicense);
+    text->setReadOnly(true);
+    text->setMinimumHeight(320);
+    col->addWidget(text, 1);
+    return page;
 }
 
 } // namespace
 
-void keyCaps(const char* keys) {
-    const std::string text = keys;
-    size_t start = 0;
-    bool firstCombo = true;
-    while (start <= text.size()) {
-        size_t end = text.find(" / ", start);
-        if (end == std::string::npos) end = text.size();
-        const std::string combo = text.substr(start, end - start);
-        if (!firstCombo) {
-            ImGui::SameLine(0, 6);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextColored(theme::vec(theme::kTextFaint), "/");
-            ImGui::SameLine(0, 6);
-        }
-        firstCombo = false;
-        // "+" joins keys, except a key that is itself "+" or ends with it ("Ctrl+=" is fine, "Ctrl++" is not used).
-        size_t k = 0;
-        bool firstKey = true;
-        while (k <= combo.size()) {
-            size_t plus = combo.find('+', k + 1);
-            if (plus == std::string::npos) plus = combo.size();
-            const std::string key = combo.substr(k, plus - k);
-            if (!firstKey) {
-                ImGui::SameLine(0, 3);
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextColored(theme::vec(theme::kTextFaint), "+");
-                ImGui::SameLine(0, 3);
-            }
-            firstKey = false;
-            keyCap(key);
-            k = plus + 1;
-            if (plus >= combo.size()) break;
-        }
-        start = end + 3;
-        if (end >= text.size()) break;
-    }
-}
-
 void openHelp(HelpTab tab) {
-    g_open = true;
-    g_tab = tab;
-    ImGui::SetWindowFocus("Help");
-}
-
-void drawHelp() {
-    if (!g_open) return;
-    const ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(std::min(820.0f, vp->WorkSize.x * 0.92f), std::min(620.0f, vp->WorkSize.y * 0.88f)),
-                             ImGuiCond_Appearing);
-    if (!ImGui::Begin("Help", &g_open, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings)) {
-        ImGui::End();
-        return;
+    static QPointer<PagedWindow> window;
+    if (!window) {
+        window = new PagedWindow("Help", {{"Shortcuts", Icon::Text, shortcutsPage},
+                                          {"About", Icon::Logo, aboutPage},
+                                          {"Credits", Icon::Star, creditsPage},
+                                          {"License", Icon::Lock, licensePage}});
+        window->resize(820, 620);
+        QObject::connect(&AppSignals::get(), &AppSignals::shortcutsChanged, window, [] {
+            if (window && window->currentPage() == 0) window->rebuild();
+        });
+        QObject::connect(&AppSignals::get(), &AppSignals::appearanceChanged, window, [] {
+            if (window) window->rebuild();
+        });
     }
-    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::IsKeyPressed(ImGuiKey_Escape)) g_open = false;
-
-    struct Page {
-        HelpTab tab;
-        const char* label;
-        Icon icon;
-    };
-    static constexpr Page kPages[] = {{HelpTab::Shortcuts, "Shortcuts", Icon::Text},
-                                      {HelpTab::About, "About", Icon::Logo},
-                                      {HelpTab::Credits, "Credits", Icon::Star},
-                                      {HelpTab::License, "License", Icon::Lock}};
-    ImGui::BeginChild("##helpSidebar", ImVec2(170, 0));
-    for (const Page& p : kPages)
-        if (sidebarItem(p.label, p.icon, g_tab == p.tab)) g_tab = p.tab;
-    ImGui::EndChild();
-    ImGui::SameLine(0, 14);
-    ImGui::BeginChild("##helpPage");
-    switch (g_tab) {
-    case HelpTab::Shortcuts: drawShortcuts(); break;
-    case HelpTab::About: drawAbout(); break;
-    case HelpTab::Credits: drawCredits(); break;
-    case HelpTab::License: drawLicense(); break;
-    }
-    ImGui::EndChild();
-    ImGui::End();
+    window->showPage(static_cast<int>(tab));
+    window->present();
 }
 
 } // namespace bemotion::ui

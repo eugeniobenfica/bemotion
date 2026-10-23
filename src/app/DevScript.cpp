@@ -1,7 +1,13 @@
 #include "app/DevScript.h"
 
-#include <imgui.h>
+#include <QApplication>
+#include <QKeyEvent>
+#include <QMouseEvent>
+#include <QTest>
+#include <QWheelEvent>
 
+#include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -10,26 +16,28 @@ namespace bemotion {
 
 namespace {
 
-ImGuiKey keyFromName(const std::string& name) {
-    if (name == "Space") return ImGuiKey_Space;
-    if (name == "Delete") return ImGuiKey_Delete;
-    if (name == "Escape") return ImGuiKey_Escape;
-    if (name == "Ctrl") return ImGuiKey_LeftCtrl;
-    if (name == "Shift") return ImGuiKey_LeftShift;
-    if (name == "Alt") return ImGuiKey_LeftAlt;
-    if (name.size() == 1 && name[0] >= 'A' && name[0] <= 'Z') return static_cast<ImGuiKey>(ImGuiKey_A + (name[0] - 'A'));
-    if (name.size() == 1 && name[0] >= '0' && name[0] <= '9') return static_cast<ImGuiKey>(ImGuiKey_0 + (name[0] - '0'));
-    // Any other key by its ImGui name ("F1", "Comma", "LeftArrow", ...).
-    for (int k = ImGuiKey_NamedKey_BEGIN; k < ImGuiKey_NamedKey_END; ++k)
-        if (name == ImGui::GetKeyName(static_cast<ImGuiKey>(k))) return static_cast<ImGuiKey>(k);
-    return ImGuiKey_None;
+Qt::Key keyFromName(const std::string& name) {
+    static const std::pair<const char*, Qt::Key> kNames[] = {
+        {"Space", Qt::Key_Space},     {"Delete", Qt::Key_Delete},     {"Escape", Qt::Key_Escape},
+        {"Enter", Qt::Key_Return},    {"Ctrl", Qt::Key_Control},      {"Shift", Qt::Key_Shift},
+        {"Alt", Qt::Key_Alt},         {"Left", Qt::Key_Left},         {"Right", Qt::Key_Right},
+        {"Up", Qt::Key_Up},           {"Down", Qt::Key_Down},         {"Home", Qt::Key_Home},
+        {"End", Qt::Key_End},         {"Tab", Qt::Key_Tab},           {"Backspace", Qt::Key_Backspace},
+        {"Comma", Qt::Key_Comma},     {"LeftArrow", Qt::Key_Left},    {"RightArrow", Qt::Key_Right},
+        {"Backslash", Qt::Key_Backslash},
+    };
+    for (const auto& [n, k] : kNames)
+        if (name == n) return k;
+    if (name.size() == 1 && name[0] >= 'A' && name[0] <= 'Z') return static_cast<Qt::Key>(Qt::Key_A + (name[0] - 'A'));
+    if (name.size() == 1 && name[0] >= '0' && name[0] <= '9') return static_cast<Qt::Key>(Qt::Key_0 + (name[0] - '0'));
+    if (name.size() >= 2 && name[0] == 'F') {
+        const int n = std::atoi(name.c_str() + 1);
+        if (n >= 1 && n <= 24) return static_cast<Qt::Key>(Qt::Key_F1 + n - 1);
+    }
+    return Qt::Key_unknown;
 }
 
-void setModifier(ImGuiIO& io, ImGuiKey key, bool down) {
-    if (key == ImGuiKey_LeftCtrl) io.AddKeyEvent(ImGuiMod_Ctrl, down);
-    if (key == ImGuiKey_LeftShift) io.AddKeyEvent(ImGuiMod_Shift, down);
-    if (key == ImGuiKey_LeftAlt) io.AddKeyEvent(ImGuiMod_Alt, down);
-}
+Qt::MouseButton buttonOf(int b) { return b == 1 ? Qt::RightButton : b == 2 ? Qt::MiddleButton : Qt::LeftButton; }
 
 } // namespace
 
@@ -48,13 +56,67 @@ bool DevScript::load(const std::filesystem::path& file) {
     return true;
 }
 
-void DevScript::apply() {
-    ImGuiIO& io = ImGui::GetIO();
+// The widget under the mouse (a popup menu first, or the one holding the press), with the
+// point in its coordinates.
+QWidget* DevScript::target(QWidget* window, QPoint& local) const {
+    const QPoint p(static_cast<int>(mouseX_), static_cast<int>(mouseY_));
+    const QPoint global = window->mapToGlobal(p);
+    QWidget* w = grabbed_.data();
+    if (!w) {
+        if (QWidget* popup = QApplication::activePopupWidget()) {
+            w = popup->childAt(popup->mapFromGlobal(global));
+            if (!w) w = popup;
+        } else if (QWidget* top = QApplication::activeModalWidget(); top && top != window) {
+            w = top->childAt(top->mapFromGlobal(global));
+            if (!w) w = top;
+        } else {
+            w = window->childAt(p);
+            if (!w) w = window;
+        }
+    }
+    local = w->mapFromGlobal(global);
+    return w;
+}
+
+void DevScript::mouseMove(QWidget* window) {
+    QPoint local;
+    QWidget* w = target(window, local);
+    QMouseEvent e(QEvent::MouseMove, local, w->mapToGlobal(local), Qt::NoButton, Qt::MouseButtons(buttons_),
+                  Qt::KeyboardModifiers(modifiers_));
+    QApplication::sendEvent(w, &e);
+}
+
+void DevScript::mouseButton(QWidget* window, int button, bool down) {
+    QPoint local;
+    QWidget* w = target(window, local);
+    const QPoint global = w->mapToGlobal(local);
+    const Qt::MouseButton b = buttonOf(button);
+    if (down) buttons_ |= b;
+    else buttons_ &= ~b;
+    if (down) {
+        const QPoint p(static_cast<int>(mouseX_), static_cast<int>(mouseY_));
+        const bool dbl = frame_ - lastPressFrame_ < 25 && (p - lastPressPos_).manhattanLength() < 4;
+        lastPressFrame_ = dbl ? -100 : frame_;
+        lastPressPos_ = p;
+        grabbed_ = w;
+        if (!dbl && (w->focusPolicy() & Qt::ClickFocus)) w->setFocus(Qt::MouseFocusReason);
+        QMouseEvent e(dbl ? QEvent::MouseButtonDblClick : QEvent::MouseButtonPress, local, global, b, Qt::MouseButtons(buttons_),
+                      Qt::KeyboardModifiers(modifiers_));
+        QApplication::sendEvent(w, &e);
+    } else {
+        QMouseEvent e(QEvent::MouseButtonRelease, local, global, b, Qt::MouseButtons(buttons_), Qt::KeyboardModifiers(modifiers_));
+        QApplication::sendEvent(w, &e);
+        if (!buttons_) grabbed_ = nullptr;
+    }
+}
+
+void DevScript::step(QWidget* window) {
+    ++frame_;
     if (moveFrames_ > 0) {
         mouseX_ += (targetX_ - mouseX_) / moveFrames_;
         mouseY_ += (targetY_ - mouseY_) / moveFrames_;
         --moveFrames_;
-        io.AddMousePosEvent(mouseX_, mouseY_);
+        mouseMove(window);
         return;
     }
     if (waitFrames_ > 0) {
@@ -64,9 +126,12 @@ void DevScript::apply() {
     // Run commands until one consumes this frame.
     while (next_ < commands_.size()) {
         const Command& c = commands_[next_++];
-        auto num = [&](size_t i, float fallback = 0.0f) {
-            return i < c.args.size() ? std::strtof(c.args[i].c_str(), nullptr) : fallback;
-        };
+        if (const char* trace = std::getenv("BEMOTION_SCRIPT_TRACE")) // a log file of the commands run
+            if (FILE* f = std::fopen(trace, "a")) {
+                std::fprintf(f, "[frame %d] %s\n", frame_, c.op.c_str());
+                std::fclose(f);
+            }
+        auto num = [&](size_t i, float fallback = 0.0f) { return i < c.args.size() ? std::strtof(c.args[i].c_str(), nullptr) : fallback; };
         if (c.op == "wait") {
             waitFrames_ = static_cast<int>(num(0, 1)) - 1;
             return;
@@ -74,26 +139,46 @@ void DevScript::apply() {
         if (c.op == "move") {
             targetX_ = num(0);
             targetY_ = num(1);
-            moveFrames_ = static_cast<int>(num(2, 1));
+            moveFrames_ = std::max(1, static_cast<int>(num(2, 1)));
             mouseX_ += (targetX_ - mouseX_) / moveFrames_;
             mouseY_ += (targetY_ - mouseY_) / moveFrames_;
             --moveFrames_;
-            io.AddMousePosEvent(mouseX_, mouseY_);
+            mouseMove(window);
             return;
         }
         if (c.op == "down" || c.op == "up") {
-            io.AddMouseButtonEvent(static_cast<int>(num(0)), c.op == "down");
+            mouseButton(window, static_cast<int>(num(0)), c.op == "down");
             return;
         }
         if (c.op == "wheel") {
-            io.AddMouseWheelEvent(0.0f, num(0));
+            QPoint local;
+            QWidget* w = target(window, local);
+            QWheelEvent e(local, w->mapToGlobal(local), QPoint(), QPoint(0, static_cast<int>(num(0) * 120)), Qt::MouseButtons(buttons_),
+                          Qt::KeyboardModifiers(modifiers_), Qt::NoScrollPhase, false);
+            QApplication::sendEvent(w, &e);
             return;
         }
         if (c.op == "key" && c.args.size() >= 2) {
-            const ImGuiKey key = keyFromName(c.args[0]);
+            const Qt::Key key = keyFromName(c.args[0]);
             const bool down = c.args[1] == "down";
-            setModifier(io, key, down);
-            io.AddKeyEvent(key, down);
+            const Qt::KeyboardModifier mod = key == Qt::Key_Control ? Qt::ControlModifier
+                                             : key == Qt::Key_Shift ? Qt::ShiftModifier
+                                             : key == Qt::Key_Alt   ? Qt::AltModifier
+                                                                    : Qt::NoModifier;
+            if (mod != Qt::NoModifier) {
+                if (down) modifiers_ |= mod;
+                else modifiers_ &= ~mod;
+            }
+            QWidget* focus = QApplication::focusWidget() ? QApplication::focusWidget() : window;
+            if (down) QTest::keyPress(focus, key, Qt::KeyboardModifiers(modifiers_));
+            else QTest::keyRelease(focus, key, Qt::KeyboardModifiers(modifiers_));
+            return;
+        }
+        if (c.op == "type") {
+            std::string text;
+            for (const std::string& a : c.args) text += (text.empty() ? "" : " ") + a;
+            QWidget* focus = QApplication::focusWidget() ? QApplication::focusWidget() : window;
+            QTest::keyClicks(focus, QString::fromStdString(text));
             return;
         }
         if (c.op == "capture" && !c.args.empty()) {
@@ -109,12 +194,6 @@ void DevScript::apply() {
             return;
         }
     }
-}
-
-std::string DevScript::takeCapture() {
-    std::string c = std::move(capture_);
-    capture_.clear();
-    return c;
 }
 
 } // namespace bemotion

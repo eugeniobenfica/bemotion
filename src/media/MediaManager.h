@@ -1,12 +1,14 @@
 #pragma once
 
-// Runtime side of imported media: GPU textures for images and video frames,
-// one video reader per layer (so cut clips of one video show different
-// frames), decoded audio, thumbnails and errors. Plugs into the renderer.
+// Runtime side of imported media: decoded pictures (images, video frames and
+// thumbnails as Skia images), one video reader per (composition, layer) so
+// cut clips of one video show different frames and an export never fights the
+// editor over seeking, decoded audio, and errors. Plugs into the renderer.
 
 #include "core/Project.h"
 
-#include <imgui.h>
+#include "include/core/SkImage.h"
+#include "include/core/SkRefCnt.h"
 
 #include <filesystem>
 #include <memory>
@@ -22,14 +24,14 @@ public:
     static MediaManager& get();
 
     void install(); // registers the renderer's frame provider
-    void release(); // frees GPU textures (GL context still alive)
+    void release(); // frees decoded pictures and readers
 
-    // Once per frame: starts decoding audio of new items, polls finished jobs.
+    // Once per frame: starts decoding audio of new items, polls finished jobs, drops idle readers.
     void update(const Composition& comp);
 
-    // Texture to draw for a media layer at composition time `t` (0 when not available).
-    ImTextureID frameFor(const Composition& comp, const Layer& layer, double t);
-    ImTextureID thumbnail(const MediaItem& item); // first frame / the image; 0 while unavailable
+    // Picture of a media layer at composition time `t` (null when not available).
+    sk_sp<SkImage> frameFor(const Composition& comp, const Layer& layer, double t);
+    sk_sp<SkImage> thumbnail(const MediaItem& item); // the image / an early video frame; null while unavailable
 
     AudioData audio(uint64_t mediaId) const; // null while decoding (or without audio)
     bool audioPending(uint64_t mediaId) const;

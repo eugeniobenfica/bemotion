@@ -4,10 +4,9 @@
 //
 //   ExportJob renders frame by frame with render::OffscreenRenderer and feeds
 //   an Encoder. Encoders:
-//     - MP4 (H.264): Media Foundation on Windows (no extra software needed),
-//       FFmpeg elsewhere
+//     - MP4 (H.264), MOV (ProRes 4444), WebM (VP9), GIF: FFmpeg's libraries,
+//       linked in (FfmpegEncoder.cpp)
 //     - PNG sequence: built in, supports transparency
-//     - MOV (ProRes 4444), WebM (VP9), GIF: require FFmpeg on the PATH
 //
 // A job is stepped from the UI thread (GL context) a few frames at a time so
 // the interface stays responsive and the export can be cancelled.
@@ -20,7 +19,6 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -32,10 +30,7 @@ const char* formatLabel(Format f);
 const char* formatExtension(Format f); // including the dot
 bool formatSupportsAlpha(Format f);
 bool formatNeedsEvenSize(Format f);
-bool formatAvailable(Format f); // false when it needs FFmpeg and FFmpeg was not found
-
-// Path to an ffmpeg executable, if one can be found.
-std::optional<std::filesystem::path> findFfmpeg();
+bool formatAvailable(Format f); // false when the linked FFmpeg has no encoder for it
 
 enum class Quality { Low, Medium, High };
 

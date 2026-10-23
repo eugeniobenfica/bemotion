@@ -2,11 +2,14 @@
 
 #include "ui/panels/TimelinePanel.h"
 
-#include "render/Fonts.h"
+#include "ui/PropertyRow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
-#include <imgui.h>
+#include <QGuiApplication>
+#include <QMouseEvent>
+#include <QPainter>
+#include <QToolTip>
 
 #include <algorithm>
 #include <cmath>
@@ -14,10 +17,13 @@
 
 namespace bemotion {
 
+using ui::Pt;
+using ui::Rgba;
+
 namespace {
 
-constexpr float kHit = 7.0f;       // pick radius (px)
-constexpr float kListRow = 24.0f;  // property list row height
+constexpr float kHit = 7.0f;      // pick radius (px)
+constexpr float kListRow = 24.0f; // property list row height
 
 int components(const PropertyRef& p) {
     return p.kind == PropertyKind::Vec2 ? 2 : p.kind == PropertyKind::Float ? 1 : 0; // colors are not graphed
@@ -45,11 +51,10 @@ float valueAt(const PropertyRef& p, double t, int k) {
 }
 
 // X / Y like After Effects (red / green); single values get a color per property.
-ImU32 curveColor(int propIndex, int comp, int comps) {
-    if (comps == 2) return comp == 0 ? IM_COL32(236, 96, 96, 255) : IM_COL32(96, 204, 120, 255);
-    static constexpr ImU32 kColors[] = {IM_COL32(232, 185, 49, 255), IM_COL32(79, 142, 247, 255),
-                                        IM_COL32(167, 123, 243, 255), IM_COL32(60, 198, 214, 255),
-                                        IM_COL32(242, 140, 56, 255),  IM_COL32(217, 101, 168, 255)};
+Rgba curveColor(int propIndex, int comp, int comps) {
+    if (comps == 2) return comp == 0 ? ui::rgba(236, 96, 96) : ui::rgba(96, 204, 120);
+    static constexpr Rgba kColors[] = {ui::rgba(232, 185, 49), ui::rgba(79, 142, 247), ui::rgba(167, 123, 243),
+                                       ui::rgba(60, 198, 214), ui::rgba(242, 140, 56), ui::rgba(217, 101, 168)};
     return kColors[propIndex % std::size(kColors)];
 }
 
@@ -70,6 +75,14 @@ std::string formatValue(float v) {
     char buf[32];
     std::snprintf(buf, sizeof buf, std::fabs(v) >= 100.0f ? "%.0f" : "%.1f", v);
     return buf;
+}
+
+// Animated (graphable) properties of `layer`, in order.
+std::vector<PropertyRef> animatedProps(Layer& layer) {
+    std::vector<PropertyRef> out;
+    for (const PropertyRef& p : layer.properties())
+        if (components(p) > 0 && p.anim->keyCount() > 0) out.push_back(p);
+    return out;
 }
 
 } // namespace
@@ -110,235 +123,278 @@ void TimelinePanel::applyEase(EditorContext& ctx, Ease ease) {
     if (!ctx.selectedKeys.empty()) ctx.touch();
 }
 
-void TimelinePanel::drawGraphEditor(EditorContext& ctx, float x0, float top, float height) {
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImGuiIO& io = ImGui::GetIO();
-    Layer* layer = ctx.selected();
-    auto hint = [&](const char* text) {
-        dl->AddText(ImVec2(x0 + 16, top + 14), theme::kTextFaint, text);
-    };
-    if (!layer) {
-        hint("Select a layer to edit the curves of its animated properties.");
-        return;
-    }
-    auto props = layer->properties();
-    std::vector<PropertyRef*> animated;
-    for (PropertyRef& p : props)
-        if (components(p) > 0 && p.anim->keyCount() > 0) animated.push_back(&p);
-    if (animated.empty()) {
-        hint("No animated properties: add keyframes (the diamond next to a property) to edit their curves here.");
-        return;
-    }
+float TimelinePanel::graphY(float v) const {
+    return graphBottom_ - (v - graphMin_) / (graphMax_ - graphMin_) * (graphBottom_ - graphTop_);
+}
 
-    // --- left: property list (click to show / hide a curve) -------------------------
-    dl->AddRectFilled(ImVec2(x0, top), ImVec2(trackX0_ - 1, top + height), theme::shade(30));
-    for (size_t pi = 0; pi < animated.size(); ++pi) {
-        const PropertyRef& p = *animated[pi];
-        const float y = top + 8 + kListRow * static_cast<float>(pi);
-        ImGui::SetCursorScreenPos(ImVec2(x0 + 8, y));
-        ImGui::PushID(p.id);
-        const bool hidden = graphHidden_.count(p.id) > 0;
-        if (ImGui::InvisibleButton("##show", ImVec2(leftWidth_ - 16, kListRow))) {
-            if (hidden) graphHidden_.erase(p.id);
-            else graphHidden_.insert(p.id);
-        }
-        const bool hovered = ImGui::IsItemHovered();
-        ImGui::PopID();
-        if (hovered) dl->AddRectFilled(ImVec2(x0 + 8, y), ImVec2(x0 + leftWidth_ - 8, y + kListRow), theme::kBgHover, 4.0f);
-        const int comps = components(p);
-        for (int k = 0; k < comps; ++k) {
-            const ImU32 c = curveColor(static_cast<int>(pi), k, comps);
-            const ImVec2 sw(x0 + 18 + k * 10.0f, y + kListRow * 0.5f);
-            if (hidden) dl->AddCircle(sw, 4.0f, c, 0, 1.5f);
-            else dl->AddCircleFilled(sw, 4.0f, c);
-        }
-        char label[128];
-        std::snprintf(label, sizeof label, "%s  ·  %s", p.group, p.label);
-        dl->AddText(ImVec2(x0 + 46, y + (kListRow - ImGui::GetFontSize()) * 0.5f), hidden ? theme::kTextFaint : theme::kTextDim,
-                    label);
-    }
+float TimelinePanel::graphValue(float y) const {
+    return graphMin_ + (graphBottom_ - y) / (graphBottom_ - graphTop_) * (graphMax_ - graphMin_);
+}
 
-    // --- right: the graph ---------------------------------------------------------------
-    const float gx0 = trackX0_, gx1 = trackX0_ + trackW_;
-    const float gy0 = top + 14, gy1 = top + height - 14;
-    if (gy1 - gy0 < 20.0f) return;
-
-    std::vector<PropertyRef*> shown;
-    for (PropertyRef* p : animated)
-        if (!graphHidden_.count(p->id)) shown.push_back(p);
-
+std::vector<TimelinePanel::GraphHit> TimelinePanel::graphHits() {
+    std::vector<GraphHit> hits;
+    Layer* layer = ctx_.selected();
+    if (!layer) return hits;
+    const auto animated = animatedProps(*layer);
+    const float gx0 = trackX0(), gx1 = trackX0() + trackW();
+    graphTop_ = 14.0f;
+    graphBottom_ = std::max(graphTop_ + 20.0f, static_cast<float>(rowsWidget()->height()) - 14.0f);
     // Vertical range: fit what is visible (frozen while dragging so nothing jumps).
-    if (graphDrag_.kind == GraphDrag::None && !shown.empty()) {
+    if (graphDrag_.kind == GraphHit::None) {
         float lo = 1e30f, hi = -1e30f;
-        for (PropertyRef* p : shown)
-            for (int k = 0; k < components(*p); ++k) {
-                for (int i = 0; i < p->anim->keyCount(); ++i) lo = std::min(lo, keyValue(*p, i, k)), hi = std::max(hi, keyValue(*p, i, k));
+        for (const PropertyRef& p : animated) {
+            if (graphHidden_.count(p.id)) continue;
+            for (int k = 0; k < components(p); ++k) {
+                for (int i = 0; i < p.anim->keyCount(); ++i) lo = std::min(lo, keyValue(p, i, k)), hi = std::max(hi, keyValue(p, i, k));
                 for (float x = gx0; x <= gx1; x += 6.0f) {
-                    const float v = valueAt(*p, xToTime(x), k);
+                    const float v = valueAt(p, xToTime(x), k);
                     lo = std::min(lo, v), hi = std::max(hi, v);
                 }
             }
+        }
+        if (lo > hi) lo = 0.0f, hi = 1.0f;
         if (hi - lo < 1e-3f) lo -= 1.0f, hi += 1.0f;
         const float pad = (hi - lo) * 0.12f;
         graphMin_ = lo - pad, graphMax_ = hi + pad;
     }
-    auto yOf = [&](float v) { return gy1 - (v - graphMin_) / (graphMax_ - graphMin_) * (gy1 - gy0); };
-    auto vOf = [&](float y) { return graphMin_ + (gy1 - y) / (gy1 - gy0) * (graphMax_ - graphMin_); };
-
-    // Grid with value labels.
-    dl->PushClipRect(ImVec2(gx0, top), ImVec2(gx1, top + height), true);
-    for (int g = 0; g <= 4; ++g) {
-        const float v = graphMin_ + (graphMax_ - graphMin_) * (0.1f + 0.8f * g / 4.0f);
-        const float y = yOf(v);
-        dl->AddLine(ImVec2(gx0, y), ImVec2(gx1, y), theme::ink(14));
-        dl->AddText(ImVec2(gx0 + 4, y - ImGui::GetFontSize() - 1), theme::kTextFaint, formatValue(v).c_str());
-    }
-
-    // Interaction surface (drawn items are hit-tested by hand).
-    ImGui::SetCursorScreenPos(ImVec2(gx0, top));
-    ImGui::InvisibleButton("##graph", ImVec2(trackW_, height), ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-    const bool hovered = ImGui::IsItemHovered();
-    const ImVec2 m = io.MousePos;
-
-    struct Hit {
-        GraphDrag::Kind kind;
-        const PropertyRef* prop;
-        int comp;
-        uint32_t uid;
-        int which;
-        ImVec2 pos;
-    };
-    std::vector<Hit> hits;
-    const Hit* hoverHit = nullptr;
-
-    for (size_t si = 0; si < shown.size(); ++si) {
-        const PropertyRef& p = *shown[si];
+    for (const PropertyRef& p : animated) {
+        if (graphHidden_.count(p.id)) continue;
         AnimatedBase& anim = *p.anim;
-        const int comps = components(p);
-        const int pi = static_cast<int>(std::find(animated.begin(), animated.end(), shown[si]) - animated.begin());
-        for (int k = 0; k < comps; ++k) {
-            const ImU32 col = curveColor(pi, k, comps);
-            // The curve.
-            std::vector<ImVec2> pts;
-            for (float x = gx0; x <= gx1 + 2.0f; x += 2.0f) pts.emplace_back(x, yOf(valueAt(p, xToTime(x), k)));
-            dl->AddPolyline(pts.data(), static_cast<int>(pts.size()), col, 0, 1.8f);
+        for (int k = 0; k < components(p); ++k) {
             // Easing handles of each segment (only for selected keys' segments, like After Effects).
             for (int i = 0; i + 1 < anim.keyCount(); ++i) {
                 if (anim.keyEasing(i) == Easing::Hold) continue;
-                const KeySelection a{layer->id, p.id, anim.keyUid(i)}, b{layer->id, p.id, anim.keyUid(i + 1)};
-                const bool selA = ctx.isKeySelected(a), selB = ctx.isKeySelected(b);
+                const bool selA = ctx_.isKeySelected({layer->id, p.id, anim.keyUid(i)});
+                const bool selB = ctx_.isKeySelected({layer->id, p.id, anim.keyUid(i + 1)});
                 if (!selA && !selB) continue;
                 const double ta = anim.keyTime(i), tb = anim.keyTime(i + 1);
                 const float va = keyValue(p, i, k), vb = keyValue(p, i + 1, k);
                 if (std::fabs(vb - va) < 1e-5f) continue; // flat: the timing curve has no height here
                 const BezierEase c = curveOf(anim, i);
-                const ImVec2 ka(timeToX(ta), yOf(va)), kb(timeToX(tb), yOf(vb));
-                const ImVec2 h1(timeToX(ta + c.x1 * (tb - ta)), yOf(va + c.y1 * (vb - va)));
-                const ImVec2 h2(timeToX(ta + c.x2 * (tb - ta)), yOf(va + c.y2 * (vb - va)));
-                if (selA) {
-                    dl->AddLine(ka, h1, theme::ink(110), 1.0f);
-                    dl->AddCircleFilled(h1, 4.0f, theme::kAccent);
-                    hits.push_back({GraphDrag::Handle, &p, k, anim.keyUid(i), 1, h1});
-                }
-                if (selB) {
-                    dl->AddLine(kb, h2, theme::ink(110), 1.0f);
-                    dl->AddCircleFilled(h2, 4.0f, theme::kAccent);
-                    hits.push_back({GraphDrag::Handle, &p, k, anim.keyUid(i), 2, h2});
-                }
+                if (selA)
+                    hits.push_back({GraphHit::Handle, p.id, k, anim.keyUid(i), 1,
+                                    QPointF(timeToX(ta + c.x1 * (tb - ta)), graphY(va + c.y1 * (vb - va))), ""});
+                if (selB)
+                    hits.push_back({GraphHit::Handle, p.id, k, anim.keyUid(i), 2,
+                                    QPointF(timeToX(ta + c.x2 * (tb - ta)), graphY(va + c.y2 * (vb - va))), ""});
             }
-            // Keyframes.
             for (int i = 0; i < anim.keyCount(); ++i) {
-                const ImVec2 kp(timeToX(anim.keyTime(i)), yOf(keyValue(p, i, k)));
-                const bool sel = ctx.isKeySelected({layer->id, p.id, anim.keyUid(i)});
-                const float r = 4.5f;
-                dl->AddRectFilled(ImVec2(kp.x - r, kp.y - r), ImVec2(kp.x + r, kp.y + r), sel ? theme::kAccent : theme::kBgDeep);
-                dl->AddRect(ImVec2(kp.x - r, kp.y - r), ImVec2(kp.x + r, kp.y + r), sel ? theme::kAccentHover : col, 0, 0, 1.5f);
-                hits.push_back({GraphDrag::Key, &p, k, anim.keyUid(i), 0, kp});
+                char label[160];
+                std::snprintf(label, sizeof label, "%s  %s\n%.2f s  ·  %s", p.label, components(p) == 2 ? (k ? "Y" : "X") : "",
+                              anim.keyTime(i), formatValue(keyValue(p, i, k)).c_str());
+                hits.push_back({GraphHit::Key, p.id, k, anim.keyUid(i), 0, QPointF(timeToX(anim.keyTime(i)), graphY(keyValue(p, i, k))), label});
             }
         }
     }
-    dl->PopClipRect();
+    return hits;
+}
 
+const TimelinePanel::GraphHit* TimelinePanel::graphHitAt(const std::vector<GraphHit>& hits, QPointF m) const {
     // Handles win over keys when they overlap.
-    if (hovered && graphDrag_.kind == GraphDrag::None) {
-        float best = kHit;
-        for (const Hit& h : hits) {
-            const float d = std::hypot(h.pos.x - m.x, h.pos.y - m.y) - (h.kind == GraphDrag::Handle ? 1.5f : 0.0f);
-            if (d < best) best = d, hoverHit = &h;
+    const GraphHit* best = nullptr;
+    float bestD = kHit;
+    for (const GraphHit& h : hits) {
+        const float d = static_cast<float>(std::hypot(h.pos.x() - m.x(), h.pos.y() - m.y())) - (h.kind == GraphHit::Handle ? 1.5f : 0.0f);
+        if (d < bestD) bestD = d, best = &h;
+    }
+    return best;
+}
+
+void TimelinePanel::paintGraph(QPainter& p, QSize size) {
+    ui::Draw d(p);
+    const float height = static_cast<float>(size.height());
+    Layer* layer = ctx_.selected();
+    auto hint = [&](const char* text) { d.text({16, 14}, theme::kTextFaint, QString(text)); };
+    if (!layer) {
+        hint("Select a layer to edit the curves of its animated properties.");
+        return;
+    }
+    const auto animated = animatedProps(*layer);
+    if (animated.empty()) {
+        hint("No animated properties: add keyframes (the diamond next to a property) to edit their curves here.");
+        return;
+    }
+    const auto hits = graphHits(); // fits the range too
+
+    // --- left: property list (click to show / hide a curve) -------------------------
+    d.rectFilled({0, 0}, {trackX0() - 1, height}, theme::shade(30));
+    const QPoint mouse = rowsWidget()->mapFromGlobal(QCursor::pos());
+    for (size_t pi = 0; pi < animated.size(); ++pi) {
+        const PropertyRef& pr = animated[pi];
+        const float y = 8 + kListRow * static_cast<float>(pi);
+        const bool hidden = graphHidden_.count(pr.id) > 0;
+        if (rowsWidget()->underMouse() && mouse.x() >= 8 && mouse.x() < leftWidth_ - 8 && mouse.y() >= y && mouse.y() < y + kListRow)
+            d.rectFilled({8, y}, {leftWidth_ - 8, y + kListRow}, theme::kBgHover, 4.0f);
+        const int comps = components(pr);
+        for (int k = 0; k < comps; ++k) {
+            const Rgba c = curveColor(static_cast<int>(pi), k, comps);
+            const Pt sw(18 + k * 10.0f, y + kListRow * 0.5f);
+            if (hidden) d.circle(sw, 4.0f, c, 1.5f);
+            else d.circleFilled(sw, 4.0f, c);
         }
-        if (hoverHit) {
-            ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-            const AnimatedBase& anim = *hoverHit->prop->anim;
-            const int i = anim.findKeyByUid(hoverHit->uid);
-            if (hoverHit->kind == GraphDrag::Key && i >= 0)
-                ImGui::SetTooltip("%s  %s\n%.2f s  ·  %s", hoverHit->prop->label, components(*hoverHit->prop) == 2 ? (hoverHit->comp ? "Y" : "X") : "",
-                                  anim.keyTime(i), formatValue(keyValue(*hoverHit->prop, i, hoverHit->comp)).c_str());
-            else if (hoverHit->kind == GraphDrag::Handle)
-                ImGui::SetTooltip("Drag to shape the easing (influence and speed)");
-        }
+        d.text({46, y + (kListRow - d.textHeight()) * 0.5f}, hidden ? theme::kTextFaint : theme::kTextDim,
+               QString("%1  ·  %2").arg(pr.group, pr.label));
     }
 
-    // Press: pick a key or handle, or clear the selection.
-    if (ImGui::IsItemActivated() || (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))) {
-        const bool right = ImGui::IsMouseClicked(ImGuiMouseButton_Right);
-        if (hoverHit) {
-            const KeySelection sel{layer->id, hoverHit->prop->id, hoverHit->uid};
-            if (hoverHit->kind == GraphDrag::Key) {
-                if (io.KeyShift || io.KeyCtrl) {
-                    if (ctx.isKeySelected(sel) && !right) std::erase(ctx.selectedKeys, sel);
-                    else if (!ctx.isKeySelected(sel)) ctx.selectedKeys.push_back(sel);
-                } else if (!ctx.isKeySelected(sel)) {
-                    ctx.selectedKeys = {sel};
-                }
+    // --- right: the graph ---------------------------------------------------------------
+    const float gx0 = trackX0(), gx1 = trackX0() + trackW();
+    if (graphBottom_ - graphTop_ < 20.0f) return;
+    d.pushClip({gx0, 0}, {gx1, height});
+    for (int g = 0; g <= 4; ++g) {
+        const float v = graphMin_ + (graphMax_ - graphMin_) * (0.1f + 0.8f * g / 4.0f);
+        const float y = graphY(v);
+        d.line({gx0, y}, {gx1, y}, theme::ink(14));
+        d.text({gx0 + 4, y - d.textHeight() - 1}, theme::kTextFaint, formatValue(v));
+    }
+    for (size_t pi = 0; pi < animated.size(); ++pi) {
+        const PropertyRef& pr = animated[pi];
+        if (graphHidden_.count(pr.id)) continue;
+        const AnimatedBase& anim = *pr.anim;
+        const int comps = components(pr);
+        for (int k = 0; k < comps; ++k) {
+            const Rgba col = curveColor(static_cast<int>(pi), k, comps);
+            std::vector<Pt> pts;
+            for (float x = gx0; x <= gx1 + 2.0f; x += 2.0f) pts.emplace_back(x, graphY(valueAt(pr, xToTime(x), k)));
+            d.polyline(pts.data(), static_cast<int>(pts.size()), col, false, 1.8f);
+            for (int i = 0; i < anim.keyCount(); ++i) {
+                const Pt kp(timeToX(anim.keyTime(i)), graphY(keyValue(pr, i, k)));
+                const bool sel = ctx_.isKeySelected({layer->id, pr.id, anim.keyUid(i)});
+                const float r = 4.5f;
+                d.rectFilled({kp.x - r, kp.y - r}, {kp.x + r, kp.y + r}, sel ? theme::kAccent : theme::kBgDeep);
+                d.rect({kp.x - r, kp.y - r}, {kp.x + r, kp.y + r}, sel ? theme::kAccentHover : col, 0, 1.5f);
             }
-            if (right) {
-                if (hoverHit->kind == GraphDrag::Key) openKeyMenu_ = true;
+        }
+    }
+    // Handles with their lines to the key they belong to.
+    for (const GraphHit& h : hits) {
+        if (h.kind != GraphHit::Handle) continue;
+        auto ref = findProperty(ctx_, layer->id, h.prop, -1);
+        if (!ref) {
+            for (const PropertyRef& pr : animated)
+                if (pr.id == h.prop) ref = pr;
+        }
+        if (!ref) continue;
+        const int i = ref->anim->findKeyByUid(h.uid);
+        if (i < 0 || i + 1 >= ref->anim->keyCount()) continue;
+        const int ki = h.which == 1 ? i : i + 1;
+        const Pt key(timeToX(ref->anim->keyTime(ki)), graphY(keyValue(*ref, ki, h.comp)));
+        d.line(key, Pt(h.pos), theme::ink(110));
+        d.circleFilled(Pt(h.pos), 4.0f, theme::kAccent);
+    }
+    d.popClip();
+}
+
+void TimelinePanel::graphPress(QMouseEvent* e) {
+    Layer* layer = ctx_.selected();
+    if (!layer) return;
+    const QPointF m = e->position();
+    const bool right = e->button() == Qt::RightButton;
+    // Property list: show / hide curves.
+    if (m.x() < trackX0()) {
+        const auto animated = animatedProps(*layer);
+        const int row = static_cast<int>(std::floor((m.y() - 8) / kListRow));
+        if (!right && row >= 0 && row < static_cast<int>(animated.size())) {
+            const std::string id = animated[row].id;
+            if (graphHidden_.count(id)) graphHidden_.erase(id);
+            else graphHidden_.insert(id);
+        }
+        rowsWidget()->update();
+        return;
+    }
+    const auto hits = graphHits();
+    const GraphHit* hit = graphHitAt(hits, m);
+    const bool additive = QGuiApplication::keyboardModifiers() & (Qt::ShiftModifier | Qt::ControlModifier);
+    if (hit) {
+        const KeySelection sel{layer->id, hit->prop, hit->uid};
+        if (hit->kind == GraphHit::Key) {
+            if (additive) {
+                if (ctx_.isKeySelected(sel) && !right) std::erase(ctx_.selectedKeys, sel);
+                else if (!ctx_.isKeySelected(sel)) ctx_.selectedKeys.push_back(sel);
+            } else if (!ctx_.isKeySelected(sel)) {
+                ctx_.selectedKeys = {sel};
+            }
+        }
+        if (right) {
+            if (hit->kind == GraphHit::Key) showKeyMenu(e->globalPosition().toPoint());
+            return;
+        }
+        graphDrag_ = {};
+        graphDrag_.kind = hit->kind;
+        graphDrag_.prop = hit->prop;
+        graphDrag_.comp = hit->comp;
+        graphDrag_.uid = hit->uid;
+        graphDrag_.which = hit->which;
+        graphDrag_.startMouse = m;
+        auto props = layer->properties();
+        if (PropertyRef* p = layer->findProperty(props, hit->prop.c_str()))
+            if (const int i = p->anim->findKeyByUid(hit->uid); i >= 0) {
+                graphDrag_.startTime = p->anim->keyTime(i);
+                graphDrag_.startValue = keyValue(*p, i, hit->comp);
+            }
+    } else if (!right && !additive) {
+        ctx_.clearKeySelection();
+    }
+    rowsWidget()->update();
+}
+
+void TimelinePanel::graphMove(QMouseEvent* e) {
+    const QPointF m = e->position();
+    Layer* layer = ctx_.selected();
+    if (graphDrag_.kind == GraphHit::None || !layer || !(e->buttons() & Qt::LeftButton)) {
+        // Hover: tooltips for keys and handles.
+        if (layer && m.x() >= trackX0()) {
+            const auto hits = graphHits();
+            if (const GraphHit* hit = graphHitAt(hits, m)) {
+                rowsWidget()->setCursor(Qt::PointingHandCursor);
+                QToolTip::showText(e->globalPosition().toPoint(),
+                                   hit->kind == GraphHit::Key ? QString::fromUtf8(hit->label.c_str())
+                                                              : QString("Drag to shape the easing (influence and speed)"),
+                                   rowsWidget());
             } else {
-                graphDrag_ = {hoverHit->kind, hoverHit->prop->id, hoverHit->comp, hoverHit->uid, hoverHit->which, m};
-                if (const int i = hoverHit->prop->anim->findKeyByUid(hoverHit->uid); i >= 0) {
-                    graphDrag_.startTime = hoverHit->prop->anim->keyTime(i);
-                    graphDrag_.startValue = keyValue(*hoverHit->prop, i, hoverHit->comp);
-                }
+                rowsWidget()->setCursor(Qt::ArrowCursor);
+                QToolTip::hideText();
             }
-        } else if (!right && !io.KeyShift && !io.KeyCtrl) {
-            ctx.clearKeySelection();
         }
+        rowsWidget()->update();
+        return;
     }
+    if (std::hypot(m.x() - graphDrag_.startMouse.x(), m.y() - graphDrag_.startMouse.y()) > 3.0) graphDrag_.moved = true;
+    if (!graphDrag_.moved) return; // waiting for the drag threshold
+    auto props = layer->properties();
+    PropertyRef* p = layer->findProperty(props, graphDrag_.prop.c_str());
+    if (!p) return;
+    AnimatedBase& anim = *p->anim;
+    const int i = anim.findKeyByUid(graphDrag_.uid);
+    const Composition& comp = ctx_.comp();
+    if (i >= 0 && graphDrag_.kind == GraphHit::Key) {
+        // Time stays between the neighbors, on whole frames; value follows the mouse.
+        const double fd = comp.frameDuration();
+        const double lo = i > 0 ? anim.keyTime(i - 1) + fd : 0.0;
+        const double hi = i + 1 < anim.keyCount() ? anim.keyTime(i + 1) - fd : 1e9;
+        // Relative to the grab point; Shift locks the time (value only).
+        const double t = graphDrag_.startTime + (m.x() - graphDrag_.startMouse.x()) / pxPerSec_;
+        if (!(QGuiApplication::keyboardModifiers() & Qt::ShiftModifier))
+            anim.setKeyTime(i, std::clamp(comp.snapToFrame(t), lo, std::max(lo, hi)));
+        setKeyValue(*p, i, graphDrag_.comp,
+                    graphDrag_.startValue + graphValue(static_cast<float>(m.y())) - graphValue(static_cast<float>(graphDrag_.startMouse.y())));
+        ctx_.touch();
+    } else if (i >= 0 && i + 1 < anim.keyCount() && graphDrag_.kind == GraphHit::Handle) {
+        const double ta = anim.keyTime(i), tb = anim.keyTime(i + 1);
+        const float va = keyValue(*p, i, graphDrag_.comp), vb = keyValue(*p, i + 1, graphDrag_.comp);
+        BezierEase c = curveOf(anim, i);
+        const float fx = static_cast<float>(std::clamp((xToTime(static_cast<float>(m.x())) - ta) / (tb - ta), 0.0, 1.0));
+        const float fy = std::clamp((graphValue(static_cast<float>(m.y())) - va) / (vb - va), -1.0f, 2.0f);
+        if (graphDrag_.which == 1) c.x1 = fx, c.y1 = fy;
+        else c.x2 = fx, c.y2 = fy;
+        setCurve(anim, i, c);
+        ctx_.touch();
+    }
+    rowsWidget()->update();
+}
 
-    // Drag.
-    if (graphDrag_.kind != GraphDrag::None) {
-        if (std::hypot(m.x - graphDrag_.startMouse.x, m.y - graphDrag_.startMouse.y) > 3.0f) graphDrag_.moved = true;
-        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-            graphDrag_.kind = GraphDrag::None;
-        } else if (!graphDrag_.moved) {
-            // waiting for the drag threshold
-        } else if (PropertyRef* p = layer->findProperty(props, graphDrag_.prop.c_str())) {
-            AnimatedBase& anim = *p->anim;
-            const int i = anim.findKeyByUid(graphDrag_.uid);
-            const Composition& comp = ctx.comp();
-            if (i >= 0 && graphDrag_.kind == GraphDrag::Key) {
-                // Time stays between the neighbors, on whole frames; value follows the mouse.
-                const double fd = comp.frameDuration();
-                const double lo = i > 0 ? anim.keyTime(i - 1) + fd : 0.0;
-                const double hi = i + 1 < anim.keyCount() ? anim.keyTime(i + 1) - fd : 1e9;
-                // Relative to the grab point; Shift locks the time (value only).
-                const double t = graphDrag_.startTime + (m.x - graphDrag_.startMouse.x) / pxPerSec_;
-                if (!io.KeyShift) anim.setKeyTime(i, std::clamp(comp.snapToFrame(t), lo, std::max(lo, hi)));
-                setKeyValue(*p, i, graphDrag_.comp, graphDrag_.startValue + vOf(m.y) - vOf(graphDrag_.startMouse.y));
-                ctx.touch();
-            } else if (i >= 0 && i + 1 < anim.keyCount() && graphDrag_.kind == GraphDrag::Handle) {
-                const double ta = anim.keyTime(i), tb = anim.keyTime(i + 1);
-                const float va = keyValue(*p, i, graphDrag_.comp), vb = keyValue(*p, i + 1, graphDrag_.comp);
-                BezierEase c = curveOf(anim, i);
-                const float fx = static_cast<float>(std::clamp((xToTime(m.x) - ta) / (tb - ta), 0.0, 1.0));
-                const float fy = std::clamp((vOf(m.y) - va) / (vb - va), -1.0f, 2.0f);
-                if (graphDrag_.which == 1) c.x1 = fx, c.y1 = fy;
-                else c.x2 = fx, c.y2 = fy;
-                setCurve(anim, i, c);
-                ctx.touch();
-            }
-        }
-    }
+void TimelinePanel::graphRelease(QMouseEvent*) {
+    graphDrag_ = {};
+    rowsWidget()->update();
 }
 
 } // namespace bemotion

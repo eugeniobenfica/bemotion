@@ -3,35 +3,33 @@
 #include "app/EffectLibrary.h"
 #include "app/Platform.h"
 #include "ui/EditorContext.h"
+#include "ui/PropertyRow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
-#include "ui/panels/PropertiesPanel.h"
 
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <imgui_stdlib.h>
+#include <QCheckBox>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QInputDialog>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMenu>
+#include <QPushButton>
+#include <QResizeEvent>
+#include <QScrollBar>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <cctype>
-#include <cfloat>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <sstream>
 #include <vector>
 
 namespace bemotion {
 
 namespace {
-
-constexpr ImGuiTableFlags kTableFlags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings;
-
-bool beginTable(const char* id) {
-    if (!ImGui::BeginTable(id, 4, kTableFlags)) return false;
-    ImGui::TableSetupColumn("key", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight() * 0.8f);
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 92.0f);
-    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("reset", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
-    return true;
-}
 
 bool matches(const std::string& text, const std::string& filter) {
     if (filter.empty()) return true;
@@ -42,10 +40,11 @@ bool matches(const std::string& text, const std::string& filter) {
     return lower(text).find(lower(filter)) != std::string::npos;
 }
 
-void faint(const char* text) {
-    ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
-    ImGui::TextWrapped("%s", text);
-    ImGui::PopStyleColor();
+QLabel* faint(const QString& text) {
+    auto* l = new QLabel(text);
+    l->setWordWrap(true);
+    l->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    return l;
 }
 
 void applyToSelection(EditorContext& ctx, const std::vector<Effect>& effects) {
@@ -55,125 +54,6 @@ void applyToSelection(EditorContext& ctx, const std::vector<Effect>& effects) {
     }
     ctx.touch();
 }
-
-} // namespace
-
-void EffectsPanel::draw(EditorContext& ctx) {
-    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
-    // New in this version: existing layouts get the tab next to Properties.
-    if (ImGuiWindow* props = ImGui::FindWindowByName(PropertiesPanel::kWindowName); props && props->DockId)
-        ImGui::SetNextWindowDockID(props->DockId, ImGuiCond_FirstUseEver);
-    ui::nextPanelWindowClass();
-    if (!ImGui::Begin(kWindowName, &open)) {
-        ImGui::End();
-        return;
-    }
-    if (ui::panelIsMinimized()) {
-        ui::panelMinimizeButton();
-        ImGui::End();
-        return;
-    }
-
-    Layer* layer = ctx.selected();
-    if (layer && layer->type != LayerType::Camera) {
-        drawStack(ctx, *layer);
-    } else {
-        ImGui::TextUnformatted("Effect Controls");
-        faint(layer ? "Cameras have no effects." : "Select a layer to see and edit its effects.");
-    }
-    ImGui::Dummy(ImVec2(0, 6));
-    drawBrowser(ctx);
-
-    ui::panelMinimizeButton();
-    ImGui::End();
-}
-
-void EffectsPanel::drawStack(EditorContext& ctx, Layer& layer) {
-    {
-        const float h = ImGui::GetFrameHeight();
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        ImGui::Dummy(ImVec2(h, h));
-        ui::drawIcon(ImGui::GetWindowDrawList(), ui::iconForLayer(layer), ImVec2(p.x + h * 0.5f, p.y + h * 0.5f), h * 0.6f,
-                     theme::kAccent);
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        ImGui::Text("Effect Controls  ·  %s", layer.name.c_str());
-    }
-    auto props = layer.properties();
-    int removeIndex = -1, moveFrom = -1, moveTo = -1;
-    const float b = ImGui::GetFrameHeight();
-    for (int i = 0; i < static_cast<int>(layer.effects.size()); ++i) {
-        Effect& e = layer.effects[i];
-        ImGui::PushID(i);
-        const float right = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-        if (ImGui::Checkbox("##on", &e.enabled)) ctx.touch();
-        ui::tooltip(e.enabled ? "Turn this effect off" : "Turn this effect on");
-        ImGui::SameLine();
-        ImGui::SetNextItemAllowOverlap();
-        const bool open = ImGui::TreeNodeEx("##fx", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
-                                                        ImGuiTreeNodeFlags_Framed,
-                                            "%s", e.group.c_str());
-        ImGui::SameLine(right - b * 3 - 4);
-        ImGui::BeginDisabled(i == 0);
-        if (ui::iconButton("##up", ui::Icon::ChevronUp, b, "Move up (applied earlier)")) moveFrom = i, moveTo = i - 1;
-        ImGui::EndDisabled();
-        ImGui::SameLine(0, 2);
-        ImGui::BeginDisabled(i + 1 == static_cast<int>(layer.effects.size()));
-        if (ui::iconButton("##down", ui::Icon::ChevronDown, b, "Move down (applied later)")) moveFrom = i, moveTo = i + 1;
-        ImGui::EndDisabled();
-        ImGui::SameLine(0, 2);
-        if (ui::iconButton("##del", ui::Icon::Trash, b, "Remove effect")) removeIndex = i;
-        if (open) {
-            if (beginTable("fxprops")) {
-                for (const PropertyRef& p : props)
-                    if (p.effectIndex == i) propertyRow(ctx, layer, p);
-                if (e.type == EffectType::MotionBlur) {
-                    ImGui::TableNextRow();
-                    ImGui::TableSetColumnIndex(1);
-                    ImGui::AlignTextToFramePadding();
-                    ImGui::TextColored(theme::vec(theme::kTextDim), "Samples");
-                    ImGui::TableSetColumnIndex(2);
-                    ImGui::SetNextItemWidth(-FLT_MIN);
-                    if (ImGui::SliderInt("##samples", &e.samples, 2, 64)) ctx.touch();
-                    ui::tooltip("More samples: smoother blur, slower preview");
-                }
-                ImGui::EndTable();
-            }
-            ImGui::TreePop();
-        }
-        ImGui::PopID();
-    }
-    if (removeIndex >= 0) {
-        layer.effects.erase(layer.effects.begin() + removeIndex);
-        ctx.clearKeySelection();
-        ctx.touch();
-    } else if (moveFrom >= 0) {
-        std::swap(layer.effects[moveFrom], layer.effects[moveTo]);
-        ctx.clearKeySelection();
-        ctx.touch();
-    }
-    if (layer.effects.empty()) faint("No effects yet. Pick one below: it is added to every selected layer.");
-    else faint("Effects run top to bottom. Every parameter can be keyframed here or in the timeline.");
-
-    if (!layer.effects.empty() && ImGui::Button("Save Stack as Preset...")) {
-        saveName_ = layer.name + " effects";
-        ImGui::OpenPopup("Save Effect Preset");
-    }
-    if (ImGui::BeginPopup("Save Effect Preset")) {
-        ImGui::TextUnformatted("Preset name");
-        ImGui::SetNextItemWidth(260);
-        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-        const bool enter = ImGui::InputText("##fxPresetName", &saveName_, ImGuiInputTextFlags_EnterReturnsTrue);
-        if ((ui::accentButton("Save", ImVec2(120, 0)) || enter) && !saveName_.empty()) {
-            EffectPreset preset{saveName_, layer.effects};
-            if (EffectLibrary::save(preset, &message_)) message_ = "Saved \"" + saveName_ + "\" to Effect Presets.";
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
-}
-
-namespace {
 
 struct Category {
     const char* name;  // After Effects' category name
@@ -195,131 +75,340 @@ ui::Icon categoryIcon(const char* category) {
     return ui::Icon::Star;
 }
 
-// Lays out equally sized tiles in as many columns as fit.
-class TileGrid {
-public:
-    explicit TileGrid(float minWidth = 86.0f) {
-        const float spacing = ImGui::GetStyle().ItemSpacing.x;
-        const float avail = ImGui::GetContentRegionAvail().x;
-        columns_ = std::max(1, static_cast<int>((avail + spacing) / (minWidth + spacing)));
-        size_.x = (avail - spacing * (columns_ - 1)) / columns_;
-        size_.y = std::clamp(size_.x * 0.8f, 64.0f, 88.0f);
+// Equally sized tiles in as many columns as fit `width`.
+struct TileGrid {
+    QGridLayout* grid;
+    int columns;
+    QSize size;
+    int count = 0;
+    TileGrid(QVBoxLayout* into, int width) {
+        grid = new QGridLayout;
+        grid->setSpacing(6);
+        grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        into->addLayout(grid);
+        columns = std::max(1, (width + 6) / (86 + 6));
+        const int w = std::max(56, (width - 6 * (columns - 1)) / columns);
+        size = QSize(w, std::clamp(static_cast<int>(w * 0.8f), 64, 88));
     }
-    ImVec2 next() {
-        if (index_++ % columns_ != 0) ImGui::SameLine();
-        return size_;
+    ui::Tile* add(ui::Icon icon, const QString& label) {
+        auto* t = new ui::Tile(icon, label);
+        t->setTileSize(size);
+        grid->addWidget(t, count / columns, count % columns);
+        ++count;
+        return t;
     }
-
-private:
-    int columns_ = 1, index_ = 0;
-    ImVec2 size_;
 };
 
 } // namespace
 
-void effectMenuItems(EditorContext& ctx) {
+void fillEffectMenu(QMenu* menu, EditorContext& ctx) {
     for (const Category& c : kCategories) {
-        if (!ImGui::BeginMenu(c.name)) continue;
+        QMenu* sub = menu->addMenu(ui::makeIcon(c.icon, theme::kTextDim, 16), c.name);
+        sub->setToolTipsVisible(true);
         for (int t = 0; t < static_cast<int>(EffectType::Count); ++t) {
             const auto type = static_cast<EffectType>(t);
             if (std::strcmp(effectCategory(type), c.name) != 0) continue;
-            if (ImGui::MenuItem(effectLabel(type))) applyToSelection(ctx, {makeEffect(type)});
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", effectDescription(type));
+            QAction* a = sub->addAction(effectLabel(type), [&ctx, type] { applyToSelection(ctx, {makeEffect(type)}); });
+            a->setToolTip(effectDescription(type));
         }
-        ImGui::EndMenu();
     }
-    ImGui::Separator();
-    if (ImGui::BeginMenu("Effect Presets")) {
-        for (const auto& lp : EffectLibrary::all()) {
-            ImGui::PushID(&lp);
-            if (ImGui::MenuItem(lp.preset.name.c_str())) applyToSelection(ctx, lp.preset.effects);
-            ImGui::PopID();
-        }
-        ImGui::EndMenu();
+    menu->addSeparator();
+    QMenu* presets = menu->addMenu("Effect Presets");
+    for (const auto& lp : EffectLibrary::all()) {
+        const std::vector<Effect> effects = lp.preset.effects;
+        presets->addAction(QString::fromStdString(lp.preset.name), [&ctx, effects] { applyToSelection(ctx, effects); });
     }
-    if (ImGui::MenuItem("Remove All Effects")) {
+    presets->setEnabled(!presets->isEmpty());
+    menu->addAction("Remove All Effects", [&ctx] {
         for (Layer* l : ctx.selectedLayers()) l->effects.clear();
         ctx.clearKeySelection();
         ctx.touch();
+    });
+}
+
+EffectsPanel::EffectsPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(parent), ctx_(ctx) {
+    setWidgetResizable(true);
+    setFrameShape(QFrame::NoFrame);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    auto* content = new QWidget;
+    auto* col = new QVBoxLayout(content);
+    col->setContentsMargins(8, 8, 8, 8);
+    col->setSpacing(6);
+    stackHost_ = new QVBoxLayout;
+    stackHost_->setContentsMargins(0, 0, 0, 0);
+    col->addLayout(stackHost_);
+    col->addSpacing(6);
+    col->addWidget(ui::sectionLabel("Effects & Presets"));
+    search_ = new QLineEdit;
+    search_->setPlaceholderText("Search effects");
+    search_->setClearButtonEnabled(true);
+    connect(search_, &QLineEdit::textChanged, this, [this] { sync(); });
+    col->addWidget(search_);
+    browserHost_ = new QVBoxLayout;
+    browserHost_->setContentsMargins(0, 0, 0, 0);
+    col->addLayout(browserHost_);
+    col->addStretch();
+    setWidget(content);
+}
+
+void EffectsPanel::resizeEvent(QResizeEvent* e) {
+    QScrollArea::resizeEvent(e);
+    browserKey_.clear(); // tile columns depend on the width
+    sync();
+}
+
+std::string EffectsPanel::stackKey() {
+    std::ostringstream k;
+    const Layer* layer = ctx_.selected();
+    if (!layer) return "none";
+    k << layer->id << ':' << static_cast<int>(layer->type) << ':' << layer->name << ':';
+    for (const Effect& e : layer->effects) k << static_cast<int>(e.type) << ',';
+    return k.str();
+}
+
+std::string EffectsPanel::browserKey() {
+    std::ostringstream k;
+    k << search_->text().toStdString() << '|' << category_ << '|' << ctx_.selection.empty() << '|' << message_ << '|';
+    for (const auto& lp : EffectLibrary::all()) k << lp.preset.name << ',';
+    return k.str();
+}
+
+void EffectsPanel::sync() {
+    if (!isVisible()) return;
+    if (const std::string k = stackKey(); k != stackKey_) {
+        stackKey_ = k;
+        rebuildStack();
+    } else {
+        for (PropertyRow* r : rows_) r->refresh();
+        for (auto& f : refreshers_) f();
+    }
+    if (const std::string k = browserKey(); k != browserKey_) {
+        browserKey_ = k;
+        rebuildBrowser();
     }
 }
 
-void EffectsPanel::drawBrowser(EditorContext& ctx) {
-    ImGui::SeparatorText("Effects & Presets");
-    ImGui::SetNextItemWidth(-FLT_MIN);
-    ImGui::InputTextWithHint("##fxsearch", "Search effects", &search_);
-    const bool canApply = !ctx.selection.empty();
-    if (!canApply) faint("Select layers, then click an effect to apply it.");
+void EffectsPanel::rebuildStack() {
+    rows_.clear();
+    refreshers_.clear();
+    if (stack_) stack_->deleteLater();
+    stack_ = new QWidget;
+    auto* col = new QVBoxLayout(stack_);
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(4);
+    stackHost_->addWidget(stack_);
+
+    Layer* layer = ctx_.selected();
+    if (!layer || layer->type == LayerType::Camera) {
+        col->addWidget(new QLabel("Effect Controls"));
+        col->addWidget(faint(layer ? "Cameras have no effects." : "Select a layer to see and edit its effects."));
+        return;
+    }
+    const uint64_t id = layer->id;
+    {
+        auto* row = new QHBoxLayout;
+        auto* icon = new QLabel;
+        icon->setPixmap(ui::makeIcon(ui::iconForLayer(*layer), theme::kAccent, 20).pixmap(20, 20));
+        row->addWidget(icon);
+        row->addWidget(new QLabel(QString("Effect Controls  ·  %1").arg(QString::fromStdString(layer->name))), 1);
+        col->addLayout(row);
+    }
+    const auto props = layer->properties();
+    const int count = static_cast<int>(layer->effects.size());
+    for (int i = 0; i < count; ++i) {
+        const Effect& e = layer->effects[i];
+        auto* extra = new QWidget;
+        auto* tools = new QHBoxLayout(extra);
+        tools->setContentsMargins(0, 0, 0, 0);
+        tools->setSpacing(2);
+        auto* on = new QCheckBox;
+        connect(on, &QCheckBox::toggled, this, [this, id, i](bool v) {
+            if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size()) && l->effects[i].enabled != v) {
+                l->effects[i].enabled = v;
+                ctx_.touch();
+            }
+        });
+        refreshers_.push_back([this, id, i, on] {
+            if (const Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size())) {
+                const QSignalBlocker b(on);
+                on->setChecked(l->effects[i].enabled);
+                on->setToolTip(l->effects[i].enabled ? "Turn this effect off" : "Turn this effect on");
+            }
+        });
+        tools->addWidget(on);
+        auto move = [this, id](int from, int to) {
+            Layer* l = ctx_.comp().findLayer(id);
+            if (!l || from < 0 || to < 0 || from >= static_cast<int>(l->effects.size()) || to >= static_cast<int>(l->effects.size())) return;
+            std::swap(l->effects[from], l->effects[to]);
+            ctx_.clearKeySelection();
+            ctx_.touch();
+        };
+        auto* up = new ui::IconButton(ui::Icon::ChevronUp, "Move up (applied earlier)", 24);
+        up->setEnabled(i > 0);
+        connect(up, &QAbstractButton::clicked, this, [move, i] { move(i, i - 1); });
+        auto* down = new ui::IconButton(ui::Icon::ChevronDown, "Move down (applied later)", 24);
+        down->setEnabled(i + 1 < count);
+        connect(down, &QAbstractButton::clicked, this, [move, i] { move(i, i + 1); });
+        auto* del = new ui::IconButton(ui::Icon::Trash, "Remove effect", 24);
+        connect(del, &QAbstractButton::clicked, this, [this, id, i] {
+            if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size())) {
+                l->effects.erase(l->effects.begin() + i);
+                ctx_.clearKeySelection();
+                ctx_.touch();
+            }
+        });
+        tools->addWidget(up);
+        tools->addWidget(down);
+        tools->addWidget(del);
+
+        auto* section = new CollapsibleSection(QString::fromStdString(e.group), nullptr, extra);
+        for (const PropertyRef& p : props)
+            if (p.effectIndex == i) rows_.push_back(new PropertyRow(ctx_, id, p, section));
+        if (e.type == EffectType::MotionBlur) {
+            auto* samples = new ui::DragValue;
+            samples->setRange(2.0f, 64.0f);
+            samples->setSpeed(0.2f);
+            samples->setFormat("%.0f");
+            samples->setToolTip("More samples: smoother blur, slower preview");
+            connect(samples, &ui::DragValue::valueChanged, this, [this, id, i](float x) {
+                const int v = static_cast<int>(std::lround(x));
+                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size()) && l->effects[i].samples != v) {
+                    l->effects[i].samples = v;
+                    ctx_.touch();
+                }
+            });
+            refreshers_.push_back([this, id, i, samples] {
+                if (const Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size()))
+                    samples->setValue(static_cast<float>(l->effects[i].samples));
+            });
+            section->addPlainRow("Samples", samples);
+        }
+        col->addWidget(section);
+    }
+    col->addWidget(faint(layer->effects.empty() ? "No effects yet. Pick one below: it is added to every selected layer."
+                                                : "Effects run top to bottom. Every parameter can be keyframed here or in the timeline."));
+    if (!layer->effects.empty()) {
+        auto* save = new QPushButton("Save Stack as Preset...");
+        connect(save, &QPushButton::clicked, this, [this, id] {
+            Layer* l = ctx_.comp().findLayer(id);
+            if (!l) return;
+            bool ok = false;
+            const QString name = QInputDialog::getText(this, "Save Effect Preset", "Preset name", QLineEdit::Normal,
+                                                       QString::fromStdString(l->name + " effects"), &ok);
+            if (!ok || name.trimmed().isEmpty()) return;
+            EffectPreset preset{name.toStdString(), l->effects};
+            if (EffectLibrary::save(preset, &message_)) message_ = "Saved \"" + preset.name + "\" to Effect Presets.";
+            sync();
+        });
+        auto* row = new QHBoxLayout;
+        row->addWidget(save);
+        row->addStretch();
+        col->addLayout(row);
+    }
+    for (auto& f : refreshers_) f();
+}
+
+void EffectsPanel::rebuildBrowser() {
+    if (browser_) browser_->deleteLater();
+    browser_ = new QWidget;
+    auto* col = new QVBoxLayout(browser_);
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(6);
+    browserHost_->addWidget(browser_);
+    const int width = std::max(120, viewport()->width() - 16);
+    const bool canApply = !ctx_.selection.empty();
+    if (!canApply) col->addWidget(faint("Select layers, then click an effect to apply it."));
 
     auto effectTile = [&](EffectType type, TileGrid& grid) {
-        ImGui::PushID(static_cast<int>(type));
-        ImGui::BeginDisabled(!canApply);
-        if (ui::objectTile("##fx", categoryIcon(effectCategory(type)), effectLabel(type), grid.next()))
-            applyToSelection(ctx, {makeEffect(type)});
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("%s\n%s", effectLabel(type), effectDescription(type));
-        ImGui::PopID();
+        ui::Tile* t = grid.add(categoryIcon(effectCategory(type)), effectLabel(type));
+        t->setDimmed(!canApply);
+        t->setToolTip(QString("%1\n%2").arg(effectLabel(type), effectDescription(type)));
+        connect(t, &QAbstractButton::clicked, this, [this, type] {
+            if (!ctx_.selection.empty()) applyToSelection(ctx_, {makeEffect(type)});
+        });
     };
-    std::filesystem::path toRemove;
     auto presetTile = [&](const LibraryEffectPreset& lp, TileGrid& grid) {
-        ImGui::PushID(&lp);
-        ImGui::BeginDisabled(!canApply);
-        if (ui::objectTile("##preset", ui::Icon::Star, lp.preset.name.c_str(), grid.next()))
-            applyToSelection(ctx, lp.preset.effects);
-        ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-            std::string list;
-            for (const Effect& e : lp.preset.effects) list += (list.empty() ? "" : " + ") + std::string(effectLabel(e.type));
-            ImGui::SetTooltip("%s\n%s", lp.preset.name.c_str(), list.c_str());
+        ui::Tile* t = grid.add(ui::Icon::Star, QString::fromStdString(lp.preset.name));
+        t->setDimmed(!canApply);
+        std::string list;
+        for (const Effect& e : lp.preset.effects) list += (list.empty() ? "" : " + ") + std::string(effectLabel(e.type));
+        t->setToolTip(QString::fromStdString(lp.preset.name + "\n" + list));
+        const std::vector<Effect> effects = lp.preset.effects;
+        connect(t, &QAbstractButton::clicked, this, [this, effects] {
+            if (!ctx_.selection.empty()) applyToSelection(ctx_, effects);
+        });
+        if (!lp.file.empty()) {
+            const std::filesystem::path file = lp.file;
+            t->setContextMenuPolicy(Qt::CustomContextMenu);
+            connect(t, &QWidget::customContextMenuRequested, this, [this, t, file](QPoint p) {
+                QMenu menu;
+                menu.addAction("Delete Preset", [this, file] {
+                    EffectLibrary::remove(file);
+                    browserKey_.clear();
+                });
+                menu.exec(t->mapToGlobal(p));
+                sync();
+            });
         }
-        if (!lp.file.empty() && ImGui::BeginPopupContextItem("##fxpresetctx")) {
-            if (ImGui::MenuItem("Delete Preset")) toRemove = lp.file;
-            ImGui::EndPopup();
-        }
-        ImGui::PopID();
     };
 
-    if (!search_.empty()) { // flat results
-        TileGrid grid;
-        int found = 0;
+    const std::string search = search_->text().toStdString();
+    if (!search.empty()) { // flat results
+        TileGrid grid(col, width);
         for (int t = 0; t < static_cast<int>(EffectType::Count); ++t) {
             const auto type = static_cast<EffectType>(t);
-            if (!matches(effectLabel(type), search_) && !matches(effectCategory(type), search_)) continue;
-            effectTile(type, grid);
-            ++found;
+            if (matches(effectLabel(type), search) || matches(effectCategory(type), search)) effectTile(type, grid);
         }
         for (const auto& lp : EffectLibrary::all())
-            if (matches(lp.preset.name, search_)) presetTile(lp, grid), ++found;
-        if (!found) faint("No effect matches your search.");
+            if (matches(lp.preset.name, search)) presetTile(lp, grid);
+        if (!grid.count) col->addWidget(faint("No effect matches your search."));
     } else if (category_.empty()) { // the categories
-        TileGrid grid;
+        TileGrid grid(col, width);
         for (const Category& c : kCategories) {
-            if (ui::objectTile(c.name, c.icon, c.label, grid.next())) category_ = c.name;
-            ui::tooltip(c.name);
+            ui::Tile* t = grid.add(c.icon, c.label);
+            t->setToolTip(c.name);
+            const std::string name = c.name;
+            connect(t, &QAbstractButton::clicked, this, [this, name] {
+                category_ = name;
+                sync();
+            });
         }
-        if (ui::objectTile("##presets", ui::Icon::Star, kPresets, grid.next())) category_ = kPresets;
+        ui::Tile* t = grid.add(ui::Icon::Star, kPresets);
+        connect(t, &QAbstractButton::clicked, this, [this] {
+            category_ = kPresets;
+            sync();
+        });
     } else { // one category
-        if (ui::iconButton("##back", ui::Icon::Back, ImGui::GetFrameHeight(), "All categories")) category_.clear();
-        ImGui::SameLine();
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(category_.c_str());
-        TileGrid grid;
+        auto* head = new QHBoxLayout;
+        auto* back = new ui::IconButton(ui::Icon::Back, "All categories", 24);
+        connect(back, &QAbstractButton::clicked, this, [this] {
+            category_.clear();
+            sync();
+        });
+        head->addWidget(back);
+        head->addWidget(new QLabel(QString::fromStdString(category_)), 1);
+        col->addLayout(head);
+        TileGrid grid(col, width);
         if (category_ == kPresets) {
             for (const auto& lp : EffectLibrary::all()) presetTile(lp, grid);
-            if (ImGui::Button("Import Preset...")) {
+            auto* import = new QPushButton("Import Preset...");
+            connect(import, &QPushButton::clicked, this, [this] {
                 if (auto file = platform::openFileDialog("Import Effect Preset", "Effect preset", ".json")) {
-                    message_.clear();
-                    message_ = EffectLibrary::importFile(*file, &message_) ? "Imported." : "Import failed: " + message_;
+                    std::string err;
+                    message_ = EffectLibrary::importFile(*file, &err) ? "Imported." : "Import failed: " + err;
+                    sync();
                 }
-            }
+            });
+            auto* row = new QHBoxLayout;
+            row->addWidget(import);
+            row->addStretch();
+            col->addLayout(row);
         } else {
             for (int t = 0; t < static_cast<int>(EffectType::Count); ++t)
                 if (category_ == effectCategory(static_cast<EffectType>(t))) effectTile(static_cast<EffectType>(t), grid);
         }
     }
-    if (!toRemove.empty()) EffectLibrary::remove(toRemove);
-    if (!message_.empty()) faint(message_.c_str());
+    if (!message_.empty()) col->addWidget(faint(QString::fromStdString(message_)));
 }
 
 } // namespace bemotion

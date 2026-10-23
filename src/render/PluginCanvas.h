@@ -3,26 +3,25 @@
 // Drawing surface handed to plugin objects (see app/PluginHost).
 //
 // Coordinates are in the layer's local space: the origin is the object's
-// center and its frame spans +-size/2. Primitives are rasterized at screen
-// density and then mapped through the layer transform, exactly like shapes,
-// so plugin objects rotate, scale, take effects and export like any layer.
+// center and its frame spans +-size/2. The canvas already carries the layer
+// transform, so plugin objects rotate, scale, take effects and export like
+// any layer.
 
 #include "core/Layer.h"
 #include "core/Math.h"
+#include "render/Text.h"
 
 #include <functional>
 #include <string>
 #include <vector>
 
-struct ImDrawList;
+class SkCanvas;
 
 namespace bemotion::render {
 
-enum class TextAnchor { Left, Center, Right };
-
 class PluginCanvas {
 public:
-    PluginCanvas(ImDrawList* dl, float density, float opacity) : dl_(dl), k_(density), opacity_(opacity) {}
+    PluginCanvas(SkCanvas* canvas, float opacity) : canvas_(canvas), opacity_(opacity) {}
 
     void rect(Vec2 min, Vec2 max, Color color, float radius = 0.0f);
     void rectOutline(Vec2 min, Vec2 max, Color color, float width, float radius = 0.0f);
@@ -38,9 +37,8 @@ public:
     float measure(const std::string& s, float size, bool bold = false) const;
 
 private:
-    unsigned col(Color c) const;
-    ImDrawList* dl_;
-    float k_;       // layer units -> raster units
+    Color faded(Color c) const { return {c.r, c.g, c.b, c.a * opacity_}; }
+    SkCanvas* canvas_;
     float opacity_; // layer opacity, multiplied into every color
 };
 

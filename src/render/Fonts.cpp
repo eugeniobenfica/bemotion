@@ -1,287 +1,175 @@
 #include "render/Fonts.h"
 
-#include "app/Platform.h"
+#include "include/core/SkFontStyle.h"
+#include "include/core/SkStream.h"
+#include "include/core/SkString.h"
 
-#include <imgui.h>
-#include <nlohmann/json.hpp>
+#if defined(_WIN32)
+#include "include/ports/SkTypeface_win.h"
+#elif defined(__APPLE__)
+#include "include/ports/SkFontMgr_mac_ct.h"
+#else
+#include "include/ports/SkFontMgr_fontconfig.h"
+#include "include/ports/SkFontScanner_FreeType.h"
+#endif
 
 #include <algorithm>
-#include <atomic>
+#include <array>
 #include <cctype>
-#include <cstdlib>
-#include <fstream>
-#include <map>
 #include <mutex>
-#include <set>
-#include <thread>
 
 namespace bemotion {
 
 namespace {
 
-constexpr const char* kFiles[] = {"Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf"};
-ImFont* g_weights[static_cast<int>(FontWeight::Count)] = {};
+constexpr const char* kInterFiles[] = {"Inter-Regular.ttf", "Inter-Medium.ttf", "Inter-SemiBold.ttf", "Inter-Bold.ttf"};
 
-// System faces, filled by the scan thread.
-std::mutex g_mutex;
-std::vector<FontFace> g_faces;
-std::atomic<bool> g_ready{false};
+struct State {
+    std::filesystem::path fontsDir;
+    std::array<sk_sp<SkTypeface>, static_cast<int>(FontWeight::Count)> inter;
+    std::vector<std::string> families; // cached list
+    std::mutex mutex;                  // the export thread shapes text too
+};
 
-// Faces loaded into the atlas (nullptr = failed) and those waiting to be.
-std::map<std::string, ImFont*> g_loaded;
-std::vector<FontFace> g_pending;
-std::set<std::string> g_requested;
-
-std::string key(const std::string& family, const std::string& style) { return family + "|" + style; }
+State& state() {
+    static State s;
+    return s;
+}
 
 std::string lower(std::string s) {
     for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
 }
 
-// Inter is bundled: map a style name onto its weights.
 FontWeight interWeight(const std::string& style) {
     const std::string s = lower(style);
     if (s.find("semibold") != std::string::npos || s.find("semi bold") != std::string::npos) return FontWeight::SemiBold;
-    if (s.find("bold") != std::string::npos || s.find("black") != std::string::npos) return FontWeight::Bold;
+    if (s.find("bold") != std::string::npos || s.find("black") != std::string::npos || s.find("heavy") != std::string::npos)
+        return FontWeight::Bold;
     if (s.find("medium") != std::string::npos) return FontWeight::Medium;
     return FontWeight::Regular;
 }
 
-std::vector<std::filesystem::path> fontDirectories() {
-    std::vector<std::filesystem::path> dirs;
-#ifdef _WIN32
-    if (const char* windir = std::getenv("WINDIR")) dirs.push_back(std::filesystem::path(windir) / "Fonts");
-    if (const char* local = std::getenv("LOCALAPPDATA"))
-        dirs.push_back(std::filesystem::path(local) / "Microsoft" / "Windows" / "Fonts");
-#elif defined(__APPLE__)
-    dirs = {"/System/Library/Fonts", "/Library/Fonts"};
-    if (const char* home = std::getenv("HOME")) dirs.push_back(std::filesystem::path(home) / "Library/Fonts");
-#else
-    dirs = {"/usr/share/fonts", "/usr/local/share/fonts"};
-    if (const char* home = std::getenv("HOME")) {
-        dirs.push_back(std::filesystem::path(home) / ".local/share/fonts");
-        dirs.push_back(std::filesystem::path(home) / ".fonts");
-    }
-#endif
-    return dirs;
-}
-
-// Scans every font file, reusing cached results for unchanged files.
-void scanSystemFonts(const std::filesystem::path& cacheFile) {
-    using nlohmann::json;
-    json cache;
-    if (std::ifstream in(cacheFile, std::ios::binary); in) try {
-            cache = json::parse(in);
-        } catch (...) {
-        }
-    std::map<std::string, json> cached;
-    if (cache.is_object())
-        for (const auto& f : cache.value("files", json::array())) cached[f.value("path", std::string())] = f;
-
-    std::vector<FontFace> faces;
-    json files = json::array();
-    std::error_code ec;
-    for (const auto& dir : fontDirectories()) {
-        for (auto it = std::filesystem::recursive_directory_iterator(dir, ec); !ec && it != std::filesystem::end(it);
-             it.increment(ec)) {
-            const auto& path = it->path();
-            const std::string ext = lower(path.extension().string());
-            if (ext != ".ttf" && ext != ".otf" && ext != ".ttc") continue;
-            const std::string p = platform::toUtf8(path);
-            const auto size = static_cast<long long>(it->file_size(ec));
-            const auto mtime = static_cast<long long>(std::filesystem::last_write_time(path, ec).time_since_epoch().count());
-            std::vector<FontFace> fileFaces;
-            if (auto c = cached.find(p); c != cached.end() && c->second.value("size", -1LL) == size &&
-                                         c->second.value("mtime", -1LL) == mtime) {
-                for (const auto& fj : c->second.value("faces", json::array()))
-                    fileFaces.push_back({fj.value("family", std::string()), fj.value("style", std::string()), path,
-                                         fj.value("index", 0), fj.value("weight", 400), fj.value("italic", false)});
-            } else {
-                fileFaces = scanFontFile(path);
-            }
-            json fj = json::array();
-            for (const auto& f : fileFaces)
-                fj.push_back({{"family", f.family}, {"style", f.style}, {"index", f.index}, {"weight", f.weight},
-                              {"italic", f.italic}});
-            files.push_back({{"path", p}, {"size", size}, {"mtime", mtime}, {"faces", fj}});
-            faces.insert(faces.end(), fileFaces.begin(), fileFaces.end());
-        }
-        ec.clear();
-    }
-    if (std::ofstream out(cacheFile, std::ios::binary | std::ios::trunc); out) out << json{{"files", files}}.dump();
-    {
-        std::lock_guard lock(g_mutex);
-        g_faces = std::move(faces);
-    }
-    g_ready = true;
-}
-
-const FontFace* findFace(const std::string& family, const std::string& style) {
-    const FontFace* fallback = nullptr;
-    for (const auto& f : g_faces) {
-        if (f.family != family) continue;
-        if (f.style == style) return &f;
-        if (!fallback || (!f.italic && std::abs(f.weight - 400) < std::abs(fallback->weight - 400))) fallback = &f;
-    }
-    return fallback;
-}
-
-} // namespace
-
-void Fonts::load(const std::filesystem::path& assetsDir) {
-    ImGuiIO& io = ImGui::GetIO();
-    ImFontConfig cfg;
-    cfg.OversampleH = 2;
-    for (int i = 0; i < static_cast<int>(FontWeight::Count); ++i) {
-        const auto file = assetsDir / "fonts" / kFiles[i];
-        std::error_code ec;
-        ImFont* font = nullptr;
-        if (std::filesystem::exists(file, ec))
-            font = io.Fonts->AddFontFromFileTTF(platform::toUtf8(file).c_str(), kUiSize, &cfg);
-        g_weights[i] = font;
-    }
-    // Fall back to the built-in font if the assets are missing.
-    ImFont* fallback = g_weights[0] ? g_weights[0] : io.Fonts->AddFontDefault();
-    for (auto& f : g_weights)
-        if (!f) f = fallback;
-    io.FontDefault = g_weights[0];
-}
-
-void Fonts::startSystemScan(const std::filesystem::path& cacheFile) {
-    std::thread([cacheFile] {
-        try {
-            scanSystemFonts(cacheFile);
-        } catch (...) {
-            g_ready = true; // a broken font or cache must never take the app down
-        }
-    }).detach();
-}
-
-bool Fonts::systemScanReady() { return g_ready; }
-
-void Fonts::processPending() {
-    if (g_pending.empty()) return;
-    ImGuiIO& io = ImGui::GetIO();
-    for (const FontFace& face : g_pending) {
-        ImFontConfig cfg;
-        cfg.FontNo = face.index;
-        cfg.OversampleH = 2;
-        std::error_code ec;
-        ImFont* font = std::filesystem::exists(face.path, ec)
-                           ? io.Fonts->AddFontFromFileTTF(platform::toUtf8(face.path).c_str(), kUiSize, &cfg)
-                           : nullptr;
-        g_loaded[key(face.family, face.style)] = font;
-    }
-    g_pending.clear();
-}
-
-namespace {
-std::string g_uiFamily = Fonts::kDefaultFamily;
-
-// A face of the interface family close to `wanted` (its styles vary by family).
-ImFont* uiFace(const char* wanted, FontWeight interWeight) {
-    if (g_uiFamily == Fonts::kDefaultFamily || !Fonts::hasFamily(g_uiFamily)) return g_weights[static_cast<int>(interWeight)];
-    const auto styles = Fonts::stylesOf(g_uiFamily);
-    std::string style = styles.empty() ? "Regular" : styles.front();
-    for (const char* candidate : {wanted, "Bold", "Medium", "Regular"})
-        if (std::find(styles.begin(), styles.end(), candidate) != styles.end()) {
-            style = candidate;
+// "SemiBold Italic" -> weight 600, italic.
+SkFontStyle styleFromName(const std::string& name) {
+    const std::string s = lower(name);
+    int weight = SkFontStyle::kNormal_Weight;
+    struct W {
+        const char* key;
+        int weight;
+    };
+    // Longest keys first: "extrabold" before "bold".
+    static constexpr W kWeights[] = {{"extralight", 200}, {"ultralight", 200}, {"semibold", 600}, {"semi bold", 600},
+                                     {"demibold", 600},   {"extrabold", 800},  {"ultrabold", 800}, {"extra bold", 800},
+                                     {"thin", 100},       {"light", 300},      {"medium", 500},    {"bold", 700},
+                                     {"black", 900},      {"heavy", 900}};
+    for (const W& w : kWeights)
+        if (s.find(w.key) != std::string::npos) {
+            weight = w.weight;
             break;
         }
-    TextProps t;
-    t.fontFamily = g_uiFamily;
-    t.fontStyle = style;
-    return Fonts::forText(t); // Inter until the face is loaded (next frame)
+    const bool italic = s.find("italic") != std::string::npos || s.find("oblique") != std::string::npos;
+    return SkFontStyle(weight, SkFontStyle::kNormal_Width, italic ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant);
 }
+
 } // namespace
 
-void Fonts::setUiFamily(const std::string& family) {
-    g_uiFamily = family.empty() ? kDefaultFamily : family;
-    ImGui::GetIO().FontDefault = ui();
+sk_sp<SkFontMgr> Fonts::manager() {
+    static const sk_sp<SkFontMgr> mgr = [] {
+#if defined(_WIN32)
+        return SkFontMgr_New_DirectWrite();
+#elif defined(__APPLE__)
+        return SkFontMgr_New_CoreText(nullptr);
+#else
+        return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
+#endif
+    }();
+    return mgr;
 }
-ImFont* Fonts::ui() { return uiFace("Regular", FontWeight::Regular); }
-ImFont* Fonts::uiMedium() { return uiFace("Medium", FontWeight::Medium); }
-ImFont* Fonts::uiBold() { return uiFace("SemiBold", FontWeight::SemiBold); }
 
-ImFont* Fonts::forWeight(FontWeight weight) {
-    const int i = static_cast<int>(weight);
-    return (i >= 0 && i < static_cast<int>(FontWeight::Count)) ? g_weights[i] : g_weights[0];
-}
-
-ImFont* Fonts::forText(const TextProps& text) {
-    ImFont* fallback = forWeight(interWeight(text.fontStyle));
-    if (text.fontFamily.empty() || text.fontFamily == kDefaultFamily || !g_ready) return fallback;
-    const std::string k = key(text.fontFamily, text.fontStyle);
-    if (auto it = g_loaded.find(k); it != g_loaded.end()) return it->second ? it->second : fallback;
-    if (!g_requested.count(k)) { // load before the next frame
-        g_requested.insert(k);
-        std::lock_guard lock(g_mutex);
-        if (const FontFace* face = findFace(text.fontFamily, text.fontStyle)) {
-            FontFace f = *face;
-            f.family = text.fontFamily;
-            f.style = text.fontStyle; // remember under the requested name
-            g_pending.push_back(std::move(f));
-        } else {
-            g_loaded[k] = nullptr; // not installed here
-        }
+void Fonts::load(const std::filesystem::path& assetsDir) {
+    State& s = state();
+    s.fontsDir = assetsDir / "fonts";
+    for (int i = 0; i < static_cast<int>(FontWeight::Count); ++i) {
+        const std::u8string path = (s.fontsDir / kInterFiles[i]).u8string();
+        auto data = SkData::MakeFromFileName(reinterpret_cast<const char*>(path.c_str()));
+        s.inter[i] = data ? manager()->makeFromData(std::move(data)) : nullptr;
     }
-    return fallback;
+}
+
+std::filesystem::path Fonts::interFile(const std::string& style) {
+    return state().fontsDir / kInterFiles[static_cast<int>(interWeight(style))];
+}
+
+sk_sp<SkTypeface> Fonts::forWeight(FontWeight weight) {
+    sk_sp<SkTypeface> tf = state().inter[static_cast<int>(weight)];
+    return tf ? tf : manager()->legacyMakeTypeface(nullptr, SkFontStyle());
+}
+
+sk_sp<SkTypeface> Fonts::typeface(const std::string& family, const std::string& style) {
+    if (family.empty() || family == kDefaultFamily) return forWeight(interWeight(style));
+    State& s = state();
+    std::lock_guard lock(s.mutex);
+    // An exact style name first (families like "Bahnschrift SemiLight Condensed" use their own names).
+    sk_sp<SkFontStyleSet> set = manager()->matchFamily(family.c_str());
+    if (set && set->count() > 0) {
+        for (int i = 0; i < set->count(); ++i) {
+            SkFontStyle fs;
+            SkString name;
+            set->getStyle(i, &fs, &name);
+            if (lower(name.c_str()) == lower(style))
+                if (auto tf = set->createTypeface(i)) return tf;
+        }
+        if (auto tf = set->matchStyle(styleFromName(style))) return tf;
+    }
+    return forWeight(interWeight(style)); // not installed here
 }
 
 std::vector<std::string> Fonts::families() {
-    std::vector<std::string> out;
-    {
-        std::lock_guard lock(g_mutex);
-        for (const auto& f : g_faces) out.push_back(f.family);
+    State& s = state();
+    std::lock_guard lock(s.mutex);
+    if (s.families.empty()) {
+        const sk_sp<SkFontMgr> mgr = manager();
+        for (int i = 0; i < mgr->countFamilies(); ++i) {
+            SkString name;
+            mgr->getFamilyName(i, &name);
+            if (name.size() && name.c_str()[0] != '@' && name.c_str()[0] != '.') s.families.emplace_back(name.c_str());
+        }
+        std::sort(s.families.begin(), s.families.end(), [](const std::string& a, const std::string& b) { return lower(a) < lower(b); });
+        s.families.erase(std::unique(s.families.begin(), s.families.end()), s.families.end());
+        s.families.erase(std::remove(s.families.begin(), s.families.end(), kDefaultFamily), s.families.end());
+        s.families.insert(s.families.begin(), kDefaultFamily);
     }
-    std::sort(out.begin(), out.end(), [](const std::string& a, const std::string& b) { return lower(a) < lower(b); });
-    out.erase(std::unique(out.begin(), out.end()), out.end());
-    std::erase(out, std::string(kDefaultFamily));
-    out.insert(out.begin(), kDefaultFamily);
-    return out;
+    return s.families;
 }
 
 std::vector<std::string> Fonts::stylesOf(const std::string& family) {
     if (family == kDefaultFamily) return {"Regular", "Medium", "SemiBold", "Bold"};
-    std::vector<FontFace> faces;
-    {
-        std::lock_guard lock(g_mutex);
-        for (const auto& f : g_faces)
-            if (f.family == family) faces.push_back(f);
+    std::vector<std::string> styles;
+    sk_sp<SkFontStyleSet> set = manager()->matchFamily(family.c_str());
+    if (!set) return styles;
+    std::vector<std::pair<SkFontStyle, std::string>> all;
+    for (int i = 0; i < set->count(); ++i) {
+        SkFontStyle fs;
+        SkString name;
+        set->getStyle(i, &fs, &name);
+        all.emplace_back(fs, name.size() ? name.c_str() : "Regular");
     }
-    std::sort(faces.begin(), faces.end(), [](const FontFace& a, const FontFace& b) {
-        return a.italic != b.italic ? !a.italic : a.weight < b.weight;
+    // Upright before italic, light to heavy: "Regular" lands near the top.
+    std::sort(all.begin(), all.end(), [](const auto& a, const auto& b) {
+        if (a.first.slant() != b.first.slant()) return a.first.slant() < b.first.slant();
+        const int da = std::abs(a.first.weight() - 400), db = std::abs(b.first.weight() - 400);
+        return da != db ? da < db : a.first.weight() < b.first.weight();
     });
-    std::vector<std::string> out;
-    for (const auto& f : faces)
-        if (std::find(out.begin(), out.end(), f.style) == out.end()) out.push_back(f.style);
-    return out;
+    for (auto& [fs, name] : all)
+        if (std::find(styles.begin(), styles.end(), name) == styles.end()) styles.push_back(name);
+    return styles;
 }
 
 bool Fonts::hasFamily(const std::string& family) {
     if (family == kDefaultFamily) return true;
-    std::lock_guard lock(g_mutex);
-    return std::any_of(g_faces.begin(), g_faces.end(), [&](const FontFace& f) { return f.family == family; });
-}
-
-bool Fonts::ensureLoaded(const Composition& comp) {
-    bool ready = true;
-    for (const Layer& l : comp.layers) {
-        if (l.type != LayerType::Text || l.text.fontFamily.empty() || l.text.fontFamily == kDefaultFamily) continue;
-        if (!g_ready) return false; // the face list is not known yet
-        forText(l.text);            // queues it if needed
-        ready &= g_loaded.count(key(l.text.fontFamily, l.text.fontStyle)) > 0;
-    }
-    return ready;
-}
-
-ImVector<ImTextureData*>* Fonts::texturesForOffscreenDraw() {
-    static ImVector<ImTextureData*> list;
-    list = ImGui::GetPlatformIO().Textures;
-    for (ImTextureData* tex : ImGui::GetIO().Fonts->TexList)
-        if (!list.contains(tex)) list.push_back(tex);
-    return &list;
+    sk_sp<SkFontStyleSet> set = manager()->matchFamily(family.c_str());
+    return set && set->count() > 0;
 }
 
 } // namespace bemotion

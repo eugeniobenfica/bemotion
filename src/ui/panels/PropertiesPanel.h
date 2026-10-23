@@ -2,41 +2,44 @@
 
 #include "core/Layer.h"
 
+#include <QScrollArea>
+
+#include <functional>
 #include <string>
+#include <vector>
+
+class QVBoxLayout;
 
 namespace bemotion {
 
 class EditorContext;
+class CollapsibleSection;
+class PropertyRow;
 
 // Right panel: every property of the selected layer (or the composition when
-// nothing is selected), with keyframe toggles and quick animation presets (effects have their own tab).
-class PropertiesPanel {
+// nothing is selected), with keyframe toggles and quick animation presets
+// (effects have their own tab). Rebuilt when the selection or the layer's
+// structure changes; otherwise only the values refresh.
+class PropertiesPanel : public QScrollArea {
+    Q_OBJECT
 public:
-    static constexpr const char* kWindowName = "Properties";
-    bool open = true; // closed with the tab's x, reopened from View > Panels
-    void draw(EditorContext& ctx);
+    explicit PropertiesPanel(EditorContext& ctx, QWidget* parent = nullptr);
+    void sync();
 
 private:
-    void drawComposition(EditorContext& ctx);
-    void drawLayer(EditorContext& ctx, Layer& layer);
-    void drawMediaSource(EditorContext& ctx, Layer& layer);
-    void drawPluginData(EditorContext& ctx, Layer& layer);
-    void drawPresets(EditorContext& ctx, Layer& layer);
+    std::string structureKey();
+    void rebuild();
+    void buildComposition(QVBoxLayout* col);
+    void buildLayer(QVBoxLayout* col, Layer& layer);
+    void buildMediaSource(QVBoxLayout* col, Layer& layer);
+    void buildPluginData(QVBoxLayout* col, Layer& layer);
+    void buildPresets(QVBoxLayout* col, Layer& layer);
 
-    std::string saveName_;
+    EditorContext& ctx_;
+    std::string key_;
+    std::vector<PropertyRow*> rows_;
+    std::vector<std::function<void()>> refreshers_; // non-animatable widgets
     std::string presetMessage_;
-    std::string fontFilter_;
-    bool releaseRequested_ = false; // "Release Compound" clicked: done before the next draw
-    bool deleteRequested_ = false;  // the trash button next to the name
 };
-
-// Building blocks shared with the timeline's property rows. Each returns true
-// when the property changed.
-bool propertyValueWidget(EditorContext& ctx, const PropertyRef& prop, float width);
-bool keyframeToggle(EditorContext& ctx, const Layer& layer, const PropertyRef& prop);
-bool resetButton(EditorContext& ctx, const Layer& layer, const PropertyRef& prop);
-
-// Full table row: keyframe toggle, label, value editor, reset button.
-bool propertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop);
 
 } // namespace bemotion

@@ -68,7 +68,13 @@ public:
     void tick(double dt); // advances playback
 
     // Marks the document as modified; recorded as an undo step when idle.
-    void touch() { pendingCommit_ = true; }
+    void touch() {
+        pendingCommit_ = true;
+        ++revision_;
+    }
+    // Changes whenever the document changes (touch, undo, redo, open): views compare it to know
+    // when to redraw.
+    uint64_t revision() const { return revision_; }
     void commitIfIdle(bool interacting);
 
     void undo();
@@ -121,6 +127,7 @@ private:
     Layer& insertLayer(Layer layer);
     void pruneSelection();
     bool pendingCommit_ = false;
+    uint64_t revision_ = 0;
 };
 
 } // namespace bemotion

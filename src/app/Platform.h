@@ -1,6 +1,7 @@
 #pragma once
 
-// Thin OS abstraction: well-known folders, native file dialogs, UTF-8 paths.
+// Thin OS abstraction over Qt: well-known folders, native file dialogs,
+// the file manager, UTF-8 paths.
 
 #include <filesystem>
 #include <optional>
@@ -15,12 +16,9 @@ std::string toUtf8(const fs::path& path);
 fs::path fromUtf8(const std::string& utf8);
 
 fs::path executableDir();
-fs::path appDataDir();         // per-user settings, created on demand
+fs::path appDataDir();         // per-user settings, created on demand (BEMOTION_APPDATA overrides it)
 fs::path defaultProjectsDir(); // Documents/bemotion, created on demand
 fs::path assetsDir();
-
-// Native window handle used to parent dialogs (HWND on Windows).
-void setMainWindowHandle(void* handle);
 
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const char* extension);
 // Several files at once; `extensions` without dots ("png", "mp4", ...). Empty when cancelled.

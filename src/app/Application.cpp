@@ -4,67 +4,83 @@
 #include "app/DevScript.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
-#include "media/AudioEngine.h"
-#include "media/MediaManager.h"
 #include "app/Settings.h"
 #include "core/Serialization.h"
-#include "export/Export.h"
-#include "render/EffectRenderer.h"
+#include "media/AudioEngine.h"
+#include "media/MediaManager.h"
 #include "render/Fonts.h"
-#include "ui/EditorScreen.h"
-#include "ui/HelpWindow.h"
+#include "ui/AppSignals.h"
+#include "ui/Dialogs.h"
+#include "ui/EditorWindow.h"
+#include "ui/HomeScreen.h"
+#include "ui/IntroScreen.h"
 #include "ui/Keymap.h"
-#include "ui/SettingsWindow.h"
 #include "ui/Theme.h"
 
-#include <imgui.h>
-#include <imgui_impl_glfw.h>
-#include <imgui_impl_opengl3.h>
+#include <QAction>
+#include <QApplication>
+#include <QCloseEvent>
+#include <QFontDatabase>
+#include <QIcon>
+#include <QImage>
+#include <QMenu>
+#include <QMimeData>
+#include <QPixmap>
+#include <QResizeEvent>
+#include <QStackedWidget>
+#include <QTimer>
+#include <QUrl>
 
-#include <GLFW/glfw3.h>
-#ifdef _WIN32
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#define GLFW_EXPOSE_NATIVE_WIN32
-#include <GLFW/glfw3native.h>
-#endif
-
-#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <optional>
-#include <vector>
 #include <thread>
 
 #ifdef _WIN32
-#include <timeapi.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #endif
 
 namespace bemotion {
 
-namespace {
+// --- window -------------------------------------------------------------------------------
 
-// Saves the current GL back buffer as a 32-bit BMP (bottom-up, as GL stores it).
-void writeFramebufferBmp(const char* path, int w, int h) {
-    std::vector<uint8_t> px(static_cast<size_t>(w) * h * 4);
-    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px.data());
-    for (size_t i = 0; i < px.size(); i += 4) std::swap(px[i], px[i + 2]); // RGBA -> BGRA
-    FILE* f = std::fopen(path, "wb");
-    if (!f) return;
-    auto u16 = [&](uint16_t v) { std::fwrite(&v, 2, 1, f); };
-    auto u32 = [&](uint32_t v) { std::fwrite(&v, 4, 1, f); };
-    const uint32_t dataSize = static_cast<uint32_t>(px.size());
-    u16(0x4D42); u32(54 + dataSize); u32(0); u32(54);                 // file header
-    u32(40); u32(w); u32(h); u16(1); u16(32); u32(0); u32(dataSize);    // info header
-    u32(2835); u32(2835); u32(0); u32(0);
-    std::fwrite(px.data(), 1, px.size(), f);
-    std::fclose(f);
+MainWindow::MainWindow() {
+    setAcceptDrops(true);
+    setMinimumSize(960, 600);
 }
 
-} // namespace
+void MainWindow::closeEvent(QCloseEvent* e) {
+    if (canClose && !canClose()) {
+        e->ignore();
+        return;
+    }
+    e->accept();
+    // Settings, Help, ... are windows of their own: the application ends with this one.
+    QTimer::singleShot(0, qApp, &QCoreApplication::quit);
+}
+
+void MainWindow::resizeEvent(QResizeEvent* e) {
+    QMainWindow::resizeEvent(e);
+    if (overlay) overlay->setGeometry(rect());
+}
+
+void MainWindow::dragEnterEvent(QDragEnterEvent* e) {
+    if (e->mimeData()->hasUrls()) e->acceptProposedAction();
+}
+
+void MainWindow::dropEvent(QDropEvent* e) {
+    std::vector<std::filesystem::path> files;
+    for (const QUrl& url : e->mimeData()->urls())
+        if (url.isLocalFile()) files.push_back(platform::fromUtf8(url.toLocalFile().toStdString()));
+    if (!files.empty() && onDrop) onDrop(files);
+    e->acceptProposedAction();
+}
+
+// --- application ----------------------------------------------------------------------------
 
 Application::Application() = default;
 Application::~Application() = default;
@@ -97,38 +113,148 @@ int Application::run(int argc, char** argv) {
             projectArg = platform::fromUtf8(arg);
         }
     }
-    if (cliExport) return runCommandLineExport(projectArg, *cliExport);
+    QCoreApplication::setApplicationName("bemotion");
+    QCoreApplication::setOrganizationName("bemotion");
+    QCoreApplication::setApplicationVersion(BEMOTION_VERSION);
+    if (cliExport) {
+        QCoreApplication core(argc, argv);
+        return runCommandLineExport(projectArg, *cliExport);
+    }
 
-    if (!init(true)) return 1;
+    QApplication app(argc, argv);
+    QApplication::setStyle("Fusion"); // the palette and style sheet do the rest
+    initShared();
+    // The interface font: Inter ships with bemotion (other families come from the system).
+    for (const char* style : {"Regular", "Medium", "SemiBold", "Bold"})
+        QFontDatabase::addApplicationFont(QString::fromStdString(platform::toUtf8(Fonts::interFile(style))));
+    applySettings();
+    media::AudioEngine::get().start();
+    buildWindow();
     if (const char* script = std::getenv("BEMOTION_SCRIPT")) {
         script_ = std::make_unique<DevScript>();
         if (!script_->load(platform::fromUtf8(script))) script_.reset();
     }
+    auto* timer = new QTimer(window_);
+    connect(timer, &QTimer::timeout, this, [this] { frame(); });
+    timer->start(16);
 
     if (!projectArg.empty()) openProject(projectArg);
-    else if (settings().showIntro) intro_.start(platform::assetsDir() / "welcome" / "Welcome.bemotion");
+    else if (settings().showIntro) intro_->start(platform::assetsDir() / "welcome" / "Welcome.bemotion");
 
-    // Frames are paced in software at the monitor refresh rate: driver vsync
-    // (swap interval 1) can stall indefinitely on some GPU drivers.
-    const GLFWvidmode* mode = glfwGetVideoMode(glfwGetPrimaryMonitor());
-    const double frameBudget = 1.0 / std::clamp(mode ? mode->refreshRate : 60, 30, 240);
+    const int result = QApplication::exec();
+    delete window_; // the editor first: it stops using media and plugins
+    window_ = nullptr;
+    media::AudioEngine::get().stop();
+    media::MediaManager::get().release();
+    PluginHost::get().shutdown();
+    return result;
+}
 
-    double last = glfwGetTime();
-    while (!glfwWindowShouldClose(window_)) {
-        if (glfwGetWindowAttrib(window_, GLFW_ICONIFIED)) {
-            glfwWaitEvents();
-            last = glfwGetTime();
-            continue;
-        }
-        glfwPollEvents();
-        const double start = glfwGetTime();
-        frame(start - last);
-        last = start;
-        const double remaining = frameBudget - (glfwGetTime() - start);
-        if (remaining > 0.0) std::this_thread::sleep_for(std::chrono::duration<double>(remaining));
+void Application::initShared() {
+    loadSettings();
+    Fonts::load(platform::assetsDir());
+    PluginHost::get().load();
+    media::MediaManager::get().install();
+}
+
+void Application::buildWindow() {
+    window_ = new MainWindow;
+    window_->setWindowTitle("bemotion");
+    // Window / taskbar icon.
+    QIcon icon;
+    for (int size : {16, 32, 48, 64, 128, 256}) {
+        const std::vector<uint8_t> px = renderAppIcon(size);
+        icon.addPixmap(QPixmap::fromImage(QImage(px.data(), size, size, QImage::Format_RGBA8888).copy()));
     }
-    shutdown();
-    return 0;
+    QApplication::setWindowIcon(icon);
+
+    stack_ = new QStackedWidget;
+    window_->setCentralWidget(stack_);
+    recents_.load();
+    if (!settings().welcomeAdded) { // first run: the Welcome project waits in the projects list
+        const auto copy = platform::defaultProjectsDir() / "Welcome to bemotion.bemotion";
+        std::error_code ec;
+        if (!std::filesystem::exists(copy, ec))
+            std::filesystem::copy_file(platform::assetsDir() / "welcome" / "Welcome.bemotion", copy, ec);
+        if (!ec) recents_.touch(copy, "Welcome to bemotion");
+        settings().welcomeAdded = true;
+        saveSettings();
+    }
+    home_ = new HomeScreen(recents_);
+    home_->onOpen = [this](const std::filesystem::path& p) { openProject(p); };
+    home_->onCreate = [this](const std::filesystem::path& p, Project project) { createProject(std::move(project), p); };
+    // Settings and Help work from the home screen too (the editor has its own menu actions).
+    auto* settingsAction = new QAction(home_);
+    auto* helpAction = new QAction(home_);
+    settingsAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    helpAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    connect(settingsAction, &QAction::triggered, this, [] { ui::openSettings(); });
+    connect(helpAction, &QAction::triggered, this, [] { ui::openHelp(); });
+    home_->addAction(settingsAction);
+    home_->addAction(helpAction);
+    auto bindHome = [settingsAction, helpAction] {
+        settingsAction->setShortcut(ui::sequenceOf(ui::Action::Settings));
+        helpAction->setShortcut(ui::sequenceOf(ui::Action::Help));
+    };
+    bindHome();
+    connect(&ui::AppSignals::get(), &ui::AppSignals::shortcutsChanged, this, bindHome);
+    stack_->addWidget(home_);
+    home_->refresh();
+
+    intro_ = new IntroScreen(window_);
+    window_->overlay = intro_;
+    intro_->hide();
+    connect(intro_, &IntroScreen::finished, this, [this] {
+        if (editor_) editor_->setFocus();
+        else home_->setFocus();
+    });
+
+    window_->canClose = [this] { return !editor_ || editor_->confirmClose(); };
+    window_->onDrop = [this](const std::vector<std::filesystem::path>& files) {
+        if (editor_) editor_->dropFiles(files, false);
+        else if (files.size() == 1 && files[0].extension() == kProjectExtension) openProject(files[0]);
+    };
+    window_->resize(1440, 900);
+    window_->showMaximized();
+    intro_->setGeometry(window_->rect());
+}
+
+void Application::frame() {
+    ++frameIndex_;
+    // Each step runs on its own: a step that opens a modal dialog (exec) must not hold up the
+    // next ones, which drive that dialog.
+    if (script_) QTimer::singleShot(0, this, [this] { scriptStep(); });
+    // Developer aid: BEMOTION_CAPTURE=<file> saves frame BEMOTION_CAPTURE_FRAME (default 60) and quits.
+    if (const char* capture = std::getenv("BEMOTION_CAPTURE")) {
+        const char* at = std::getenv("BEMOTION_CAPTURE_FRAME");
+        if (frameIndex_ == (at ? std::atoi(at) : 60)) {
+            window_->grab().save(capture);
+            window_->canClose = nullptr;
+            window_->close();
+        }
+    }
+}
+
+void Application::scriptStep() {
+    if (!script_) return;
+    script_->step(window_);
+    if (!script_) return; // quit while that step ran
+    for (auto& f : script_->takeDrops())
+        if (window_->onDrop) window_->onDrop({f});
+    if (const std::string shot = script_->takeCapture(); !shot.empty()) {
+        // The window, plus any other open window (settings, dialogs) as <file>-<title>.<ext>.
+        const QString file = QString::fromStdString(shot);
+        window_->grab().save(file);
+        const int dot = file.lastIndexOf('.');
+        for (QWidget* w : QApplication::topLevelWidgets())
+            if (w != window_ && w->isVisible() && !w->windowTitle().isEmpty() && !qobject_cast<QMenu*>(w))
+                w->grab().save(file.left(dot) + "-" + w->windowTitle().replace(' ', '_') + file.mid(dot));
+    }
+    if (script_->wantsQuit()) {
+        script_.reset();
+        window_->canClose = nullptr; // scripted runs never ask
+        window_->close();
+    }
 }
 
 int Application::runCommandLineExport(const std::filesystem::path& projectPath, exporting::Settings settings) {
@@ -150,10 +276,7 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
         std::fprintf(stderr, "error: %s\n", error.c_str());
         return 1;
     }
-    if (!init(false)) {
-        std::fprintf(stderr, "error: could not create an OpenGL context\n");
-        return 1;
-    }
+    initShared();
     if (settings.output.extension().empty()) settings.output += exporting::formatExtension(settings.format);
     else
         for (int k = 0; k < static_cast<int>(exporting::Format::Count); ++k)
@@ -162,14 +285,7 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
     project.comp.fitDuration();
     settings.end = project.comp.duration;
     PluginHost::get().reconcile(project.comp);
-
-    // Text layers may use system fonts: wait until they are in the atlas.
-    for (int tries = 0; !Fonts::ensureLoaded(project.comp) && tries < 3000; ++tries) {
-        Fonts::processPending();
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    Fonts::processPending();
-    // Audio decodes in the background: wait for it too.
+    // Audio decodes in the background: wait for it.
     for (int tries = 0; !media::MediaManager::get().audioReady(project.comp) && tries < 60000; ++tries) {
         media::MediaManager::get().update(project.comp);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -184,12 +300,7 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
     }
     int reported = -1;
     while (job.running()) {
-        // Glyphs are rasterized through ImGui's font atlas, which updates per frame.
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
         job.step(0.25);
-        ImGui::EndFrame();
         const int percent = job.framesDone() * 100 / std::max(1, job.framesTotal());
         if (percent / 10 != reported) {
             reported = percent / 10;
@@ -202,225 +313,63 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
         result = 1;
     }
     if (result == 0)
-        std::printf("done: %s (%d frames, %.1f s)\n", platform::toUtf8(settings.output).c_str(), job.framesTotal(),
-                    job.elapsedSeconds());
-    shutdown();
-    return result;
-}
-
-bool Application::init(bool visible) {
-    glfwSetErrorCallback([](int code, const char* desc) { std::fprintf(stderr, "GLFW error %d: %s\n", code, desc); });
-    if (!glfwInit()) return false;
-#ifdef _WIN32
-    timeBeginPeriod(1); // 1 ms sleep granularity for frame pacing
-#endif
-
-    glfwWindowHint(GLFW_VISIBLE, visible ? GLFW_TRUE : GLFW_FALSE);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-#ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
-#endif
-
-    const float scale = ImGui_ImplGlfw_GetContentScaleForMonitor(glfwGetPrimaryMonitor());
-    window_ = glfwCreateWindow(static_cast<int>(1440 * scale), static_cast<int>(900 * scale), "bemotion", nullptr, nullptr);
-    if (!window_) {
-        glfwTerminate();
-        return false;
-    }
-    glfwMakeContextCurrent(window_);
-    glfwSwapInterval(0);
-    glfwSetWindowUserPointer(window_, this);
-    glfwSetWindowCloseCallback(window_, &Application::onWindowClose);
-    glfwSetDropCallback(window_, [](GLFWwindow* w, int count, const char** paths) {
-        auto* app = static_cast<Application*>(glfwGetWindowUserPointer(w));
-        for (int i = 0; i < count; ++i) app->droppedFiles_.push_back(platform::fromUtf8(paths[i]));
-    });
-    glfwSetWindowSizeLimits(window_, 960, 600, GLFW_DONT_CARE, GLFW_DONT_CARE);
-    if (visible) glfwMaximizeWindow(window_);
-#ifdef _WIN32
-    platform::setMainWindowHandle(glfwGetWin32Window(window_));
-#endif
-
-    // Window / taskbar icon.
-    std::vector<GLFWimage> images;
-    std::vector<std::vector<uint8_t>> pixels;
-    for (int size : {16, 32, 48, 64, 128, 256}) {
-        pixels.push_back(renderAppIcon(size));
-        images.push_back(GLFWimage{size, size, pixels.back().data()});
-    }
-    glfwSetWindowIcon(window_, static_cast<int>(images.size()), images.data());
-
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigWindowsMoveFromTitleBarOnly = true;
-    iniPath_ = platform::toUtf8(platform::appDataDir() / "layout.ini");
-    io.IniFilename = iniPath_.c_str();
-
-    loadSettings();
-    theme::applyStyle();
-    ImGui::GetStyle().ScaleAllSizes(scale);
-    applySettings(scale);
-    ImGui::GetStyle().FontScaleDpi = scale;
-    Fonts::load(platform::assetsDir());
-    Fonts::startSystemScan(platform::appDataDir() / "fontcache.json");
-    PluginHost::get().load();
-    media::MediaManager::get().install();
-    if (visible) media::AudioEngine::get().start(); // command-line exports play nothing
-
-    ImGui_ImplGlfw_InitForOpenGL(window_, true);
-    ImGui_ImplOpenGL3_Init("#version 330");
-
-    recents_.load();
-    if (!settings().welcomeAdded) { // first run: the Welcome project waits in the projects list
-        const auto copy = platform::defaultProjectsDir() / "Welcome to bemotion.bemotion";
-        std::error_code ec;
-        if (!std::filesystem::exists(copy, ec))
-            std::filesystem::copy_file(platform::assetsDir() / "welcome" / "Welcome.bemotion", copy, ec);
-        if (!ec) recents_.touch(copy, "Welcome to bemotion");
-        settings().welcomeAdded = true;
-        saveSettings();
-    }
-    home_.refresh(recents_);
-    updateTitle();
-    return true;
-}
-
-void Application::shutdown() {
-    editor_.reset();
-    media::AudioEngine::get().stop();
+        std::printf("done: %s (%d frames, %.1f s)\n", platform::toUtf8(settings.output).c_str(), job.framesTotal(), job.elapsedSeconds());
     media::MediaManager::get().release();
     PluginHost::get().shutdown();
-    render::screenEffects().release();
-    ImGui_ImplOpenGL3_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    ImGui::DestroyContext();
-    glfwDestroyWindow(window_);
-    glfwTerminate();
-#ifdef _WIN32
-    timeEndPeriod(1);
-#endif
-}
-
-void Application::frame(double dt) {
-    render::screenEffects().beginFrame(); // effect textures from the previous frame can be reused
-    Fonts::processPending(); // faces requested by text layers last frame
-    PluginHost::get().processPendingReload();
-    Fonts::setUiFamily(settings().uiFont); // the interface font (Settings > Interface)
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    if (script_) {
-        script_->apply();
-        for (auto& f : script_->takeDrops()) droppedFiles_.push_back(std::move(f));
-    }
-    ImGui::NewFrame();
-    if (!droppedFiles_.empty()) { // OS file drag & drop onto the window
-        if (editor_) editor_->dropFiles(droppedFiles_);
-        droppedFiles_.clear();
-    }
-
-    if (editor_) {
-        switch (editor_->draw(dt)) {
-        case EditorScreen::Request::GoHome: goHome(); break;
-        case EditorScreen::Request::Quit:
-            editor_.reset();
-            glfwSetWindowShouldClose(window_, GLFW_TRUE);
-            break;
-        case EditorScreen::Request::None: break;
-        }
-    } else {
-        HomeScreen::Result r = home_.draw(recents_);
-        if (r.action == HomeScreen::Result::Action::Open) openProject(r.path);
-        else if (r.action == HomeScreen::Result::Action::Create) createProject(std::move(r.project), r.path);
-    }
-
-    intro_.draw(dt); // on top of the home screen while it plays
-
-    if (ui::shortcutPressed(ui::Action::Settings)) ui::openSettings();
-    if (ui::shortcutPressed(ui::Action::Help)) ui::openHelp();
-    ui::drawSettings();
-    ui::drawHelp();
-
-    // Media: audio decoding jobs, and what the speakers play.
-    if (editor_) {
-        media::MediaManager::get().update(editor_->project().comp);
-        media::AudioEngine::get().update(editor_->project().comp, editor_->time(), editor_->playing());
-    } else {
-        media::AudioEngine::get().update(Composition{}, 0.0, false);
-    }
-
-    ImGui::Render();
-    int w = 0, h = 0;
-    glfwGetFramebufferSize(window_, &w, &h);
-    glViewport(0, 0, w, h);
-    const ImVec4 bg = theme::vec(theme::kBgDeep);
-    glClearColor(bg.x, bg.y, bg.z, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
-    // Developer aid: BEMOTION_CAPTURE=<file.bmp> saves frame BEMOTION_CAPTURE_FRAME (default 60) and quits.
-    ++frameIndex_;
-    if (const char* capture = std::getenv("BEMOTION_CAPTURE")) {
-        const char* at = std::getenv("BEMOTION_CAPTURE_FRAME");
-        if (frameIndex_ == (at ? std::atoi(at) : 60)) {
-            writeFramebufferBmp(capture, w, h);
-            glfwSetWindowShouldClose(window_, GLFW_TRUE);
-        }
-    }
-    if (script_) {
-        if (const std::string shot = script_->takeCapture(); !shot.empty()) writeFramebufferBmp(shot.c_str(), w, h);
-        if (script_->wantsQuit()) glfwSetWindowShouldClose(window_, GLFW_TRUE);
-    }
-    glfwSwapBuffers(window_);
-
-    updateTitle();
+    return result;
 }
 
 void Application::openProject(const std::filesystem::path& path) {
     Project project;
     std::string err;
     if (!loadProject(path, project, &err)) {
-        home_.setError("Could not open \"" + platform::toUtf8(path.filename()) + "\": " + err);
+        home_->setError("Could not open \"" + platform::toUtf8(path.filename()) + "\": " + err);
         return;
     }
     recents_.touch(path, project.name);
     PluginHost::get().reconcile(project.comp);
-    editor_ = std::make_unique<EditorScreen>(std::move(project), path, recents_);
+    showEditor(std::move(project), path);
 }
 
 void Application::createProject(Project project, const std::filesystem::path& path) {
     std::string err;
     if (!saveProject(project, path, &err)) {
-        home_.setError("Could not create the project: " + err);
+        home_->setError("Could not create the project: " + err);
         return;
     }
     recents_.touch(path, project.name);
-    editor_ = std::make_unique<EditorScreen>(std::move(project), path, recents_);
+    showEditor(std::move(project), path);
+}
+
+void Application::showEditor(Project project, const std::filesystem::path& path) {
+    if (editor_) {
+        stack_->removeWidget(editor_);
+        editor_->deleteLater();
+    }
+    editor_ = new EditorWindow(std::move(project), path, recents_);
+    stack_->addWidget(editor_);
+    stack_->setCurrentWidget(editor_);
+    connect(editor_, &EditorWindow::goHome, this, [this] { QTimer::singleShot(0, this, [this] { goHome(); }); });
+    connect(editor_, &EditorWindow::quitRequested, window_, &QWidget::close);
+    connect(editor_, &EditorWindow::titleChanged, this, [this] { updateTitle(); });
+    updateTitle();
+    if (intro_->isVisible()) intro_->raise();
+    else editor_->setFocus();
 }
 
 void Application::goHome() {
-    editor_.reset();
+    if (editor_) {
+        stack_->removeWidget(editor_);
+        editor_->deleteLater();
+        editor_ = nullptr;
+    }
+    media::AudioEngine::get().update(Composition{}, 0.0, false);
     recents_.load();
-    home_.refresh(recents_);
+    stack_->setCurrentWidget(home_);
+    home_->refresh();
+    updateTitle();
 }
 
-void Application::updateTitle() {
-    const std::string title = editor_ ? editor_->windowTitle() : std::string("bemotion");
-    if (title != title_) {
-        title_ = title;
-        glfwSetWindowTitle(window_, title_.c_str());
-    }
-}
-
-void Application::onWindowClose(GLFWwindow* window) {
-    auto* app = static_cast<Application*>(glfwGetWindowUserPointer(window));
-    if (app && app->editor_) {
-        glfwSetWindowShouldClose(window, GLFW_FALSE);
-        app->editor_->requestQuit();
-    }
-}
+void Application::updateTitle() { window_->setWindowTitle(editor_ ? editor_->title() : QString("bemotion")); }
 
 } // namespace bemotion

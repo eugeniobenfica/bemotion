@@ -6,34 +6,107 @@ on:
   pull_request:
 
 jobs:
-  build:
-    name: ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, ubuntu-latest, macos-latest]
-
+  windows:
+    name: windows (MSYS2 UCRT64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Linux dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build libxrandr-dev libxinerama-dev libxcursor-dev \
-            libxi-dev libgl1-mesa-dev libwayland-dev libxkbcommon-dev
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git patch
+            mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-gn
+            mingw-w64-ucrt-x86_64-qt6-base mingw-w64-ucrt-x86_64-qt6-svg mingw-w64-ucrt-x86_64-qt6-tools
+            mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-harfbuzz mingw-w64-ucrt-x86_64-icu
+            mingw-w64-ucrt-x86_64-libjpeg-turbo mingw-w64-ucrt-x86_64-libwebp mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-expat mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-freetype
 
-      - name: Install Ninja
-        if: runner.os != 'Linux'
-        uses: seanmiddleditch/gha-setup-ninja@v5
+      - name: Cache Skia
+        id: skia
+        uses: actions/cache@v4
+        with:
+          path: third_party/skia
+          key: skia-windows-${{ hashFiles('tools/skia/**') }}
 
-      - name: Set up MSVC
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Build Skia
+        if: steps.skia.outputs.cache-hit != 'true'
+        run: tools/skia/build-skia.sh
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  linux:
+    name: linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang python3 pkg-config \
+            qt6-base-dev qt6-base-dev-tools libqt6svg6-dev libgl-dev \
+            libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev \
+            libharfbuzz-dev libicu-dev libfreetype-dev libfontconfig-dev \
+            libpng-dev libjpeg-dev libwebp-dev libexpat1-dev zlib1g-dev
+
+      - name: Cache Skia
+        id: skia
+        uses: actions/cache@v4
+        with:
+          path: third_party/skia
+          key: skia-linux-${{ hashFiles('tools/skia/**') }}
+
+      - name: Build Skia
+        if: steps.skia.outputs.cache-hit != 'true'
+        run: tools/skia/build-skia.sh
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  macos:
+    name: macos
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install ninja pkgconf qt ffmpeg harfbuzz icu4c freetype fontconfig libpng jpeg-turbo webp
+          echo "PKG_CONFIG_PATH=$(brew --prefix icu4c)/lib/pkgconfig:$(brew --prefix jpeg-turbo)/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+
+      - name: Cache Skia
+        id: skia
+        uses: actions/cache@v4
+        with:
+          path: third_party/skia
+          key: skia-macos-${{ hashFiles('tools/skia/**') }}
+
+      - name: Build Skia
+        if: steps.skia.outputs.cache-hit != 'true'
+        run: tools/skia/build-skia.sh
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 
       - name: Build
         run: cmake --build build

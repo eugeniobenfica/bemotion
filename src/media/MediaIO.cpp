@@ -1,6 +1,5 @@
-// Media files: images (stb_image), audio (miniaudio; Media Foundation for
-// audio in video containers on Windows) and probing. Video frames are read by
-// the platform reader (VideoReaderMF.cpp on Windows).
+// Media files: still images through stb_image, video and audio through
+// FFmpeg's libraries (FfmpegMedia.cpp), the same on every platform.
 
 #include "media/MediaIO.h"
 
@@ -8,28 +7,21 @@
 #define STBI_FAILURE_USERMSG
 #include <stb_image.h>
 
-#if defined(_WIN32) && !defined(NOMINMAX)
-#define NOMINMAX // miniaudio includes <windows.h>: keep std::min / std::max usable
-#endif
-#include <miniaudio.h>
-
 #include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstdio>
 
 namespace bemotion::media {
 
-// Implemented per platform (VideoReaderMF.cpp; a stub elsewhere).
-bool platformProbeVideo(const std::filesystem::path& file, MediaItem& item, std::string* error);
-bool platformDecodeAudio(const std::filesystem::path& file, std::vector<float>& stereo, std::string* error);
+// FfmpegMedia.cpp
+bool ffmpegProbe(const std::filesystem::path& file, MediaItem& item, std::string* error);
+bool ffmpegDecodeAudio(const std::filesystem::path& file, std::vector<float>& stereo, std::string* error);
 
 namespace {
 
 const std::vector<std::string> kImages = {"png", "jpg", "jpeg", "bmp", "tga", "gif", "psd", "hdr"};
-const std::vector<std::string> kAudio = {"wav", "mp3", "flac"};
-const std::vector<std::string> kPlatformAudio = {"m4a", "aac", "wma"};
-const std::vector<std::string> kVideo = {"mp4", "mov", "m4v", "wmv", "avi", "mkv"};
+const std::vector<std::string> kAudio = {"wav", "mp3", "flac", "m4a", "aac", "ogg", "opus", "wma", "aif", "aiff"};
+const std::vector<std::string> kVideo = {"mp4", "mov", "m4v", "mkv", "webm", "avi", "wmv", "mpg", "mpeg", "mts", "m2ts"};
 
 std::string extensionOf(const std::filesystem::path& file) {
     std::string ext = file.extension().string();
@@ -56,45 +48,13 @@ std::FILE* openFile(const std::filesystem::path& file) {
 #endif
 }
 
-bool miniaudioDecode(const std::filesystem::path& file, std::vector<float>& stereo, double* duration, std::string* error) {
-    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 2, kAudioRate);
-    ma_decoder decoder;
-#ifdef _WIN32
-    const ma_result r = ma_decoder_init_file_w(file.wstring().c_str(), &config, &decoder);
-#else
-    const ma_result r = ma_decoder_init_file(file.c_str(), &config, &decoder);
-#endif
-    if (r != MA_SUCCESS) {
-        if (error) *error = "Could not read this audio file.";
-        return false;
-    }
-    ma_uint64 frames = 0;
-    ma_decoder_get_length_in_pcm_frames(&decoder, &frames);
-    if (duration) *duration = static_cast<double>(frames) / kAudioRate;
-    if (!duration) { // decoding wanted, not just the length
-        stereo.clear();
-        float chunk[4096 * 2];
-        for (;;) {
-            ma_uint64 read = 0;
-            if (ma_decoder_read_pcm_frames(&decoder, chunk, 4096, &read) != MA_SUCCESS && read == 0) break;
-            stereo.insert(stereo.end(), chunk, chunk + read * 2);
-            if (read < 4096) break;
-        }
-    }
-    ma_decoder_uninit(&decoder);
-    return true;
-}
-
 } // namespace
 
 const std::vector<std::string>& supportedExtensions() {
     static const std::vector<std::string> all = [] {
         std::vector<std::string> v = kImages;
         v.insert(v.end(), kAudio.begin(), kAudio.end());
-#ifdef _WIN32
-        v.insert(v.end(), kPlatformAudio.begin(), kPlatformAudio.end());
         v.insert(v.end(), kVideo.begin(), kVideo.end());
-#endif
         return v;
     }();
     return all;
@@ -126,19 +86,8 @@ ProbeResult probe(const std::filesystem::path& file) {
         r.ok = true;
         return r;
     }
-    if (contains(kAudio, ext)) {
-        std::vector<float> none;
-        double duration = 0;
-        if (!miniaudioDecode(file, none, &duration, &r.error)) return r;
-        r.item.kind = MediaKind::Audio;
-        r.item.duration = duration;
-        r.item.hasAudio = true;
-        r.ok = true;
-        return r;
-    }
-    if (contains(kVideo, ext) || contains(kPlatformAudio, ext)) {
-        if (!platformProbeVideo(file, r.item, &r.error)) return r;
-        r.ok = true;
+    if (contains(kAudio, ext) || contains(kVideo, ext)) {
+        r.ok = ffmpegProbe(file, r.item, &r.error);
         return r;
     }
     r.error = "This file type is not supported (" + (ext.empty() ? std::string("no extension") : "." + ext) + ").";
@@ -164,9 +113,7 @@ bool loadImage(const std::filesystem::path& file, int& width, int& height, std::
 }
 
 bool decodeAudio(const std::filesystem::path& file, std::vector<float>& stereo, std::string* error) {
-    const std::string ext = extensionOf(file);
-    if (contains(kAudio, ext)) return miniaudioDecode(file, stereo, nullptr, error);
-    return platformDecodeAudio(file, stereo, error);
+    return ffmpegDecodeAudio(file, stereo, error);
 }
 
 } // namespace bemotion::media

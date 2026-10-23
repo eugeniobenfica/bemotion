@@ -1,14 +1,13 @@
 #pragma once
 
-// Renders a composition into an off-screen OpenGL framebuffer and reads the
-// pixels back. Used by video export; it shares the exact drawing path of the
-// viewport, so exports look identical to the preview.
-//
-// Must be called on the thread that owns the GL context, with an ImGui context
-// current (fonts are rasterized through ImGui's atlas).
+// Renders a composition into an off-screen Skia surface and reads the pixels
+// back. Used by video export, thumbnails and the intro; it is the same
+// drawing path as the viewport, so exports look identical to the preview.
 
 #include "core/Project.h"
-#include "render/EffectRenderer.h"
+
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSurface.h"
 
 #include <cstdint>
 #include <string>
@@ -18,13 +17,8 @@ namespace bemotion::render {
 
 class OffscreenRenderer {
 public:
-    OffscreenRenderer() = default;
-    OffscreenRenderer(const OffscreenRenderer&) = delete;
-    OffscreenRenderer& operator=(const OffscreenRenderer&) = delete;
-    ~OffscreenRenderer();
-
     bool init(int width, int height, std::string& error);
-    void release();
+    void release() { surface_.reset(); }
 
     // Renders `comp` at time `t`, scaled by `scale`, into `rgba` (top-down,
     // straight alpha, width * height * 4 bytes).
@@ -34,9 +28,7 @@ public:
     int height() const { return height_; }
 
 private:
-    EffectRenderer effects_; // separate pool: exporting must not reuse the preview's textures
-    unsigned int fbo_ = 0;
-    unsigned int texture_ = 0;
+    sk_sp<SkSurface> surface_;
     int width_ = 0;
     int height_ = 0;
 };

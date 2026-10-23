@@ -23,4 +23,6 @@ maintain**, so a few guidelines:
 
 ## Building
 
-See the [README](README.md#building).
+See [Getting started](README.md#getting-started) in the README: Qt 6, FFmpeg and a
+Skia built once with `tools/skia/build-skia.sh` (on Windows, from an MSYS2
+UCRT64 shell).

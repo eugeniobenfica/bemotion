@@ -1,241 +1,327 @@
 #include "render/SceneRenderer.h"
 
 #include "core/Geometry.h"
-#include "render/EffectRenderer.h"
-#include "render/Fonts.h"
 #include "render/PluginCanvas.h"
+#include "render/Text.h"
 
-#include <imgui.h>
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColorFilter.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPathEffect.h"
+#include "include/core/SkPathBuilder.h"
+#include "include/core/SkRRect.h"
+#include "include/effects/SkColorMatrix.h"
+#include "include/effects/SkImageFilters.h"
+#include "include/effects/SkRuntimeEffect.h"
+#include "include/effects/SkTrimPathEffect.h"
 
 #include <algorithm>
-#include <cfloat>
 #include <cmath>
+#include <cstdio>
 #include <vector>
 
 namespace bemotion::render {
 
 namespace {
 
-ImU32 toU32(Color c, float opacity) {
-    return ImGui::ColorConvertFloat4ToU32(ImVec4(c.r, c.g, c.b, std::clamp(c.a * opacity, 0.0f, 1.0f)));
-}
+SkMatrix toSk(const Affine& m) { return SkMatrix::MakeAll(m.a, m.c, m.tx, m.b, m.d, m.ty, 0, 0, 1); }
 
-// Average scale factor of a transform, used to pick a rasterization density.
-float densityOf(const Affine& m) { return std::sqrt(std::fabs(m.determinant())); }
+SkColor4f color4(Color c, float opacity = 1.0f) { return {c.r, c.g, c.b, std::clamp(c.a * opacity, 0.0f, 1.0f)}; }
 
-void transformVertices(ImDrawList* dl, int start, const Affine& m) {
-    for (int i = start; i < dl->VtxBuffer.Size; ++i) {
-        ImDrawVert& v = dl->VtxBuffer[i];
-        const Vec2 p = m.apply({v.pos.x, v.pos.y});
-        v.pos = ImVec2(p.x, p.y);
+// --- shapes ------------------------------------------------------------------------
+
+SkPath shapePath(const ShapeProps& shape, double t) {
+    const Vec2 size = shape.size.valueAt(t);
+    const float hw = std::fabs(size.x) * 0.5f, hh = std::fabs(size.y) * 0.5f;
+    SkPathBuilder b;
+    switch (shape.kind) {
+    case ShapeKind::Rectangle: {
+        const float r = std::clamp(shape.roundness.valueAt(t), 0.0f, std::min(hw, hh));
+        const SkRect rect = SkRect::MakeLTRB(-hw, -hh, hw, hh);
+        if (r < 0.01f) b.addRect(rect);
+        else b.addRRect(SkRRect::MakeRectXY(rect, r, r));
+        return b.detach();
     }
-}
-
-// --- text layout -------------------------------------------------------------
-
-int utf8Length(unsigned char lead) {
-    if (lead < 0x80) return 1;
-    if ((lead >> 5) == 0x6) return 2;
-    if ((lead >> 4) == 0xE) return 3;
-    if ((lead >> 3) == 0x1E) return 4;
-    return 1;
-}
-
-struct Glyph {
-    const char* begin;
-    int length;
-    float x; // local x of the glyph's left edge
-};
-
-struct TextLine {
-    std::vector<Glyph> glyphs;
-    float width = 0.0f;
-    float y = 0.0f; // local y of the line top
-};
-
-struct TextLayout {
-    std::vector<TextLine> lines;
-    float fontSize = 0.0f;
-    float width = 0.0f;
-    float height = 0.0f;
-    float top = 0.0f;
-    int glyphCount = 0;
-};
-
-// Glyph advances are measured at a fixed reference size and scaled, so layout
-// does not depend on the zoom level and does not bake extra font sizes.
-constexpr float kMeasureSize = 64.0f;
-
-TextLayout layoutText(const TextProps& text, double t) {
-    TextLayout layout;
-    ImFont* font = Fonts::forText(text);
-    const float size = std::max(1.0f, text.fontSize.valueAt(t));
-    const float tracking = text.tracking.valueAt(t);
-    const float advance = size * std::max(0.1f, text.lineHeight.valueAt(t) * 0.01f);
-    const float measureScale = size / kMeasureSize;
-    layout.fontSize = size;
-
-    layout.lines.emplace_back();
-    const std::string& s = text.text;
-    for (size_t i = 0; i < s.size();) {
-        const int len = std::min<int>(utf8Length(static_cast<unsigned char>(s[i])), static_cast<int>(s.size() - i));
-        const char* p = s.data() + i;
-        i += len;
-        if (*p == '\n') {
-            layout.lines.emplace_back();
-            continue;
-        }
-        if (*p == '\r') continue;
-        TextLine& line = layout.lines.back();
-        const float w = font->CalcTextSizeA(kMeasureSize, FLT_MAX, 0.0f, p, p + len).x * measureScale;
-        if (!line.glyphs.empty()) line.width += tracking;
-        line.glyphs.push_back({p, len, line.width});
-        line.width += w;
-        ++layout.glyphCount;
+    case ShapeKind::Ellipse: b.addOval(SkRect::MakeLTRB(-hw, -hh, hw, hh), SkPathDirection::kCW, 0); return b.detach(); // from the top
+    default: break;
     }
-
-    layout.height = advance * static_cast<float>(layout.lines.size());
-    layout.top = -layout.height * 0.5f;
-    for (size_t i = 0; i < layout.lines.size(); ++i) {
-        TextLine& line = layout.lines[i];
-        layout.width = std::max(layout.width, line.width);
-        line.y = layout.top + advance * static_cast<float>(i) + (advance - size) * 0.5f;
-        const float offset = text.align == TextAlign::Left     ? 0.0f
-                             : text.align == TextAlign::Center ? -line.width * 0.5f
-                                                               : -line.width;
-        for (auto& g : line.glyphs) g.x += offset;
-    }
-    return layout;
+    // Polygons, stars and lines: the core outline (the same points the editor uses).
+    const Path p = buildShapePath(shape, t);
+    if (p.points.empty()) return {};
+    b.moveTo(p.points[0].x, p.points[0].y);
+    for (size_t i = 1; i < p.points.size(); ++i) b.lineTo(p.points[i].x, p.points[i].y);
+    if (p.closed) b.close();
+    return b.detach();
 }
 
-float alignedLeft(const TextProps& text, float width) {
-    return text.align == TextAlign::Left ? 0.0f : text.align == TextAlign::Center ? -width * 0.5f : -width;
-}
-
-// Quantized raster sizes keep the dynamic font atlas small while zooming.
-float quantizeRasterSize(float px) {
-    static constexpr float kSteps[] = {6,   8,   10,  12,  14,  16,  18,  20,  24,  28,  32,  40,  48,
-                                       56,  64,  80,  96,  112, 128, 160, 192, 224, 256, 320, 384, 448, 512};
-    for (float s : kSteps)
-        if (s >= px) return s;
-    return kSteps[std::size(kSteps) - 1];
-}
-
-void drawText(ImDrawList* dl, const Layer& layer, double t, const Affine& toScreen, float opacity) {
-    const TextProps& text = layer.text;
-    const TextLayout layout = layoutText(text, t);
-    if (layout.glyphCount == 0) return;
-
-    const ImU32 col = toU32(text.color.valueAt(t), opacity);
-    if ((col & IM_COL32_A_MASK) == 0) return;
-
-    const float rasterSize = quantizeRasterSize(layout.fontSize * densityOf(toScreen));
-    const float k = rasterSize / layout.fontSize; // layer units -> raster units
-    const float reveal = std::clamp(text.reveal.valueAt(t), 0.0f, 100.0f) * 0.01f;
-    const int visibleGlyphs = static_cast<int>(std::floor(reveal * layout.glyphCount + 1e-4f));
-
-    ImFont* font = Fonts::forText(text);
-    // Culling happens before our vertex transform, so disable it entirely.
-    const ImVec4 noClip(-FLT_MAX, -FLT_MAX, FLT_MAX, FLT_MAX);
-    const int start = dl->VtxBuffer.Size;
-    int drawn = 0;
-    for (const auto& line : layout.lines) {
-        for (const auto& g : line.glyphs) {
-            if (drawn++ >= visibleGlyphs) break;
-            font->RenderText(dl, rasterSize, ImVec2(g.x * k, line.y * k), col, noClip, g.begin, g.begin + g.length);
-        }
-    }
-    transformVertices(dl, start, toScreen * Affine::scale(1.0f / k));
-}
-
-// --- shapes ------------------------------------------------------------------
-
-void drawShape(ImDrawList* dl, const Layer& layer, double t, const Affine& toScreen, float opacity) {
+void drawShape(SkCanvas* canvas, const Layer& layer, double t, float opacity) {
     const ShapeProps& shape = layer.shape;
-    Path path = buildShapePath(shape, t);
-    if (path.points.empty()) return;
-
-    // Anti-aliased fills expect clockwise winding on screen; a mirrored
-    // transform flips it, so flip the points back.
-    if (toScreen.determinant() < 0.0f) std::reverse(path.points.begin(), path.points.end());
-
-    const float k = std::clamp(densityOf(toScreen), 0.01f, 64.0f);
-    auto toRaster = [k](const std::vector<Vec2>& pts) {
-        std::vector<ImVec2> out;
-        out.reserve(pts.size());
-        for (const Vec2& p : pts) out.emplace_back(p.x * k, p.y * k);
-        return out;
-    };
-
-    const int start = dl->VtxBuffer.Size;
-
-    if (shape.fillEnabled && path.closed && path.points.size() >= 3) {
-        const ImU32 fill = toU32(shape.fillColor.valueAt(t), opacity);
-        if (fill & IM_COL32_A_MASK) {
-            const auto pts = toRaster(path.points);
-            if (path.convex) dl->AddConvexPolyFilled(pts.data(), static_cast<int>(pts.size()), fill);
-            else dl->AddConcavePolyFilled(pts.data(), static_cast<int>(pts.size()), fill);
-        }
+    const SkPath path = shapePath(shape, t);
+    if (path.isEmpty()) return;
+    const bool closed = shape.kind != ShapeKind::Line;
+    if (shape.fillEnabled && closed) {
+        SkPaint fill(color4(shape.fillColor.valueAt(t), opacity));
+        fill.setAntiAlias(true);
+        if (fill.getAlphaf() > 0.0f) canvas->drawPath(path, fill);
     }
-
-    const float strokeWidth = shape.strokeWidth.valueAt(t);
-    if (shape.strokeEnabled && strokeWidth > 0.0f) {
-        const ImU32 stroke = toU32(shape.strokeColor.valueAt(t), opacity);
-        const float a = shape.trimStart.valueAt(t) * 0.01f, b = shape.trimEnd.valueAt(t) * 0.01f;
-        const bool trimmed = std::fabs(a) > 1e-4f || std::fabs(b - 1.0f) > 1e-4f;
-        const Path outline = trimmed ? trimPath(path, a, b) : path;
-        if ((stroke & IM_COL32_A_MASK) && outline.points.size() >= 2) {
-            const auto pts = toRaster(outline.points);
-            dl->AddPolyline(pts.data(), static_cast<int>(pts.size()), stroke,
-                            outline.closed ? ImDrawFlags_Closed : ImDrawFlags_None, strokeWidth * k);
+    const float width = shape.strokeWidth.valueAt(t);
+    if (shape.strokeEnabled && width > 0.0f) {
+        SkPaint stroke(color4(shape.strokeColor.valueAt(t), opacity));
+        if (stroke.getAlphaf() <= 0.0f) return;
+        stroke.setAntiAlias(true);
+        stroke.setStyle(SkPaint::kStroke_Style);
+        stroke.setStrokeWidth(width);
+        stroke.setStrokeJoin(SkPaint::kMiter_Join);
+        stroke.setStrokeCap(closed ? SkPaint::kButt_Cap : SkPaint::kRound_Cap);
+        float a = std::clamp(shape.trimStart.valueAt(t) * 0.01f, 0.0f, 1.0f), b = std::clamp(shape.trimEnd.valueAt(t) * 0.01f, 0.0f, 1.0f);
+        if (a > b) std::swap(a, b);
+        if (b - a <= 1e-4f) return;
+        if (a > 1e-4f || b < 1.0f - 1e-4f) {
+            stroke.setPathEffect(SkTrimPathEffect::Make(a, b));
+            stroke.setStrokeCap(SkPaint::kButt_Cap);
         }
+        canvas->drawPath(path, stroke);
     }
-
-    transformVertices(dl, start, toScreen * Affine::scale(1.0f / k));
 }
 
-// --- plugin objects ------------------------------------------------------------
+// --- plugin objects ------------------------------------------------------------------
 
 PluginDrawer& pluginDrawer() {
     static PluginDrawer drawer;
     return drawer;
 }
 
-void drawPlugin(ImDrawList* dl, const Layer& layer, double t, const Affine& toScreen, float opacity) {
-    const float k = std::clamp(densityOf(toScreen), 0.01f, 64.0f);
-    const int start = dl->VtxBuffer.Size;
-    PluginCanvas canvas(dl, k, opacity);
+void drawPlugin(SkCanvas* canvas, const Layer& layer, double t, float opacity) {
+    PluginCanvas pc(canvas, opacity);
     if (pluginDrawer()) {
-        pluginDrawer()(layer, t, canvas);
+        pluginDrawer()(layer, t, pc);
     } else { // no plugin host (tests, tools): a placeholder frame
         const Vec2 half = layer.plugin.size.valueAt(t) * 0.5f;
-        canvas.rectOutline(half * -1.0f, half, Color::fromHex(0x808080), 2.0f);
+        pc.rectOutline(half * -1.0f, half, Color::fromHex(0x808080), 2.0f);
     }
-    transformVertices(dl, start, toScreen * Affine::scale(1.0f / k));
 }
+
+// --- footage -----------------------------------------------------------------------
 
 MediaProvider& mediaProvider() {
     static MediaProvider provider;
     return provider;
 }
 
-// Footage: the frame as a textured quad through the layer transform.
-void drawMedia(ImDrawList* dl, const Composition* comp, const Layer& layer, double t, const Affine& toScreen, float opacity) {
+void drawMedia(SkCanvas* canvas, const Composition* comp, const Layer& layer, double t, float opacity) {
     if (!layer.media.hasVideo) return; // audio only
     const Vec2 half = layer.media.size * 0.5f;
-    const Vec2 c[4] = {toScreen.apply({-half.x, -half.y}), toScreen.apply({half.x, -half.y}), toScreen.apply({half.x, half.y}),
-                       toScreen.apply({-half.x, half.y})};
-    const unsigned long long tex = comp && mediaProvider() ? mediaProvider()(*comp, layer, t) : 0;
-    const ImU32 tint = IM_COL32(255, 255, 255, static_cast<int>(std::clamp(opacity, 0.0f, 1.0f) * 255.0f + 0.5f));
-    if (!tex) { // not loaded or missing: a placeholder frame
-        dl->AddQuadFilled(ImVec2(c[0].x, c[0].y), ImVec2(c[1].x, c[1].y), ImVec2(c[2].x, c[2].y), ImVec2(c[3].x, c[3].y),
-                          IM_COL32(60, 60, 70, static_cast<int>(opacity * 200)));
-        dl->AddLine(ImVec2(c[0].x, c[0].y), ImVec2(c[2].x, c[2].y), IM_COL32(120, 120, 130, static_cast<int>(opacity * 200)));
-        dl->AddLine(ImVec2(c[1].x, c[1].y), ImVec2(c[3].x, c[3].y), IM_COL32(120, 120, 130, static_cast<int>(opacity * 200)));
+    const SkRect dst = SkRect::MakeLTRB(-half.x, -half.y, half.x, half.y);
+    sk_sp<SkImage> image = comp && mediaProvider() ? mediaProvider()(*comp, layer, t) : nullptr;
+    if (!image) { // not loaded or missing: a placeholder frame
+        SkPaint p(SkColor4f{0.24f, 0.24f, 0.28f, 0.8f * opacity});
+        canvas->drawRect(dst, p);
+        p.setColor4f({0.47f, 0.47f, 0.51f, 0.8f * opacity});
+        p.setStyle(SkPaint::kStroke_Style);
+        p.setAntiAlias(true);
+        canvas->drawLine(dst.left(), dst.top(), dst.right(), dst.bottom(), p);
+        canvas->drawLine(dst.right(), dst.top(), dst.left(), dst.bottom(), p);
         return;
     }
-    dl->AddImageQuad(ImTextureRef(static_cast<ImTextureID>(tex)), ImVec2(c[0].x, c[0].y), ImVec2(c[1].x, c[1].y),
-                     ImVec2(c[2].x, c[2].y), ImVec2(c[3].x, c[3].y), ImVec2(0, 0), ImVec2(1, 0), ImVec2(1, 1), ImVec2(0, 1), tint);
+    SkPaint p;
+    p.setAlphaf(std::clamp(opacity, 0.0f, 1.0f));
+    canvas->drawImageRect(image, dst, SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kLinear), &p);
+}
+
+// --- effects -------------------------------------------------------------------------
+
+// Color effects on straight colors (Skia hands color filters premultiplied colors).
+//   0 brightness & contrast   a = brightness, b = contrast
+//   1 hue / saturation        a = hue (deg), b = saturation, c = lightness
+//   2 tint                    color = white maps to, amount
+//   3 fill                    color, amount
+//   4 invert                  amount
+constexpr const char* kColorOps = R"(
+uniform int mode; uniform float a; uniform float b; uniform float c; uniform half4 color; uniform float amount;
+half3 hueShift(half3 v, float deg) {
+    const half3x3 toYIQ = half3x3(0.299, 0.596, 0.211, 0.587, -0.274, -0.523, 0.114, -0.322, 0.312);
+    const half3x3 toRGB = half3x3(1.0, 1.0, 1.0, 0.956, -0.272, -1.106, 0.621, -0.647, 1.703);
+    half3 yiq = toYIQ * v;
+    float r = radians(deg); float cs = cos(r); float sn = sin(r);
+    yiq.yz = half2(yiq.y * cs - yiq.z * sn, yiq.y * sn + yiq.z * cs);
+    return toRGB * yiq;
+}
+half4 main(half4 p) {
+    if (p.a < 0.0001) return half4(0);
+    half3 v = p.rgb / p.a;
+    half luma = dot(v, half3(0.2126, 0.7152, 0.0722));
+    if (mode == 0) {
+        v += a / 300.0;
+        float k = b >= 0.0 ? 1.0 / max(0.01, 1.0 - b / 101.0) : 1.0 + b / 100.0;
+        v = (v - 0.5) * k + 0.5;
+    } else if (mode == 1) {
+        v = hueShift(v, -a); // positive = toward the next hue on the wheel, like After Effects
+        half l = dot(v, half3(0.2126, 0.7152, 0.0722));
+        v = mix(half3(l), v, 1.0 + b / 100.0);
+        v = c >= 0.0 ? mix(v, half3(1.0), c / 100.0) : v * (1.0 + c / 100.0);
+    } else if (mode == 2) {
+        v = mix(v, color.rgb * luma, amount * color.a);
+    } else if (mode == 3) {
+        v = mix(v, color.rgb, amount * color.a);
+    } else {
+        v = mix(v, 1.0 - v, amount);
+    }
+    v = clamp(v, 0.0, 1.0);
+    return half4(v * p.a, p.a);
+})";
+
+// Wave warp: pixels move across the wave direction.
+constexpr const char* kWave = R"(
+uniform shader src; uniform float2 dir; uniform float height; uniform float width; uniform float phase;
+half4 main(float2 p) {
+    float d = height * sin(6.2831853 * (dot(p, dir) / max(width, 1.0) - phase));
+    return src.eval(p + float2(-dir.y, dir.x) * d);
+})";
+
+sk_sp<SkRuntimeEffect> effect(const char* sksl, bool colorFilter) {
+    auto result = colorFilter ? SkRuntimeEffect::MakeForColorFilter(SkString(sksl)) : SkRuntimeEffect::MakeForShader(SkString(sksl));
+    if (!result.effect) std::fprintf(stderr, "effect shader error: %s\n", result.errorText.c_str());
+    return result.effect;
+}
+
+sk_sp<SkRuntimeEffect> colorOps() {
+    static const sk_sp<SkRuntimeEffect> e = effect(kColorOps, true);
+    return e;
+}
+
+sk_sp<SkImageFilter> colorOp(sk_sp<SkImageFilter> input, int mode, float a, float b, float c, Color color, float amount) {
+    if (!colorOps()) return input;
+    SkRuntimeColorFilterBuilder builder(colorOps());
+    builder.uniform("mode") = mode;
+    builder.uniform("a") = a;
+    builder.uniform("b") = b;
+    builder.uniform("c") = c;
+    builder.uniform("color") = SkV4{color.r, color.g, color.b, color.a};
+    builder.uniform("amount") = std::clamp(amount, 0.0f, 1.0f);
+    return SkImageFilters::ColorFilter(builder.makeColorFilter(), std::move(input));
+}
+
+// The input's silhouette in one color.
+sk_sp<SkImageFilter> silhouette(sk_sp<SkImageFilter> input, Color color, float alpha) {
+    return SkImageFilters::ColorFilter(SkColorFilters::Blend(color4(color, alpha), nullptr, SkBlendMode::kSrcIn), std::move(input));
+}
+
+// The layer's effect stack as one filter chain, in output pixels (`zoom` = composition -> output).
+sk_sp<SkImageFilter> effectChain(const Layer& layer, double t, float zoom) {
+    sk_sp<SkImageFilter> current; // null = the layer as drawn
+    for (const Effect& e : layer.effects) {
+        if (!e.enabled || e.type == EffectType::MotionBlur) continue;
+        const float v1 = e.value1.valueAt(t), v2 = e.value2.valueAt(t), v3 = e.value3.valueAt(t);
+        const float size = std::max(0.0f, e.size.valueAt(t)) * zoom;
+        const float strength = std::max(0.0f, e.opacity.valueAt(t)) * 0.01f;
+        const Color color = e.color.valueAt(t);
+        switch (e.type) {
+        case EffectType::GaussianBlur:
+            if (size > 0.01f) current = SkImageFilters::Blur(size * 0.5f, size * 0.5f, SkTileMode::kDecal, current);
+            break;
+        case EffectType::DirectionalBlur: {
+            if (size <= 0.01f) break;
+            // A blur along one axis: turn the direction onto x, blur horizontally only, turn back.
+            // (A sampling shader is far too slow on the CPU.) Spread like a box of `size`: sigma = size / sqrt(12).
+            const float degrees = v1 - 90.0f; // 0° = vertical, like After Effects
+            const SkMatrix toX = SkMatrix::RotateDeg(-degrees), back = SkMatrix::RotateDeg(degrees);
+            const SkSamplingOptions linear(SkFilterMode::kLinear);
+            current = SkImageFilters::MatrixTransform(toX, linear, current);
+            current = SkImageFilters::Blur(size * 0.2887f, 0.0f, SkTileMode::kDecal, current);
+            current = SkImageFilters::MatrixTransform(back, linear, current);
+            break;
+        }
+        case EffectType::BrightnessContrast: current = colorOp(current, 0, v1, v2, 0, {}, 0); break;
+        case EffectType::HueSaturation: current = colorOp(current, 1, v1, v2, v3, {}, 0); break;
+        case EffectType::Tint: current = colorOp(current, 2, 0, 0, 0, color, strength); break;
+        case EffectType::Fill: current = colorOp(current, 3, 0, 0, 0, color, strength); break;
+        case EffectType::Invert: current = colorOp(current, 4, 0, 0, 0, {}, strength); break;
+        case EffectType::WaveWarp: {
+            static const sk_sp<SkRuntimeEffect> fx = effect(kWave, false);
+            if (!fx) break;
+            const float a = degToRad(e.shutter.valueAt(t));
+            SkRuntimeShaderBuilder builder(fx);
+            builder.uniform("dir") = SkV2{std::cos(a), std::sin(a)};
+            builder.uniform("height") = v1 * zoom;
+            builder.uniform("width") = std::max(2.0f, v2) * zoom;
+            builder.uniform("phase") = static_cast<float>(v3 * (t - layer.inPoint));
+            current = SkImageFilters::RuntimeShader(builder, std::fabs(v1 * zoom), "src", current);
+            break;
+        }
+        case EffectType::Outline: { // a grown silhouette underneath
+            if (size <= 0.01f) break;
+            // Grown by blurring the alpha and cutting it where a straight edge would have
+            // faded at `size` (Skia's Dilate is far too slow on the CPU). The cut is ~1 px soft.
+            const float sigma = std::max(0.5f, size * 0.5f);
+            const float k = std::clamp(9.25f * size, 4.0f, 60.0f);
+            SkColorMatrix cut;
+            // alpha' = k (alpha - t): reaches 1/2 near the straight-edge level 0.0228, and stays 0
+            // where nothing was drawn (t > 0), so the layer does not spread over the whole frame.
+            const float t = std::max(0.004f, 0.0228f - 0.5f / k);
+            const float rows[20] = {1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, k, -k * t};
+            cut.setRowMajor(rows);
+            sk_sp<SkImageFilter> grown = SkImageFilters::ColorFilter(
+                SkColorFilters::Matrix(cut), SkImageFilters::Blur(sigma, sigma, SkTileMode::kDecal, current));
+            sk_sp<SkImageFilter> under = silhouette(grown, color, std::min(strength, 1.0f));
+            current = SkImageFilters::Merge(std::move(under), current);
+            break;
+        }
+        case EffectType::Glow: { // a blurred silhouette underneath; intensity above 100% brightens it
+            sk_sp<SkImageFilter> halo = silhouette(current, color, 1.0f);
+            if (size > 0.01f) halo = SkImageFilters::Blur(size * 0.5f, size * 0.5f, SkTileMode::kDecal, halo);
+            if (std::fabs(strength - 1.0f) > 1e-3f) {
+                SkColorMatrix gain;
+                gain.setScale(strength, strength, strength, strength);
+                halo = SkImageFilters::ColorFilter(SkColorFilters::Matrix(gain), halo);
+            }
+            current = SkImageFilters::Merge(std::move(halo), current);
+            break;
+        }
+        case EffectType::DropShadow: {
+            const Vec2 offset = e.offset.valueAt(t) * zoom;
+            current = SkImageFilters::DropShadow(offset.x, offset.y, size * 0.5f, size * 0.5f,
+                                                 color4(color, std::min(strength, 1.0f)).toSkColor(), current);
+            break;
+        }
+        default: break;
+        }
+    }
+    return current;
+}
+
+// Moments to render: one, or several across the shutter for motion blur.
+std::vector<double> momentsOf(const Layer& layer, double t, double frameDuration) {
+    for (const Effect& e : layer.effects)
+        if (e.enabled && e.type == EffectType::MotionBlur) {
+            const double shutter = std::clamp(e.shutter.valueAt(t), 0.0f, 720.0f) / 360.0 * frameDuration;
+            const int n = shutter > 1e-6 ? std::clamp(e.samples, 2, 64) : 1;
+            std::vector<double> times;
+            for (int i = 0; i < n; ++i) times.push_back(t - shutter * (n > 1 ? double(i) / (n - 1) : 0.0));
+            return times;
+        }
+    return {t};
+}
+
+// The layer's own content in its local space (the canvas carries its transform).
+void drawContent(SkCanvas* canvas, const Layer& layer, double t, float opacity, const Composition* comp, const Affine& toOutput,
+                 float zoom) {
+    switch (layer.type) {
+    case LayerType::Compound:
+        if (!comp) return;
+        // Children, bottom first, in the compound's space; its opacity multiplies theirs.
+        for (auto it = comp->layers.rbegin(); it != comp->layers.rend(); ++it) {
+            if (it->parent != layer.id || !it->activeAt(t) || it->type == LayerType::Camera) continue;
+            const float own = std::clamp(it->transform.opacity.valueAt(t) * 0.01f, 0.0f, 1.0f);
+            drawLayer(canvas, *it, t, toOutput * it->matrixAt(t), zoom, comp, own * opacity);
+        }
+        return;
+    case LayerType::Media: drawMedia(canvas, comp, layer, t, opacity); return;
+    case LayerType::Text: drawText(canvas, layer.text, t, opacity); return;
+    case LayerType::Plugin: drawPlugin(canvas, layer, t, opacity); return;
+    case LayerType::Camera: return;
+    default: drawShape(canvas, layer, t, opacity); return;
+    }
 }
 
 } // namespace
@@ -243,54 +329,87 @@ void drawMedia(ImDrawList* dl, const Composition* comp, const Layer& layer, doub
 void setPluginDrawer(PluginDrawer drawer) { pluginDrawer() = std::move(drawer); }
 void setMediaProvider(MediaProvider provider) { mediaProvider() = std::move(provider); }
 
-void drawLayer(ImDrawList* dl, const Layer& layer, double time, const Affine& layerToScreen, float opacityOverride,
-               const Composition* comp, EffectRenderer* effects, float zoom) {
+bool hasActiveEffects(const Layer& layer) {
+    return std::any_of(layer.effects.begin(), layer.effects.end(), [](const Effect& e) { return e.enabled; });
+}
+
+void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Affine& layerToOutput, float zoom,
+               const Composition* comp, float opacityOverride) {
     const float opacity = opacityOverride >= 0.0f ? std::min(opacityOverride, 1.0f)
                                                   : std::clamp(layer.transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
     if (opacity <= 0.0f || layer.type == LayerType::Camera) return;
-    if (layer.type == LayerType::Compound) {
-        if (!comp) return;
-        // Children, bottom first, in the compound's space; its opacity multiplies theirs.
-        for (auto it = comp->layers.rbegin(); it != comp->layers.rend(); ++it) {
-            if (it->parent != layer.id || !it->activeAt(time) || it->type == LayerType::Camera) continue;
-            const float own = std::clamp(it->transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
-            if (effects && hasActiveEffects(*it))
-                effects->drawLayer(dl, *it, time, comp->frameDuration(), layerToScreen, zoom, comp, opacity);
-            else
-                drawLayer(dl, *it, time, layerToScreen * it->matrixAt(time), own * opacity, comp, effects, zoom);
+    // Transforms are absolute (`layerToOutput` is the whole chain), so nested compounds do not stack them twice.
+    if (!hasActiveEffects(layer)) {
+        canvas->save();
+        canvas->setMatrix(toSk(layerToOutput));
+        drawContent(canvas, layer, time, opacity, comp, layerToOutput, zoom);
+        canvas->restore();
+        return;
+    }
+
+    // With effects: draw into a layer filtered in output space (no transform on the filter).
+    // `layerToOutput` is for `time`; other moments (motion blur) rebuild it from the parent.
+    const Affine parent = layerToOutput * layer.matrixAt(time).inverse();
+    const std::vector<double> times = momentsOf(layer, time, comp ? comp->frameDuration() : 1.0 / 30.0);
+    // The offscreen layer only needs to hold what the layer draws (in output pixels): image
+    // filters on the CPU cost per pixel of the layer.
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    bool bounded = true;
+    for (double ti : times) {
+        Vec2 lo, hi;
+        if (!localBounds(layer, ti, lo, hi, comp)) {
+            bounded = false;
+            break;
         }
-        return;
+        const Affine m = parent * layer.matrixAt(ti);
+        for (Vec2 corner : {lo, Vec2{hi.x, lo.y}, hi, Vec2{lo.x, hi.y}}) {
+            const Vec2 q = m.apply(corner);
+            x0 = std::min(x0, q.x), y0 = std::min(y0, q.y), x1 = std::max(x1, q.x), y1 = std::max(y1, q.y);
+        }
     }
-    if (layer.type == LayerType::Media) {
-        drawMedia(dl, comp, layer, time, layerToScreen, opacity);
-        return;
+    const SkRect bounds = SkRect::MakeLTRB(x0 - 4, y0 - 4, x1 + 4, y1 + 4); // antialiasing and strokes past the bounds
+    const SkRect* hint = bounded && !bounds.isEmpty() ? &bounds : nullptr;
+    canvas->save();
+    canvas->resetMatrix();
+    SkPaint filtered;
+    filtered.setImageFilter(effectChain(layer, time, zoom));
+    filtered.setAlphaf(opacity);
+    canvas->saveLayer(hint, &filtered);
+    for (double ti : times) {
+        const bool average = times.size() > 1;
+        if (average) {
+            SkPaint add;
+            add.setBlendMode(SkBlendMode::kPlus);
+            add.setAlphaf(1.0f / static_cast<float>(times.size()));
+            canvas->saveLayer(hint, &add);
+        }
+        const Affine m = parent * layer.matrixAt(ti);
+        canvas->setMatrix(toSk(m));
+        drawContent(canvas, layer, ti, 1.0f, comp, m, zoom);
+        if (average) canvas->restore();
     }
-    if (layer.type == LayerType::Text) drawText(dl, layer, time, layerToScreen, opacity);
-    else if (layer.type == LayerType::Plugin) drawPlugin(dl, layer, time, layerToScreen, opacity);
-    else drawShape(dl, layer, time, layerToScreen, opacity);
+    canvas->restore();
+    canvas->restore();
 }
 
-void drawComposition(ImDrawList* dl, const Composition& comp, double time, const View& view, bool background,
-                     EffectRenderer* effects, bool throughCamera) {
-    if (!effects) effects = &screenEffects();
+void drawComposition(SkCanvas* canvas, const Composition& comp, double time, const View& view, bool background,
+                     bool throughCamera) {
     const Vec2 a = view.toScreen({0, 0});
     const Vec2 b = view.toScreen({static_cast<float>(comp.width), static_cast<float>(comp.height)});
-    const Color bg = comp.background;
-    if (background)
-        dl->AddRectFilled(ImVec2(a.x, a.y), ImVec2(b.x, b.y),
-                          ImGui::ColorConvertFloat4ToU32(ImVec4(bg.r, bg.g, bg.b, 1.0f)));
-
-    // Layers are clipped to the composition frame.
-    dl->PushClipRect(ImVec2(a.x, a.y), ImVec2(b.x, b.y), true);
-    const Affine viewMatrix = Affine::translate(view.origin) * Affine::scale(view.zoom) *
-                              (throughCamera ? comp.cameraAt(time) : Affine{});
+    const SkRect frame = SkRect::MakeLTRB(a.x, a.y, b.x, b.y);
+    if (background) {
+        const Color bg = comp.background;
+        canvas->drawRect(frame, SkPaint(SkColor4f{bg.r, bg.g, bg.b, 1.0f}));
+    }
+    canvas->save();
+    canvas->clipRect(frame, true); // layers are clipped to the composition frame
+    const Affine viewMatrix = Affine::translate(view.origin) * Affine::scale(view.zoom) * (throughCamera ? comp.cameraAt(time) : Affine{});
     for (auto it = comp.layers.rbegin(); it != comp.layers.rend(); ++it) {
         if (!it->activeAt(time) || it->type == LayerType::Camera) continue;
         if (it->parent && comp.findLayer(it->parent)) continue; // drawn by its compound
-        if (hasActiveEffects(*it)) effects->drawLayer(dl, *it, time, comp.frameDuration(), viewMatrix, view.zoom, &comp);
-        else drawLayer(dl, *it, time, viewMatrix * it->matrixAt(time), -1.0f, &comp, effects, view.zoom);
+        drawLayer(canvas, *it, time, viewMatrix * it->matrixAt(time), view.zoom, &comp);
     }
-    dl->PopClipRect();
+    canvas->restore();
 }
 
 bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp) {
@@ -334,18 +453,15 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
         return true;
     }
     if (layer.type == LayerType::Text) {
-        const TextLayout layout = layoutText(layer.text, time);
-        const float left = alignedLeft(layer.text, layout.width);
-        outMin = {left, layout.top};
-        outMax = {left + std::max(layout.width, layout.fontSize * 0.25f), layout.top + layout.height};
+        textBounds(layer.text, time, outMin, outMax);
         return true;
     }
     const ShapeProps& s = layer.shape;
     const Vec2 size = s.size.valueAt(time);
     float pad = s.strokeEnabled ? s.strokeWidth.valueAt(time) * 0.5f : 0.0f;
     if (s.kind == ShapeKind::Line) pad = std::max(pad, 6.0f);
-    outMin = {-size.x * 0.5f - pad, -size.y * 0.5f - pad};
-    outMax = {size.x * 0.5f + pad, size.y * 0.5f + pad};
+    outMin = {-std::fabs(size.x) * 0.5f - pad, -std::fabs(size.y) * 0.5f - pad};
+    outMax = {std::fabs(size.x) * 0.5f + pad, std::fabs(size.y) * 0.5f + pad};
     return true;
 }
 

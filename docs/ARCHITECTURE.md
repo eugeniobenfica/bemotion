@@ -3,11 +3,11 @@
 bemotion is split into layers. Dependencies only point downwards:
 
 ```
-app     window, main loop, OS integration (GLFW, file dialogs, paths), command line
- └─ ui      theme, widgets, home screen, editor, panels, dialogs (Dear ImGui)
-     └─ export  encoders (Media Foundation, FFmpeg, PNG) and the export job
-         └─ render  draws a Composition into an ImDrawList (on screen or off screen)
-             └─ core    document model — plain C++, no UI or GPU code
+app     application window, OS integration (Qt: dialogs, paths, trash), command line
+ └─ ui      Qt Widgets: theme, widgets, home screen, editor window, dock panels, dialogs
+     └─ export  encoders (FFmpeg libraries, PNG) and the export job
+         └─ render  draws a Composition onto a Skia canvas (on screen or off screen)
+             └─ core    document model — plain C++, no UI or graphics code
 ```
 
 `core` builds as its own static library (`bemotion_core`) and is covered by the
@@ -45,32 +45,38 @@ tests in `tests/`.
 
 ## Rendering (`src/render`)
 
-`SceneRenderer` draws through Dear ImGui's `ImDrawList`, the same path used by
-the UI. Each primitive is generated in layer space, rasterized at roughly
-screen density, and its vertices are then transformed by the layer → screen
-matrix. That gives rotation and non-uniform scale for shapes *and* text with a
-single code path. Text uses ImGui 1.92's dynamic font atlas; raster sizes are
-quantized to keep the atlas small while zooming.
+`SceneRenderer` draws a composition onto any `SkCanvas`. Each layer draws in
+its own local space with the full layer → output matrix on the canvas, so
+shapes, text and footage stay sharp at any zoom, rotation or scale. A layer
+with effects is drawn into an offscreen layer (`saveLayer`, bounded to what
+the layer covers) whose image-filter chain applies the effect stack in output
+pixels: Skia blurs, drop shadows and color matrices, SkSL runtime effects for
+the color operations and Wave Warp. Motion Blur averages several moments
+inside the shutter with additive layers.
 
-`OffscreenRenderer` renders the same draw lists into an OpenGL framebuffer and
-reads the pixels back, so exports look exactly like the preview.
+`Text` shapes with SkShaper (HarfBuzz + ICU: ligatures, complex scripts,
+bidirectional text, per-character font fallback) and caches shaped lines;
+`Fonts` wraps the platform font manager (DirectWrite, CoreText, fontconfig)
+plus the bundled Inter.
+
+`OffscreenRenderer` renders into a raster `SkSurface` and reads the pixels
+back, so exports look exactly like the preview: it is the same code path.
+Skia itself is built by `tools/skia/build-skia.sh` from a pinned revision,
+without AVX2 / AVX-512 code so the binaries run on any x86-64 CPU.
 
 ## Export (`src/export`)
 
 `ExportJob` snapshots the project, renders frame by frame and feeds an
-`Encoder`. It is stepped from the UI thread a few frames at a time (the GL
-context lives there), which keeps the progress dialog responsive and makes
-cancelling trivial. Encoders:
+`Encoder`. It is stepped from the UI thread a few frames at a time, which keeps
+the progress dialog responsive and makes cancelling trivial. Encoders:
 
-- `MediaFoundationEncoder` — MP4/H.264 on Windows with no extra software
-  (frames are converted to NV12, BT.709).
-- `FfmpegEncoder` — pipes raw RGBA into an `ffmpeg` process for MP4 on other
-  systems and for ProRes 4444, WebM VP9 and GIF.
+- `FfmpegEncoder` — FFmpeg's libraries, linked in: MP4 / H.264 (libx264, then
+  OpenH264 or the hardware encoders available), MOV / ProRes 4444, WebM / VP9
+  and GIF (palette built by an FFmpeg filter graph), with AAC / PCM / Opus audio.
 - `PngSequenceEncoder` — numbered PNGs via stb_image_write, with alpha.
 
 Audio is mixed once when the job starts (`Settings::mixAudio`, provided by the
-media module) and handed to the encoder: an AAC stream in Media Foundation
-MP4s, a temporary WAV input for FFmpeg, a `.wav` beside PNG sequences.
+media module) and muxed into the file; PNG sequences get a `.wav` beside them.
 
 ## Media (`src/media`)
 
@@ -79,10 +85,10 @@ points at one by id and stores where the source's frame 0 sits in composition
 time (`MediaProps::start`, moved along by `shiftTime`), so cut, moved and
 trimmed clips stay in sync with their source.
 
-- `MediaIO` probes files and decodes images (stb_image) and audio (miniaudio;
-  Media Foundation for audio in video containers). `VideoReader` reads video
-  frames (Media Foundation on Windows, a stub elsewhere).
-- `MediaManager` is the runtime side: GL textures for images and thumbnails,
+- `MediaIO` probes files and decodes images (stb_image); audio and video go
+  through FFmpeg (`FfmpegMedia.cpp`): audio is resampled to stereo float, and
+  `VideoReader` seeks and decodes video frames to RGBA.
+- `MediaManager` is the runtime side: `SkImage`s for stills, frames and thumbnails,
   one video reader per (composition, layer) so the editor and an export never
   fight over seeking, and audio decoded in the background. It plugs into the
   renderer through `render::setMediaProvider`.
@@ -96,44 +102,56 @@ trimmed clips stay in sync with their source.
   tool, playhead and history. Panels mutate the project directly and call
   `ctx.touch()`; the change becomes one undo step when the user releases the
   mouse / stops typing (`commitIfIdle`).
-- **Panels** (`ui/panels`) are independent classes with a `draw(ctx)` method:
-  `ObjectsPanel` (left), `ViewportPanel` (center), `PropertiesPanel` (right)
-  and `TimelinePanel` (bottom). They live in an ImGui dockspace, so users can
-  rearrange them; *View → Reset Layout* restores the default. Objects are
-  dragged onto the viewport with an ImGui drag-and-drop payload
-  (`kObjectPayload`).
+- **`EditorWindow`** is the workspace: menus and shortcuts (`QAction`s bound
+  from the keymap), and the panels in Qt Advanced Docking System docks: drag
+  tabs to rearrange or float them, pin a panel to auto-hide it on the window
+  edge, double-click a tab to maximize it; the layout is saved and *View →
+  Reset Layout* restores the default. A 16 ms timer drives playback, media,
+  audio and the undo commits, and calls each panel's `sync()`.
+- **Panels** (`ui/panels`) are Qt widgets: `ObjectsPanel`, `MediaPanel` and
+  `ToolsPanel` (left), `ViewportPanel` (center: the composition rendered by
+  Skia plus overlays drawn with `ui::Draw` over `QPainter`), `PropertiesPanel`
+  and `EffectsPanel` (right) and `TimelinePanel` (bottom: custom painted, with
+  real editors in its property rows and the graph editor in
+  `TimelineGraph.cpp`). Panels rebuild their widgets only when the structure
+  changes (another layer, other properties) and otherwise just refresh values,
+  using `EditorContext::revision()` to know when to repaint. Drag and drop
+  between panels uses the MIME types of `ui/Mime.h`.
+- **`PropertyRow`** is the shared editor of one animatable property (keyframe
+  toggle, label, drag-to-scrub value, reset, context menu), used by Properties,
+  Effects and the timeline.
 - **`ToolsPanel`** lists the tools and actions of `ui/Tools.h`; the user drags
   them into the timeline's toolbar (saved as `Settings::toolbar`).
-- Minimized panels are not drawn at all (`ui::panelHidden`): their neighbors
-  take the space and `drawHiddenPanelHandles` leaves a restore handle on the
-  window edge they came from.
-- **`ExportDialog`** — settings, progress and result of an export.
+- **Dialogs** (`ui/Dialogs.h`): export (settings, progress, result), Settings
+  and Help (both `PagedWindow`s), and the New Project dialog of the home screen.
 - **`IntroScreen`** plays `assets/welcome/Welcome.bemotion` full-window at
   startup (skippable, can be turned off in Settings). The same file is the
   Welcome project users can open, so the intro is edited in bemotion itself.
-- **`Theme`** defines the palette (dark neutrals + golden accent `#E8B931`).
-  Use the named colors from `Theme.h` instead of literals.
+- **`Theme`** defines the palette (dark neutrals + golden accent `#E8B931`)
+  and applies it to Qt as a `QPalette` plus a style sheet. Use the named colors
+  from `Theme.h` instead of literals.
 - **`Widgets`** has the vector icon set and custom controls (accent button,
   object tile, keyframe toggle). The logo is `drawLogoMark`, built from the
   shared geometry in `render/LogoMark.h` (also used by the app icon).
 
 ## App (`src/app`)
 
-`Application` owns the GLFW window and ImGui context and switches between the
-home screen and the editor. Frames are paced in software at the monitor
-refresh rate (driver vsync can stall on some GPUs). With `--export` it renders
-headlessly from the command line instead. `Platform` wraps OS specifics: known
-folders, native file dialogs and UTF-8 paths.
+`Application` creates the `QApplication` and the main window, which stacks the
+home screen and the editor with the intro on top while it plays. With
+`--export` it renders headlessly from the command line instead (no window).
+`Platform` wraps OS specifics through Qt: known folders, native file dialogs,
+the file manager, the trash and UTF-8 paths.
 
 ### Developer aids
 
-- `BEMOTION_CAPTURE=shot.bmp` saves frame `BEMOTION_CAPTURE_FRAME` (default 60)
-  to a BMP and quits.
+- `BEMOTION_CAPTURE=shot.png` saves the window at frame `BEMOTION_CAPTURE_FRAME`
+  (default 60, about 16 ms each) and quits.
 - `BEMOTION_APPDATA=dir` keeps settings, layout and caches in `dir` instead of
   the user's app data folder (use it for scripted UI tests).
 - `BEMOTION_SCRIPT=steps.txt` replays scripted mouse/keyboard input and can
-  capture frames along the way (see `app/DevScript.h`), so interactions can be
-  checked without anyone at the screen.
+  capture windows along the way (see `app/DevScript.h`), so interactions can be
+  checked without anyone at the screen; `BEMOTION_SCRIPT_TRACE=log.txt` logs
+  each command as it runs.
 - `bemotion --write-icon <file.ico|png|svg>` / `--write-mark <file.svg>`
   regenerate the brand files in `assets/branding` from `render/LogoMark.h`.
 - Configure with `-DBEMOTION_CONSOLE=ON` to keep a console window for logs and

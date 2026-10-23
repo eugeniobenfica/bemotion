@@ -5,6 +5,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <QApplication>
+#include <QFont>
+
 #include <algorithm>
 #include <fstream>
 #include <sstream>
@@ -14,8 +17,6 @@ namespace bemotion {
 namespace {
 
 using json = nlohmann::json;
-
-float g_dpiScale = 1.0f;
 
 std::filesystem::path settingsFile() { return platform::appDataDir() / "settings.json"; }
 
@@ -111,10 +112,14 @@ theme::Palette effectivePalette() {
     return p;
 }
 
-void applySettings(float dpiScale) {
-    if (dpiScale > 0.0f) g_dpiScale = dpiScale;
-    theme::apply(effectivePalette(), g_dpiScale);
-    ImGui::GetStyle().FontScaleMain = settings().textScale;
+void applySettings() {
+    theme::apply(effectivePalette());
+    if (auto* app = qobject_cast<QApplication*>(QApplication::instance())) {
+        QFont font(QString::fromStdString(settings().uiFont));
+        font.setPointSizeF(9.5 * std::clamp(settings().textScale, 0.8f, 1.5f));
+        font.setStyleStrategy(QFont::PreferAntialias);
+        app->setFont(font);
+    }
 }
 
 // --- themes ---------------------------------------------------------------------

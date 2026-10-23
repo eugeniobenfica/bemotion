@@ -1,70 +1,41 @@
 #pragma once
 
-// Fonts for the UI and for text layers.
+// Fonts for text layers and plugin text, through Skia.
 //
-// The bundled Inter family (Regular/Medium/SemiBold/Bold) is always there.
-// System fonts are discovered in the background (family/style names read
-// from each file's name table, cached in <app data>/fontcache.json) and
-// loaded into ImGui's atlas the first time a text layer uses them. ImGui
-// 1.92+ rasterizes glyphs on demand at any size, so one ImFont per face is
-// enough.
+// The bundled Inter family (Regular / Medium / SemiBold / Bold) is always
+// there; every installed family comes from the system font manager
+// (DirectWrite on Windows, CoreText on macOS, fontconfig on Linux).
+// Missing characters fall back to other installed fonts while shaping.
 
 #include "core/Project.h"
+
+#include "include/core/SkFontMgr.h"
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkTypeface.h"
 
 #include <filesystem>
 #include <string>
 #include <vector>
 
-#include <imgui.h> // ImVector, ImTextureData
-
-struct ImFont;
-
 namespace bemotion {
-
-struct FontFace {
-    std::string family;
-    std::string style;
-    std::filesystem::path path;
-    int index = 0;    // face inside a .ttc collection
-    int weight = 400; // OS/2 weight class
-    bool italic = false;
-};
 
 class Fonts {
 public:
-    static constexpr float kUiSize = 15.0f;
     static constexpr const char* kDefaultFamily = "Inter";
 
-    static void load(const std::filesystem::path& assetsDir);
-    // Starts scanning installed fonts on a background thread.
-    static void startSystemScan(const std::filesystem::path& cacheFile);
-    static bool systemScanReady();
-    // Adds fonts requested since the last call to the atlas (call between frames).
-    static void processPending();
+    static void load(const std::filesystem::path& assetsDir); // the bundled Inter faces
+    static sk_sp<SkFontMgr> manager();
 
-    // The interface font family ("Inter" by default; any installed family).
-    static void setUiFamily(const std::string& family);
-    static ImFont* ui();
-    static ImFont* uiMedium();
-    static ImFont* uiBold();
-    static ImFont* forWeight(FontWeight weight);
+    // The face for a family and style name ("Bold", "SemiBold Italic", ...); Inter when the
+    // family is not installed, the closest weight / slant when the style is not.
+    static sk_sp<SkTypeface> typeface(const std::string& family, const std::string& style);
+    static sk_sp<SkTypeface> forWeight(FontWeight weight); // Inter
 
-    // Font for a text layer; falls back to Inter while a face loads or if missing.
-    static ImFont* forText(const TextProps& text);
-    // Queues every face the composition uses; true once all are loaded (or
-    // known to be missing). Exports wait for this so no frame uses a fallback.
-    static bool ensureLoaded(const Composition& comp);
-    // Every texture an off-screen draw may reference this frame: the registered
-    // ones plus atlas pages created since the frame started (ImGui registers
-    // those only at the next NewFrame, so mid-frame renders must upload them).
-    static ImVector<ImTextureData*>* texturesForOffscreenDraw();
-
-    static std::vector<std::string> families();                    // sorted, Inter first
+    static std::vector<std::string> families();                         // sorted, Inter first
     static std::vector<std::string> stylesOf(const std::string& family); // regular first
     static bool hasFamily(const std::string& family);
-};
 
-// Reads the faces of one font file (several for .ttc collections).
-std::vector<FontFace> scanFontFile(const std::filesystem::path& file);
+    static std::filesystem::path interFile(const std::string& style); // for the UI (Qt)
+};
 
 } // namespace bemotion

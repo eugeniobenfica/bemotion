@@ -4,9 +4,8 @@
 // and audio samples.
 //
 //   images   PNG, JPEG, BMP, TGA, GIF (first frame), PSD (composite), HDR - stb_image
-//   audio    WAV, MP3, FLAC - miniaudio (every platform); M4A / AAC / WMA - Media Foundation (Windows)
-//   video    MP4 / MOV / M4V / WMV / AVI (H.264, HEVC, ... whatever the system decodes) - Media Foundation
-//            (Windows); other systems do not import video yet.
+//   audio    WAV, MP3, FLAC, M4A / AAC, OGG / Opus, WMA, AIFF - FFmpeg
+//   video    MP4, MOV, M4V, MKV, WebM, AVI, WMV, MPEG-TS (any codec FFmpeg decodes) - FFmpeg
 //
 // Audio is always delivered as interleaved stereo float at kAudioRate.
 

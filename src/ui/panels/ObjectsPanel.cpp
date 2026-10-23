@@ -2,11 +2,13 @@
 
 #include "app/PluginHost.h"
 #include "ui/EditorContext.h"
+#include "ui/Mime.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
-#include "ui/panels/ViewportPanel.h"
 
-#include <imgui.h>
+#include <QGridLayout>
+#include <QResizeEvent>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <cctype>
@@ -15,96 +17,106 @@ namespace bemotion {
 
 namespace {
 
-// Lets a tile be dragged onto the viewport to drop the object at a precise spot.
-// `kind` is -1 for text, otherwise a ShapeKind.
-void dragSource(int kind, ui::Icon icon, const char* label) {
-    if (!ImGui::BeginDragDropSource()) return;
-    ImGui::SetDragDropPayload(kObjectPayload, &kind, sizeof(kind));
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float s = ImGui::GetFrameHeight();
-    ImGui::Dummy(ImVec2(s, s));
-    ui::drawIcon(ImGui::GetWindowDrawList(), icon, ImVec2(p.x + s * 0.5f, p.y + s * 0.5f), s * 0.6f, theme::kAccent);
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    ImGui::Text("%s  ·  drop on the canvas or the timeline", label);
-    ImGui::EndDragDropSource();
-}
+constexpr int kTileWidth = 84;
+
+// A grid of tiles under a section title.
+struct Section {
+    QGridLayout* grid;
+    int cols;
+    int count = 0;
+    void add(QWidget* w) {
+        grid->addWidget(w, count / cols, count % cols);
+        ++count;
+    }
+};
 
 } // namespace
 
-void ObjectsPanel::draw(EditorContext& ctx) {
-    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
-    ui::nextPanelWindowClass();
-    if (!ImGui::Begin(kWindowName, &open)) {
-        ImGui::End();
-        return;
-    }
-    if (ui::panelIsMinimized()) { // only the tab shows
-        ui::panelMinimizeButton();
-        ImGui::End();
-        return;
-    }
+ObjectsPanel::ObjectsPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(parent), ctx_(ctx) {
+    setWidgetResizable(true);
+    setFrameShape(QFrame::NoFrame);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    rebuild();
+}
 
-    // As many compact tiles per row as fit.
-    const float spacing = ImGui::GetStyle().ItemSpacing.x;
-    const float avail = ImGui::GetContentRegionAvail().x;
-    const int cols = std::max(2, static_cast<int>((avail + spacing) / (84.0f + spacing)));
-    const float tileW = std::max(56.0f, (avail - spacing * (cols - 1)) / cols);
-    const ImVec2 tile(tileW, std::clamp(tileW * 0.8f, 56.0f, 84.0f));
+void ObjectsPanel::resizeEvent(QResizeEvent* e) {
+    QScrollArea::resizeEvent(e);
+    const int cols = std::max(2, (viewport()->width() - 16) / (kTileWidth + 8));
+    if (cols != columns_) rebuild();
+}
 
-    ui::sectionLabel("TEXT");
-    if (ui::objectTile("##text", ui::Icon::Text, "Text", tile)) ctx.addText();
-    ui::tooltip("Click to add at the center, or drag onto the canvas (T)");
-    dragSource(-1, ui::Icon::Text, "Text");
+void ObjectsPanel::sync() {
+    if (PluginHost::get().objectTypes().size() != pluginTypes_) rebuild();
+}
 
-    ImGui::Dummy(ImVec2(0, 6));
-    ui::sectionLabel("GRAPHICS");
-    int column = 0;
+void ObjectsPanel::rebuild() {
+    const auto types = PluginHost::get().objectTypes();
+    pluginTypes_ = types.size();
+    columns_ = std::max(2, (viewport()->width() - 16) / (kTileWidth + 8));
+    const int tileW = std::max(56, (viewport()->width() - 16 - 8 * (columns_ - 1)) / columns_);
+    const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.8f), 56, 84));
+
+    content_ = new QWidget;
+    auto* col = new QVBoxLayout(content_);
+    col->setContentsMargins(8, 8, 8, 8);
+    col->setSpacing(6);
+    auto section = [&](const QString& title) {
+        col->addWidget(ui::sectionLabel(title));
+        auto* grid = new QGridLayout;
+        grid->setSpacing(8);
+        grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        col->addLayout(grid);
+        return Section{grid, columns_};
+    };
+    auto makeTile = [&](ui::Icon icon, const QString& label, const QString& tip, int kind, std::function<void()> add) {
+        auto* t = new ui::Tile(icon, label);
+        t->setTileSize(tile);
+        t->setToolTip(tip);
+        t->setDragData([kind] { return ui::makeMime(ui::kObjectMime, kind); });
+        connect(t, &QAbstractButton::clicked, this, std::move(add));
+        return t;
+    };
+
+    Section text = section("Text");
+    text.add(makeTile(ui::Icon::Text, "Text", "Click to add at the center, or drag onto the canvas (T)", -1, [this] { ctx_.addText(); }));
+    col->addSpacing(4);
+
+    Section graphics = section("Graphics");
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) {
         const auto kind = static_cast<ShapeKind>(i);
-        if (column++ % cols != 0) ImGui::SameLine();
-        ImGui::PushID(i);
-        if (ui::objectTile("##shape", ui::iconForShape(kind), shapeKindLabel(kind), tile)) ctx.addShape(kind);
-        ui::tooltip("Click to add at the center, or drag onto the canvas");
-        dragSource(i, ui::iconForShape(kind), shapeKindLabel(kind));
-        ImGui::PopID();
+        graphics.add(makeTile(ui::iconForShape(kind), shapeKindLabel(kind), "Click to add at the center, or drag onto the canvas", i,
+                              [this, kind] { ctx_.addShape(kind); }));
     }
+    col->addSpacing(4);
 
-    ImGui::Dummy(ImVec2(0, 6));
-    ui::sectionLabel("SCENE");
-    if (ui::objectTile("##camera", ui::Icon::Camera, "Camera", tile)) ctx.addCamera();
-    ui::tooltip("A camera frames the scene: animate its position, rotation and zoom");
-    dragSource(kDropCamera, ui::Icon::Camera, "Camera");
-
+    Section scene = section("Scene");
+    scene.add(makeTile(ui::Icon::Camera, "Camera", "A camera frames the scene: animate its position, rotation and zoom",
+                       ui::kDropCamera, [this] { ctx_.addCamera(); }));
 
     // Object types from plugins (charts, ...), grouped by plugin.
-    const auto types = PluginHost::get().objectTypes();
     std::string lastPlugin;
-    column = 0;
+    Section* current = nullptr;
+    std::vector<Section> sections;
+    sections.reserve(types.size());
     for (size_t i = 0; i < types.size(); ++i) {
         const PluginObjectType& type = *types[i];
         if (type.pluginId != lastPlugin) {
             lastPlugin = type.pluginId;
             const Plugin* plugin = PluginHost::get().findPlugin(type.pluginId);
-            std::string title = plugin ? plugin->name : type.pluginId;
-            for (char& ch : title) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
-            ImGui::Dummy(ImVec2(0, 6));
-            ui::sectionLabel(title.c_str());
-            column = 0;
+            col->addSpacing(4);
+            sections.push_back(section(QString::fromStdString(plugin ? plugin->name : type.pluginId)));
+            current = &sections.back();
         }
-        if (column++ % cols != 0) ImGui::SameLine();
-        ImGui::PushID(static_cast<int>(i) + 1000);
-        const ui::Icon icon = ui::iconForPlugin(type.icon);
-        if (ui::objectTile("##plugin", icon, type.name.c_str(), tile)) ctx.addPluginObject(type);
-        ui::tooltip(type.description.empty() ? "Click to add at the center, or drag onto the canvas"
-                                             : type.description.c_str());
-        dragSource(kDropPlugin - static_cast<int>(i), icon, type.name.c_str());
-        ImGui::PopID();
+        const std::string id = type.id;
+        current->add(makeTile(ui::iconForPlugin(type.icon), QString::fromStdString(type.name),
+                              QString::fromStdString(type.description.empty() ? "Click to add at the center, or drag onto the canvas"
+                                                                              : type.description),
+                              ui::kDropPlugin - static_cast<int>(i), [this, id] {
+                                  if (const PluginObjectType* t = PluginHost::get().findType(id)) ctx_.addPluginObject(*t);
+                              }));
     }
-
-
-    ui::panelMinimizeButton();
-    ImGui::End();
+    col->addStretch();
+    setWidget(content_);
 }
 
 } // namespace bemotion

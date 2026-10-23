@@ -12,9 +12,7 @@ namespace bemotion::exporting {
 // Implemented in the encoder translation units.
 std::unique_ptr<Encoder> makePngSequenceEncoder();
 std::unique_ptr<Encoder> makeFfmpegEncoder();
-#ifdef _WIN32
-std::unique_ptr<Encoder> makeMediaFoundationEncoder();
-#endif
+bool ffmpegCanEncode(Format f);
 
 namespace {
 
@@ -23,20 +21,14 @@ struct FormatInfo {
     const char* extension;
     bool alpha;
     bool evenSize;
-    bool needsFfmpeg;
 };
 
 constexpr FormatInfo kFormats[] = {
-    {"MP4 video (H.264)", ".mp4", false, true,
-#ifdef _WIN32
-     false},
-#else
-     true},
-#endif
-    {"PNG image sequence", ".png", true, false, false},
-    {"MOV video (ProRes 4444)", ".mov", true, true, true},
-    {"WebM video (VP9)", ".webm", true, true, true},
-    {"Animated GIF", ".gif", true, false, true},
+    {"MP4 video (H.264)", ".mp4", false, true},
+    {"PNG image sequence", ".png", true, false},
+    {"MOV video (ProRes 4444)", ".mov", true, true},
+    {"WebM video (VP9)", ".webm", true, true},
+    {"Animated GIF", ".gif", true, false},
 };
 static_assert(std::size(kFormats) == static_cast<size_t>(Format::Count));
 
@@ -48,50 +40,7 @@ const char* formatLabel(Format f) { return info(f).label; }
 const char* formatExtension(Format f) { return info(f).extension; }
 bool formatSupportsAlpha(Format f) { return info(f).alpha; }
 bool formatNeedsEvenSize(Format f) { return info(f).evenSize; }
-bool formatAvailable(Format f) { return !info(f).needsFfmpeg || findFfmpeg().has_value(); }
-
-std::optional<std::filesystem::path> findFfmpeg() {
-    namespace fs = std::filesystem;
-    static const std::optional<fs::path> cached = []() -> std::optional<fs::path> {
-#ifdef _WIN32
-        const char* exe = "ffmpeg.exe";
-        const char sep = ';';
-#else
-        const char* exe = "ffmpeg";
-        const char sep = ':';
-#endif
-        std::error_code ec;
-        std::vector<fs::path> candidates{platform::executableDir() / exe};
-        if (const char* path = std::getenv("PATH")) {
-            std::string all = path;
-            size_t begin = 0;
-            while (begin <= all.size()) {
-                const size_t end = std::min(all.find(sep, begin), all.size());
-                if (end > begin) candidates.push_back(platform::fromUtf8(all.substr(begin, end - begin)) / exe);
-                begin = end + 1;
-            }
-        }
-#ifdef _WIN32
-        // winget installs (PATH changes only reach new logins).
-        if (const char* local = std::getenv("LOCALAPPDATA")) {
-            const fs::path packages = fs::path(local) / "Microsoft" / "WinGet" / "Packages";
-            for (const auto& pkg : fs::directory_iterator(packages, ec))
-                if (pkg.path().filename().string().rfind("Gyan.FFmpeg", 0) == 0 ||
-                    pkg.path().filename().string().rfind("BtbN.FFmpeg", 0) == 0)
-                    for (const auto& sub : fs::directory_iterator(pkg.path(), ec))
-                        candidates.push_back(sub.path() / "bin" / exe);
-        }
-#else
-        candidates.push_back("/usr/bin/ffmpeg");
-        candidates.push_back("/usr/local/bin/ffmpeg");
-        candidates.push_back("/opt/homebrew/bin/ffmpeg");
-#endif
-        for (const auto& c : candidates)
-            if (fs::is_regular_file(c, ec)) return c;
-        return std::nullopt;
-    }();
-    return cached;
-}
+bool formatAvailable(Format f) { return f == Format::PngSequence || ffmpegCanEncode(f); }
 
 void outputSize(const Composition& comp, const Settings& s, int& width, int& height) {
     width = std::max(2, static_cast<int>(std::lround(comp.width * s.scale)));
@@ -136,13 +85,7 @@ bool writeWav(const std::filesystem::path& file, const std::vector<float>& stere
 }
 
 std::unique_ptr<Encoder> createEncoder(Format format) {
-    switch (format) {
-    case Format::PngSequence: return makePngSequenceEncoder();
-#ifdef _WIN32
-    case Format::Mp4: return makeMediaFoundationEncoder();
-#endif
-    default: return makeFfmpegEncoder();
-    }
+    return format == Format::PngSequence ? makePngSequenceEncoder() : makeFfmpegEncoder();
 }
 
 // --- ExportJob -----------------------------------------------------------------------

@@ -3,24 +3,29 @@
 #include "core/Math.h"
 #include "render/SceneRenderer.h"
 
+#include <QImage>
+#include <QWidget>
+
 #include <cstdint>
 #include <utility>
 #include <vector>
 
+class QComboBox;
+class QLabel;
+class QMimeData;
+class QPainter;
+class QPlainTextEdit;
+class QPushButton;
+class QToolButton;
+
 namespace bemotion {
 
 class EditorContext;
+namespace ui {
+class IconButton;
+}
 
-// Payload id for dragging objects from the Objects panel onto the canvas.
-// The payload is an int: -1 for text, kDropCamera for a camera, kDropPlugin - i
-// for plugin object type i (PluginHost::objectTypes()), otherwise a ShapeKind.
-inline constexpr const char* kObjectPayload = "BEMOTION_OBJECT";
-// Payload of a Media panel item: its uint64_t media id.
-inline constexpr const char* kMediaPayload = "BEMOTION_MEDIA";
-inline constexpr int kDropCamera = -2;
-inline constexpr int kDropPlugin = -100;
-
-// Center panel: renders the composition and provides direct manipulation.
+// Center panel: renders the composition (Skia) and provides direct manipulation.
 //
 // Mouse:
 //   wheel                         zoom around the cursor
@@ -29,64 +34,90 @@ inline constexpr int kDropPlugin = -100;
 //   drag on empty space           box selection
 //   drag a layer                  move every selected layer
 //   corner / top handle           scale (Shift: uniform) / rotate (Shift: 15° steps)
-class ViewportPanel {
+//   double-click a text           edit it in place; a compound: enter it
+class ViewportPanel : public QWidget {
+    Q_OBJECT
 public:
-    static constexpr const char* kWindowName = "Viewport";
-    bool open = true; // closed with the tab's x, reopened from View > Panels
+    explicit ViewportPanel(EditorContext& ctx, QWidget* parent = nullptr);
 
-    void draw(EditorContext& ctx);
+    void sync(); // redraws when what it shows changed
 
     // Keeps the composition fitted to the panel until the user zooms or pans.
-    void requestFit() { autoFit_ = true; }
+    void requestFit() {
+        autoFit_ = true;
+        update();
+    }
     void zoomBy(float factor); // around the canvas center
     void setZoom(float zoom);
 
-    // True when Space was used as the hand tool since the last call, so the
-    // editor should not treat that Space press as play/pause.
-    bool takeSpaceUsed() {
-        const bool used = spaceUsed_;
-        spaceUsed_ = false;
-        return used;
-    }
+    // Space held (the hand tool). Returns, when released, whether it was used to pan
+    // (then it is not a play / pause tap).
+    bool setSpaceHeld(bool held);
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+    void resizeEvent(QResizeEvent*) override;
+    void mousePressEvent(QMouseEvent*) override;
+    void mouseDoubleClickEvent(QMouseEvent*) override;
+    void mouseMoveEvent(QMouseEvent*) override;
+    void mouseReleaseEvent(QMouseEvent*) override;
+    void wheelEvent(QWheelEvent*) override;
+    void leaveEvent(QEvent*) override;
+    void dragEnterEvent(QDragEnterEvent*) override;
+    void dragMoveEvent(QDragMoveEvent*) override;
+    void dragLeaveEvent(QDragLeaveEvent*) override;
+    void dropEvent(QDropEvent*) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle };
+    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle, Guide };
 
-    void handleNavigation(bool hovered);
-    void handleSelectionInput(EditorContext& ctx, bool hovered);
-    void handleDrop(EditorContext& ctx);
-    const struct PluginObjectType* droppedPluginType() const; // null unless a plugin object is dragged in
-    void drawOverlay(EditorContext& ctx, bool hovered);
-    void drawHud(EditorContext& ctx);
-    void drawTextEditor(EditorContext& ctx);
+    void layout(); // zoom, origin and camera for the current size and time
+    void press(QMouseEvent* e, bool doubleClick);
+    void dragTo(Vec2 mouse, Qt::KeyboardModifiers mods);
+    void updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods);
+    bool updateDrop(const QMimeData* mime, Vec2 mouse, Qt::KeyboardModifiers mods);
+    const struct PluginObjectType* droppedPluginType() const;
+    void drawOverlay(QPainter& p);
+    void drawGuides(QPainter& p);
+    void drawRulers(QPainter& p);
+    void drawHudBackground(QPainter& p);
+    void positionHud();
+    void beginTextEdit(uint64_t layerId);
+    void placeTextEditor();
+    void endTextEdit(bool keep);
+    void editGuide(int index, QPoint at);
 
     // --- motion path ---------------------------------------------------------------
     // The single selected layer's position keyframes, drawn as an editable curve.
-    Layer* pathLayer(EditorContext& ctx) const;
+    Layer* pathLayer() const;
     // Point under the screen position: key index and part (0 = key, 1 = in handle, 2 = out handle).
-    bool pathHit(EditorContext& ctx, Vec2 screen, int& key, int& part) const;
-    void drawMotionPath(EditorContext& ctx);
-    int pathKey_ = -1;  // key being dragged
+    bool pathHit(Vec2 screen, int& key, int& part) const;
+    void drawMotionPath(QPainter& p);
+    int pathKey_ = -1; // key being dragged
     int pathPart_ = 0;
     void zoomAround(Vec2 screenPoint, float newZoom);
 
+    EditorContext& ctx_;
     float zoom_ = 0.5f;
     Vec2 pan_{0.0f, 0.0f};    // offset of the composition center from the canvas center
-    Vec2 origin_{0.0f, 0.0f}; // screen position of comp (0,0), updated each frame
-    Vec2 canvasMin_, canvasMax_;
+    Vec2 origin_{0.0f, 0.0f}; // widget position of comp (0,0)
     Vec2 compSize_;
     // Camera: through it (the default) or a free view showing camera frames.
     bool throughCamera_ = true;
     Affine world_; // scene -> composition for this frame
     render::View sceneView() const { return {origin_, zoom_, world_}; }
     bool autoFit_ = true;
-    bool spaceUsed_ = false;
+    bool spaceHeld_ = false, spaceUsed_ = false;
+    Vec2 mouse_{-1e6f, -1e6f};
+    bool hovered_ = false;
 
     Drag drag_ = Drag::None;
     bool dragMoved_ = false;
     uint64_t dragLayer_ = 0; // layer under the cursor when the drag started
     Vec2 dragStartMouse_;    // composition space
     Vec2 dragStartScreen_;
+    Vec2 lastMouse_;
     std::vector<std::pair<uint64_t, Vec2>> dragStartPositions_; // every moved layer
     Vec2 dragStartPosition_;
     Vec2 dragStartScale_;
@@ -94,8 +125,9 @@ private:
     float dragStartAngle_ = 0.0f;
     Vec2 dragCorner_; // local space corner being dragged
     std::vector<uint64_t> marqueeBase_; // selection kept when Shift-box-selecting
+    bool additive_ = false;
 
-    // Object being dragged in from the Objects panel (ghost preview).
+    // Object being dragged in from the Objects / Media panels (ghost preview).
     bool dropHover_ = false;
     int dropKind_ = 0;
     uint64_t dropMedia_ = 0; // a Media panel item being dropped (instead of dropKind_)
@@ -103,21 +135,39 @@ private:
 
     // --- snapping & guides ---------------------------------------------------------
     // Targets in composition pixels: canvas center/edges, guides, other layers' edges/centers.
-    void collectSnapTargets(EditorContext& ctx, const std::vector<uint64_t>& exclude);
+    void collectSnapTargets(const std::vector<uint64_t>& exclude);
     // Snaps a box moving by `delta` (composition pixels); records the lines to draw.
     Vec2 snapMove(Vec2 boxMin, Vec2 boxMax, Vec2 delta);
-    void handleGuides(EditorContext& ctx);
-    void drawRulers(EditorContext& ctx);
-    void drawGuides(EditorContext& ctx);
-    int guideAt(EditorContext& ctx, Vec2 screen) const; // -1 if none
-
+    int guideAt(Vec2 screen) const; // -1 if none
     std::vector<double> snapTargetsX_, snapTargetsY_;
-    std::vector<float> snapLinesX_, snapLinesY_; // snapped this frame (composition pixels)
+    std::vector<float> snapLinesX_, snapLinesY_; // snapped by the current drag (composition pixels)
     Vec2 dragBoxMin_, dragBoxMax_;                // moving layers' bounds at drag start
     int guideDrag_ = -1;                          // index into Composition::guides
-    uint64_t textEdit_ = 0;   // text layer being edited in place (double-click)
-    bool focusTextEdit_ = false;
-    int guideEdit_ = -1;                          // guide whose position popup is open
+
+    // In-place text editing.
+    uint64_t textEdit_ = 0;
+    std::string textBefore_;
+    QPlainTextEdit* textEditor_ = nullptr;
+    QLabel* textHint_ = nullptr;
+
+    // Heads-up controls (bottom of the canvas).
+    ui::IconButton* cameraButton_ = nullptr;
+    ui::IconButton* snapButton_ = nullptr;
+    ui::IconButton* zoomOutButton_ = nullptr;
+    ui::IconButton* zoomInButton_ = nullptr;
+    QToolButton* zoomLevel_ = nullptr;
+    QPushButton* fitButton_ = nullptr;
+
+    // What was last drawn (to redraw only on change).
+    struct Signature {
+        uint64_t revision = 0;
+        double time = -1;
+        std::vector<uint64_t> selection;
+        uint64_t scope = 0;
+        bool snapping = false, guides = false, rulers = false, playing = false;
+        bool operator==(const Signature&) const = default;
+    } drawn_;
+    QImage frame_; // the rendered composition
 };
 
 } // namespace bemotion

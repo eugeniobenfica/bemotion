@@ -31,7 +31,7 @@ the conventions of After Effects and Premiere, so it feels familiar from the
 first minute.
 
 > 🇧🇷 **Resumo:** bemotion é um animador 2D minimalista e de código aberto para
-> motion graphics. Escrito em C++20 com Dear ImGui e OpenGL, com foco em
+> motion graphics. Escrito em C++20 com Qt, Skia e FFmpeg, com foco em
 > simplicidade, liberdade de customização e uma interface limpa no modo escuro.
 
 <p align="center">
@@ -100,8 +100,8 @@ first minute.
   every UI color; import / export themes ([example](examples/themes))
 - Rebind every shortcut, pick the interface font and text size, timeline
   densities, frames per arrow press
-- Dockable panels: minimize one and it steps aside (only a restore handle
-  stays on the edge), maximize with <kbd>`</kbd>
+- Dockable panels: drag tabs anywhere, float them, pin one to auto-hide on the
+  window edge, double-click a tab to maximize it
 
 </td>
 <td valign="top">
@@ -124,8 +124,9 @@ first minute.
   delete to the Recycle Bin / Trash) and a *New Project* dialog with format
   presets (Full HD, 4K, Vertical/Reels, Square…)
 - **Media panel** (like After Effects' *Project* panel): images (PNG, JPEG,
-  BMP, TGA, GIF, PSD, HDR), audio (WAV, MP3, FLAC; M4A/AAC/WMA on Windows) and
-  video (MP4, MOV, M4V, WMV, AVI, MKV — Windows, through Media Foundation).
+  BMP, TGA, GIF, PSD, HDR), audio (WAV, MP3, FLAC, M4A/AAC, OGG/Opus, WMA, AIFF)
+  and video (MP4, MOV, M4V, MKV, WebM, AVI, WMV, MPEG, MTS) on every platform,
+  through FFmpeg.
   Audio plays with the timeline, clips show their waveform, video and audio
   clips trim only within their source, and missing files can be relinked
 - **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
@@ -152,20 +153,45 @@ first minute.
 
 ## Getting started
 
-Requirements: CMake ≥ 3.21, a C++20 compiler (GCC 11+, Clang 14+ or MSVC 2022)
-and an internet connection on the first configure (dependencies are fetched
-automatically and pinned to exact versions).
+bemotion is built with CMake and needs a few system libraries — **Qt 6** (≥ 6.4),
+**FFmpeg** (libavformat, libavcodec, libavfilter, libswscale, libswresample),
+HarfBuzz, ICU and the usual image libraries — plus **Skia**, which
+`tools/skia/build-skia.sh` builds once from a pinned revision into
+`third_party/skia` (it takes a while). The rest (Qt Advanced Docking System,
+nlohmann/json, stb, Lua, miniaudio) is fetched on the first configure.
+
+**Windows** — in an [MSYS2](https://www.msys2.org) **UCRT64** shell:
 
 ```bash
+pacman -S --needed git patch mingw-w64-ucrt-x86_64-{toolchain,cmake,ninja,pkgconf,python,gn}   mingw-w64-ucrt-x86_64-{qt6-base,qt6-svg,qt6-tools,ffmpeg,harfbuzz,icu,libjpeg-turbo,libwebp,libpng,expat,zlib,freetype}
+tools/skia/build-skia.sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/src/bemotion        # Windows: build\src\bemotion.exe
+./build/bemotion.exe
+tools/deploy-windows.sh build dist/bemotion   # a folder that runs on any Windows PC
 ```
 
-Run the unit tests with `ctest --test-dir build`.
+**Linux** (Ubuntu 24.04):
 
-On Linux, install the X11/OpenGL development packages first, e.g. on Ubuntu:
-`sudo apt install libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev libwayland-dev libxkbcommon-dev`.
+```bash
+sudo apt install ninja-build clang python3 pkg-config qt6-base-dev qt6-base-dev-tools libqt6svg6-dev libgl-dev   libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev   libharfbuzz-dev libicu-dev libfreetype-dev libfontconfig-dev libpng-dev libjpeg-dev libwebp-dev libexpat1-dev zlib1g-dev
+tools/skia/build-skia.sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
+./build/bemotion
+```
+
+**macOS** (Homebrew):
+
+```bash
+brew install ninja pkgconf qt ffmpeg harfbuzz icu4c freetype fontconfig libpng jpeg-turbo webp
+export PKG_CONFIG_PATH="$(brew --prefix icu4c)/lib/pkgconfig:$(brew --prefix jpeg-turbo)/lib/pkgconfig"
+tools/skia/build-skia.sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+cmake --build build && ./build/bemotion
+```
+
+Run the unit tests with `ctest --test-dir build`. A Skia built elsewhere can be
+used with `-DSKIA_ROOT=<dir>`.
 
 ### Rendering from the command line
 
@@ -214,12 +240,13 @@ current ones.
 
 ```
 src/core     document model (layers, keyframes, easing, file format, undo) — no UI code
-src/render   draws compositions (viewport, thumbnails, off-screen export) and the logo mark
+src/render   draws compositions with Skia (viewport, thumbnails, export), text shaping, the logo mark
 src/export   video / image-sequence encoders and the export job
-src/media    imported media: image / audio / video decoding, textures, audio playback and mixing
-src/ui       theme, widgets, intro, home screen, editor, panels and dialogs
-src/app      window, main loop, OS integration, settings, preset/theme libraries, plugin host
+src/media    imported media: image / audio / video decoding (FFmpeg), audio playback and mixing
+src/ui       Qt interface: theme, widgets, intro, home screen, editor window, dock panels, dialogs
+src/app      application window, OS integration, settings, preset/theme libraries, plugin host
 assets       fonts, bundled plugins, the Welcome project and the brand files
+tools        Skia build script and the Windows deploy script
 tests        unit tests for the core
 ```
 

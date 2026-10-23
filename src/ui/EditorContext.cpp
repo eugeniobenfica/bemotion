@@ -13,6 +13,7 @@ void EditorContext::open(Project p, std::filesystem::path file) {
     path = std::move(file);
     project.comp.fitDuration();
     history.reset(project);
+    ++revision_;
     selection.clear();
     selectedKeys.clear();
     tool = Tool::Select;
@@ -111,6 +112,7 @@ void EditorContext::commitIfIdle(bool interacting) {
 
 void EditorContext::undo() {
     commitIfIdle(false);
+    ++revision_;
     if (history.undo(project)) {
         selectedKeys.clear();
         pruneSelection();
@@ -119,6 +121,7 @@ void EditorContext::undo() {
 
 void EditorContext::redo() {
     commitIfIdle(false);
+    ++revision_;
     if (history.redo(project)) {
         selectedKeys.clear();
         pruneSelection();

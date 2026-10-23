@@ -26,29 +26,29 @@ add_executable(bemotion WIN32
     app/Settings.cpp
     app/RecentProjects.cpp
     export/Export.cpp
+    export/FfmpegEncoder.cpp
+    export/PngSequenceEncoder.cpp
     media/AudioEngine.cpp
+    media/FfmpegMedia.cpp
     media/MediaIO.cpp
     media/MediaManager.cpp
-    media/VideoReaderMF.cpp
-    export/FfmpegEncoder.cpp
-    export/MediaFoundationEncoder.cpp
-    export/PngSequenceEncoder.cpp
-    render/EffectRenderer.cpp
     render/Fonts.cpp
-    render/FontScan.cpp
-    render/GL.cpp
     render/LogoMark.cpp
     render/OffscreenRenderer.cpp
     render/PluginCanvas.cpp
     render/SceneRenderer.cpp
+    render/Text.cpp
+    ui/AppSignals.h
+    ui/Draw.cpp
     ui/EditorContext.cpp
-    ui/EditorScreen.cpp
+    ui/EditorWindow.cpp
     ui/ExportDialog.cpp
     ui/HelpWindow.cpp
     ui/HomeScreen.cpp
     ui/IntroScreen.cpp
     ui/Keymap.cpp
-    ui/PluginsWindow.cpp
+    ui/PagedWindow.cpp
+    ui/PropertyRow.cpp
     ui/SettingsWindow.cpp
     ui/Theme.cpp
     ui/Tools.cpp
@@ -61,8 +61,15 @@ add_executable(bemotion WIN32
     ui/panels/TimelinePanel.cpp
     ui/panels/ToolsPanel.cpp
     ui/panels/ViewportPanel.cpp)
+set_target_properties(bemotion PROPERTIES AUTOMOC ON)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(bemotion PRIVATE bemotion_core imgui stb lua miniaudio)
+target_link_libraries(bemotion PRIVATE
+    bemotion_core
+    Qt6::Widgets Qt6::Svg Qt6::Test
+    qtadvanceddocking-qt6
+    skia
+    PkgConfig::FFMPEG
+    stb lua miniaudio)
 target_compile_definitions(bemotion PRIVATE
     BEMOTION_VERSION="${PROJECT_VERSION}"
     BEMOTION_SOURCE_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
@@ -76,7 +83,7 @@ if(WIN32)
     enable_language(RC)
     add_library(bemotion_resources OBJECT app/bemotion.rc)
     target_sources(bemotion PRIVATE $<TARGET_OBJECTS:bemotion_resources>)
-    target_link_libraries(bemotion PRIVATE comdlg32 shell32 ole32 uuid winmm mfplat mfreadwrite mfuuid)
+    target_link_libraries(bemotion PRIVATE shell32 ole32 uuid winmm)
 endif()
 
 if(MSVC)
@@ -86,13 +93,8 @@ if(MSVC)
     target_compile_definitions(bemotion PRIVATE _CRT_SECURE_NO_WARNINGS)
     target_link_options(bemotion PRIVATE /ENTRY:mainCRTStartup)
 else()
-    target_compile_options(bemotion PRIVATE -Wall -Wextra)
+    target_compile_options(bemotion PRIVATE -Wall -Wextra -Wno-attributes) # Skia headers use clang:: attributes
     target_compile_options(bemotion_core PRIVATE -Wall -Wextra)
-endif()
-
-if(MINGW)
-    # Ship a self-contained executable (no libstdc++/libgcc DLLs needed).
-    target_link_options(bemotion PRIVATE -static -static-libgcc -static-libstdc++)
 endif()
 
 # Copy runtime assets (fonts, bundled plugins, ...) next to the executable on

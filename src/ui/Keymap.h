@@ -4,7 +4,7 @@
 // (After Effects / industry conventions); users can rebind them in
 // Settings > Shortcuts, and the bindings are saved with the settings.
 
-#include <imgui.h>
+#include <QKeySequence>
 
 #include <string>
 
@@ -27,23 +27,23 @@ enum class Action {
     Count
 };
 
+// A key and its modifiers (QKeyCombination::toCombined()); 0 = no binding.
+using Chord = int;
+
 struct ActionInfo {
     const char* id;    // saved in settings.json
     const char* label; // shown in Settings and Help
     const char* group;
-    ImGuiKeyChord defaultChord;
+    Chord defaultChord;
 };
 
 const ActionInfo& actionInfo(Action a);
-ImGuiKeyChord chordOf(Action a);
-void setChord(Action a, ImGuiKeyChord chord); // 0 removes the binding
+Chord chordOf(Action a);
+QKeySequence sequenceOf(Action a);
+void setChord(Action a, Chord chord); // 0 removes the binding
 void resetChord(Action a);
-std::string chordName(ImGuiKeyChord chord);   // "Ctrl+Shift+Z", "" if none
-Action actionWithChord(ImGuiKeyChord chord, Action except); // Action::Count if free
-
-// True when the action's shortcut was pressed this frame. Single keys
-// (no Ctrl/Alt) never fire while typing in a field.
-bool shortcutPressed(Action a, bool repeat = false);
+std::string chordName(Chord chord);   // "Ctrl+Shift+Z", "" if none
+Action actionWithChord(Chord chord, Action except); // Action::Count if free
 
 // Persistence (as part of settings.json): id -> chord name, only non-default bindings.
 void loadKeymap(const std::string& json);

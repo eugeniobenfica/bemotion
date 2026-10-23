@@ -16,7 +16,7 @@ namespace bemotion {
 struct Settings {
     std::string theme = "Dark"; // ThemeLibrary entry
     bool customAccent = false;  // false: use the theme's own accent
-    ImU32 accent = IM_COL32(232, 185, 49, 255);
+    theme::Rgba accent = theme::rgba(232, 185, 49);
     bool advanced = false;      // show every option in the settings window
     // Advanced mode: colors edited by hand override the theme.
     bool customPalette = false;
@@ -42,8 +42,8 @@ void saveSettings();
 
 // The palette in effect: theme (or hand-edited colors) plus the accent choice.
 theme::Palette effectivePalette();
-// Applies effectivePalette() to the UI. `dpiScale` is remembered from the first call.
-void applySettings(float dpiScale = 0.0f);
+// Applies effectivePalette() and the interface font / text size to the application.
+void applySettings();
 
 struct LibraryTheme {
     theme::Palette palette;

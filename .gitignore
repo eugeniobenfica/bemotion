@@ -26,3 +26,6 @@ desktop.ini
 
 # Media shown in the README
 !docs/media/*.gif
+
+# Dependencies built locally (tools/skia/build-skia.sh)
+third_party/

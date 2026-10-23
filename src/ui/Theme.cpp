@@ -1,5 +1,9 @@
 #include "ui/Theme.h"
 
+#include <QApplication>
+#include <QPalette>
+#include <QString>
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -13,41 +17,7 @@ using json = nlohmann::json;
 
 Palette g_current;
 
-int ch(ImU32 c, int shift) { return static_cast<int>((c >> shift) & 0xFF); }
-
-// Linear blend of two colors (alpha included).
-ImU32 mix(ImU32 a, ImU32 b, float t) {
-    auto m = [&](int shift) { return static_cast<int>(ch(a, shift) + (ch(b, shift) - ch(a, shift)) * t + 0.5f); };
-    return IM_COL32(m(IM_COL32_R_SHIFT), m(IM_COL32_G_SHIFT), m(IM_COL32_B_SHIFT), m(IM_COL32_A_SHIFT));
-}
-
-float luminance(ImU32 c) {
-    return (0.2126f * ch(c, IM_COL32_R_SHIFT) + 0.7152f * ch(c, IM_COL32_G_SHIFT) + 0.0722f * ch(c, IM_COL32_B_SHIFT)) / 255.0f;
-}
-
-std::string toHex(ImU32 c) {
-    char buf[16];
-    if (ch(c, IM_COL32_A_SHIFT) == 255)
-        std::snprintf(buf, sizeof buf, "#%02X%02X%02X", ch(c, IM_COL32_R_SHIFT), ch(c, IM_COL32_G_SHIFT), ch(c, IM_COL32_B_SHIFT));
-    else
-        std::snprintf(buf, sizeof buf, "#%02X%02X%02X%02X", ch(c, IM_COL32_R_SHIFT), ch(c, IM_COL32_G_SHIFT),
-                      ch(c, IM_COL32_B_SHIFT), ch(c, IM_COL32_A_SHIFT));
-    return buf;
-}
-
-bool fromHex(const std::string& s, ImU32& out) {
-    if (s.empty() || s[0] != '#' || (s.size() != 7 && s.size() != 9)) return false;
-    unsigned v = 0;
-    for (size_t i = 1; i < s.size(); ++i) {
-        const char c = s[i];
-        const int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-        if (d < 0) return false;
-        v = v * 16 + static_cast<unsigned>(d);
-    }
-    if (s.size() == 7) v = (v << 8) | 0xFF;
-    out = IM_COL32((v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
-    return true;
-}
+float luminance(Rgba c) { return (0.2126f * ui::red(c) + 0.7152f * ui::green(c) + 0.0722f * ui::blue(c)) / 255.0f; }
 
 // Every color field, for (de)serialization.
 template <typename P, typename Fn>
@@ -67,7 +37,37 @@ void forEachColor(P& p, Fn&& fn) {
     fn("canvas", p.canvas);
 }
 
+QString css(Rgba c) {
+    return QString("rgba(%1,%2,%3,%4)").arg(ui::red(c)).arg(ui::green(c)).arg(ui::blue(c)).arg(ui::alpha(c));
+}
+
 } // namespace
+
+std::string toHex(Rgba c) {
+    char buf[16];
+    if (ui::alpha(c) == 255) std::snprintf(buf, sizeof buf, "#%02X%02X%02X", ui::red(c), ui::green(c), ui::blue(c));
+    else std::snprintf(buf, sizeof buf, "#%02X%02X%02X%02X", ui::red(c), ui::green(c), ui::blue(c), ui::alpha(c));
+    return buf;
+}
+
+bool fromHex(const std::string& s, Rgba& out) {
+    if (s.empty() || s[0] != '#' || (s.size() != 7 && s.size() != 9)) return false;
+    unsigned v = 0;
+    for (size_t i = 1; i < s.size(); ++i) {
+        const char c = s[i];
+        const int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        if (d < 0) return false;
+        v = v * 16 + static_cast<unsigned>(d);
+    }
+    if (s.size() == 7) v = (v << 8) | 0xFF;
+    out = rgba((v >> 24) & 0xFF, (v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+    return true;
+}
+
+Rgba mix(Rgba a, Rgba b, float t) {
+    auto m = [&](int x, int y) { return static_cast<int>(x + (y - x) * t + 0.5f); };
+    return rgba(m(ui::red(a), ui::red(b)), m(ui::green(a), ui::green(b)), m(ui::blue(a), ui::blue(b)), m(ui::alpha(a), ui::alpha(b)));
+}
 
 Palette darkPalette() { return {}; }
 
@@ -75,35 +75,35 @@ Palette lightPalette() {
     Palette p;
     p.name = "Light";
     p.light = true;
-    p.bgDeep = IM_COL32(222, 222, 227, 255);
-    p.bgPanel = IM_COL32(240, 240, 243, 255);
-    p.bgRaised = IM_COL32(252, 252, 253, 255);
-    p.bgHover = IM_COL32(228, 228, 234, 255);
-    p.border = IM_COL32(206, 206, 213, 255);
-    p.text = IM_COL32(28, 28, 32, 255);
-    p.textDim = IM_COL32(88, 88, 98, 255);
-    p.textFaint = IM_COL32(140, 140, 150, 255);
-    p.accent = IM_COL32(214, 158, 14, 255);
-    p.danger = IM_COL32(208, 68, 52, 255);
-    p.snap = IM_COL32(226, 38, 136, 255);
-    p.guide = IM_COL32(0, 146, 214, 220);
-    p.canvas = IM_COL32(204, 204, 210, 255);
+    p.bgDeep = rgba(222, 222, 227);
+    p.bgPanel = rgba(240, 240, 243);
+    p.bgRaised = rgba(252, 252, 253);
+    p.bgHover = rgba(228, 228, 234);
+    p.border = rgba(206, 206, 213);
+    p.text = rgba(28, 28, 32);
+    p.textDim = rgba(88, 88, 98);
+    p.textFaint = rgba(140, 140, 150);
+    p.accent = rgba(214, 158, 14);
+    p.danger = rgba(208, 68, 52);
+    p.snap = rgba(226, 38, 136);
+    p.guide = rgba(0, 146, 214, 220);
+    p.canvas = rgba(204, 204, 210);
     return p;
 }
 
 Palette midnightPalette() {
     Palette p;
     p.name = "Midnight";
-    p.bgDeep = IM_COL32(10, 13, 22, 255);
-    p.bgPanel = IM_COL32(16, 20, 32, 255);
-    p.bgRaised = IM_COL32(24, 29, 44, 255);
-    p.bgHover = IM_COL32(33, 40, 58, 255);
-    p.border = IM_COL32(38, 45, 64, 255);
-    p.text = IM_COL32(226, 231, 245, 255);
-    p.textDim = IM_COL32(140, 150, 175, 255);
-    p.textFaint = IM_COL32(88, 98, 125, 255);
-    p.accent = IM_COL32(110, 168, 255, 255);
-    p.canvas = IM_COL32(22, 27, 40, 255);
+    p.bgDeep = rgba(10, 13, 22);
+    p.bgPanel = rgba(16, 20, 32);
+    p.bgRaised = rgba(24, 29, 44);
+    p.bgHover = rgba(33, 40, 58);
+    p.border = rgba(38, 45, 64);
+    p.text = rgba(226, 231, 245);
+    p.textDim = rgba(140, 150, 175);
+    p.textFaint = rgba(88, 98, 125);
+    p.accent = rgba(110, 168, 255);
+    p.canvas = rgba(22, 27, 40);
     return p;
 }
 
@@ -116,7 +116,7 @@ bool paletteFromJson(const std::string& text, Palette& out, std::string* error) 
         p.light = j.value("light", false);
         p.rounding = std::clamp(j.value("rounding", p.rounding), 0.0f, 12.0f);
         const json colors = j.value("colors", json::object());
-        forEachColor(p, [&](const char* key, ImU32& c) {
+        forEachColor(p, [&](const char* key, Rgba& c) {
             if (colors.contains(key) && colors[key].is_string() && !fromHex(colors[key].get<std::string>(), c))
                 throw std::runtime_error(std::string("bad color for \"") + key + "\"");
         });
@@ -130,40 +130,37 @@ bool paletteFromJson(const std::string& text, Palette& out, std::string* error) 
 
 std::string paletteToJson(const Palette& palette) {
     json colors = json::object();
-    forEachColor(palette, [&](const char* key, const ImU32& c) { colors[key] = toHex(c); });
+    forEachColor(palette, [&](const char* key, const Rgba& c) { colors[key] = toHex(c); });
     json j = {{"name", palette.name}, {"light", palette.light}, {"rounding", palette.rounding}, {"colors", colors}};
     return j.dump(2);
 }
 
-ImU32 withAlpha(ImU32 c, int alpha) { return (c & ~IM_COL32_A_MASK) | (static_cast<ImU32>(std::clamp(alpha, 0, 255)) << IM_COL32_A_SHIFT); }
-ImU32 accent(int alpha) { return withAlpha(kAccent, alpha); }
-ImU32 ink(int alpha) { return g_current.light ? IM_COL32(0, 0, 0, alpha) : IM_COL32(255, 255, 255, alpha); }
-ImU32 shade(int alpha) { return IM_COL32(0, 0, 0, g_current.light ? alpha / 3 : alpha); }
-
+Rgba withAlpha(Rgba c, int a) { return (c & 0x00FFFFFFu) | (static_cast<Rgba>(std::clamp(a, 0, 255)) << 24); }
+Rgba accent(int a) { return withAlpha(kAccent, a); }
+Rgba ink(int a) { return g_current.light ? rgba(0, 0, 0, a) : rgba(255, 255, 255, a); }
+Rgba shade(int a) { return rgba(0, 0, 0, g_current.light ? a / 3 : a); }
 const Palette& current() { return g_current; }
 
-void applyStyle() {
-    ImGuiStyle& s = ImGui::GetStyle();
-    s.WindowPadding = ImVec2(12, 12);
-    s.FramePadding = ImVec2(8, 5);
-    s.ItemSpacing = ImVec2(8, 6);
-    s.ItemInnerSpacing = ImVec2(6, 4);
-    s.CellPadding = ImVec2(6, 4);
-    s.IndentSpacing = 14;
-    s.ScrollbarSize = 10;
-    s.GrabMinSize = 10;
-    s.WindowBorderSize = 0;
-    s.ChildBorderSize = 0;
-    s.PopupBorderSize = 1;
-    s.FrameBorderSize = 0;
-    s.TabBorderSize = 0;
-    s.WindowTitleAlign = ImVec2(0.0f, 0.5f);
-    s.WindowMenuButtonPosition = ImGuiDir_None;
-    s.SeparatorTextBorderSize = 1;
-    s.DockingSeparatorSize = 2;
+// Docking (Qt Advanced Docking System): added to its own style sheet, which wins over the application's.
+QString dockStyleSheet() {
+    QString s;
+    s += QString("ads--CDockContainerWidget, ads--CDockManager { background: %1; }\n"
+                 "ads--CDockAreaWidget { background: %2; border: none; }\n"
+                 "ads--CDockAreaTitleBar { background: %1; border: none; }\n"
+                 "ads--CDockWidgetTab { background: %1; border: none; padding: 0 6px; }\n"
+                 "ads--CDockWidgetTab[activeTab=\"true\"] { background: %2; border-top: 2px solid %3; }\n"
+                 "ads--CDockWidgetTab QLabel { color: %4; }\n"
+                 "ads--CDockWidgetTab[activeTab=\"true\"] QLabel { color: %5; }\n"
+                 "ads--CDockSplitter::handle { background: %1; }\n"
+                 "ads--CAutoHideTab { background: %2; color: %4; padding: 6px 4px; border: none; }\n"
+                 "ads--CAutoHideTab:hover { color: %5; background: %6; }\n"
+                 "ads--CAutoHideSideBar { background: %1; border: none; }\n"
+                 "ads--CDockWidget { background: %2; }\n")
+             .arg(css(kBgDeep), css(kBgPanel), css(kAccent), css(kTextDim), css(kText), css(kBgHover));
+    return s;
 }
 
-void apply(const Palette& p, float dpiScale) {
+void apply(const Palette& p) {
     g_current = p;
     kBgDeep = p.bgDeep;
     kBgPanel = p.bgPanel;
@@ -174,77 +171,129 @@ void apply(const Palette& p, float dpiScale) {
     kTextDim = p.textDim;
     kTextFaint = p.textFaint;
     kAccent = withAlpha(p.accent, 255);
-    kAccentHover = mix(kAccent, IM_COL32(255, 255, 255, 255), 0.18f);
-    kAccentActive = mix(kAccent, IM_COL32(0, 0, 0, 255), 0.12f);
+    kAccentHover = mix(kAccent, rgba(255, 255, 255), 0.18f);
+    kAccentActive = mix(kAccent, rgba(0, 0, 0), 0.12f);
     kAccentSoft = withAlpha(kAccent, 40);
-    kOnAccent = luminance(kAccent) > 0.55f ? IM_COL32(20, 18, 12, 255) : IM_COL32(255, 255, 255, 255);
+    kOnAccent = luminance(kAccent) > 0.55f ? rgba(20, 18, 12) : rgba(255, 255, 255);
     kDanger = p.danger;
     kSnap = p.snap;
     kGuide = p.guide;
     kCanvas = p.canvas;
 
-    ImGuiStyle& s = ImGui::GetStyle();
-    const float r = std::clamp(p.rounding, 0.0f, 12.0f) * dpiScale;
-    s.FrameRounding = r;
-    s.WindowRounding = r * 1.6f;
-    s.ChildRounding = r * 1.2f;
-    s.PopupRounding = r * 1.2f;
-    s.ScrollbarRounding = r * 1.6f;
-    s.GrabRounding = r * 0.8f;
-    s.TabRounding = r;
+    auto* app = qobject_cast<QApplication*>(QApplication::instance());
+    if (!app) return;
 
-    const ImU32 popup = withAlpha(mix(p.bgPanel, p.bgRaised, 0.5f), 250);
-    const ImU32 pressed = mix(p.bgHover, p.text, 0.08f);
-    ImVec4* c = s.Colors;
-    c[ImGuiCol_Text] = vec(kText);
-    c[ImGuiCol_TextDisabled] = vec(kTextFaint);
-    c[ImGuiCol_WindowBg] = vec(kBgPanel);
-    c[ImGuiCol_ChildBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_PopupBg] = vec(popup);
-    c[ImGuiCol_Border] = vec(kBorder);
-    c[ImGuiCol_BorderShadow] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_FrameBg] = vec(kBgRaised);
-    c[ImGuiCol_FrameBgHovered] = vec(kBgHover);
-    c[ImGuiCol_FrameBgActive] = vec(pressed);
-    c[ImGuiCol_TitleBg] = vec(kBgDeep);
-    c[ImGuiCol_TitleBgActive] = vec(kBgDeep);
-    c[ImGuiCol_TitleBgCollapsed] = vec(kBgDeep);
-    c[ImGuiCol_MenuBarBg] = vec(kBgDeep);
-    c[ImGuiCol_ScrollbarBg] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_ScrollbarGrab] = vec(mix(p.border, p.text, 0.12f));
-    c[ImGuiCol_ScrollbarGrabHovered] = vec(mix(p.border, p.text, 0.25f));
-    c[ImGuiCol_ScrollbarGrabActive] = vec(kAccent);
-    c[ImGuiCol_CheckMark] = vec(kAccent);
-    c[ImGuiCol_SliderGrab] = vec(kAccent);
-    c[ImGuiCol_SliderGrabActive] = vec(kAccentHover);
-    c[ImGuiCol_Button] = vec(kBgRaised);
-    c[ImGuiCol_ButtonHovered] = vec(kBgHover);
-    c[ImGuiCol_ButtonActive] = vec(pressed);
-    c[ImGuiCol_Header] = vec(ink(12));
-    c[ImGuiCol_HeaderHovered] = vec(ink(20));
-    c[ImGuiCol_HeaderActive] = vec(accent(50));
-    c[ImGuiCol_Separator] = vec(kBorder);
-    c[ImGuiCol_SeparatorHovered] = vec(kAccent);
-    c[ImGuiCol_SeparatorActive] = vec(kAccent);
-    c[ImGuiCol_ResizeGrip] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_ResizeGripHovered] = vec(kAccent);
-    c[ImGuiCol_ResizeGripActive] = vec(kAccent);
-    c[ImGuiCol_Tab] = vec(kBgDeep);
-    c[ImGuiCol_TabHovered] = vec(kBgHover);
-    c[ImGuiCol_TabSelected] = vec(kBgPanel);
-    c[ImGuiCol_TabSelectedOverline] = vec(kAccent);
-    c[ImGuiCol_TabDimmed] = vec(kBgDeep);
-    c[ImGuiCol_TabDimmedSelected] = vec(kBgPanel);
-    c[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
-    c[ImGuiCol_DockingPreview] = vec(accent(90));
-    c[ImGuiCol_DockingEmptyBg] = vec(kBgDeep);
-    c[ImGuiCol_TextSelectedBg] = vec(accent(70));
-    c[ImGuiCol_DragDropTarget] = vec(kAccent);
-    c[ImGuiCol_NavCursor] = vec(kAccent);
-    c[ImGuiCol_ModalWindowDimBg] = ImVec4(0, 0, 0, p.light ? 0.3f : 0.55f);
-    c[ImGuiCol_TableHeaderBg] = vec(kBgRaised);
-    c[ImGuiCol_TableBorderLight] = vec(kBorder);
-    c[ImGuiCol_TableBorderStrong] = vec(kBorder);
+    QPalette pal;
+    pal.setColor(QPalette::Window, q(kBgPanel));
+    pal.setColor(QPalette::WindowText, q(kText));
+    pal.setColor(QPalette::Base, q(kBgRaised));
+    pal.setColor(QPalette::AlternateBase, q(kBgHover));
+    pal.setColor(QPalette::Text, q(kText));
+    pal.setColor(QPalette::PlaceholderText, q(kTextFaint));
+    pal.setColor(QPalette::Button, q(kBgRaised));
+    pal.setColor(QPalette::ButtonText, q(kText));
+    pal.setColor(QPalette::Highlight, q(accent(150)));
+    pal.setColor(QPalette::HighlightedText, q(kText));
+    pal.setColor(QPalette::ToolTipBase, q(kBgRaised));
+    pal.setColor(QPalette::ToolTipText, q(kText));
+    pal.setColor(QPalette::Link, q(kAccent));
+    pal.setColor(QPalette::Mid, q(kBorder));
+    pal.setColor(QPalette::Dark, q(kBgDeep));
+    pal.setColor(QPalette::Light, q(kBgDeep));
+    pal.setColor(QPalette::Midlight, q(kBorder));
+    pal.setColor(QPalette::Shadow, q(kBgDeep));
+    pal.setColor(QPalette::Disabled, QPalette::Text, q(kTextFaint));
+    pal.setColor(QPalette::Disabled, QPalette::WindowText, q(kTextFaint));
+    pal.setColor(QPalette::Disabled, QPalette::ButtonText, q(kTextFaint));
+    app->setPalette(pal);
+
+    const int r = static_cast<int>(std::clamp(p.rounding, 0.0f, 12.0f));
+    const Rgba pressed = mix(p.bgHover, p.text, 0.08f);
+    const Rgba popup = mix(p.bgPanel, p.bgRaised, 0.5f);
+    QString s;
+    s += QString("QWidget { color: %1; }\n").arg(css(kText));
+    s += QString("QMainWindow, QDialog { background: %1; }\n").arg(css(kBgPanel));
+    s += QString("QToolTip { background: %1; color: %2; border: 1px solid %3; padding: 4px 6px; border-radius: %4px; }\n")
+             .arg(css(kBgRaised), css(kText), css(kBorder))
+             .arg(r);
+    // Menus.
+    s += QString("QMenuBar { background: %1; padding: 2px; }\n"
+                 "QMenuBar::item { padding: 6px 10px; border-radius: %3px; background: transparent; }\n"
+                 "QMenuBar::item:selected, QMenuBar::item:pressed { background: %2; }\n")
+             .arg(css(kBgDeep), css(kBgHover))
+             .arg(r);
+    s += QString("QMenu { background: %1; border: 1px solid %2; padding: 4px; border-radius: %5px; }\n"
+                 "QMenu::item { padding: 6px 28px 6px 14px; border-radius: %6px; }\n"
+                 "QMenu::item:selected { background: %3; }\n"
+                 "QMenu::item:disabled { color: %4; }\n"
+                 "QMenu::separator { height: 1px; background: %2; margin: 4px 6px; }\n")
+             .arg(css(popup), css(kBorder), css(kBgHover), css(kTextFaint))
+             .arg(r + 2)
+             .arg(r);
+    // Buttons.
+    s += QString("QPushButton { background: %1; border: none; border-radius: %4px; padding: 6px 14px; }\n"
+                 "QPushButton:hover { background: %2; }\n"
+                 "QPushButton:pressed { background: %3; }\n"
+                 "QPushButton:disabled { color: %5; }\n"
+                 "QPushButton[accent=\"true\"] { background: %6; color: %7; font-weight: 600; }\n"
+                 "QPushButton[accent=\"true\"]:hover { background: %8; }\n"
+                 "QPushButton[accent=\"true\"]:pressed { background: %9; }\n")
+             .arg(css(kBgRaised), css(kBgHover), css(pressed))
+             .arg(r)
+             .arg(css(kTextFaint), css(kAccent), css(kOnAccent), css(kAccentHover), css(kAccentActive));
+    s += QString("QPushButton[danger=\"true\"] { background: %1; color: white; }\n").arg(css(kDanger));
+    s += QString("QToolButton { background: transparent; border: none; border-radius: %2px; padding: 3px; }\n"
+                 "QToolButton:hover { background: %1; }\n"
+                 "QToolButton:checked { background: %3; }\n")
+             .arg(css(kBgHover))
+             .arg(r)
+             .arg(css(accent(45)));
+    // Inputs.
+    s += QString("QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QKeySequenceEdit {"
+                 " background: %1; border: 1px solid transparent; border-radius: %4px; padding: 4px 6px;"
+                 " selection-background-color: %3; }\n"
+                 "QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus { border-color: %2; }\n"
+                 "QComboBox::drop-down { border: none; width: 18px; }\n"
+                 "QComboBox QAbstractItemView { background: %5; border: 1px solid %6; selection-background-color: %7; }\n")
+             .arg(css(kBgRaised), css(accent(160)), css(accent(90)))
+             .arg(r)
+             .arg(css(popup), css(kBorder), css(kBgHover));
+    s += QString("QCheckBox::indicator, QRadioButton::indicator { width: 15px; height: 15px; border-radius: 4px;"
+                 " background: %1; border: 1px solid %2; }\n"
+                 "QRadioButton::indicator { border-radius: 8px; }\n"
+                 "QCheckBox::indicator:checked, QRadioButton::indicator:checked { background: %3; border-color: %3; }\n")
+             .arg(css(kBgRaised), css(kBorder), css(kAccent));
+    s += QString("QSlider::groove:horizontal { height: 4px; background: %1; border-radius: 2px; }\n"
+                 "QSlider::sub-page:horizontal { background: %2; border-radius: 2px; }\n"
+                 "QSlider::handle:horizontal { width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; background: %2; }\n")
+             .arg(css(kBgRaised), css(kAccent));
+    // Scroll bars: thin, no arrows.
+    s += QString("QScrollBar:vertical { width: 10px; background: transparent; margin: 0; }\n"
+                 "QScrollBar:horizontal { height: 10px; background: transparent; margin: 0; }\n"
+                 "QScrollBar::handle { background: %1; border-radius: 4px; min-height: 24px; min-width: 24px; margin: 2px; }\n"
+                 "QScrollBar::handle:hover { background: %2; }\n"
+                 "QScrollBar::add-line, QScrollBar::sub-line { width: 0; height: 0; }\n"
+                 "QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }\n")
+             .arg(css(mix(p.border, p.text, 0.12f)), css(mix(p.border, p.text, 0.28f)));
+    s += QString("QScrollArea { background: transparent; border: none; }\n"
+                 "QScrollArea > QWidget > QWidget { background: transparent; }\n");
+    // Tabs and lists.
+    s += QString("QTabWidget::pane { border: none; }\n"
+                 "QTabBar::tab { background: transparent; padding: 7px 14px; border-radius: %3px; color: %1; }\n"
+                 "QTabBar::tab:selected { color: %2; background: %4; }\n")
+             .arg(css(kTextDim), css(kText))
+             .arg(r)
+             .arg(css(kBgRaised));
+    s += QString("QListWidget, QTreeWidget, QTableWidget { background: transparent; border: none; outline: none; }\n"
+                 "QListWidget::item, QTreeWidget::item { padding: 6px; border-radius: %3px; }\n"
+                 "QListWidget::item:hover, QTreeWidget::item:hover { background: %1; }\n"
+                 "QListWidget::item:selected, QTreeWidget::item:selected { background: %2; color: %4; }\n"
+                 "QHeaderView::section { background: %5; border: none; padding: 4px 6px; color: %6; }\n")
+             .arg(css(kBgHover), css(accent(50)))
+             .arg(r)
+             .arg(css(kText), css(kBgRaised), css(kTextDim));
+    s += QString("QSplitter::handle { background: %1; }\n").arg(css(kBgDeep));
+    app->setStyleSheet(s);
 }
 
 } // namespace bemotion::theme

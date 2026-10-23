@@ -7,17 +7,29 @@
 #include "media/MediaManager.h"
 #include "render/Fonts.h"
 #include "ui/EditorContext.h"
+#include "ui/PropertyRow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
-#include <imgui.h>
-#include <imgui_stdlib.h>
+#include <QAbstractItemView>
+#include <QApplication>
+#include <QCheckBox>
+#include <QClipboard>
+#include <QComboBox>
+#include <QCompleter>
+#include <QGridLayout>
+#include <QHBoxLayout>
+#include <QInputDialog>
+#include <QLabel>
+#include <QLineEdit>
+#include <QMenu>
+#include <QPlainTextEdit>
+#include <QPushButton>
+#include <QScrollBar>
+#include <QVBoxLayout>
 
 #include <algorithm>
-#include <cctype>
-#include <cfloat>
 #include <cmath>
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
@@ -26,54 +38,26 @@ namespace bemotion {
 
 namespace {
 
-constexpr ImGuiTableFlags kTableFlags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings;
-
-bool beginPropertyTable(const char* id) {
-    if (!ImGui::BeginTable(id, 4, kTableFlags)) return false;
-    ImGui::TableSetupColumn("key", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight() * 0.8f);
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed, 92.0f);
-    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
-    ImGui::TableSetupColumn("reset", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
-    return true;
+QLabel* faint(const QString& text) {
+    auto* l = new QLabel(text);
+    l->setWordWrap(true);
+    l->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextFaint).name()));
+    return l;
 }
 
-// A non-animatable row (label + widget) laid out like propertyRow.
-void plainRowLabel(const char* label) {
-    ImGui::TableNextRow();
-    ImGui::TableSetColumnIndex(1);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(theme::vec(theme::kTextDim), "%s", label);
-    ImGui::TableSetColumnIndex(2);
-    ImGui::SetNextItemWidth(-FLT_MIN);
+QLabel* dim(const QString& text) {
+    auto* l = new QLabel(text);
+    l->setWordWrap(true);
+    l->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kTextDim).name()));
+    return l;
 }
 
-// Non-animatable plugin parameters (toggles, choices, text) of one group.
-void pluginParamRows(EditorContext& ctx, Layer& layer, const std::string& group) {
-    for (PluginParam& p : layer.plugin.params) {
-        if (p.group != group || p.kind == PluginParamKind::Number || p.kind == PluginParamKind::Color) continue;
-        ImGui::PushID(p.id.c_str());
-        plainRowLabel(p.label.c_str());
-        switch (p.kind) {
-        case PluginParamKind::Toggle:
-            if (ImGui::Checkbox("##v", &p.toggle)) ctx.touch();
-            break;
-        case PluginParamKind::Choice:
-            if (ImGui::BeginCombo("##v", p.choice < static_cast<int>(p.choices.size()) ? p.choices[p.choice].c_str() : "")) {
-                for (int i = 0; i < static_cast<int>(p.choices.size()); ++i)
-                    if (ImGui::Selectable(p.choices[i].c_str(), i == p.choice)) {
-                        p.choice = i;
-                        ctx.touch();
-                    }
-                ImGui::EndCombo();
-            }
-            break;
-        case PluginParamKind::Text:
-            if (ImGui::InputText("##v", &p.text)) ctx.touch();
-            break;
-        default: break;
-        }
-        ImGui::PopID();
-    }
+// Combo boxes size to the panel, not to their longest entry (font names can be long).
+QComboBox* newCombo() {
+    auto* c = new QComboBox;
+    c->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    c->setMinimumContentsLength(6);
+    return c;
 }
 
 bool hasAnimatedParams(const Layer& layer, const std::string& group) {
@@ -120,399 +104,365 @@ std::vector<DataRow> parseRows(const std::string& text) {
     return rows;
 }
 
-bool containsNoCase(const std::string& hay, const std::string& needle) {
-    if (needle.empty()) return true;
-    auto it = std::search(hay.begin(), hay.end(), needle.begin(), needle.end(), [](char a, char b) {
-        return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b));
-    });
-    return it != hay.end();
-}
-
-void jumpToKey(EditorContext& ctx, const AnimatedBase& anim, int direction) {
-    double best = direction > 0 ? DBL_MAX : -DBL_MAX;
-    for (int i = 0; i < anim.keyCount(); ++i) {
-        const double kt = anim.keyTime(i);
-        if (direction > 0 && kt > ctx.time + kTimeEpsilon) best = std::min(best, kt);
-        if (direction < 0 && kt < ctx.time - kTimeEpsilon) best = std::max(best, kt);
-    }
-    if (best != DBL_MAX && best != -DBL_MAX) ctx.setTime(best);
-}
-
 } // namespace
 
-bool propertyValueWidget(EditorContext& ctx, const PropertyRef& prop, float width) {
-    const double t = ctx.time;
-    bool changed = false;
-    ImGui::SetNextItemWidth(width);
-    const ImGuiSliderFlags clampFlags = prop.min < prop.max ? ImGuiSliderFlags_AlwaysClamp : ImGuiSliderFlags_None;
-    switch (prop.kind) {
-    case PropertyKind::Float: {
-        float v = prop.asFloat().valueAt(t);
-        if (ImGui::DragFloat("##v", &v, prop.speed, prop.min, prop.max, prop.format, clampFlags)) {
-            prop.asFloat().set(t, v);
-            changed = true;
-        }
-        break;
-    }
-    case PropertyKind::Vec2: {
-        Vec2 v = prop.asVec2().valueAt(t);
-        if (ImGui::DragFloat2("##v", &v.x, prop.speed, prop.min, prop.max, prop.format, clampFlags)) {
-            prop.asVec2().set(t, v);
-            changed = true;
-        }
-        break;
-    }
-    case PropertyKind::Color: {
-        Color v = prop.asColor().valueAt(t);
-        if (ImGui::ColorEdit4("##v", &v.r, ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_DisplayHex)) {
-            prop.asColor().set(t, v);
-            changed = true;
-        }
-        break;
-    }
-    }
-    if (changed) ctx.touch();
-    return changed;
+PropertiesPanel::PropertiesPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(parent), ctx_(ctx) {
+    setWidgetResizable(true);
+    setFrameShape(QFrame::NoFrame);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 }
 
-bool keyframeToggle(EditorContext& ctx, const Layer& layer, const PropertyRef& prop) {
-    AnimatedBase& anim = *prop.anim;
-    const int keyHere = anim.findKey(ctx.time);
-    // Keyframes only make sense where the clip exists.
-    const bool inClip = ctx.time >= layer.inPoint - kTimeEpsilon && ctx.time <= layer.outPoint + kTimeEpsilon;
-    ImGui::BeginDisabled(!inClip && keyHere < 0);
-    const bool pressed = ui::keyframeButton("##key", keyHere >= 0, anim.isAnimated());
-    ImGui::EndDisabled();
-    if (!inClip && keyHere < 0) ui::tooltip("The playhead is outside this clip");
-    if (!pressed) return false;
-    if (keyHere >= 0) anim.removeKey(keyHere);
-    else anim.addKeyAt(ctx.time);
-    ctx.touch();
-    return true;
+// What the panel's widgets depend on: when it changes, they are rebuilt.
+std::string PropertiesPanel::structureKey() {
+    std::ostringstream k;
+    Layer* layer = ctx_.selected();
+    k << ctx_.selection.size() << ':';
+    if (!layer) return k.str() + "comp";
+    k << layer->id << ':' << static_cast<int>(layer->type) << ':' << static_cast<int>(layer->shape.kind) << ':' << layer->parent << ':'
+      << layer->plugin.objectType << ':' << layer->plugin.rows.size() << ':' << layer->media.mediaId << ':' << layer->media.hasAudio
+      << ':' << PresetLibrary::all().size() << ':' << presetMessage_;
+    if (layer->type == LayerType::Compound)
+        for (const Layer& c : ctx_.comp().layers)
+            if (c.parent == layer->id) k << ',' << c.id << c.name;
+    for (const PropertyRef& p : layer->properties())
+        if (p.effectIndex < 0) k << p.id << ';';
+    return k.str();
 }
 
-bool resetButton(EditorContext& ctx, const Layer& layer, const PropertyRef& prop) {
-    const std::vector<float> def = defaultPropertyValue(layer, prop.id, ctx.comp().center());
-    if (def.empty()) return false;
-    const std::vector<float> cur = propertyValue(prop, ctx.time);
-    bool differs = false;
-    for (size_t i = 0; i < def.size() && i < cur.size(); ++i) differs |= std::fabs(def[i] - cur[i]) > 1e-4f;
-    ImGui::BeginDisabled(!differs);
-    const bool pressed = ui::iconButton("##reset", ui::Icon::Reset, ImGui::GetFrameHeight(), "Reset to the original value");
-    ImGui::EndDisabled();
-    if (!pressed) return false;
-    setPropertyValue(prop, ctx.time, def);
-    ctx.touch();
-    return true;
-}
-
-bool propertyRow(EditorContext& ctx, Layer& layer, const PropertyRef& prop) {
-    bool changed = false;
-    const double t = ctx.time;
-    AnimatedBase& anim = *prop.anim;
-    ImGui::PushID(prop.id);
-    ImGui::TableNextRow();
-
-    ImGui::TableSetColumnIndex(0);
-    changed |= keyframeToggle(ctx, layer, prop);
-
-    ImGui::TableSetColumnIndex(1);
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextColored(theme::vec(anim.isAnimated() ? theme::kText : theme::kTextDim), "%s", prop.label);
-
-    ImGui::TableSetColumnIndex(2);
-    changed |= propertyValueWidget(ctx, prop, -FLT_MIN);
-
-    const int keyHere = anim.findKey(t);
-    if (ImGui::BeginPopupContextItem("##ctx")) {
-        if (ImGui::MenuItem(keyHere >= 0 ? "Remove Keyframe" : "Add Keyframe")) {
-            if (keyHere >= 0) anim.removeKey(keyHere);
-            else anim.addKeyAt(t);
-            changed = true;
-        }
-        if (ImGui::MenuItem("Previous Keyframe", "J", false, anim.isAnimated())) jumpToKey(ctx, anim, -1);
-        if (ImGui::MenuItem("Next Keyframe", "K", false, anim.isAnimated())) jumpToKey(ctx, anim, +1);
-        ImGui::Separator();
-        if (ImGui::MenuItem("Clear Animation", nullptr, false, anim.isAnimated())) {
-            anim.clearKeys(t);
-            changed = true;
-        }
-        if (ImGui::MenuItem("Reset and Clear Animation")) {
-            anim.clearKeys(t);
-            setPropertyValue(prop, t, defaultPropertyValue(layer, prop.id, ctx.comp().center()));
-            changed = true;
-        }
-        ImGui::EndPopup();
-    }
-
-    ImGui::TableSetColumnIndex(3);
-    changed |= resetButton(ctx, layer, prop);
-
-    if (changed) ctx.touch();
-    ImGui::PopID();
-    return changed;
-}
-
-void PropertiesPanel::draw(EditorContext& ctx) {
-    if (!open || ui::panelHidden(kWindowName)) return; // minimized: only its restore handle shows
-    ui::nextPanelWindowClass();
-    if (!ImGui::Begin(kWindowName, &open)) {
-        ImGui::End();
+void PropertiesPanel::sync() {
+    if (!isVisible()) return;
+    const std::string key = structureKey();
+    if (key != key_) {
+        key_ = key;
+        rebuild();
         return;
     }
-    if (ui::panelIsMinimized()) { // only the tab shows
-        ui::panelMinimizeButton();
-        ImGui::End();
-        return;
-    }
-    if (releaseRequested_) {
-        releaseRequested_ = false;
-        ctx.releaseSelectedCompounds();
-    }
-    if (deleteRequested_) {
-        deleteRequested_ = false;
-        ctx.deleteSelected();
-    }
-    if (Layer* layer = ctx.selected()) drawLayer(ctx, *layer);
-    else drawComposition(ctx);
-    ui::panelMinimizeButton();
-    ImGui::End();
+    for (PropertyRow* r : rows_) r->refresh();
+    for (auto& f : refreshers_) f();
 }
 
-void PropertiesPanel::drawComposition(EditorContext& ctx) {
-    Composition& c = ctx.comp();
-    ImGui::PushFont(Fonts::uiBold(), Fonts::kUiSize * 1.1f);
-    ImGui::TextUnformatted("Composition");
-    ImGui::PopFont();
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "Select a layer to edit it.");
-    ImGui::Dummy(ImVec2(0, 4));
-
-    if (!beginPropertyTable("comp")) return;
-    plainRowLabel("Width");
-    if (ImGui::InputInt("##w", &c.width, 0)) { c.width = std::clamp(c.width, 16, 16384); c.syncCameras(); ctx.touch(); }
-    plainRowLabel("Height");
-    if (ImGui::InputInt("##h", &c.height, 0)) { c.height = std::clamp(c.height, 16, 16384); c.syncCameras(); ctx.touch(); }
-    plainRowLabel("Frame Rate");
-    float fps = static_cast<float>(c.fps);
-    if (ImGui::DragFloat("##fps", &fps, 0.1f, 1.0f, 240.0f, "%.2f fps", ImGuiSliderFlags_AlwaysClamp)) {
-        c.fps = fps;
-        ctx.setTime(ctx.time);
-        ctx.touch();
-    }
-    plainRowLabel("Duration");
-    ImGui::AlignTextToFramePadding();
-    ImGui::Text("%.2f s", c.duration);
-    ui::tooltip("The composition ends where its last clip ends: add objects or extend clips to make it longer.");
-    plainRowLabel("Background");
-    if (ImGui::ColorEdit3("##bg", &c.background.r, ImGuiColorEditFlags_DisplayHex)) ctx.touch();
-    ImGui::EndTable();
+void PropertiesPanel::rebuild() {
+    const int scroll = verticalScrollBar() ? verticalScrollBar()->value() : 0;
+    rows_.clear();
+    refreshers_.clear();
+    auto* content = new QWidget;
+    auto* col = new QVBoxLayout(content);
+    col->setContentsMargins(8, 8, 8, 8);
+    col->setSpacing(4);
+    if (Layer* layer = ctx_.selected()) buildLayer(col, *layer);
+    else buildComposition(col);
+    col->addStretch();
+    setWidget(content);
+    verticalScrollBar()->setValue(scroll);
 }
 
-void PropertiesPanel::drawMediaSource(EditorContext& ctx, Layer& layer) {
-    if (!ImGui::CollapsingHeader("Source", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    const MediaItem* item = ctx.comp().findMedia(layer.media.mediaId);
-    if (!item) {
-        ImGui::TextColored(theme::vec(theme::kDanger), "The media of this layer was removed.");
-        return;
-    }
-    const bool missing = media::MediaManager::get().fileMissing(*item);
-    ImGui::TextUnformatted(item->name.c_str());
-    char info[96];
-    if (item->kind == MediaKind::Image)
-        std::snprintf(info, sizeof info, "Image  ·  %d×%d", item->width, item->height);
-    else if (item->kind == MediaKind::Audio)
-        std::snprintf(info, sizeof info, "Audio  ·  %.2f s", item->duration);
-    else
-        std::snprintf(info, sizeof info, "Video  ·  %d×%d  ·  %.2f s  ·  %.4g fps%s", item->width, item->height, item->duration,
-                      item->fps, item->hasAudio ? "  ·  with audio" : "");
-    ImGui::TextColored(theme::vec(theme::kTextDim), "%s", info);
-    ImGui::PushStyleColor(ImGuiCol_Text, missing ? theme::kDanger : theme::kTextFaint);
-    ImGui::TextWrapped("%s%s", missing ? "Missing: " : "", item->path.c_str());
-    ImGui::PopStyleColor();
-    if (missing) {
-        ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
-        ImGui::TextWrapped("Relink it from the Media panel (right-click the item).");
-        ImGui::PopStyleColor();
-    }
-    const float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-    if (layer.media.hasVideo) {
-        if (ImGui::Button("Fit to Composition", ImVec2(w, 0)) && layer.media.size.x > 0 && layer.media.size.y > 0) {
-            // Like After Effects' Fit to Comp (keeping the aspect ratio): centered, as large as fits.
-            const Composition& c = ctx.comp();
-            const float fit = std::min(c.width / layer.media.size.x, c.height / layer.media.size.y) * 100.0f;
-            layer.transform.scale.base = {fit, fit};
-            layer.transform.position.base = c.center();
-            if (const Layer* parent = c.findLayer(layer.parent))
-                layer.transform.position.base = c.worldMatrix(*parent, ctx.time).inverse().apply(c.center());
-            ctx.touch();
-        }
-        ui::tooltip("Scale it to fill the composition, keeping its proportions");
-        ImGui::SameLine();
-    }
-    ImGui::BeginDisabled(missing);
-    if (ImGui::Button("Show in Folder", ImVec2(layer.media.hasVideo ? w : -FLT_MIN, 0)))
-        platform::revealInFileManager(std::filesystem::path(std::u8string(item->path.begin(), item->path.end())));
-    ImGui::EndDisabled();
+// --- composition ---------------------------------------------------------------------------
+
+void PropertiesPanel::buildComposition(QVBoxLayout* col) {
+    auto* title = new QLabel("Composition");
+    QFont f = title->font();
+    f.setPointSizeF(f.pointSizeF() * 1.15);
+    f.setWeight(QFont::DemiBold);
+    title->setFont(f);
+    col->addWidget(title);
+    col->addWidget(faint("Select a layer to edit it."));
+    col->addSpacing(4);
+
+    auto* section = new CollapsibleSection("Composition Settings");
+    auto sizeValue = [this](int Composition::*field) {
+        auto* v = new ui::DragValue;
+        v->setRange(16.0f, 16384.0f);
+        v->setSpeed(1.0f);
+        v->setFormat("%.0f px");
+        connect(v, &ui::DragValue::valueChanged, this, [this, field](float x) {
+            ctx_.comp().*field = static_cast<int>(std::lround(x));
+            ctx_.comp().syncCameras();
+            ctx_.touch();
+        });
+        return v;
+    };
+    auto* w = sizeValue(&Composition::width);
+    section->addPlainRow("Width", w);
+    auto* h = sizeValue(&Composition::height);
+    section->addPlainRow("Height", h);
+    auto* fps = new ui::DragValue;
+    fps->setRange(1.0f, 240.0f);
+    fps->setSpeed(0.1f);
+    fps->setFormat("%.2f fps");
+    connect(fps, &ui::DragValue::valueChanged, this, [this](float v) {
+        ctx_.comp().fps = v;
+        ctx_.setTime(ctx_.time);
+        ctx_.touch();
+    });
+    section->addPlainRow("Frame Rate", fps);
+    auto* duration = new QLabel;
+    duration->setToolTip("The composition ends where its last clip ends: add objects or extend clips to make it longer.");
+    section->addPlainRow("Duration", duration);
+    auto* bg = new ui::ColorButton;
+    bg->setAlphaEnabled(false);
+    connect(bg, &ui::ColorButton::colorChanged, this, [this](Color c) {
+        ctx_.comp().background = {c.r, c.g, c.b, 1.0f};
+        ctx_.touch();
+    });
+    auto* bgRow = new QWidget;
+    auto* bgLayout = new QHBoxLayout(bgRow);
+    bgLayout->setContentsMargins(0, 0, 0, 0);
+    bgLayout->addWidget(bg);
+    auto* bgHex = dim("");
+    bgLayout->addWidget(bgHex, 1);
+    section->addPlainRow("Background", bgRow);
+    col->addWidget(section);
+
+    refreshers_.push_back([=, this] {
+        const Composition& c = ctx_.comp();
+        w->setValue(static_cast<float>(c.width));
+        h->setValue(static_cast<float>(c.height));
+        fps->setValue(static_cast<float>(c.fps));
+        duration->setText(QString("%1 s").arg(c.duration, 0, 'f', 2));
+        bg->setColor(c.background);
+        bgHex->setText(QString::fromStdString(colorHex(c.background)));
+    });
+    refreshers_.back()();
 }
 
-void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
-    // Header: type icon + editable name.
+// --- layer -----------------------------------------------------------------------------------
+
+void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
+    const uint64_t id = layer.id;
+    // Header: type icon + editable name + delete.
     {
-        const float h = ImGui::GetFrameHeight();
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        ImGui::Dummy(ImVec2(h, h));
-        ui::drawIcon(ImGui::GetWindowDrawList(), ui::iconForLayer(layer), ImVec2(p.x + h * 0.5f, p.y + h * 0.5f), h * 0.6f,
-                     theme::kAccent);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(-(h + ImGui::GetStyle().ItemSpacing.x));
-        if (ImGui::InputText("##name", &layer.name)) ctx.touch();
-        ImGui::SameLine();
-        // Deferred like releasing: deleting removes the layer this panel is drawing.
-        if (ui::iconButton("##deleteLayer", ui::Icon::Trash, h, "Delete this layer (Delete)")) deleteRequested_ = true;
+        auto* row = new QHBoxLayout;
+        auto* icon = new QLabel;
+        icon->setPixmap(ui::makeIcon(ui::iconForLayer(layer), theme::kAccent, 22).pixmap(22, 22));
+        row->addWidget(icon);
+        auto* name = new QLineEdit(QString::fromStdString(layer.name));
+        connect(name, &QLineEdit::editingFinished, this, [this, id, name] {
+            if (Layer* l = ctx_.comp().findLayer(id); l && l->name != name->text().toStdString()) {
+                l->name = name->text().toStdString();
+                ctx_.touch();
+            }
+        });
+        row->addWidget(name, 1);
+        auto* trash = new ui::IconButton(ui::Icon::Trash, "Delete this layer (Delete)", 26);
+        connect(trash, &QAbstractButton::clicked, this, [this] { ctx_.deleteSelected(); });
+        row->addWidget(trash);
+        col->addLayout(row);
+        refreshers_.push_back([this, id, name] {
+            if (const Layer* l = ctx_.comp().findLayer(id); l && !name->hasFocus()) name->setText(QString::fromStdString(l->name));
+        });
     }
-    if (ctx.selection.size() > 1) {
-        ImGui::TextColored(theme::vec(theme::kAccent), "%d layers selected", static_cast<int>(ctx.selection.size()));
-        ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
-        ImGui::TextWrapped("Properties below belong to this layer. Quick animations apply to all selected layers.");
-        ImGui::PopStyleColor();
+    if (ctx_.selection.size() > 1) {
+        auto* n = new QLabel(QString("%1 layers selected").arg(ctx_.selection.size()));
+        n->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kAccent).name()));
+        col->addWidget(n);
+        col->addWidget(faint("Properties below belong to this layer. Quick animations apply to all selected layers."));
     }
     // Compounds: where this layer lives, and what a compound contains.
-    if (const Layer* parent = layer.parent ? ctx.comp().findLayer(layer.parent) : nullptr) {
-        ImGui::TextColored(theme::vec(theme::kTextDim), "Inside \"%s\"", parent->name.c_str());
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Select Compound")) ctx.select(parent->id);
+    if (const Layer* parent = layer.parent ? ctx_.comp().findLayer(layer.parent) : nullptr) {
+        auto* row = new QHBoxLayout;
+        row->addWidget(dim(QString("Inside \"%1\"").arg(QString::fromStdString(parent->name))), 1);
+        auto* select = new QPushButton("Select Compound");
+        const uint64_t pid = parent->id;
+        connect(select, &QPushButton::clicked, this, [this, pid] { ctx_.select(pid); });
+        row->addWidget(select);
+        col->addLayout(row);
     }
-    if (layer.type == LayerType::Compound && ImGui::CollapsingHeader("Contents", ImGuiTreeNodeFlags_DefaultOpen)) {
-        uint64_t pick = 0;
-        for (const Layer& child : ctx.comp().layers) {
+    if (layer.type == LayerType::Compound) {
+        auto* section = new CollapsibleSection("Contents");
+        for (const Layer& child : ctx_.comp().layers) {
             if (child.parent != layer.id) continue;
-            ImGui::PushID(static_cast<int>(child.id));
-            const ImVec2 p = ImGui::GetCursorScreenPos();
-            if (ImGui::Selectable("##child", false, 0, ImVec2(0, ImGui::GetFrameHeight()))) pick = child.id;
-            ui::drawIcon(ImGui::GetWindowDrawList(), ui::iconForLayer(child),
-                         ImVec2(p.x + 12, p.y + ImGui::GetFrameHeight() * 0.5f), 13.0f, theme::kTextDim);
-            ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + 28, p.y + (ImGui::GetFrameHeight() - ImGui::GetFontSize()) * 0.5f),
-                                                theme::kText, child.name.c_str());
-            ImGui::PopID();
+            auto* b = new QPushButton(ui::makeIcon(ui::iconForLayer(child), theme::kTextDim, 16), QString::fromStdString(child.name));
+            b->setFlat(true);
+            b->setStyleSheet("text-align: left; padding: 4px 8px;");
+            const uint64_t cid = child.id;
+            connect(b, &QPushButton::clicked, this, [this, cid] { ctx_.select(cid); });
+            section->body()->addWidget(b);
         }
-        ImGui::PushStyleColor(ImGuiCol_Text, theme::kTextFaint);
-        ImGui::TextWrapped("Double-click the compound in the viewport, or a layer here, to edit what is inside.");
-        ImGui::PopStyleColor();
-        // Deferred: releasing removes the layer this panel is drawing.
-        if (ImGui::Button("Release Compound", ImVec2(-FLT_MIN, 0))) releaseRequested_ = true;
-        ui::tooltip("Put the layers back where the compound is, keeping how they look (Ctrl+Shift+G)");
-        if (pick) ctx.select(pick);
+        section->body()->addWidget(faint("Double-click the compound in the viewport, or a layer here, to edit what is inside."));
+        auto* release = new QPushButton("Release Compound");
+        release->setToolTip("Put the layers back where the compound is, keeping how they look (Ctrl+Shift+G)");
+        connect(release, &QPushButton::clicked, this, [this] { ctx_.releaseSelectedCompounds(); });
+        section->body()->addWidget(release);
+        col->addWidget(section);
     }
-    if (layer.type == LayerType::Media) drawMediaSource(ctx, layer);
-    ImGui::Dummy(ImVec2(0, 2));
+    if (layer.type == LayerType::Media) buildMediaSource(col, layer);
 
-    auto props = layer.properties();
-    const char* currentGroup = nullptr;
-    bool groupOpen = false;
-    bool tableOpen = false;
-
-    auto closeGroup = [&] {
-        if (tableOpen) ImGui::EndTable();
-        tableOpen = false;
-    };
-
-    for (const PropertyRef& prop : props) {
-        if (prop.effectIndex >= 0) continue; // shown in the Effects section
-        if (!currentGroup || std::strcmp(currentGroup, prop.group) != 0) {
-            closeGroup();
-            currentGroup = prop.group;
-            groupOpen = ImGui::CollapsingHeader(prop.group, ImGuiTreeNodeFlags_DefaultOpen);
-            if (!groupOpen) continue;
-            tableOpen = beginPropertyTable(prop.group);
-            if (!tableOpen) continue;
-
-            // Group-specific, non-animatable settings.
-            const std::string group = prop.group;
+    // Property groups in order, with their non-animatable settings first.
+    CollapsibleSection* section = nullptr;
+    std::string group;
+    for (const PropertyRef& prop : layer.properties()) {
+        if (prop.effectIndex >= 0) continue; // shown in the Effects tab
+        if (!section || group != prop.group) {
+            group = prop.group;
+            section = new CollapsibleSection(QString::fromUtf8(prop.group));
+            col->addWidget(section);
             if (layer.type == LayerType::Plugin) {
-                pluginParamRows(ctx, layer, group);
-            } else if (group == "Shape") {
-                plainRowLabel("Type");
-                int kind = static_cast<int>(layer.shape.kind);
-                if (ImGui::BeginCombo("##kind", shapeKindLabel(layer.shape.kind))) {
-                    for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i)
-                        if (ImGui::Selectable(shapeKindLabel(static_cast<ShapeKind>(i)), i == kind)) {
-                            layer.shape.kind = static_cast<ShapeKind>(i);
-                            ctx.touch();
-                        }
-                    ImGui::EndCombo();
-                }
-            } else if (group == "Fill") {
-                plainRowLabel("Enabled");
-                if (ImGui::Checkbox("##fill", &layer.shape.fillEnabled)) ctx.touch();
-            } else if (group == "Stroke") {
-                plainRowLabel("Enabled");
-                if (ImGui::Checkbox("##stroke", &layer.shape.strokeEnabled)) ctx.touch();
-            } else if (group == "Text" && layer.type == LayerType::Text) {
-                plainRowLabel("Content");
-                if (ImGui::InputTextMultiline("##text", &layer.text.text,
-                                              ImVec2(-FLT_MIN, ImGui::GetTextLineHeight() * 3.6f)))
-                    ctx.touch();
-                plainRowLabel("Font");
-                const bool missing = !Fonts::systemScanReady() ? false : !Fonts::hasFamily(layer.text.fontFamily);
-                if (ImGui::BeginCombo("##font", layer.text.fontFamily.c_str(), ImGuiComboFlags_HeightLarge)) {
-                    if (ImGui::IsWindowAppearing()) {
-                        fontFilter_.clear();
-                        ImGui::SetKeyboardFocusHere();
-                    }
-                    ImGui::SetNextItemWidth(-FLT_MIN);
-                    ImGui::InputTextWithHint("##fontFilter", "Search fonts", &fontFilter_);
-                    if (!Fonts::systemScanReady()) ImGui::TextColored(theme::vec(theme::kTextFaint), "Looking for installed fonts...");
-                    const auto families = Fonts::families();
-                    std::vector<const std::string*> shown;
-                    for (const auto& f : families)
-                        if (containsNoCase(f, fontFilter_)) shown.push_back(&f);
-                    ImGuiListClipper clipper; // hundreds of families: only lay out the visible ones
-                    clipper.Begin(static_cast<int>(shown.size()));
-                    while (clipper.Step())
-                        for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-                            if (ImGui::Selectable(shown[i]->c_str(), *shown[i] == layer.text.fontFamily)) {
-                                for (Layer* l : ctx.selectedLayers()) {
-                                    if (l->type != LayerType::Text) continue;
-                                    l->text.fontFamily = *shown[i];
-                                    const auto styles = Fonts::stylesOf(*shown[i]);
-                                    if (std::find(styles.begin(), styles.end(), l->text.fontStyle) == styles.end() &&
-                                        !styles.empty())
-                                        l->text.fontStyle = styles.front();
-                                }
-                                ctx.touch();
+                for (PluginParam& p : layer.plugin.params) {
+                    if (p.group != group || p.kind == PluginParamKind::Number || p.kind == PluginParamKind::Color) continue;
+                    const std::string pid = p.id;
+                    auto param = [this, id, pid]() -> PluginParam* {
+                        Layer* l = ctx_.comp().findLayer(id);
+                        return l ? l->plugin.find(pid) : nullptr;
+                    };
+                    switch (p.kind) {
+                    case PluginParamKind::Toggle: {
+                        auto* cb = new QCheckBox;
+                        connect(cb, &QCheckBox::toggled, this, [this, param](bool on) {
+                            if (PluginParam* pp = param(); pp && pp->toggle != on) {
+                                pp->toggle = on;
+                                ctx_.touch();
                             }
-                    ImGui::EndCombo();
-                }
-                if (missing) ui::tooltip("This font is not installed here: Inter is used instead.");
-                plainRowLabel("Style");
-                if (ImGui::BeginCombo("##style", layer.text.fontStyle.c_str())) {
-                    for (const auto& s : Fonts::stylesOf(layer.text.fontFamily))
-                        if (ImGui::Selectable(s.c_str(), s == layer.text.fontStyle)) {
-                            for (Layer* l : ctx.selectedLayers())
-                                if (l->type == LayerType::Text && l->text.fontFamily == layer.text.fontFamily)
-                                    l->text.fontStyle = s;
-                            ctx.touch();
-                        }
-                    ImGui::EndCombo();
-                }
-                plainRowLabel("Align");
-                static const char* kAlign[] = {"Left", "Center", "Right"};
-                const float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x * 2) / 3.0f;
-                for (int i = 0; i < 3; ++i) {
-                    if (i) ImGui::SameLine();
-                    const bool on = static_cast<int>(layer.text.align) == i;
-                    if (on) ImGui::PushStyleColor(ImGuiCol_Button, theme::kAccentSoft);
-                    if (ImGui::Button(kAlign[i], ImVec2(w, 0))) {
-                        layer.text.align = static_cast<TextAlign>(i);
-                        ctx.touch();
+                        });
+                        section->addPlainRow(QString::fromStdString(p.label), cb);
+                        refreshers_.push_back([cb, param] {
+                            if (PluginParam* pp = param()) {
+                                const QSignalBlocker b(cb);
+                                cb->setChecked(pp->toggle);
+                            }
+                        });
+                        break;
                     }
-                    if (on) ImGui::PopStyleColor();
+                    case PluginParamKind::Choice: {
+                        auto* combo = newCombo();
+                        for (const auto& c : p.choices) combo->addItem(QString::fromStdString(c));
+                        connect(combo, &QComboBox::currentIndexChanged, this, [this, param](int i) {
+                            if (PluginParam* pp = param(); pp && pp->choice != i && i >= 0) {
+                                pp->choice = i;
+                                ctx_.touch();
+                            }
+                        });
+                        section->addPlainRow(QString::fromStdString(p.label), combo);
+                        refreshers_.push_back([combo, param] {
+                            if (PluginParam* pp = param(); pp && !combo->view()->isVisible()) {
+                                const QSignalBlocker b(combo);
+                                combo->setCurrentIndex(pp->choice);
+                            }
+                        });
+                        break;
+                    }
+                    case PluginParamKind::Text: {
+                        auto* edit = new QLineEdit;
+                        connect(edit, &QLineEdit::textEdited, this, [this, param](const QString& t) {
+                            if (PluginParam* pp = param()) {
+                                pp->text = t.toStdString();
+                                ctx_.touch();
+                            }
+                        });
+                        section->addPlainRow(QString::fromStdString(p.label), edit);
+                        refreshers_.push_back([edit, param] {
+                            if (PluginParam* pp = param(); pp && !edit->hasFocus()) edit->setText(QString::fromStdString(pp->text));
+                        });
+                        break;
+                    }
+                    default: break;
+                    }
                 }
+            } else if (group == "Shape") {
+                auto* kind = newCombo();
+                for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) kind->addItem(shapeKindLabel(static_cast<ShapeKind>(i)));
+                kind->setCurrentIndex(static_cast<int>(layer.shape.kind));
+                connect(kind, &QComboBox::currentIndexChanged, this, [this, id](int i) {
+                    if (Layer* l = ctx_.comp().findLayer(id); l && i >= 0) {
+                        l->shape.kind = static_cast<ShapeKind>(i);
+                        ctx_.touch();
+                    }
+                });
+                section->addPlainRow("Type", kind);
+            } else if (group == "Fill" || group == "Stroke") {
+                const bool fill = group == "Fill";
+                auto* on = new QCheckBox;
+                connect(on, &QCheckBox::toggled, this, [this, id, fill](bool v) {
+                    if (Layer* l = ctx_.comp().findLayer(id)) {
+                        (fill ? l->shape.fillEnabled : l->shape.strokeEnabled) = v;
+                        ctx_.touch();
+                    }
+                });
+                section->addPlainRow("Enabled", on);
+                refreshers_.push_back([this, id, on, fill] {
+                    if (const Layer* l = ctx_.comp().findLayer(id)) {
+                        const QSignalBlocker b(on);
+                        on->setChecked(fill ? l->shape.fillEnabled : l->shape.strokeEnabled);
+                    }
+                });
+            } else if (group == "Text" && layer.type == LayerType::Text) {
+                auto* text = new QPlainTextEdit;
+                text->setFixedHeight(text->fontMetrics().height() * 4 + 12);
+                text->setPlainText(QString::fromStdString(layer.text.text));
+                connect(text, &QPlainTextEdit::textChanged, this, [this, id, text] {
+                    if (Layer* l = ctx_.comp().findLayer(id)) {
+                        l->text.text = text->toPlainText().toStdString();
+                        ctx_.touch();
+                    }
+                });
+                section->addPlainRow("Content", text);
+                refreshers_.push_back([this, id, text] {
+                    if (const Layer* l = ctx_.comp().findLayer(id); l && !text->hasFocus() && text->toPlainText().toStdString() != l->text.text) {
+                        const QSignalBlocker b(text);
+                        text->setPlainText(QString::fromStdString(l->text.text));
+                    }
+                });
+
+                auto* font = newCombo();
+                font->setEditable(true);
+                font->setInsertPolicy(QComboBox::NoInsert);
+                for (const auto& fam : Fonts::families()) font->addItem(QString::fromStdString(fam));
+                font->completer()->setFilterMode(Qt::MatchContains);
+                font->completer()->setCompletionMode(QCompleter::PopupCompletion);
+                font->setCurrentText(QString::fromStdString(layer.text.fontFamily));
+                if (!Fonts::hasFamily(layer.text.fontFamily)) font->setToolTip("This font is not installed here: Inter is used instead.");
+                section->addPlainRow("Font", font);
+                auto* style = newCombo();
+                for (const auto& s : Fonts::stylesOf(layer.text.fontFamily)) style->addItem(QString::fromStdString(s));
+                style->setCurrentText(QString::fromStdString(layer.text.fontStyle));
+                section->addPlainRow("Style", style);
+                connect(font, &QComboBox::activated, this, [this, font](int) {
+                    const std::string fam = font->currentText().toStdString();
+                    if (!Fonts::hasFamily(fam)) return;
+                    for (Layer* l : ctx_.selectedLayers()) {
+                        if (l->type != LayerType::Text) continue;
+                        l->text.fontFamily = fam;
+                        const auto styles = Fonts::stylesOf(fam);
+                        if (std::find(styles.begin(), styles.end(), l->text.fontStyle) == styles.end() && !styles.empty())
+                            l->text.fontStyle = styles.front();
+                    }
+                    ctx_.touch();
+                    key_.clear(); // the style list changes
+                });
+                connect(style, &QComboBox::activated, this, [this, id, style](int) {
+                    const Layer* cur = ctx_.comp().findLayer(id);
+                    if (!cur) return;
+                    const std::string fam = cur->text.fontFamily, s = style->currentText().toStdString();
+                    for (Layer* l : ctx_.selectedLayers())
+                        if (l->type == LayerType::Text && l->text.fontFamily == fam) l->text.fontStyle = s;
+                    ctx_.touch();
+                });
+
+                auto* alignRow = new QWidget;
+                auto* align = new QHBoxLayout(alignRow);
+                align->setContentsMargins(0, 0, 0, 0);
+                align->setSpacing(4);
+                std::vector<QPushButton*> buttons;
+                for (int i = 0; i < 3; ++i) {
+                    auto* b = new QPushButton(i == 0 ? "Left" : i == 1 ? "Center" : "Right");
+                    b->setCheckable(true);
+                    connect(b, &QPushButton::clicked, this, [this, id, i] {
+                        if (Layer* l = ctx_.comp().findLayer(id)) {
+                            l->text.align = static_cast<TextAlign>(i);
+                            ctx_.touch();
+                        }
+                    });
+                    align->addWidget(b);
+                    buttons.push_back(b);
+                }
+                section->addPlainRow("Align", alignRow);
+                refreshers_.push_back([this, id, buttons] {
+                    if (const Layer* l = ctx_.comp().findLayer(id))
+                        for (int i = 0; i < 3; ++i) buttons[i]->setChecked(static_cast<int>(l->text.align) == i);
+                });
             }
         }
-        if (groupOpen && tableOpen) propertyRow(ctx, layer, prop);
+        rows_.push_back(new PropertyRow(ctx_, id, prop, section));
     }
-    closeGroup();
 
     if (layer.type == LayerType::Plugin) {
         // Groups made only of toggles / choices / text never came up above.
@@ -520,204 +470,351 @@ void PropertiesPanel::drawLayer(EditorContext& ctx, Layer& layer) {
         for (const PluginParam& p : layer.plugin.params) {
             if (hasAnimatedParams(layer, p.group) || std::find(done.begin(), done.end(), p.group) != done.end()) continue;
             done.push_back(p.group);
-            if (ImGui::CollapsingHeader(p.group.c_str(), ImGuiTreeNodeFlags_DefaultOpen) && beginPropertyTable(p.group.c_str())) {
-                pluginParamRows(ctx, layer, p.group);
-                ImGui::EndTable();
+            auto* s = new CollapsibleSection(QString::fromStdString(p.group));
+            for (const PluginParam& q : layer.plugin.params) {
+                if (q.group != p.group) continue;
+                const std::string pid = q.id;
+                auto param = [this, id, pid]() -> PluginParam* {
+                    Layer* l = ctx_.comp().findLayer(id);
+                    return l ? l->plugin.find(pid) : nullptr;
+                };
+                if (q.kind == PluginParamKind::Toggle) {
+                    auto* cb = new QCheckBox;
+                    cb->setChecked(q.toggle);
+                    connect(cb, &QCheckBox::toggled, this, [this, param](bool on) {
+                        if (PluginParam* pp = param()) {
+                            pp->toggle = on;
+                            ctx_.touch();
+                        }
+                    });
+                    s->addPlainRow(QString::fromStdString(q.label), cb);
+                } else if (q.kind == PluginParamKind::Choice) {
+                    auto* combo = newCombo();
+                    for (const auto& c : q.choices) combo->addItem(QString::fromStdString(c));
+                    combo->setCurrentIndex(q.choice);
+                    connect(combo, &QComboBox::currentIndexChanged, this, [this, param](int i) {
+                        if (PluginParam* pp = param(); pp && i >= 0) {
+                            pp->choice = i;
+                            ctx_.touch();
+                        }
+                    });
+                    s->addPlainRow(QString::fromStdString(q.label), combo);
+                } else if (q.kind == PluginParamKind::Text) {
+                    auto* edit = new QLineEdit(QString::fromStdString(q.text));
+                    connect(edit, &QLineEdit::textEdited, this, [this, param](const QString& t) {
+                        if (PluginParam* pp = param()) {
+                            pp->text = t.toStdString();
+                            ctx_.touch();
+                        }
+                    });
+                    s->addPlainRow(QString::fromStdString(q.label), edit);
+                }
             }
+            col->addWidget(s);
         }
-        if (layer.plugin.hasRows) drawPluginData(ctx, layer);
+        if (layer.plugin.hasRows) buildPluginData(col, layer);
         if (!PluginHost::get().findType(layer.plugin.objectType)) {
-            ImGui::PushStyleColor(ImGuiCol_Text, theme::kDanger);
-            ImGui::TextWrapped("The plugin for this object (%s) is not installed or failed to load.",
-                               layer.plugin.objectType.c_str());
-            ImGui::PopStyleColor();
+            auto* warn = new QLabel(QString("The plugin for this object (%1) is not installed or failed to load.")
+                                        .arg(QString::fromStdString(layer.plugin.objectType)));
+            warn->setWordWrap(true);
+            warn->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+            col->addWidget(warn);
         }
     }
 
-    if (ImGui::CollapsingHeader("Layer", ImGuiTreeNodeFlags_DefaultOpen) && beginPropertyTable("layer")) {
-        // In/out stay inside the composition, between neighboring clips, at least one frame long.
-        Composition& comp = ctx.comp();
-        const double frame = comp.frameDuration();
-        double minIn = 0, maxOut = 0;
-        comp.clipLimits(layer.id, minIn, maxOut);
-        plainRowLabel("In");
-        float in = static_cast<float>(layer.inPoint);
-        const float inMax = static_cast<float>(std::max(minIn, layer.outPoint - frame));
-        if (ImGui::DragFloat("##in", &in, 0.01f, static_cast<float>(minIn), inMax, "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
-            comp.setInPoint(layer.id, comp.snapToFrame(in));
-            ctx.touch();
-        }
-        plainRowLabel("Out");
-        float out = static_cast<float>(layer.outPoint);
-        const float outMin = static_cast<float>(std::min(maxOut, layer.inPoint + frame));
-        if (ImGui::DragFloat("##out", &out, 0.01f, outMin, static_cast<float>(maxOut), "%.2f s", ImGuiSliderFlags_AlwaysClamp)) {
-            comp.setOutPoint(layer.id, out);
-            ctx.touch();
-        }
-        plainRowLabel("Label");
+    // In / out and the label color.
+    {
+        auto* s = new CollapsibleSection("Layer");
+        auto* in = new ui::DragValue;
+        in->setSpeed(0.01f);
+        in->setFormat("%.2f s");
+        connect(in, &ui::DragValue::valueChanged, this, [this, id](float v) {
+            Composition& comp = ctx_.comp();
+            comp.setInPoint(id, comp.snapToFrame(v));
+            ctx_.touch();
+        });
+        s->addPlainRow("In", in);
+        auto* out = new ui::DragValue;
+        out->setSpeed(0.01f);
+        out->setFormat("%.2f s");
+        connect(out, &ui::DragValue::valueChanged, this, [this, id](float v) {
+            ctx_.comp().setOutPoint(id, v);
+            ctx_.touch();
+        });
+        s->addPlainRow("Out", out);
+        auto* labels = new QWidget;
+        auto* lrow = new QHBoxLayout(labels);
+        lrow->setContentsMargins(0, 0, 0, 0);
+        lrow->setSpacing(4);
+        std::vector<QPushButton*> swatches;
         for (int i = 0; i < kLabelColorCount; ++i) {
-            if (i) ImGui::SameLine(0, 4);
             const Color lc = labelColor(i);
-            ImGui::PushID(i);
-            const ImVec2 p = ImGui::GetCursorScreenPos();
-            const float s = ImGui::GetFrameHeight() * 0.7f;
-            if (ImGui::InvisibleButton("##label", ImVec2(s, s))) {
-                layer.label = i;
-                ctx.touch();
+            auto* b = new QPushButton;
+            b->setFixedSize(18, 18);
+            b->setCheckable(true);
+            b->setStyleSheet(QString("QPushButton { background: %1; border-radius: 4px; padding: 0; }"
+                                     "QPushButton:checked { border: 2px solid %2; }")
+                                 .arg(QColor::fromRgbF(lc.r, lc.g, lc.b).name(), theme::q(theme::kText).name()));
+            connect(b, &QPushButton::clicked, this, [this, id, i] {
+                if (Layer* l = ctx_.comp().findLayer(id)) {
+                    l->label = i;
+                    ctx_.touch();
+                }
+            });
+            lrow->addWidget(b);
+            swatches.push_back(b);
+        }
+        lrow->addStretch();
+        s->addPlainRow("Label", labels);
+        col->addWidget(s);
+        refreshers_.push_back([this, id, in, out, swatches] {
+            Composition& comp = ctx_.comp();
+            const Layer* l = comp.findLayer(id);
+            if (!l) return;
+            // In/out stay inside the composition, between neighboring clips, at least one frame long.
+            const double frame = comp.frameDuration();
+            double minIn = 0, maxOut = 0;
+            comp.clipLimits(id, minIn, maxOut);
+            in->setRange(static_cast<float>(minIn), static_cast<float>(std::max(minIn, l->outPoint - frame)));
+            in->setValue(static_cast<float>(l->inPoint));
+            out->setRange(static_cast<float>(std::min(maxOut, l->inPoint + frame)), static_cast<float>(maxOut));
+            out->setValue(static_cast<float>(l->outPoint));
+            for (int i = 0; i < static_cast<int>(swatches.size()); ++i) swatches[i]->setChecked(l->label == i);
+        });
+    }
+
+    if (layer.type != LayerType::Camera) buildPresets(col, layer); // cameras are not drawn: no animation presets
+    for (auto& f : refreshers_) f();
+}
+
+void PropertiesPanel::buildMediaSource(QVBoxLayout* col, Layer& layer) {
+    auto* s = new CollapsibleSection("Source");
+    const MediaItem* item = ctx_.comp().findMedia(layer.media.mediaId);
+    if (!item) {
+        auto* gone = new QLabel("The media of this layer was removed.");
+        gone->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+        s->body()->addWidget(gone);
+        col->addWidget(s);
+        return;
+    }
+    const bool missing = media::MediaManager::get().fileMissing(*item);
+    s->body()->addWidget(new QLabel(QString::fromStdString(item->name)));
+    char info[128];
+    if (item->kind == MediaKind::Image) std::snprintf(info, sizeof info, "Image  ·  %d×%d", item->width, item->height);
+    else if (item->kind == MediaKind::Audio) std::snprintf(info, sizeof info, "Audio  ·  %.2f s", item->duration);
+    else
+        std::snprintf(info, sizeof info, "Video  ·  %d×%d  ·  %.2f s  ·  %.4g fps%s", item->width, item->height, item->duration, item->fps,
+                      item->hasAudio ? "  ·  with audio" : "");
+    s->body()->addWidget(dim(QString::fromUtf8(info)));
+    auto* path = missing ? new QLabel(QString::fromStdString("Missing: " + item->path)) : faint(QString::fromStdString(item->path));
+    path->setWordWrap(true);
+    if (missing) path->setStyleSheet(QString("color: %1;").arg(theme::q(theme::kDanger).name()));
+    s->body()->addWidget(path);
+    if (missing) s->body()->addWidget(faint("Relink it from the Media panel (right-click the item)."));
+    auto* row = new QHBoxLayout;
+    const uint64_t id = layer.id;
+    if (layer.media.hasVideo) {
+        auto* fit = new QPushButton("Fit to Composition");
+        fit->setToolTip("Scale it to fill the composition, keeping its proportions");
+        connect(fit, &QPushButton::clicked, this, [this, id] {
+            Layer* l = ctx_.comp().findLayer(id);
+            if (!l || l->media.size.x <= 0 || l->media.size.y <= 0) return;
+            // Like After Effects' Fit to Comp (keeping the aspect ratio): centered, as large as fits.
+            const Composition& c = ctx_.comp();
+            const float f = std::min(c.width / l->media.size.x, c.height / l->media.size.y) * 100.0f;
+            l->transform.scale.base = {f, f};
+            l->transform.position.base = c.center();
+            if (const Layer* parent = c.findLayer(l->parent))
+                l->transform.position.base = c.worldMatrix(*parent, ctx_.time).inverse().apply(c.center());
+            ctx_.touch();
+        });
+        row->addWidget(fit);
+    }
+    auto* reveal = new QPushButton("Show in Folder");
+    reveal->setEnabled(!missing);
+    const std::string file = item->path;
+    connect(reveal, &QPushButton::clicked, this, [file] { platform::revealInFileManager(platform::fromUtf8(file)); });
+    row->addWidget(reveal);
+    s->body()->addLayout(row);
+    col->addWidget(s);
+}
+
+void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
+    auto* s = new CollapsibleSection("Data");
+    const uint64_t id = layer.id;
+    auto rowsOf = [this, id]() -> std::vector<DataRow>* {
+        Layer* l = ctx_.comp().findLayer(id);
+        return l ? &l->plugin.rows : nullptr;
+    };
+    auto* grid = new QGridLayout;
+    grid->setHorizontalSpacing(4);
+    grid->setVerticalSpacing(4);
+    grid->setColumnStretch(1, 3);
+    grid->setColumnStretch(2, 2);
+    for (int i = 0; i < static_cast<int>(layer.plugin.rows.size()); ++i) {
+        const DataRow& r = layer.plugin.rows[i];
+        auto* color = new ui::ColorButton;
+        color->setColor(r.color);
+        connect(color, &ui::ColorButton::colorChanged, this, [this, rowsOf, i](Color c) {
+            if (auto* rows = rowsOf(); rows && i < static_cast<int>(rows->size())) {
+                (*rows)[i].color = c;
+                ctx_.touch();
             }
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            dl->AddRectFilled(p, ImVec2(p.x + s, p.y + s), ImGui::ColorConvertFloat4ToU32(ImVec4(lc.r, lc.g, lc.b, 1)), 4);
-            if (layer.label == i) dl->AddRect(ImVec2(p.x - 2, p.y - 2), ImVec2(p.x + s + 2, p.y + s + 2), theme::kText, 5);
-            ImGui::PopID();
+        });
+        auto* label = new QLineEdit(QString::fromStdString(r.label));
+        label->setPlaceholderText("Label");
+        connect(label, &QLineEdit::textEdited, this, [this, rowsOf, i](const QString& t) {
+            if (auto* rows = rowsOf(); rows && i < static_cast<int>(rows->size())) {
+                (*rows)[i].label = t.toStdString();
+                ctx_.touch();
+            }
+        });
+        auto* value = new ui::DragValue;
+        value->setFormat("%g");
+        value->setValue(r.value);
+        connect(value, &ui::DragValue::valueChanged, this, [this, rowsOf, i](float v) {
+            if (auto* rows = rowsOf(); rows && i < static_cast<int>(rows->size())) {
+                (*rows)[i].value = v;
+                ctx_.touch();
+            }
+        });
+        auto* up = new ui::IconButton(ui::Icon::ChevronUp, "Move up", 24);
+        connect(up, &QAbstractButton::clicked, this, [this, rowsOf, i] {
+            if (auto* rows = rowsOf(); rows && i > 0 && i < static_cast<int>(rows->size())) {
+                std::swap((*rows)[i], (*rows)[i - 1]);
+                ctx_.touch();
+                key_.clear();
+            }
+        });
+        auto* del = new ui::IconButton(ui::Icon::Trash, "Remove row", 24);
+        connect(del, &QAbstractButton::clicked, this, [this, rowsOf, i] {
+            if (auto* rows = rowsOf(); rows && i < static_cast<int>(rows->size())) {
+                rows->erase(rows->begin() + i);
+                ctx_.touch();
+            }
+        });
+        grid->addWidget(color, i, 0);
+        grid->addWidget(label, i, 1);
+        grid->addWidget(value, i, 2);
+        grid->addWidget(up, i, 3);
+        grid->addWidget(del, i, 4);
+    }
+    s->body()->addLayout(grid);
+    auto* buttons = new QHBoxLayout;
+    auto* add = new QPushButton("+ Add Row");
+    connect(add, &QPushButton::clicked, this, [this, rowsOf] {
+        if (auto* rows = rowsOf()) {
+            DataRow r;
+            r.label = "Item " + std::to_string(rows->size() + 1);
+            r.value = rows->empty() ? 50.0f : rows->back().value;
+            r.color = labelColor(static_cast<int>(rows->size()));
+            rows->push_back(std::move(r));
+            ctx_.touch();
         }
-        ImGui::EndTable();
-    }
-
-    if (layer.type == LayerType::Camera) return; // cameras are not drawn: no effects or animation presets
-    drawPresets(ctx, layer);
-}
-
-void PropertiesPanel::drawPluginData(EditorContext& ctx, Layer& layer) {
-    if (!ImGui::CollapsingHeader("Data###pluginRows", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    auto& rows = layer.plugin.rows;
-    int remove = -1, moveUp = -1;
-    constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_RowBg;
-    if (ImGui::BeginTable("##rows", 4, flags)) {
-        ImGui::TableSetupColumn("color", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight());
-        ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 1.4f);
-        ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 1.0f);
-        ImGui::TableSetupColumn("tools", ImGuiTableColumnFlags_WidthFixed, ImGui::GetFrameHeight() * 2 + 4);
-        for (int i = 0; i < static_cast<int>(rows.size()); ++i) {
-            DataRow& r = rows[i];
-            ImGui::PushID(i);
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            if (ImGui::ColorEdit4("##c", &r.color.r, ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoLabel |
-                                                         ImGuiColorEditFlags_AlphaPreviewHalf))
-                ctx.touch();
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::InputTextWithHint("##l", "Label", &r.label)) ctx.touch();
-            ImGui::TableNextColumn();
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::DragFloat("##v", &r.value, 0.5f, 0, 0, "%g")) ctx.touch();
-            ImGui::TableNextColumn();
-            if (ui::iconButton("##up", ui::Icon::ChevronUp, ImGui::GetFrameHeight(), "Move up") && i > 0) moveUp = i;
-            ImGui::SameLine(0, 4);
-            if (ui::iconButton("##del", ui::Icon::Trash, ImGui::GetFrameHeight(), "Remove row")) remove = i;
-            ImGui::PopID();
+    });
+    auto* paste = new QPushButton("Paste");
+    paste->setToolTip("Replace the data with rows from the clipboard: \"label, value[, #color]\" per line.\n"
+                      "Cells copied from a spreadsheet work too.");
+    connect(paste, &QPushButton::clicked, this, [this, rowsOf] {
+        auto pasted = parseRows(QApplication::clipboard()->text().toStdString());
+        if (auto* rows = rowsOf(); rows && !pasted.empty()) {
+            *rows = std::move(pasted);
+            ctx_.touch();
+            key_.clear();
         }
-        ImGui::EndTable();
-    }
-    if (moveUp > 0) {
-        std::swap(rows[moveUp], rows[moveUp - 1]);
-        ctx.touch();
-    }
-    if (remove >= 0) {
-        rows.erase(rows.begin() + remove);
-        ctx.touch();
-    }
-    if (ImGui::Button("+ Add Row")) {
-        DataRow r;
-        r.label = "Item " + std::to_string(rows.size() + 1);
-        r.value = rows.empty() ? 50.0f : rows.back().value;
-        r.color = labelColor(static_cast<int>(rows.size()));
-        rows.push_back(std::move(r));
-        ctx.touch();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Paste")) {
-        const char* clip = ImGui::GetClipboardText();
-        auto pasted = parseRows(clip ? clip : "");
-        if (!pasted.empty()) {
-            rows = std::move(pasted);
-            ctx.touch();
-        }
-    }
-    ui::tooltip("Replace the data with rows from the clipboard: \"label, value[, #color]\" per line.\n"
-                "Cells copied from a spreadsheet work too.");
-    ImGui::SameLine();
-    if (ImGui::Button("Copy")) {
+    });
+    auto* copy = new QPushButton("Copy");
+    copy->setToolTip("Copy the data as CSV");
+    connect(copy, &QPushButton::clicked, this, [rowsOf] {
         std::string text;
-        for (const DataRow& r : rows) {
-            char value[32];
-            std::snprintf(value, sizeof value, "%g", r.value);
-            text += r.label + ", " + value + ", " + colorHex(r.color) + "\n";
-        }
-        ImGui::SetClipboardText(text.c_str());
-    }
-    ui::tooltip("Copy the data as CSV");
+        if (auto* rows = rowsOf())
+            for (const DataRow& r : *rows) {
+                char value[32];
+                std::snprintf(value, sizeof value, "%g", r.value);
+                text += r.label + ", " + value + ", " + colorHex(r.color) + "\n";
+            }
+        QApplication::clipboard()->setText(QString::fromStdString(text));
+    });
+    buttons->addWidget(add);
+    buttons->addWidget(paste);
+    buttons->addWidget(copy);
+    buttons->addStretch();
+    s->body()->addLayout(buttons);
+    col->addWidget(s);
 }
 
-void PropertiesPanel::drawPresets(EditorContext& ctx, Layer& layer) {
-    if (!ImGui::CollapsingHeader("Quick Animations", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    ImGui::TextColored(theme::vec(theme::kTextFaint), "Adds keyframes at the playhead (replacing overlapping ones).");
-    const float spacing = ImGui::GetStyle().ItemSpacing.x;
-    const float w = (ImGui::GetContentRegionAvail().x - spacing) * 0.5f;
-
+void PropertiesPanel::buildPresets(QVBoxLayout* col, Layer& layer) {
+    auto* s = new CollapsibleSection("Quick Animations");
+    s->body()->addWidget(faint("Adds keyframes at the playhead (replacing overlapping ones)."));
     // Built-in categories first, then whatever imported presets use.
     std::vector<std::string> categories = {"Entrance", "Emphasis", "Exit"};
     for (const auto& lp : PresetLibrary::all())
-        if (std::find(categories.begin(), categories.end(), lp.preset.category) == categories.end())
-            categories.push_back(lp.preset.category);
-
-    std::filesystem::path toRemove;
+        if (std::find(categories.begin(), categories.end(), lp.preset.category) == categories.end()) categories.push_back(lp.preset.category);
     for (const std::string& category : categories) {
-        int column = 0;
+        QGridLayout* grid = nullptr;
+        int n = 0;
         for (const auto& lp : PresetLibrary::all()) {
             if (lp.preset.category != category || !presetAppliesTo(lp.preset, layer)) continue;
-            if (column == 0) ui::sectionLabel(category.c_str());
-            if (column++ % 2 == 1) ImGui::SameLine();
-            ImGui::PushID(&lp);
-            if (ImGui::Button(lp.preset.name.c_str(), ImVec2(w, 0))) {
-                for (Layer* l : ctx.selectedLayers())
-                    if (presetAppliesTo(lp.preset, *l)) applyPreset(lp.preset, *l, ctx.time);
-                ctx.touch();
+            if (!grid) {
+                s->body()->addWidget(ui::sectionLabel(QString::fromStdString(category)));
+                grid = new QGridLayout;
+                grid->setSpacing(4);
+                s->body()->addLayout(grid);
             }
-            if (!lp.file.empty() && ImGui::BeginPopupContextItem("##presetctx")) {
-                if (ImGui::MenuItem("Show File")) platform::revealInFileManager(lp.file);
-                if (ImGui::MenuItem("Delete Preset")) toRemove = lp.file;
-                ImGui::EndPopup();
+            auto* b = new QPushButton(QString::fromStdString(lp.preset.name));
+            const AnimationPreset preset = lp.preset;
+            connect(b, &QPushButton::clicked, this, [this, preset] {
+                for (Layer* l : ctx_.selectedLayers())
+                    if (presetAppliesTo(preset, *l)) applyPreset(preset, *l, ctx_.time);
+                ctx_.touch();
+            });
+            if (!lp.file.empty()) {
+                const std::filesystem::path file = lp.file;
+                b->setContextMenuPolicy(Qt::CustomContextMenu);
+                connect(b, &QWidget::customContextMenuRequested, this, [this, b, file](QPoint p) {
+                    QMenu menu;
+                    menu.addAction("Show File", [file] { platform::revealInFileManager(file); });
+                    menu.addAction("Delete Preset", [this, file] {
+                        PresetLibrary::remove(file);
+                        key_.clear();
+                    });
+                    menu.exec(b->mapToGlobal(p));
+                });
             }
-            ImGui::PopID();
+            grid->addWidget(b, n / 2, n % 2);
+            ++n;
         }
     }
-    if (!toRemove.empty()) PresetLibrary::remove(toRemove);
-
-    ImGui::Dummy(ImVec2(0, 4));
-    if (ImGui::Button("Import...", ImVec2(w, 0))) {
+    auto* row = new QHBoxLayout;
+    auto* import = new QPushButton("Import...");
+    import->setToolTip("Add a Quick Animation from a .json preset file");
+    connect(import, &QPushButton::clicked, this, [this] {
         if (auto file = platform::openFileDialog("Import Quick Animation", "Quick Animation preset", ".json")) {
-            presetMessage_.clear();
-            if (!PresetLibrary::importFile(*file, &presetMessage_)) presetMessage_ = "Import failed: " + presetMessage_;
+            std::string err;
+            presetMessage_ = PresetLibrary::importFile(*file, &err) ? "" : "Import failed: " + err;
         }
-    }
-    ui::tooltip("Add a Quick Animation from a .json preset file");
-    ImGui::SameLine();
-    if (ImGui::Button("Save as Preset...", ImVec2(w, 0))) {
-        saveName_ = layer.name + " animation";
-        ImGui::OpenPopup("Save Quick Animation");
-    }
-    ui::tooltip("Turn this layer's keyframes into a reusable Quick Animation");
-    if (!presetMessage_.empty()) {
-        ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextColored(theme::vec(theme::kTextDim), "%s", presetMessage_.c_str());
-        ImGui::PopTextWrapPos();
-    }
-
-    if (ImGui::BeginPopup("Save Quick Animation")) {
-        ImGui::TextUnformatted("Preset name");
-        ImGui::SetNextItemWidth(260);
-        if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-        const bool enter = ImGui::InputText("##presetName", &saveName_, ImGuiInputTextFlags_EnterReturnsTrue);
-        if ((ui::accentButton("Save", ImVec2(120, 0)) || enter) && !saveName_.empty()) {
-            AnimationPreset preset = presetFromLayer(layer, layer.inPoint, layer.outPoint, saveName_);
-            if (preset.tracks.empty()) presetMessage_ = "This layer has no keyframes to save.";
-            else if (PresetLibrary::save(preset, &presetMessage_))
-                presetMessage_ = "Saved \"" + saveName_ + "\" to Quick Animations (Custom).";
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
+    });
+    auto* save = new QPushButton("Save as Preset...");
+    save->setToolTip("Turn this layer's keyframes into a reusable Quick Animation");
+    const uint64_t id = layer.id;
+    connect(save, &QPushButton::clicked, this, [this, id] {
+        Layer* l = ctx_.comp().findLayer(id);
+        if (!l) return;
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, "Save Quick Animation", "Preset name", QLineEdit::Normal,
+                                                   QString::fromStdString(l->name + " animation"), &ok);
+        if (!ok || name.trimmed().isEmpty()) return;
+        AnimationPreset preset = presetFromLayer(*l, l->inPoint, l->outPoint, name.toStdString());
+        std::string err;
+        if (preset.tracks.empty()) presetMessage_ = "This layer has no keyframes to save.";
+        else if (PresetLibrary::save(preset, &err)) presetMessage_ = "Saved \"" + name.toStdString() + "\" to Quick Animations (Custom).";
+        else presetMessage_ = err;
+    });
+    row->addWidget(import);
+    row->addWidget(save);
+    s->body()->addLayout(row);
+    if (!presetMessage_.empty()) s->body()->addWidget(dim(QString::fromStdString(presetMessage_)));
+    col->addWidget(s);
 }
 
 } // namespace bemotion
