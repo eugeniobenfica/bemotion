@@ -27,6 +27,7 @@ jobs:
             mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-harfbuzz mingw-w64-ucrt-x86_64-icu
             mingw-w64-ucrt-x86_64-libjpeg-turbo mingw-w64-ucrt-x86_64-libwebp mingw-w64-ucrt-x86_64-libpng
             mingw-w64-ucrt-x86_64-expat mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-freetype
+            mingw-w64-ucrt-x86_64-binutils
 
       - name: Cache Skia
         id: skia
@@ -48,6 +49,31 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - name: Smoke test (build)
+        run: tools/smoke-test.sh build smoke
+
+      - name: Package
+        run: tools/deploy-windows.sh build dist/bemotion
+
+      - name: Smoke test (package)
+        run: tools/smoke-test.sh dist/bemotion smoke-package
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: bemotion-windows
+          path: dist/bemotion
+
+      - name: Upload smoke test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bemotion-windows-smoke
+          path: |
+            smoke/*.png
+            smoke-package/*.png
+            smoke/welcome.mp4
+
   linux:
     name: linux
     runs-on: ubuntu-24.04
@@ -57,8 +83,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build clang python3 pkg-config \
-            qt6-base-dev qt6-base-private-dev qt6-base-dev-tools libqt6svg6-dev libgl-dev libxkbcommon-dev \
+          sudo apt-get install -y ninja-build clang python3 pkg-config ffmpeg qmake6 file \
+            qt6-base-dev qt6-base-private-dev qt6-base-dev-tools qt6-qpa-plugins libqt6svg6-dev libgl-dev libxkbcommon-dev \
             libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev \
             libharfbuzz-dev libicu-dev libfreetype-dev libfontconfig-dev \
             libpng-dev libjpeg-dev libwebp-dev libexpat1-dev zlib1g-dev
@@ -82,6 +108,31 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke test (build)
+        run: tools/smoke-test.sh build smoke
+
+      - name: Package
+        run: tools/package-linux.sh build dist
+
+      - name: Smoke test (package)
+        run: tools/smoke-test.sh dist/AppDir/usr/bin smoke-package
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: bemotion-linux
+          path: dist/bemotion-x86_64.AppImage
+
+      - name: Upload smoke test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bemotion-linux-smoke
+          path: |
+            smoke/*.png
+            smoke-package/*.png
+            smoke/welcome.mp4
 
   macos:
     name: macos
@@ -113,3 +164,28 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke test (build)
+        run: tools/smoke-test.sh build smoke
+
+      - name: Package
+        run: tools/package-macos.sh build dist
+
+      - name: Smoke test (package)
+        run: tools/smoke-test.sh dist/bemotion.app/Contents/MacOS smoke-package
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: bemotion-macos
+          path: dist/bemotion.dmg
+
+      - name: Upload smoke test output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bemotion-macos-smoke
+          path: |
+            smoke/*.png
+            smoke-package/*.png
+            smoke/welcome.mp4

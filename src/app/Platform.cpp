@@ -73,6 +73,8 @@ fs::path assetsDir() {
     std::error_code ec;
     fs::path nextToExe = executableDir() / "assets";
     if (fs::exists(nextToExe, ec)) return nextToExe;
+    // A macOS app bundle: Contents/MacOS/bemotion, Contents/Resources/assets.
+    if (fs::path bundled = executableDir().parent_path() / "Resources" / "assets"; fs::exists(bundled, ec)) return bundled;
 #ifdef BEMOTION_SOURCE_ASSETS_DIR
     return fs::path(BEMOTION_SOURCE_ASSETS_DIR);
 #else

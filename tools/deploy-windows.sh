@@ -16,9 +16,13 @@ cp "$build/bemotion.exe" "$out/"
 rm -rf "$out/assets"
 cp -r "$build/assets" "$out/assets"
 
-# Qt libraries and plugins (platform, styles, image formats, ...).
+# Qt libraries and plugins (platform, styles, image formats, ...). No network, TLS or touch
+# plugins: bemotion never goes online.
 "$prefix/bin/windeployqt6.exe" --no-translations --no-system-d3d-compiler --no-opengl-sw \
+    --skip-plugin-types tls,networkinformation,generic \
     --dir "$(cygpath -w "$out")" "$(cygpath -w "$out/bemotion.exe")" >/dev/null
+# The "offscreen" platform too (about 1 MB): tools/smoke-test.sh runs the package without a screen.
+cp "$prefix/share/qt6/plugins/platforms/qoffscreen.dll" "$out/platforms/"
 
 # Everything else the executable and the Qt plugins load from the prefix, recursively.
 copy_deps() {
