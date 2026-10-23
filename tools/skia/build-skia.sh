@@ -109,6 +109,16 @@ ARGS="
   skia_enable_tools=false
   skia_enable_fontmgr_empty=false
 "
+# Outside MSYS2 the system libraries' headers may live elsewhere (Homebrew): pass pkg-config's paths.
+if [ "$OS" != mingw ]; then
+    INCLUDES="$(pkg-config --cflags-only-I libpng libjpeg libwebp harfbuzz icu-uc freetype2 expat zlib 2>/dev/null || true)"
+    LIBDIRS="$(pkg-config --libs-only-L libpng libjpeg libwebp harfbuzz icu-uc freetype2 expat zlib 2>/dev/null || true)"
+    to_list() { local out=""; for f in $1; do out="$out\"$f\","; done; echo "[${out%,}]"; }
+    ARGS="$ARGS
+  extra_cflags=$(to_list "$INCLUDES")
+  extra_ldflags=$(to_list "$LIBDIRS")
+"
+fi
 if [ "$(uname -m)" = arm64 ] || [ "$(uname -m)" = aarch64 ]; then ARGS="${ARGS/target_cpu=\"x64\"/target_cpu=\"arm64\"}"; fi
 
 OUT=out/bemotion

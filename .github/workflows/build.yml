@@ -37,7 +37,7 @@ jobs:
 
       - name: Build Skia
         if: steps.skia.outputs.cache-hit != 'true'
-        run: tools/skia/build-skia.sh
+        run: bash -x tools/skia/build-skia.sh
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -58,7 +58,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build clang python3 pkg-config \
-            qt6-base-dev qt6-base-dev-tools libqt6svg6-dev libgl-dev \
+            qt6-base-dev qt6-base-private-dev qt6-base-dev-tools libqt6svg6-dev libgl-dev libxkbcommon-dev \
             libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev \
             libharfbuzz-dev libicu-dev libfreetype-dev libfontconfig-dev \
             libpng-dev libjpeg-dev libwebp-dev libexpat1-dev zlib1g-dev
@@ -72,7 +72,7 @@ jobs:
 
       - name: Build Skia
         if: steps.skia.outputs.cache-hit != 'true'
-        run: tools/skia/build-skia.sh
+        run: bash -x tools/skia/build-skia.sh
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -103,7 +103,7 @@ jobs:
 
       - name: Build Skia
         if: steps.skia.outputs.cache-hit != 'true'
-        run: tools/skia/build-skia.sh
+        run: bash -x tools/skia/build-skia.sh
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
