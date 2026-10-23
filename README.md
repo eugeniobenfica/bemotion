@@ -11,13 +11,14 @@ A free, open source video editor that stays calm, fast, and friendly to people a
 [![License: MIT](https://img.shields.io/badge/license-MIT-E8B931?labelColor=141417)](LICENSE)
 ![C++20](https://img.shields.io/badge/C%2B%2B-20-E8B931?labelColor=141417)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20·%20Linux%20·%20macOS-E8B931?labelColor=141417)
+[![Buy Me a Coffee](https://img.shields.io/badge/support-Buy%20Me%20a%20Coffee-E8B931?labelColor=141417&logo=buymeacoffee&logoColor=E8B931)](https://buymeacoffee.com/eugeniobenfica)
 
 <img src="docs/media/intro.gif" width="720" alt="The bemotion intro animation">
 
 <sub>The intro above is an ordinary bemotion project, built from four shapes and two texts —<br>
 open <b>Welcome to bemotion</b> from the home screen and take it apart.</sub>
 
-[The idea](#the-idea) · [Features](#features) · [Download](#download-windows) · [Getting started](#getting-started) · [Shortcuts](#keyboard-shortcuts) · [Plugins](docs/PLUGINS.md) · [Contributing](CONTRIBUTING.md)
+[The idea](#the-idea) · [Features](#features) · [Download](#download-windows) · [Getting started](#getting-started) · [Shortcuts](#keyboard-shortcuts) · [Plugins](docs/PLUGINS.md) · [Contributing](CONTRIBUTING.md) · [Support ☕](#support-bemotion)
 
 </div>
 
@@ -58,13 +59,43 @@ press play.
   export, edit from scripts — and a simple editor on top. Download the
   essentials; add what you need as [plugins](docs/PLUGINS.md).
 - **Free.** No price, no account, no subscription, no watermark. Open source
-  under the MIT license.
+  under the MIT license — kept that way by [people who support it](#support-bemotion).
 - **An idea more than a technology.** bemotion is defined by its philosophy, its
   file format, its [operations](docs/OPERATIONS.md) and its
   [architecture](docs/ARCHITECTURE.md) — not by a language or a framework. It is
   built to be modified and, when it makes sense, rewritten (it already moved from
   ImGui / OpenGL to Qt / Skia once). It will be kept going for as long as this
   philosophy is useful.
+
+## Support bemotion
+
+bemotion is free, and it will stay free. No ads, no paid tier, no features held
+back, no data collected. That only works because it does not answer to
+investors or a pricing page. It answers to the people who use it.
+
+It is built by an independent developer, in hours that could have gone to paid
+work. Each contribution turns into more of those hours: a feature finished
+sooner, a bug fixed instead of postponed, a release tested on one more machine.
+Everyone who opens bemotion gets the result, including the student, the small
+creator and the person who could never pay for a video editor.
+
+If bemotion saved you time, taught you something or just made editing feel
+lighter, a coffee keeps it moving:
+
+<p align="center">
+<a href="https://buymeacoffee.com/eugeniobenfica"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" height="52" alt="Buy Me a Coffee"></a>
+</p>
+
+Not able to give money? That counts too. Star the repository, share something
+you made with bemotion, report a bug, or [contribute](CONTRIBUTING.md) code,
+plugins, presets or translations. A free tool lives as long as its community
+does.
+
+> 🇧🇷 **Apoie:** o bemotion é e continuará gratuito, sem anúncios nem versão
+> paga, porque é mantido por quem usa. Cada café no
+> [Buy Me a Coffee](https://buymeacoffee.com/eugeniobenfica) vira mais horas de desenvolvimento,
+> com recursos mais cedo e menos bugs, para todo mundo. Também ajuda dar uma
+> estrela, compartilhar e contribuir.
 
 ## Features
 

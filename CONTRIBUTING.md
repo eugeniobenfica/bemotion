@@ -2,8 +2,13 @@
 
 # Contributing to bemotion
 
-Thanks for your interest! bemotion aims to stay **simple, fast and easy to
-maintain**, so a few guidelines:
+Thanks for your interest! Code is one way to help, and so are bug reports,
+plugins, presets, translations and spreading the word. If you would rather
+support the work directly, you can [buy a coffee](https://buymeacoffee.com/eugeniobenfica). It keeps bemotion
+free for everyone.
+
+bemotion aims to stay **simple, fast and easy to maintain**, so a few
+guidelines:
 
 1. **Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first.** It explains the
    layers, the rules, how to add properties, effects, operations and panels,
