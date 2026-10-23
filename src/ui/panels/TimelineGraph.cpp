@@ -7,6 +7,7 @@
 #include "ui/Widgets.h"
 
 #include <QGuiApplication>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QToolTip>
@@ -331,9 +332,93 @@ void TimelinePanel::graphPress(QMouseEvent* e) {
                 graphDrag_.startTime = p->anim->keyTime(i);
                 graphDrag_.startValue = keyValue(*p, i, hit->comp);
             }
-    } else if (!right && !additive) {
+    } else if (right) {
+        showGraphMenu(e->globalPosition().toPoint(), m);
+        return;
+    } else if (!additive) {
         ctx_.clearKeySelection();
     }
+    rowsWidget()->update();
+}
+
+// The curve (property and component) closest to a point of the graph, if one passes near it.
+std::optional<std::pair<std::string, int>> TimelinePanel::curveNear(QPointF m) {
+    Layer* layer = ctx_.selected();
+    if (!layer) return std::nullopt;
+    graphHits(); // the vertical range
+    const double t = xToTime(static_cast<float>(m.x()));
+    std::optional<std::pair<std::string, int>> best;
+    float bestD = 12.0f;
+    for (const PropertyRef& p : animatedProps(*layer)) {
+        if (graphHidden_.count(p.id)) continue;
+        for (int k = 0; k < components(p); ++k)
+            if (const float d = std::fabs(graphY(valueAt(p, t, k)) - static_cast<float>(m.y())); d < bestD) bestD = d, best = {{p.id, k}};
+    }
+    return best;
+}
+
+void TimelinePanel::addGraphKeys(const std::vector<std::string>& propIds, double t) {
+    Layer* layer = ctx_.selected();
+    if (!layer) return;
+    t = ctx_.comp().snapToFrame(std::clamp(t, layer->inPoint, layer->outPoint));
+    auto props = layer->properties();
+    std::vector<KeySelection> added;
+    for (const std::string& id : propIds)
+        if (PropertyRef* p = layer->findProperty(props, id.c_str())) {
+            p->anim->addKeyAt(t); // keeps the curve's value there
+            if (const int i = p->anim->findKey(t); i >= 0) added.push_back({layer->id, id, p->anim->keyUid(i)});
+        }
+    if (added.empty()) return;
+    ctx_.selectedKeys = added;
+    ctx_.touch();
+    rowsWidget()->update();
+}
+
+void TimelinePanel::addKeysAtPlayhead() {
+    // Every curve shown; with none animated yet, position (the usual start).
+    Layer* layer = ctx_.selected();
+    if (!layer) return;
+    std::vector<std::string> ids;
+    for (const PropertyRef& p : animatedProps(*layer))
+        if (!graphHidden_.count(p.id)) ids.push_back(p.id);
+    if (ids.empty()) ids.push_back("position");
+    addGraphKeys(ids, ctx_.time);
+}
+
+void TimelinePanel::showGraphMenu(QPoint global, QPointF at) {
+    Layer* layer = ctx_.selected();
+    if (!layer) return;
+    const double t = xToTime(static_cast<float>(at.x()));
+    QMenu menu;
+    char when[32];
+    std::snprintf(when, sizeof when, "%.2f s", ctx_.comp().snapToFrame(std::max(0.0, t)));
+    if (const auto curve = curveNear(at)) {
+        const std::string id = curve->first;
+        auto props = layer->properties();
+        const PropertyRef* p = layer->findProperty(props, id.c_str());
+        menu.addAction(ui::menuIcon(ui::Icon::Diamond, theme::kAccent), QString("Add Keyframe to %1 at %2").arg(p ? p->label : id.c_str(), when),
+                       [this, id, t] { addGraphKeys({id}, t); });
+    }
+    menu.addAction(ui::menuIcon(ui::Icon::Diamond, theme::kTextDim), QString("Add Keyframes Here (shown curves, %1)").arg(when), [this, t] {
+        std::vector<std::string> ids;
+        if (Layer* l = ctx_.selected())
+            for (const PropertyRef& p : animatedProps(*l))
+                if (!graphHidden_.count(p.id)) ids.push_back(p.id);
+        addGraphKeys(ids, t);
+    });
+    // Properties without keys yet: their first keyframe makes them appear here.
+    QMenu* animate = menu.addMenu("Animate Property");
+    for (const PropertyRef& p : layer->properties())
+        if (components(p) > 0 && p.anim->keyCount() == 0) {
+            const std::string id = p.id;
+            animate->addAction(QString("%1  ·  %2").arg(p.group, p.label), [this, id, t] { addGraphKeys({id}, t); });
+        }
+    animate->setEnabled(!animate->isEmpty());
+    if (!ctx_.selectedKeys.empty()) {
+        menu.addSeparator();
+        menu.addAction("Keyframe Options...", [this, global] { showKeyMenu(global); });
+    }
+    menu.exec(global);
     rowsWidget()->update();
 }
 

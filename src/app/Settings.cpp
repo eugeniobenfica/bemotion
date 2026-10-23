@@ -80,7 +80,11 @@ void loadSettings() {
         s.maxDuration = std::clamp(j.value("max_duration", s.maxDuration), 0.0, 24.0 * 3600.0);
         s.autosaveMinutes = std::clamp(j.value("autosave_minutes", s.autosaveMinutes), 0, 120);
         s.showIntro = j.value("show_intro", s.showIntro);
+        s.showRulers = j.value("show_rulers", s.showRulers);
         s.welcomeAdded = j.value("welcome_added", s.welcomeAdded);
+        s.toolbarInViewport = j.value("toolbar_in_viewport", s.toolbarInViewport);
+        s.toolbarX = std::clamp(j.value("toolbar_x", s.toolbarX), 0.0f, 1.0f);
+        s.toolbarY = std::clamp(j.value("toolbar_y", s.toolbarY), 0.0f, 1.0f);
         if (j.contains("toolbar")) {
             s.toolbar.clear();
             for (const std::string& id : j.value("toolbar", std::vector<std::string>{}))
@@ -100,7 +104,8 @@ void saveSettings() {
               {"timeline_layer_row", s.timelineLayerRow}, {"timeline_property_row", s.timelinePropertyRow},
               {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}, {"ui_font", s.uiFont},
               {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames},
-              {"max_duration", s.maxDuration}, {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"welcome_added", s.welcomeAdded}, {"toolbar", s.toolbar},
+              {"max_duration", s.maxDuration}, {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"show_rulers", s.showRulers}, {"welcome_added", s.welcomeAdded}, {"toolbar", s.toolbar},
+              {"toolbar_in_viewport", s.toolbarInViewport}, {"toolbar_x", s.toolbarX}, {"toolbar_y", s.toolbarY},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);

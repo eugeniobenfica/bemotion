@@ -99,6 +99,7 @@ std::string layerTypeName(const Layer& l) {
     case LayerType::Camera: return "camera";
     case LayerType::Compound: return "compound";
     case LayerType::Media: return "media";
+    case LayerType::Background: return "background";
     case LayerType::Plugin: return "plugin:" + l.plugin.objectType;
     }
     return "?";
@@ -360,6 +361,9 @@ private:
                 const float fit = std::min({1.0f, static_cast<float>(c_.width) / item->width, static_cast<float>(c_.height) / item->height});
                 l.transform.scale.base = {fit * 100.0f, fit * 100.0f};
             }
+        } else if (type == "background") {
+            l = makeBackgroundLayer(has(op, "duration") ? duration : std::max(duration, c_.duration));
+            if (has(op, "fill") || has(op, "media") || has(op, "fit")) setBackground(l, op);
         } else if (type == "plugin") {
             const std::string object = text(field(op, "object"), "object");
             std::string error;
@@ -369,7 +373,7 @@ private:
             l.outPoint = l.inPoint + duration;
         } else {
             fail("unknown layer type \"" + type + "\"" +
-                 suggest(type, {"text", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "plugin"}));
+                 suggest(type, {"text", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "background", "plugin"}));
         }
         if (has(op, "name")) l.name = text(op["name"], "name");
         l.name = c_.uniqueLayerName(l.name.empty() ? type : l.name);
@@ -386,9 +390,42 @@ private:
             const Layer& ref = layer(op, "below");
             index = c_.indexOf(ref.id);
             while (index < static_cast<int>(c_.layers.size()) && c_.layers[index].track == ref.track) ++index;
-        } else if (has(op, "at") && text(op["at"], "at") == "bottom") index = static_cast<int>(c_.layers.size());
+        } else if ((has(op, "at") && text(op["at"], "at") == "bottom") || (type == "background" && !has(op, "at")))
+            index = static_cast<int>(c_.layers.size()); // a background goes under everything unless told otherwise
         const Layer& added = c_.addLayer(std::move(l), index);
         return {{"layer", added.id}, {"name", added.name}};
+    }
+
+    // A background's fill ("solid", "linear", "radial", "image"), picture ("media": id) and fit.
+    void setBackground(Layer& l, const json& op) {
+        BackgroundProps& b = l.background;
+        if (has(op, "fill")) {
+            const std::string fill = text(op["fill"], "fill");
+            std::vector<std::string> ids;
+            bool found = false;
+            for (int i = 0; i < static_cast<int>(BackgroundFill::Count); ++i) {
+                ids.push_back(backgroundFillId(static_cast<BackgroundFill>(i)));
+                if (fill == ids.back()) b.fill = static_cast<BackgroundFill>(i), found = true;
+            }
+            if (!found) fail("unknown fill \"" + fill + "\"" + suggest(fill, ids));
+        }
+        if (has(op, "media")) {
+            const auto id = static_cast<uint64_t>(number(op["media"], "media"));
+            const MediaItem* m = c_.findMedia(id);
+            if (!m || m->kind == MediaKind::Audio) fail("there is no picture or video with media id " + std::to_string(id) + " (media.import it first)");
+            b.mediaId = id;
+            if (!has(op, "fill")) b.fill = BackgroundFill::Image;
+        }
+        if (has(op, "fit")) {
+            const std::string fit = text(op["fit"], "fit");
+            std::vector<std::string> ids;
+            bool found = false;
+            for (int i = 0; i < static_cast<int>(BackgroundFit::Count); ++i) {
+                ids.push_back(backgroundFitId(static_cast<BackgroundFit>(i)));
+                if (fit == ids.back()) b.fit = static_cast<BackgroundFit>(i), found = true;
+            }
+            if (!found) fail("unknown fit \"" + fit + "\"" + suggest(fit, ids));
+        }
     }
 
     json layerRemove(const json& op) {
@@ -436,7 +473,8 @@ private:
             if (kind < 0) fail("unknown shape \"" + s + "\"" + suggest(s, {"rectangle", "ellipse", "polygon", "star", "line"}));
             l.shape.kind = static_cast<ShapeKind>(kind);
         }
-        if (has(op, "fill")) requireType(l.type == LayerType::Shape, "fill", "shape"), l.shape.fillEnabled = boolean(op["fill"], "fill");
+        if (l.type == LayerType::Background && (has(op, "fill") || has(op, "media") || has(op, "fit"))) setBackground(l, op);
+        else if (has(op, "fill")) requireType(l.type == LayerType::Shape, "fill", "shape"), l.shape.fillEnabled = boolean(op["fill"], "fill");
         if (has(op, "stroke")) requireType(l.type == LayerType::Shape, "stroke", "shape"), l.shape.strokeEnabled = boolean(op["stroke"], "stroke");
         json out = json::object();
         if (has(op, "start")) { // moves the clip, keyframes included
@@ -823,6 +861,9 @@ private:
                          {"align", kAlignNames[static_cast<int>(l.text.align)]}};
         if (l.type == LayerType::Shape) j["shape"] = {{"fill", l.shape.fillEnabled}, {"stroke", l.shape.strokeEnabled}};
         if (l.type == LayerType::Media) j["media"] = l.media.mediaId;
+        if (l.type == LayerType::Background)
+            j["background"] = {{"fill", backgroundFillId(l.background.fill)}, {"media", l.background.mediaId},
+                               {"fit", backgroundFitId(l.background.fit)}};
         if (l.plugin.hasRows) {
             json rows = json::array();
             for (const DataRow& r : l.plugin.rows) rows.push_back({{"label", r.label}, {"value", r.value}, {"color", hexOf(r.color)}});

@@ -66,6 +66,8 @@ constexpr int kCustomPreset = static_cast<int>(std::size(kPresets)) - 1;
 constexpr double kFpsOptions[] = {24, 25, 30, 50, 60};
 constexpr int kCardMin = 240, kGap = 20;
 
+constexpr const char* kSupportUrl = "https://buymeacoffee.com/eugeniobenfica";
+
 std::string relativeTime(int64_t unixSeconds) {
     using namespace std::chrono;
     const int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
@@ -297,6 +299,9 @@ void HomeScreen::buildUi() {
     auto* folder = new QPushButton("Projects Folder");
     connect(folder, &QPushButton::clicked, this, [] { platform::revealInFileManager(platform::defaultProjectsDir()); });
     footer->addWidget(folder, 1);
+    auto* coffee = new ui::IconButton(ui::Icon::Coffee, "Support bemotion: buy a coffee (it stays free thanks to you)", 30);
+    connect(coffee, &QAbstractButton::clicked, this, [] { platform::openWithDefaultApp(kSupportUrl); });
+    footer->addWidget(coffee);
     auto* gear = new ui::IconButton(ui::Icon::Gear, "Settings (Ctrl+,)", 30);
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
     footer->addWidget(gear);
@@ -307,8 +312,7 @@ void HomeScreen::buildUi() {
     connect(help, &QPushButton::clicked, this, [] { ui::openHelp(ui::HelpTab::About); });
     footer->addWidget(help);
     side->addLayout(footer);
-    count_ = styled("", theme::kTextFaint);
-    side->addWidget(count_);
+    count_ = nullptr;
     row->addWidget(sidebar);
 
     // --- projects ----------------------------------------------------------------------
@@ -316,7 +320,10 @@ void HomeScreen::buildUi() {
     main->setContentsMargins(36, 30, 36, 0);
     main->setSpacing(6);
     auto* head = new QHBoxLayout;
-    head->addWidget(styled("Projects", theme::kText, 1.8f, true));
+    auto* title = styled("Projects", theme::kText, 1.8f, true);
+    title->setToolTip("Every project in " + QString::fromStdString(platform::toUtf8(platform::defaultProjectsDir())) +
+                      ", and the ones you opened from elsewhere");
+    head->addWidget(title);
     head->addStretch(1);
     search_ = new QLineEdit;
     search_->setPlaceholderText("Search projects");
@@ -325,9 +332,7 @@ void HomeScreen::buildUi() {
     connect(search_, &QLineEdit::textChanged, this, [this] { rebuildGrid(); });
     head->addWidget(search_);
     main->addLayout(head);
-    auto* where = styled("In your projects folder and recently opened", theme::kTextFaint);
-    where->setToolTip(QString::fromStdString(platform::toUtf8(platform::defaultProjectsDir())));
-    main->addWidget(where);
+
     errorRow_ = new QWidget;
     auto* er = new QHBoxLayout(errorRow_);
     er->setContentsMargins(0, 4, 0, 4);
@@ -431,7 +436,7 @@ bool HomeScreen::eventFilter(QObject* watched, QEvent* e) {
 
 void HomeScreen::rebuildGrid() {
     const auto& items = entries_;
-    count_->setText(QString("%1 project%2").arg(items.size()).arg(items.size() == 1 ? "" : "s"));
+
     const int avail = std::max(kCardMin, scroll_->viewport()->width() - 2);
     columns_ = std::max(1, (avail + kGap) / (kCardMin + kGap));
     const int cardW = (avail - kGap * (columns_ - 1)) / columns_;

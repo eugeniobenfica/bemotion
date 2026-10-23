@@ -12,7 +12,8 @@ is a complete example.
 ```
 
 `api` is the version the plugin was written for: 1 objects, 2 commands and
-operations, 3 tables and CSV import, 4 files and 3D meshes.
+operations, 3 tables and CSV import, 4 files and 3D meshes, 5 command buttons
+and the microphone.
 `bemotion.api_version` tells the running version.
 
 Scripts run in a sandbox (base, table, string, math and utf8 only — no files,
@@ -170,7 +171,38 @@ bemotion.register_command {
 A command is **one undo step**, and it runs on a copy: if it raises an error
 (or an operation fails), the project stays exactly as it was and the message
 goes to the plugin's log. Permissions: `edit` for commands, `media` to use
-`media.import`, `files` to read the files chosen in `file` parameters.
+`media.import`, `files` to read the files chosen in `file` parameters,
+`microphone` to record.
+
+### Buttons, playback and the microphone (API 5)
+
+A command can have a button in the timeline's toolbar (next to its controls on
+the right): `button = { place = "timeline", icon = "mic", toggle = true }`. A
+toggle button stays pressed; `doc.pressed` tells the command which way it went.
+`doc.play(true | false)` starts or stops playback when the command ends.
+
+With the **`microphone` permission**, `bemotion.microphone.start()` records
+the default microphone, `stop()` saves it (WAV, in the project's
+`Recordings` folder) and returns the file, `recording()`, `level()` (0–1) and
+`cancel()`. The bundled [Recorder](../assets/plugins/recorder/main.lua) is a
+voice-over button in a dozen lines:
+
+```lua
+local started_at = 0
+bemotion.register_command {
+  id = "record", name = "Record Audio",
+  button = { place = "timeline", icon = "mic", toggle = true },
+  run = function(doc)
+    if doc.pressed then
+      bemotion.microphone.start(); started_at = doc.time; doc.play(true); return
+    end
+    doc.play(false)
+    if not bemotion.microphone.recording() then return end
+    local media = doc.apply { op = "media.import", path = bemotion.microphone.stop() }
+    doc.apply { op = "layer.add", type = "media", media = media.media, start = started_at }
+  end,
+}
+```
 
 The same `doc` API runs standalone scripts from the command line — the script
 receives `doc` as its argument (`local doc = ...`):

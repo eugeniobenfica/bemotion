@@ -31,13 +31,13 @@ ToolsPanel::ToolsPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(parent
 
 void ToolsPanel::resizeEvent(QResizeEvent* e) {
     QScrollArea::resizeEvent(e);
-    if (std::max(2, (viewport()->width() - 16) / 92) != columns_) rebuild();
+    if (std::max(2, (viewport()->width() - 16) / 80) != columns_) rebuild();
 }
 
 void ToolsPanel::rebuild() {
-    columns_ = std::max(2, (viewport()->width() - 16) / 92);
+    columns_ = std::max(2, (viewport()->width() - 16) / 80);
     const int tileW = std::max(56, (viewport()->width() - 16 - 8 * (columns_ - 1)) / columns_);
-    const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.8f), 56, 84));
+    const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.78f), 50, 66));
     const auto& catalog = ui::toolCatalog();
     tiles_.assign(catalog.size(), nullptr);
 
@@ -69,8 +69,7 @@ void ToolsPanel::rebuild() {
         col->addLayout(grid);
         col->addSpacing(6);
     }
-    auto* hint = new QLabel("Drag tools into the timeline's toolbar. Drag them along it to reorder, out of it (or right-click) "
-                            "to remove. A dot marks the ones already there.");
+    auto* hint = new QLabel("Drag tools into the toolbar; drag them out of it to remove them.");
     hint->setWordWrap(true);
     ui::setTone(hint, ui::Tone::TextFaint);
     col->addWidget(hint);

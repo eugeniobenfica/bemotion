@@ -12,6 +12,7 @@
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRRect.h"
 #include "include/effects/SkColorMatrix.h"
+#include "include/effects/SkGradientShader.h"
 #include "include/effects/SkImageFilters.h"
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/effects/SkTrimPathEffect.h"
@@ -127,6 +128,69 @@ void drawMedia(SkCanvas* canvas, const Composition* comp, const Layer& layer, do
     SkPaint p;
     p.setAlphaf(std::clamp(opacity, 0.0f, 1.0f));
     canvas->drawImageRect(image, dst, SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kLinear), &p);
+}
+
+// A background: the whole composition frame (local space = composition space).
+void drawBackground(SkCanvas* canvas, const Composition* comp, const Layer& layer, double t, float opacity) {
+    const float w = comp ? static_cast<float>(comp->width) : 1920.0f, h = comp ? static_cast<float>(comp->height) : 1080.0f;
+    const SkRect frame = SkRect::MakeWH(w, h);
+    const BackgroundProps& b = layer.background;
+    auto color4 = [&](Color c) { return SkColor4f{c.r, c.g, c.b, std::clamp(c.a * opacity, 0.0f, 1.0f)}; };
+    const SkColor4f c1 = color4(b.color.valueAt(t)), c2 = color4(b.color2.valueAt(t));
+    SkPaint paint(c1);
+    switch (b.fill) {
+    case BackgroundFill::Linear: {
+        // Across the frame along the angle, end to end.
+        const float a = b.angle.valueAt(t) * 3.14159265f / 180.0f;
+        const float dx = std::cos(a), dy = std::sin(a);
+        const float half = (std::fabs(w * dx) + std::fabs(h * dy)) * 0.5f;
+        const SkPoint pts[2] = {{w * 0.5f - dx * half, h * 0.5f - dy * half}, {w * 0.5f + dx * half, h * 0.5f + dy * half}};
+        const SkColor4f colors[2] = {c1, c2};
+        paint.setShader(SkGradientShader::MakeLinear(pts, colors, nullptr, nullptr, 2, SkTileMode::kClamp));
+        break;
+    }
+    case BackgroundFill::Radial: {
+        const SkColor4f colors[2] = {c1, c2};
+        paint.setShader(SkGradientShader::MakeRadial({w * 0.5f, h * 0.5f}, std::hypot(w, h) * 0.5f, colors, nullptr, nullptr, 2,
+                                                     SkTileMode::kClamp));
+        break;
+    }
+    default: break;
+    }
+    canvas->drawRect(frame, paint);
+    if (b.fill == BackgroundFill::Image && comp && mediaProvider()) {
+        const MediaItem* item = comp->findMedia(b.mediaId);
+        // The media layer it would be (its clip, from the background's start).
+        Layer proxy;
+        proxy.id = layer.id;
+        proxy.type = LayerType::Media;
+        proxy.inPoint = layer.inPoint;
+        proxy.outPoint = layer.outPoint;
+        proxy.media.mediaId = b.mediaId;
+        proxy.media.start = layer.inPoint;
+        proxy.media.hasVideo = true;
+        sk_sp<SkImage> image = item ? mediaProvider()(*comp, proxy, t) : nullptr;
+        if (image) {
+            const float iw = static_cast<float>(image->width()), ih = static_cast<float>(image->height());
+            float sw = w, sh = h; // stretch
+            if (b.fit != BackgroundFit::Stretch) {
+                const float k = b.fit == BackgroundFit::Cover ? std::max(w / iw, h / ih) : std::min(w / iw, h / ih);
+                sw = iw * k, sh = ih * k;
+            }
+            const float zoom = std::max(0.01f, b.zoom.valueAt(t) * 0.01f);
+            sw *= zoom, sh *= zoom;
+            const Vec2 off = b.offset.valueAt(t);
+            const SkRect dst = SkRect::MakeXYWH((w - sw) * 0.5f + off.x, (h - sh) * 0.5f + off.y, sw, sh);
+            SkPaint p;
+            p.setAlphaf(std::clamp(opacity, 0.0f, 1.0f));
+            canvas->save();
+            canvas->clipRect(frame);
+            canvas->drawImageRect(image, dst, SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kLinear), &p);
+            canvas->restore();
+        }
+    }
+    if (const float dark = std::clamp(b.darken.valueAt(t) * 0.01f, 0.0f, 1.0f); dark > 0.0f)
+        canvas->drawRect(frame, SkPaint(SkColor4f{0, 0, 0, dark * opacity}));
 }
 
 // --- effects -------------------------------------------------------------------------
@@ -319,6 +383,7 @@ void drawContent(SkCanvas* canvas, const Layer& layer, double t, float opacity, 
     case LayerType::Media: drawMedia(canvas, comp, layer, t, opacity); return;
     case LayerType::Text: drawText(canvas, layer.text, t, opacity); return;
     case LayerType::Plugin: drawPlugin(canvas, layer, t, opacity); return;
+    case LayerType::Background: drawBackground(canvas, comp, layer, t, opacity); return;
     case LayerType::Camera: return;
     default: drawShape(canvas, layer, t, opacity); return;
     }
@@ -403,11 +468,13 @@ void drawComposition(SkCanvas* canvas, const Composition& comp, double time, con
     }
     canvas->save();
     canvas->clipRect(frame, true); // layers are clipped to the composition frame
-    const Affine viewMatrix = Affine::translate(view.origin) * Affine::scale(view.zoom) * (throughCamera ? comp.cameraAt(time) : Affine{});
+    const Affine screen = Affine::translate(view.origin) * Affine::scale(view.zoom);
+    const Affine viewMatrix = screen * (throughCamera ? comp.cameraAt(time) : Affine{});
     for (auto it = comp.layers.rbegin(); it != comp.layers.rend(); ++it) {
         if (!it->activeAt(time) || it->type == LayerType::Camera) continue;
         if (it->parent && comp.findLayer(it->parent)) continue; // drawn by its compound
-        drawLayer(canvas, *it, time, viewMatrix * it->matrixAt(time), view.zoom, &comp);
+        // Backgrounds stay on the frame whatever the camera does.
+        drawLayer(canvas, *it, time, (it->type == LayerType::Background ? screen : viewMatrix) * it->matrixAt(time), view.zoom, &comp);
     }
     canvas->restore();
 }
@@ -446,6 +513,11 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
         outMax = layer.media.size * 0.5f;
         return true;
     }
+    if (layer.type == LayerType::Background) { // the frame
+        outMin = {0, 0};
+        outMax = comp ? Vec2{static_cast<float>(comp->width), static_cast<float>(comp->height)} : Vec2{1920, 1080};
+        return true;
+    }
     if (layer.type == LayerType::Plugin) {
         const Vec2 half = layer.plugin.size.valueAt(time) * 0.5f;
         outMin = half * -1.0f;
@@ -467,7 +539,9 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
 
 uint64_t hitTestInside(const Composition& comp, double time, Vec2 scenePoint, uint64_t compoundId) {
     for (const auto& layer : comp.layers) {
-        if (layer.parent != compoundId || !comp.visibleAt(layer, time) || layer.locked || layer.type == LayerType::Camera) continue;
+        if (layer.parent != compoundId || !comp.visibleAt(layer, time) || layer.locked || layer.type == LayerType::Camera ||
+            layer.type == LayerType::Background) // a click on the empty frame should not pick the background
+            continue;
         Vec2 mn, mx;
         if (!localBounds(layer, time, mn, mx, &comp)) continue;
         const Vec2 p = comp.worldMatrix(layer, time).inverse().apply(scenePoint);
@@ -480,7 +554,7 @@ uint64_t hitTest(const Composition& comp, double time, Vec2 scenePoint, bool inc
     for (const auto& layer : comp.layers) {
         if (!layer.activeAt(time) || layer.locked) continue;
         if (layer.parent && comp.findLayer(layer.parent)) continue; // picked through its compound
-        if (layer.type == LayerType::Camera && !includeCameras) continue;
+        if ((layer.type == LayerType::Camera && !includeCameras) || layer.type == LayerType::Background) continue;
         Vec2 mn, mx;
         if (!localBounds(layer, time, mn, mx, &comp)) continue;
         const Vec2 p = layer.matrixAt(time).inverse().apply(scenePoint);

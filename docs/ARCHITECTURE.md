@@ -107,6 +107,10 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
   through its transform and their own transform is in its space.
   `createCompound` / `releaseCompound` keep the look when grouping and
   ungrouping; `removeLayerTree` removes a compound with its contents.
+- **Backgrounds** — `LayerType::Background` fills the whole frame (color,
+  gradient or picture / video): its matrix is the identity, the camera does
+  not move it, the viewport does not pick it with a click (only the timeline
+  and Properties select it), and new ones go to the bottom of the stack.
 - **Media** — `Composition::media` lists imported files (`core/Media.h`); a
   media layer refers to one by id and stores where the source's first frame
   sits in composition time (`MediaProps::start`, moved by `shiftTime`).
@@ -265,8 +269,14 @@ Rules:
     tabs-menu or pin buttons): a minimized panel hides and leaves a handle on
     the window edge that brings it back at its size. View > Panels shows or
     hides panels; double-clicking a tab maximizes it.
-  - Floating helpers that are not panels (the Tools popover) are child widgets
-    of the window, not separate windows, so drag and drop keeps working.
+  - Floating helpers that are not panels (the Tools popover, the toolbar
+    when it floats over the viewport) are child widgets of the window, not
+    separate windows, so drag and drop keeps working. The toolbar moves by its
+    grip (a drag with its own MIME type); its tools move by themselves.
+  - Panels minimize from a handle that appears, on hover, where the restore
+    handle will be. No focus highlight on panels.
+  - Never `show()` / `setVisible(true)` a widget before it has a parent: for
+    a moment it is a window of its own (it flashes on screen).
 - **Panels** (`ui/panels`) follow one pattern:
   - `sync()` is called every tick. It computes a cheap **structure key** (what
     the widgets depend on: selected layer, its properties, …). If the key
@@ -290,6 +300,8 @@ Rules:
   `ui::setTone(label, Tone::…)` (recolored on `appearanceChanged`), never a
   style sheet with a baked color; screens that bake colors otherwise rebuild
   on `appearanceChanged` (the home screen does).
+- **`Style`** (`ui/Style.h`) — Fusion plus our check boxes and radio buttons
+  (outline and check mark; an accent-filled box reads as a color swatch).
 - **`Draw`** (`ui/Draw.h`) — the small drawing vocabulary over `QPainter` for
   custom-painted parts (`Rgba` packed 0xAABBGGRR, `Pt`). **Icons** are vector
   code in `Widgets.cpp` (`Icon` enum, `drawIcon`, `makeIcon`) — no icon files.
@@ -356,8 +368,13 @@ Rules:
   expensive results (a parsed model), `bemotion.mesh` / `g.mesh` build and
   draw triangle meshes natively (`render/Mesh3D`). The 3D Models plugin is
   built on this.
+- **Buttons and the microphone** (API 5): a command can carry a timeline
+  button (`toggle` ones give `doc.pressed`), ask for playback (`doc.play`),
+  and record through `media/Recorder` (miniaudio capture to WAV) with the
+  `microphone` permission. The Recorder plugin is built on this.
 - **Permissions** in `plugin.json`: `edit` (commands), `media`
-  (`media.import`), `files` (read the files chosen in `file` parameters). New
+  (`media.import`), `files` (read the files chosen in `file` parameters),
+  `microphone` (record). New
   capabilities that touch the user's files or the outside world must be new
   permissions.
 - The API is versioned (`bemotion.api_version`); keep old plugins working.

@@ -220,6 +220,7 @@ json encodeLayer(const Layer& constLayer) {
                 : layer.type == LayerType::Plugin   ? "plugin"
                 : layer.type == LayerType::Compound ? "compound"
                 : layer.type == LayerType::Media    ? "media"
+                : layer.type == LayerType::Background ? "background"
                                                     : "shape";
     j["visible"] = layer.visible;
     j["locked"] = layer.locked;
@@ -236,6 +237,9 @@ json encodeLayer(const Layer& constLayer) {
         const MediaProps& m = layer.media;
         j["media"] = {{"id", m.mediaId}, {"size", encode(m.size)}, {"start", m.start}, {"video", m.hasVideo},
                       {"audio", m.hasAudio}};
+    } else if (layer.type == LayerType::Background) {
+        j["background"] = {{"fill", backgroundFillId(layer.background.fill)}, {"media", layer.background.mediaId},
+                           {"fit", backgroundFitId(layer.background.fit)}};
     } else if (layer.type == LayerType::Text) {
         j["text"] = {{"text", layer.text.text},
                      {"font_family", layer.text.fontFamily},
@@ -278,6 +282,7 @@ Layer decodeLayer(const json& j) {
                  : type == "plugin"   ? LayerType::Plugin
                  : type == "compound" ? LayerType::Compound
                  : type == "media"    ? LayerType::Media
+                 : type == "background" ? LayerType::Background
                                       : LayerType::Shape;
     if (j.contains("plugin")) decodePlugin(j["plugin"], layer.plugin); // before properties: creates the params
     if (const auto m = j.find("media"); m != j.end() && m->is_object()) { // before properties: decides which exist
@@ -286,6 +291,14 @@ Layer decodeLayer(const json& j) {
         layer.media.start = m->value("start", 0.0);
         layer.media.hasVideo = m->value("video", true);
         layer.media.hasAudio = m->value("audio", false);
+    }
+    if (const auto b = j.find("background"); b != j.end() && b->is_object()) { // before properties: the fill decides which exist
+        const std::string fill = b->value("fill", std::string("linear")), fit = b->value("fit", std::string("cover"));
+        for (int i = 0; i < static_cast<int>(BackgroundFill::Count); ++i)
+            if (fill == backgroundFillId(static_cast<BackgroundFill>(i))) layer.background.fill = static_cast<BackgroundFill>(i);
+        for (int i = 0; i < static_cast<int>(BackgroundFit::Count); ++i)
+            if (fit == backgroundFitId(static_cast<BackgroundFit>(i))) layer.background.fit = static_cast<BackgroundFit>(i);
+        layer.background.mediaId = b->value("media", uint64_t{0});
     }
     layer.visible = j.value("visible", true);
     layer.locked = j.value("locked", false);

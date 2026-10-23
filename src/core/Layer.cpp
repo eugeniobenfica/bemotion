@@ -1,5 +1,6 @@
 #include "core/Layer.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstring>
 
@@ -58,6 +59,38 @@ std::vector<PropertyRef> Layer::properties() {
     auto& tr = transform;
     if (type == LayerType::Media && !media.hasVideo) { // audio only: just its level
         p.push_back({"volume", "Audio", "Volume", PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
+        return p;
+    }
+    if (type == LayerType::Background) { // fills the frame: no position, size or rotation
+        auto& b = background;
+        p.push_back({"opacity", "Transform", "Opacity", PropertyKind::Float, &tr.opacity, 0.5f, 0, 100, "%.0f%%"});
+        p.push_back({"bg_color", "Background", b.fill == BackgroundFill::Image ? "Behind" : b.fill == BackgroundFill::Solid ? "Color" : "Color 1",
+                     PropertyKind::Color, &b.color});
+        if (b.fill == BackgroundFill::Linear || b.fill == BackgroundFill::Radial)
+            p.push_back({"bg_color2", "Background", "Color 2", PropertyKind::Color, &b.color2});
+        if (b.fill == BackgroundFill::Linear)
+            p.push_back({"bg_angle", "Background", "Angle", PropertyKind::Float, &b.angle, 0.5f, 0, 0, "%.0f°"});
+        if (b.fill == BackgroundFill::Image) {
+            p.push_back({"bg_zoom", "Background", "Zoom", PropertyKind::Float, &b.zoom, 0.5f, 1, 1000, "%.0f%%"});
+            p.push_back({"bg_offset", "Background", "Offset", PropertyKind::Vec2, &b.offset});
+        }
+        p.push_back({"bg_darken", "Background", "Darken", PropertyKind::Float, &b.darken, 0.5f, 0, 100, "%.0f%%"});
+        // Effects (blur a picture, tint it...) as on any layer.
+        for (size_t i = 0; i < effects.size(); ++i) {
+            Effect& e = effects[i];
+            int sameType = 0;
+            for (size_t j = 0; j <= i; ++j) sameType += effects[j].type == e.type;
+            e.group = std::string(effectLabel(e.type)) + (sameType > 1 ? " " + std::to_string(sameType) : "");
+            const std::string prefix = "fx" + std::to_string(i) + ".";
+            for (int k = 0; k < kEffectSlotCount; ++k) e.ids[k] = prefix + effectSlotId(static_cast<EffectSlot>(k));
+            for (const EffectParam& ep : effectParams(e.type)) {
+                const PropertyKind kind = ep.slot == EffectSlot::Color    ? PropertyKind::Color
+                                          : ep.slot == EffectSlot::Offset ? PropertyKind::Vec2
+                                                                          : PropertyKind::Float;
+                p.push_back({e.ids[static_cast<int>(ep.slot)].c_str(), e.group.c_str(), ep.label, kind, &e.slot(ep.slot),
+                             ep.speed, ep.min, ep.max, ep.format, static_cast<int>(i)});
+            }
+        }
         return p;
     }
     if (type == LayerType::Camera) { // never drawn: no shape, text or effects
@@ -140,6 +173,7 @@ PropertyRef* Layer::findProperty(std::vector<PropertyRef>& props, const char* pr
 }
 
 Affine Layer::matrixAt(double t) const {
+    if (type == LayerType::Background) return Affine{}; // drawn in composition space, over the whole frame
     const Vec2 pos = transform.position.valueAt(t);
     // A camera is only a point of view: position and roll (zoom has its own property).
     if (type == LayerType::Camera) return Affine::translate(pos) * Affine::rotateDeg(transform.rotation.valueAt(t));
@@ -271,7 +305,39 @@ Layer makePluginLayer(const std::string& name, PluginProps props, Vec2 position,
     return l;
 }
 
+const char* backgroundFillId(BackgroundFill f) {
+    static const char* ids[] = {"solid", "linear", "radial", "image"};
+    return ids[std::clamp(static_cast<int>(f), 0, 3)];
+}
+const char* backgroundFillLabel(BackgroundFill f) {
+    static const char* labels[] = {"Solid Color", "Linear Gradient", "Radial Gradient", "Image or Video"};
+    return labels[std::clamp(static_cast<int>(f), 0, 3)];
+}
+const char* backgroundFitId(BackgroundFit f) {
+    static const char* ids[] = {"cover", "contain", "stretch"};
+    return ids[std::clamp(static_cast<int>(f), 0, 2)];
+}
+const char* backgroundFitLabel(BackgroundFit f) {
+    static const char* labels[] = {"Cover", "Contain", "Stretch"};
+    return labels[std::clamp(static_cast<int>(f), 0, 2)];
+}
+
+Layer makeBackgroundLayer(double duration) {
+    Layer l;
+    l.type = LayerType::Background;
+    l.name = "Background";
+    l.outPoint = std::max(duration, 0.04);
+    return l;
+}
+
 std::vector<float> defaultPropertyValue(const Layer& layer, const char* propertyId, Vec2 compCenter) {
+    if (layer.type == LayerType::Background) {
+        Layer fresh = makeBackgroundLayer(1.0);
+        fresh.background.fill = layer.background.fill;
+        auto props = fresh.properties();
+        if (const PropertyRef* p = fresh.findProperty(props, propertyId)) return propertyValue(*p, 0.0);
+        return {};
+    }
     if (layer.type == LayerType::Plugin) {
         Layer fresh = makePluginLayer(layer.name, layer.plugin, compCenter, 1.0);
         fresh.plugin.size = AnimVec2{layer.plugin.defaultSize};

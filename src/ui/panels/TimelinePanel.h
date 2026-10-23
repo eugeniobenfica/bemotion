@@ -42,6 +42,22 @@ public:
 
 signals:
     void toolsPanelRequested(); // the toolbar's "+" or Customize...
+    // The toolbar was dragged (or sent) to the viewport (at `at`, viewport coordinates; (-1, -1):
+    // its default place) or back to the timeline.
+    void toolbarMoveRequested(bool toViewport, QPoint at);
+    // A plugin command's button (API 5) was clicked; `pressed`: its state for toggle buttons.
+    void pluginButtonClicked(const std::string& commandId, bool pressed);
+
+public:
+    QWidget* toolPill() const;
+    void setPluginButtonPressed(const std::string& commandId, bool pressed);
+    void rebuildPluginButtons();
+    void releaseToolPill(); // out of the timeline's bar (it floats elsewhere)
+    void dockToolPill();    // back into it
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* e) override;
+    void dropEvent(QDropEvent* e) override;
 
 private:
     friend class TimelineRuler;
@@ -156,6 +172,10 @@ private:
     void graphPress(QMouseEvent* e);
     void graphMove(QMouseEvent* e);
     void graphRelease(QMouseEvent* e);
+    void showGraphMenu(QPoint global, QPointF at); // right-click on the graph
+    std::optional<std::pair<std::string, int>> curveNear(QPointF m);
+    void addGraphKeys(const std::vector<std::string>& propIds, double t); // new keys keep the curve's value
+    void addKeysAtPlayhead();
     float graphY(float v) const;
     float graphValue(float y) const;
     bool graphMode_ = false;
@@ -181,8 +201,13 @@ private:
     ui::IconButton* loop_ = nullptr;
     ui::IconButton* graph_ = nullptr;
     ui::IconButton* animOnly_ = nullptr;
+    ui::IconButton* addKeys_ = nullptr; // graph mode: keyframes at the playhead
+    QHBoxLayout* pluginBar_ = nullptr;  // plugin command buttons
+    std::vector<std::pair<std::string, ui::IconButton*>> pluginButtons_;
     std::vector<QPushButton*> easeButtons_;
     ToolPill* pill_ = nullptr;
+    QHBoxLayout* bar_ = nullptr;
+    QWidget* divider_ = nullptr;
     QWidget* breadcrumb_ = nullptr;
     std::string breadcrumbKey_;
     TimelineRuler* ruler_ = nullptr;

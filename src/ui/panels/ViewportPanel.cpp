@@ -72,6 +72,7 @@ render::View parentView(const render::View& view, const Layer& layer, double t) 
 Affine parentOf(const Layer& layer, double t) { return g_comp ? g_comp->parentMatrix(layer, t) : Affine{}; }
 
 bool computeHandles(const Layer& layer, double t, const render::View& sceneView, Handles& h) {
+    if (layer.type == LayerType::Background) return false; // it is the frame: nothing to move or scale
     const render::View view = parentView(sceneView, layer, t);
     Vec2 mn, mx;
     if (!render::localBounds(layer, t, mn, mx, g_comp)) return false;
@@ -281,20 +282,8 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     if (textEdit_) placeTextEditor();
 }
 
-void ViewportPanel::drawHudBackground(QPainter& p) {
-    Draw d(p);
-    const Composition& c = ctx_.comp();
-    char info[64];
-    std::snprintf(info, sizeof(info), "%d × %d", c.width, c.height);
-    // A pill clear of the ruler, so guides and the ruler never run through the text.
-    const QString text = QString::fromUtf8(info);
-    const float tw = d.textWidth(text), lineH = 26.0f;
-    const float left = (ctx_.showRulers ? kRuler : 0.0f) + 10.0f, y = height() - lineH - 10.0f;
-    // A narrow viewport keeps only the zoom controls.
-    const int controls = cameraButton_->isVisible() ? cameraButton_->x() : snapButton_->x();
-    if (left + tw + 16 + 8 > controls) return;
-    d.rectFilled(Pt(left, y), Pt(left + tw + 16, y + lineH), theme::withAlpha(theme::kBgRaised, 220), theme::current().rounding);
-    d.text(Pt(left + 8, y + (lineH - d.textHeight()) * 0.5f), theme::kTextDim, text);
+void ViewportPanel::drawHudBackground(QPainter&) {
+    // Nothing: the composition size is in Properties (with nothing selected), not on the canvas.
 }
 
 void ViewportPanel::drawMotionPath(QPainter& p) {
@@ -441,6 +430,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
         const MediaItem* item = dropMedia_ ? comp.findMedia(dropMedia_) : nullptr;
         Layer ghost = item                         ? makeMediaLayer(*item, scenePos, 0.0, kDefaultLayerLength)
                       : dropKind_ == ui::kDropCamera ? makeCameraLayer(compSize_, comp.duration)
+                      : dropKind_ == ui::kDropBackground ? makeBackgroundLayer(comp.duration)
                       : type                       ? makePluginLayer(type->name, type->prototype, scenePos, comp.duration)
                       : dropKind_ < 0              ? makeTextLayer("Your text", scenePos, comp.duration)
                                                    : makeShapeLayer(static_cast<ShapeKind>(dropKind_), scenePos, comp.duration);
@@ -736,7 +726,7 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
                     dragBoxMin_ = {1e9f, 1e9f};
                     dragBoxMax_ = {-1e9f, -1e9f};
                     for (Layer* l : ctx_.selectedLayers()) {
-                        if (l->locked || (l->type == LayerType::Camera && throughCamera_)) continue;
+                        if (l->locked || (l->type == LayerType::Camera && throughCamera_) || l->type == LayerType::Background) continue;
                         dragStartPositions_.emplace_back(l->id, l->transform.position.valueAt(t));
                         moving.push_back(l->id);
                         Vec2 mn, mx;
@@ -805,6 +795,7 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
         ctx_.selection = marqueeBase_;
         for (const Layer& l : comp.layers)
             if (l.activeAt(t) && !l.locked && !ctx_.isSelected(l.id) && !(l.parent && comp.findLayer(l.parent)) &&
+                l.type != LayerType::Background &&
                 layerOverlapsRect(l, t, view, a, b))
                 ctx_.selection.push_back(l.id);
         ctx_.clearKeySelection();
@@ -952,11 +943,13 @@ bool ViewportPanel::updateDrop(const QMimeData* mime, Vec2 mouse, Qt::KeyboardMo
 }
 
 void ViewportPanel::dragEnterEvent(QDragEnterEvent* e) {
+    if (e->mimeData()->hasFormat(ui::kToolbarMime)) return e->acceptProposedAction();
     if (updateDrop(e->mimeData(), vec(e->position()), e->modifiers())) e->acceptProposedAction();
     else e->ignore();
 }
 
 void ViewportPanel::dragMoveEvent(QDragMoveEvent* e) {
+    if (e->mimeData()->hasFormat(ui::kToolbarMime)) return e->acceptProposedAction();
     if (updateDrop(e->mimeData(), vec(e->position()), e->modifiers())) e->acceptProposedAction();
     else e->ignore();
 }
@@ -969,10 +962,18 @@ void ViewportPanel::dragLeaveEvent(QDragLeaveEvent*) {
 }
 
 void ViewportPanel::dropEvent(QDropEvent* e) {
+    if (e->mimeData()->hasFormat(ui::kToolbarMime)) {
+        // Where the grip was grabbed (x in the bar): the bar lands under the mouse as it was held.
+        const int grabX = e->mimeData()->data(ui::kToolbarMime).toInt();
+        e->acceptProposedAction();
+        emit toolbarDropped(e->position().toPoint() - QPoint(grabX, 14));
+        return;
+    }
     if (!updateDrop(e->mimeData(), vec(e->position()), e->modifiers())) return;
     const Vec2 scenePos = world_.inverse().apply(dropPos_); // where the camera shows that point
     if (dropMedia_) ctx_.addMedia(dropMedia_, scenePos);
     else if (dropKind_ == ui::kDropCamera) ctx_.addCamera();
+    else if (dropKind_ == ui::kDropBackground) ctx_.addBackground();
     else if (const PluginObjectType* type = droppedPluginType()) ctx_.addPluginObject(*type, scenePos);
     else if (dropKind_ < 0) ctx_.addText(scenePos);
     else ctx_.addShape(static_cast<ShapeKind>(dropKind_), scenePos);

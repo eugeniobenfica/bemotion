@@ -109,6 +109,8 @@ does.
 - **Media**: import images, video and audio (Ctrl+I or drop files on the
   window) into the *Media* panel; media layers animate like everything else
   and get an animatable *Volume*
+- **Background**: a color, a gradient or a picture / video that always fills
+  the frame (cover, contain, zoom, darken), under everything
 - **Compounds** (Ctrl+G): group layers into one object with its own timeline
 - **Edit text in place**: double-click a text on the canvas
 - **Copy and paste** objects (Ctrl+C / Ctrl+X / Ctrl+V) in the timeline and
@@ -124,8 +126,9 @@ does.
   custom cubic-bezier curve editor; Easy Ease with F9
 - **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
   Draw On… stackable, importable, savable
-- **Transitions** panel: Fade, Slide, Zoom, Pop, Spin at a clip's start, end
-  or both, with any duration — plain keyframes you can still edit
+- **Transitions** panel by category (Fade, Slide, Scale, Rotate) at a clip's
+  start, end or both, with any duration — plain keyframes you can still edit
+- Add keyframes right in the Graph Editor (right-click, double-click or *+*)
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…
   stackable, keyframable, with presets
 
@@ -138,7 +141,8 @@ does.
 - **Timeline** with multi-clip tracks, trimming, cut tool (C), split at
   playhead (Ctrl+K), snapping to clips, keys and the playhead
 - **Your own toolbar**: the toolbar's *+* opens every tool; drag them into
-  the toolbar, reorder them, drag them out to remove
+  the toolbar, reorder them, drag them out to remove; drag its grip to float
+  it over the viewport
 - **No fixed length**: the composition ends where its last clip ends and grows
   as you add objects — or set a length limit (15 s ads, 60 s shorts)
 - **Arrange**: distribute layers evenly, stagger their start times
@@ -168,7 +172,7 @@ does.
 - Rebind every shortcut, pick the interface font and text size, timeline
   densities, frames per arrow press
 - Dockable panels: drag tabs anywhere, minimize a panel to a handle on the
-  window edge, double-click a tab to maximize it
+  window edge, double-click a tab to maximize it; full screen with F11
 
 </td>
 <td valign="top">
@@ -180,6 +184,8 @@ does.
   import from a **CSV** file
 - The bundled **3D Models** plugin brings glTF / GLB, OBJ and STL models into
   the 2D scene: turn, zoom, light and color them, all keyframable
+- The bundled **Recorder** plugin records voice-overs from the microphone,
+  straight into the timeline
 - Plugin **commands** edit the project through the same operations as
   scripts and AI tools — see [docs/PLUGINS.md](docs/PLUGINS.md)
 - **Robot-friendly**: scripts and AI assistants create and edit projects from

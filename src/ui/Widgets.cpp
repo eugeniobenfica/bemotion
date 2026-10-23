@@ -33,6 +33,7 @@ Icon iconForPlugin(const std::string& name) {
     if (name == "pie" || name == "donut") return Icon::PieChart;
     if (name == "table") return Icon::Table;
     if (name == "cube" || name == "model") return Icon::Cube;
+    if (name == "mic" || name == "microphone") return Icon::Microphone;
     if (name == "text") return Icon::Text;
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) {
         std::string shape = shapeKindLabel(static_cast<ShapeKind>(i));
@@ -64,6 +65,7 @@ Icon iconForMedia(MediaKind kind) {
 
 Icon iconForLayer(const Layer& layer) {
     if (layer.type == LayerType::Camera) return Icon::Camera;
+    if (layer.type == LayerType::Background) return Icon::Background;
     if (layer.type == LayerType::Compound) return Icon::Compound;
     if (layer.type == LayerType::Media) return layer.media.hasVideo ? Icon::Film : Icon::Audio;
     if (layer.type == LayerType::Plugin) {
@@ -218,6 +220,32 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.rect(Pt(c.x - h * 0.85f, c.y - h * 0.55f), Pt(c.x + h * 0.15f, c.y + h * 0.55f), col, 2.0f, th);
         dl.rectFilled(Pt(c.x - h * 0.15f, c.y - h * 0.55f), Pt(c.x + h * 0.85f, c.y + h * 0.55f), theme::withAlpha(col, 110), 2.0f);
         dl.rect(Pt(c.x - h * 0.15f, c.y - h * 0.55f), Pt(c.x + h * 0.85f, c.y + h * 0.55f), col, 2.0f, th);
+        break;
+    }
+    case Icon::Background: { // a frame with a sun and hills: the picture behind everything
+        const Pt a(c.x - h * 0.85f, c.y - h * 0.65f), b(c.x + h * 0.85f, c.y + h * 0.65f);
+        dl.rect(a, b, col, 2.0f, th);
+        dl.circleFilled(Pt(c.x + h * 0.4f, c.y - h * 0.25f), h * 0.14f, col);
+        const Pt hills[4] = {Pt(a.x + h * 0.15f, b.y - h * 0.12f), Pt(c.x - h * 0.25f, c.y - h * 0.05f), Pt(c.x + h * 0.15f, b.y - h * 0.35f),
+                             Pt(b.x - h * 0.12f, b.y - h * 0.12f)};
+        dl.polyline(hills, 4, col, false, th);
+        break;
+    }
+    case Icon::Coffee: { // a cup with a handle and steam
+        const Pt a(c.x - h * 0.65f, c.y - h * 0.15f), b(c.x + h * 0.35f, c.y + h * 0.7f);
+        dl.rect(a, b, col, 3.0f, th);
+        dl.circle(Pt(b.x + h * 0.12f, c.y + h * 0.25f), h * 0.2f, col, th);
+        dl.line(Pt(c.x - h * 0.35f, c.y - h * 0.75f), Pt(c.x - h * 0.35f, c.y - h * 0.4f), col, th);
+        dl.line(Pt(c.x - h * 0.05f, c.y - h * 0.85f), Pt(c.x - h * 0.05f, c.y - h * 0.4f), col, th);
+        break;
+    }
+    case Icon::Microphone: { // a capsule on a stand
+        dl.rectFilled(Pt(c.x - h * 0.25f, c.y - h * 0.85f), Pt(c.x + h * 0.25f, c.y + h * 0.2f), col, h * 0.25f);
+        const Pt arc[5] = {Pt(c.x - h * 0.5f, c.y - h * 0.1f), Pt(c.x - h * 0.45f, c.y + h * 0.3f), Pt(c.x, c.y + h * 0.5f),
+                           Pt(c.x + h * 0.45f, c.y + h * 0.3f), Pt(c.x + h * 0.5f, c.y - h * 0.1f)};
+        dl.polyline(arc, 5, col, false, th);
+        dl.line(Pt(c.x, c.y + h * 0.5f), Pt(c.x, c.y + h * 0.85f), col, th);
+        dl.line(Pt(c.x - h * 0.3f, c.y + h * 0.85f), Pt(c.x + h * 0.3f, c.y + h * 0.85f), col, th);
         break;
     }
     case Icon::Cube: { // an outlined cube in a three-quarter view
@@ -652,9 +680,11 @@ void IconButton::paintEvent(QPaintEvent*) {
     QPainter p(this);
     Draw d(p);
     const bool hovered = underMouse() && isEnabled();
-    if (isDown()) d.rectFilled(Pt(0, 0), Pt(width(), height()), theme::kBorder, 5.0f);
-    else if (hovered) d.rectFilled(Pt(0, 0), Pt(width(), height()), theme::kBgHover, 5.0f);
-    Rgba col = active_ ? theme::kAccent : (hovered ? theme::kText : theme::kTextDim);
+    const bool danger = icon_ == Icon::Trash; // deleting stands out
+    if (isDown()) d.rectFilled(Pt(0, 0), Pt(width(), height()), danger ? theme::withAlpha(theme::kDanger, 90) : theme::kBorder, 5.0f);
+    else if (hovered) d.rectFilled(Pt(0, 0), Pt(width(), height()), danger ? theme::withAlpha(theme::kDanger, 45) : theme::kBgHover, 5.0f);
+    if (active_ && activeColor_) d.rectFilled(Pt(0, 0), Pt(width(), height()), theme::withAlpha(activeColor_, 50), 5.0f);
+    Rgba col = active_ ? (activeColor_ ? activeColor_ : theme::kAccent) : (hovered ? (danger ? theme::kDanger : theme::kText) : theme::kTextDim);
     if (!isEnabled()) col = theme::withAlpha(theme::kTextFaint, 140);
     drawIcon(d, icon_, Pt(width() * 0.5f, height() * 0.5f), std::min(width(), height()) * 0.58f, col);
 }

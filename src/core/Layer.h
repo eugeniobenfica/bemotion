@@ -11,7 +11,7 @@
 
 namespace bemotion {
 
-enum class LayerType { Shape, Text, Camera, Plugin, Compound, Media };
+enum class LayerType { Shape, Text, Camera, Plugin, Compound, Media, Background };
 
 enum class ShapeKind { Rectangle, Ellipse, Polygon, Star, Line, Count };
 
@@ -143,6 +143,27 @@ struct PluginProps {
     PluginParam* find(const std::string& id);
 };
 
+// A background: always fills the whole composition frame (no position, size or camera),
+// with a color, a gradient or a picture / video.
+enum class BackgroundFill { Solid, Linear, Radial, Image, Count };
+enum class BackgroundFit { Cover, Contain, Stretch, Count };
+const char* backgroundFillId(BackgroundFill f); // "solid", "linear", "radial", "image"
+const char* backgroundFillLabel(BackgroundFill f);
+const char* backgroundFitId(BackgroundFit f);    // "cover", "contain", "stretch"
+const char* backgroundFitLabel(BackgroundFit f);
+
+struct BackgroundProps {
+    BackgroundFill fill = BackgroundFill::Linear;
+    AnimColor color{Color::fromHex(0x262B3D)};  // solid color, gradient start, behind a picture
+    AnimColor color2{Color::fromHex(0x0C0D12)}; // gradient end
+    AnimFloat angle{90.0f};                     // linear gradient direction: 0 left to right, 90 top to bottom
+    uint64_t mediaId = 0;                       // Image: a picture or video of the Media panel
+    BackgroundFit fit = BackgroundFit::Cover;
+    AnimFloat zoom{100.0f};                     // Image: percent of the fitted size
+    AnimVec2 offset{Vec2{0.0f, 0.0f}};          // Image: pan, composition pixels
+    AnimFloat darken{0.0f};                     // percent of black over everything (text stays readable)
+};
+
 // A layer showing / playing a media item (video, image or audio).
 struct MediaProps {
     uint64_t mediaId = 0;
@@ -182,6 +203,7 @@ struct Layer {
     CameraProps camera;
     PluginProps plugin;
     MediaProps media;
+    BackgroundProps background;
     std::vector<Effect> effects; // applied in order
 
     // All animatable properties that apply to this layer's type, in UI order.
@@ -199,6 +221,7 @@ struct Layer {
 
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
+Layer makeBackgroundLayer(double duration); // fills the frame, from 0 for `duration`
 Layer makeCameraLayer(Vec2 compSize, double duration);
 Layer makeCompoundLayer(Vec2 position, double duration);
 // A layer for `item` starting at `start` (videos and audio last as long as the source).

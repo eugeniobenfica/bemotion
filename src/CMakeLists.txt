@@ -48,6 +48,7 @@ add_executable(bemotion WIN32
     media/FfmpegMedia.cpp
     media/MediaIO.cpp
     media/MediaManager.cpp
+    media/Recorder.cpp
     render/Fonts.cpp
     render/LogoMark.cpp
     render/Mesh3D.cpp
@@ -58,6 +59,7 @@ add_executable(bemotion WIN32
     ui/AppSignals.h
     ui/Draw.cpp
     ui/SkiaQt.h
+    ui/Style.cpp
     ui/EditorContext.cpp
     ui/EditorWindow.cpp
     ui/ExportDialog.cpp

@@ -14,10 +14,14 @@ namespace bemotion {
 enum class TransitionEdge { In, Out, Both };
 
 struct TransitionInfo {
-    const char* id;    // "fade", "slide_left", ...
-    const char* name;  // "Fade"
-    const char* about; // one line for tooltips
+    const char* id;       // "fade", "slide_left", ...
+    const char* name;     // "Fade"
+    const char* about;    // one line for tooltips
+    const char* category; // "Fade", "Slide", "Scale", "Rotate"
 };
+
+// The categories, in display order.
+const std::vector<const char*>& transitionCategories();
 
 const std::vector<TransitionInfo>& transitions();
 const TransitionInfo* findTransition(const std::string& id);

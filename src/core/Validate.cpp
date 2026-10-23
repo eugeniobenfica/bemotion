@@ -141,7 +141,7 @@ private:
                 report(where, "empty name");
                 l.name = c.uniqueLayerName("Layer");
             }
-            if (static_cast<int>(l.type) < 0 || static_cast<int>(l.type) > static_cast<int>(LayerType::Media)) {
+            if (static_cast<int>(l.type) < 0 || static_cast<int>(l.type) > static_cast<int>(LayerType::Background)) {
                 report(where, "unknown layer type");
                 l.type = LayerType::Shape;
             }
@@ -177,6 +177,10 @@ private:
                     report(where, "belongs to a compound that does not exist (now top level)");
                     l.parent = 0;
                 }
+            }
+            if (l.type == LayerType::Background && l.background.mediaId && !c.findMedia(l.background.mediaId)) {
+                report(layerName(l), "its background picture is not among the media items (cleared)");
+                l.background.mediaId = 0;
             }
             if (l.type == LayerType::Media && !c.findMedia(l.media.mediaId)) {
                 report(where, "uses a media item that is not in the project (a placeholder was added to relink)");

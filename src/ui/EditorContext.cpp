@@ -192,6 +192,16 @@ Layer& EditorContext::addCamera() {
     return cam;
 }
 
+Layer& EditorContext::addBackground() {
+    Layer l = makeBackgroundLayer(std::max(kDefaultLayerLength, comp().duration));
+    l.name = comp().uniqueLayerName(l.name);
+    l.label = static_cast<int>(comp().nextLayerId % kLabelColorCount);
+    Layer& added = comp().addLayer(std::move(l), static_cast<int>(comp().layers.size())); // at the bottom, from the start
+    select(added.id);
+    touch();
+    return added;
+}
+
 Layer& EditorContext::addPluginObject(const PluginObjectType& type, std::optional<Vec2> position) {
     Layer layer = PluginHost::get().createLayer(type, position.value_or(comp().center()), kDefaultLayerLength);
     return insertLayer(std::move(layer));
@@ -219,6 +229,7 @@ Layer* EditorContext::addObject(int kind, Vec2 position, double start) {
     time = std::max(0.0, start); // new layers start at `time`
     Layer* added = nullptr;
     if (kind == -2) added = &addCamera(); // kDropCamera
+    else if (kind == -3) added = &addBackground(); // kDropBackground
     else if (kind == -1) added = &addText(position);
     else if (kind >= 0 && kind < static_cast<int>(ShapeKind::Count)) added = &addShape(static_cast<ShapeKind>(kind), position);
     else if (kind <= -100) { // kDropPlugin - i: plugin object type i

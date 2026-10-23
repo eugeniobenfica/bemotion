@@ -1,5 +1,6 @@
 #include "ui/panels/TimelinePanel.h"
 
+#include "app/PluginHost.h"
 #include "app/Settings.h"
 #include "core/Snapping.h"
 #include "media/MediaIO.h"
@@ -24,6 +25,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QTimer>
 #include <QToolTip>
 #include <QVBoxLayout>
 #include <QWheelEvent>
@@ -278,7 +280,8 @@ private:
 };
 
 // The user's tools (Settings::toolbar, filled from the Tools popover) on a pill of their own.
-// Drag a tool along the bar to reorder it, out of the bar to remove it.
+// Drag a tool along the bar to reorder it, out of the bar to remove it. The grip on the left
+// moves the whole bar: into the viewport (it floats there) or back into the timeline.
 class ToolPill : public QWidget {
 public:
     explicit ToolPill(TimelinePanel* panel) : panel_(panel) {
@@ -288,7 +291,7 @@ public:
     }
     QSize sizeHint() const override {
         const int n = static_cast<int>(tools().size());
-        return {static_cast<int>(kPad * 2 + n * (kSize + kGap) + kSize * 0.8f + 8), static_cast<int>(kSize + 2)};
+        return {static_cast<int>(kGrip + kPad * 2 + n * (kSize + kGap) + kSize * 0.8f + 8), static_cast<int>(kSize + 2)};
     }
 
 protected:
@@ -296,6 +299,10 @@ protected:
         QPainter p(this);
         ui::Draw d(p);
         d.rectFilled({0, 0}, {float(width()), float(height())}, theme::kBgDeep, 7.0f);
+        if (parentWidget() != panel_) d.rect({0.5f, 0.5f}, {width() - 0.5f, height() - 0.5f}, theme::kBorder, 7.0f); // floating
+        for (int r = 0; r < 3; ++r) // the grip
+            for (int c = 0; c < 2; ++c)
+                d.circleFilled({5.0f + c * 4.0f, height() * 0.5f + (r - 1) * 5.0f}, 1.2f, hover_ == -3 ? theme::kText : theme::kTextFaint);
         const auto ts = tools();
         EditorContext& ctx = panel_->ctx_;
         const auto& catalog = ui::toolCatalog();
@@ -323,6 +330,7 @@ protected:
             const int i = indexAt(he->pos());
             const auto ts = tools();
             if (i >= 0) QToolTip::showText(he->globalPos(), QString::fromStdString(ui::toolTooltip(ui::toolCatalog()[ts[i]])), this);
+            else if (i == -3) QToolTip::showText(he->globalPos(), "Drag to move the toolbar: into the viewport, or back to the timeline", this);
             else if (i == -2) QToolTip::showText(he->globalPos(), "All tools: click to open them, then drag the ones you want here", this);
             else QToolTip::hideText();
             return true;
@@ -332,6 +340,14 @@ protected:
     void mousePressEvent(QMouseEvent* e) override {
         pressed_ = indexAt(e->position());
         pressPos_ = e->position();
+        if (e->button() == Qt::RightButton && pressed_ == -3) {
+            QMenu menu;
+            const bool floating = parentWidget() != panel_;
+            menu.addAction(floating ? "Back to the Timeline" : "Move to the Viewport",
+                           [this, floating] { emit panel_->toolbarMoveRequested(!floating, QPoint(-1, -1)); });
+            menu.exec(e->globalPosition().toPoint());
+            pressed_ = -1;
+        }
         if (e->button() == Qt::RightButton && pressed_ >= 0) {
             const int at = pressed_;
             QMenu menu;
@@ -342,6 +358,17 @@ protected:
         }
     }
     void mouseMoveEvent(QMouseEvent* e) override {
+        if ((e->buttons() & Qt::LeftButton) && pressed_ == -3 && (e->position() - pressPos_).manhattanLength() > 4) {
+            pressed_ = -1; // the grip: the whole bar goes where it is dropped
+            auto* drag = new QDrag(this);
+            auto* mime = new QMimeData;
+            mime->setData(ui::kToolbarMime, QByteArray::number(static_cast<int>(pressPos_.x())));
+            drag->setMimeData(mime);
+            drag->setPixmap(grab());
+            drag->setHotSpot(pressPos_.toPoint());
+            drag->exec(Qt::MoveAction);
+            return;
+        }
         if ((e->buttons() & Qt::LeftButton) && pressed_ >= 0 && (e->position() - pressPos_).manhattanLength() > 6) {
             const int from = pressed_;
             pressed_ = -1;
@@ -361,7 +388,11 @@ protected:
             return;
         }
         const int h = indexAt(e->position());
-        if (h != hover_) hover_ = h, update();
+        if (h != hover_) {
+            hover_ = h;
+            setCursor(h == -3 ? Qt::OpenHandCursor : Qt::ArrowCursor);
+            update();
+        }
     }
     void mouseReleaseEvent(QMouseEvent* e) override {
         if (e->button() != Qt::LeftButton) return;
@@ -415,7 +446,7 @@ protected:
     }
 
 private:
-    static constexpr float kSize = 26.0f, kPad = 3.0f, kGap = 2.0f;
+    static constexpr float kSize = 26.0f, kPad = 3.0f, kGap = 2.0f, kGrip = 12.0f;
     // Catalog indices of the bar's tools (unknown ids skipped).
     static std::vector<int> tools() {
         std::vector<int> out;
@@ -423,12 +454,13 @@ private:
             if (const int i = ui::toolIndex(id); i >= 0) out.push_back(i);
         return out;
     }
-    QRectF buttonRect(int i) const { return {kPad + i * (kSize + kGap), 1.0, kSize, kSize}; }
+    QRectF buttonRect(int i) const { return {kGrip + kPad + i * (kSize + kGap), 1.0, kSize, kSize}; }
     QRectF plusRect() const {
-        const float x = kPad + static_cast<float>(tools().size()) * (kSize + kGap) + 2.0f;
+        const float x = kGrip + kPad + static_cast<float>(tools().size()) * (kSize + kGap) + 2.0f;
         return {x, 1.0 + kSize * 0.1, kSize * 0.8, kSize * 0.8};
     }
-    int indexAt(QPointF p) const {
+    int indexAt(QPointF p) const { // a tool, -2 the "+", -3 the grip, -1 nothing
+        if (p.x() < kGrip) return -3;
         const int n = static_cast<int>(tools().size());
         for (int i = 0; i < n; ++i)
             if (buttonRect(i).contains(p)) return i;
@@ -454,6 +486,7 @@ private:
 // --- panel -------------------------------------------------------------------------------------
 
 TimelinePanel::TimelinePanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), ctx_(ctx) {
+    setAcceptDrops(true); // the toolbar, dragged back here
     auto* col = new QVBoxLayout(this);
     col->setContentsMargins(6, 6, 6, 4);
     col->setSpacing(4);
@@ -473,17 +506,23 @@ TimelinePanel::TimelinePanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
         pill_->update();
     });
     connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, this, [this] { relayout(); });
+    connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
+        QTimer::singleShot(300, this, [this] { rebuildPluginButtons(); }); // after the reload
+    });
 }
 
 void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
     const int s = 26;
+    bar_ = bar;
     pill_ = new ToolPill(this);
     bar->addWidget(pill_);
     // Timeline functions, set apart from the tools by a divider.
-    bar->addSpacing(8);
     auto* divider = new QFrame;
+    divider_ = divider;
     divider->setFrameShape(QFrame::VLine);
     divider->setFixedHeight(s - 8);
+    divider->setContentsMargins(8, 0, 8, 0);
+    divider->setFixedWidth(17);
     ui::setTone(divider, ui::Tone::Border);
     bar->addWidget(divider);
     bar->addSpacing(8);
@@ -550,12 +589,18 @@ void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
     }
     bar->addStretch(1);
 
-    // Right-aligned controls: icons only.
+    // Right-aligned controls: icons only. Plugin buttons (recording, ...) come first.
+    pluginBar_ = new QHBoxLayout;
+    pluginBar_->setSpacing(2);
+    bar->addLayout(pluginBar_);
+    rebuildPluginButtons();
     graph_ = button(ui::Icon::Graph, "Graph Editor: edit the curves of the selected layer's keyframes", [this] {
         graphMode_ = !graphMode_;
         graphDrag_ = {};
         relayout();
     });
+    addKeys_ = button(ui::Icon::Plus, "Add keyframes at the playhead to the curves shown (right-click the graph for more)",
+                      [this] { addKeysAtPlayhead(); });
     animOnly_ = button(ui::Icon::Diamond, "Show only animated properties", [this] {
         animatedOnly_ = !animatedOnly_;
         relayout();
@@ -570,6 +615,57 @@ void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
 }
 
 QWidget* TimelinePanel::rowsWidget() const { return rows_; }
+
+QWidget* TimelinePanel::toolPill() const { return pill_; }
+
+void TimelinePanel::rebuildPluginButtons() {
+    for (auto& [id, b] : pluginButtons_) b->deleteLater();
+    pluginButtons_.clear();
+    for (const PluginCommand* c : PluginHost::get().commands()) {
+        if (c->place != "timeline") continue;
+        auto* b = new ui::IconButton(ui::iconForPlugin(c->icon), QString::fromStdString(c->name + (c->description.empty() ? "" : "\n" + c->description)), 26);
+        if (c->icon == "mic" || c->icon == "microphone") b->setActiveColor(theme::kDanger);
+        const std::string id = c->id;
+        const bool toggle = c->toggle;
+        connect(b, &QAbstractButton::clicked, this, [this, b, id, toggle] {
+            const bool pressed = toggle && !b->active();
+            if (toggle) b->setActive(pressed);
+            emit pluginButtonClicked(id, pressed);
+        });
+        pluginBar_->addWidget(b);
+        pluginButtons_.emplace_back(id, b);
+    }
+    if (!pluginButtons_.empty()) pluginBar_->addSpacing(8);
+}
+
+void TimelinePanel::setPluginButtonPressed(const std::string& commandId, bool pressed) {
+    for (auto& [id, b] : pluginButtons_)
+        if (id == commandId) b->setActive(pressed);
+}
+
+void TimelinePanel::releaseToolPill() {
+    if (pill_->parentWidget() != this) return;
+    bar_->removeWidget(pill_);
+    divider_->hide();
+}
+
+void TimelinePanel::dockToolPill() {
+    if (pill_->parentWidget() == this) return;
+    pill_->setParent(this);
+    bar_->insertWidget(0, pill_);
+    divider_->show();
+    pill_->show();
+}
+
+void TimelinePanel::dragEnterEvent(QDragEnterEvent* e) {
+    if (e->mimeData()->hasFormat(ui::kToolbarMime)) e->acceptProposedAction();
+}
+
+void TimelinePanel::dropEvent(QDropEvent* e) {
+    if (!e->mimeData()->hasFormat(ui::kToolbarMime)) return;
+    e->acceptProposedAction();
+    emit toolbarMoveRequested(false, QPoint());
+}
 
 float TimelinePanel::trackW() const { return std::max(50.0f, static_cast<float>(rows_->width()) - leftWidth_); }
 
@@ -790,11 +886,14 @@ void TimelinePanel::sync() {
     if (!isVisible()) return;
     const Composition& comp = ctx_.comp();
     timecode_->setText(QString::fromStdString(ui::formatTimecode(ctx_.time, comp.fps)));
-    frameInfo_->setText(QString("frame %1 / %2  ·  %3 fps").arg(comp.frameAt(ctx_.time)).arg(comp.frameCount() - 1).arg(comp.fps, 0, 'g', 4));
+    frameInfo_->setText(QString("frame %1").arg(comp.frameAt(ctx_.time)));
+    frameInfo_->setToolTip(QString("Frame %1 of %2  ·  %3 fps").arg(comp.frameAt(ctx_.time)).arg(comp.frameCount() - 1).arg(comp.fps, 0, 'g', 4));
     play_->setIcon(ctx_.playing ? ui::Icon::Pause : ui::Icon::Play);
     snap_->setActive(ctx_.snapping);
     loop_->setActive(ctx_.loop);
     graph_->setActive(graphMode_);
+    addKeys_->setVisible(graphMode_);
+    addKeys_->setEnabled(ctx_.selected() != nullptr);
     animOnly_->setActive(animatedOnly_);
     for (QPushButton* b : easeButtons_) {
         b->setVisible(graphMode_);
@@ -1400,6 +1499,10 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
 
 void TimelinePanel::rowsDoubleClick(QMouseEvent* e) {
     computeItems();
+    if (graphMode_ && e->button() == Qt::LeftButton && e->position().x() >= trackX0()) { // a key on the curve under the mouse
+        if (const auto curve = curveNear(e->position())) addGraphKeys({curve->first}, xToTime(static_cast<float>(e->position().x())));
+        return;
+    }
     if (graphMode_ || e->button() != Qt::LeftButton) return;
     const float x = static_cast<float>(e->position().x());
     const Item* item = itemAt(static_cast<float>(e->position().y()));

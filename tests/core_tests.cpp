@@ -798,6 +798,26 @@ void testFileParams() {
     fs::remove_all(dir);
 }
 
+void testBackground() {
+    Project p;
+    CHECK(run(p, R"([{"op": "layer.add", "type": "text", "text": "Hi", "name": "T"},
+                     {"op": "layer.add", "type": "background", "name": "BG", "fill": "radial"},
+                     {"op": "property.set", "layer": "BG", "prop": "bg_darken", "value": 30}])").ok);
+    CHECK(p.comp.layers.back().type == LayerType::Background); // under everything
+    CHECK(p.comp.layers.back().background.fill == BackgroundFill::Radial);
+    CHECK(!run(p, R"({"op": "layer.set", "layer": "BG", "fill": "plaid"})").ok);
+    CHECK(!run(p, R"({"op": "layer.set", "layer": "BG", "media": 99})").ok);
+    // It never moves: no position, and its matrix is the identity whatever the transform says.
+    Layer& bg = p.comp.layers.back();
+    bg.transform.position.base = {500, 500};
+    CHECK(near(bg.matrixAt(0).apply({10, 20}).x, 10) && near(bg.matrixAt(0).apply({10, 20}).y, 20));
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    CHECK(back.comp.layers.back().type == LayerType::Background && back.comp.layers.back().background.fill == BackgroundFill::Radial);
+    CHECK(near(back.comp.layers.back().background.darken.valueAt(0), 30));
+    CHECK(validate(back).empty());
+}
+
 } // namespace
 
 int main() {
@@ -841,6 +861,7 @@ int main() {
         {"copy and paste", testCopyPaste},
         {"arrange and transitions", testArrangeAndTransitions},
         {"file parameters", testFileParams},
+        {"background", testBackground},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

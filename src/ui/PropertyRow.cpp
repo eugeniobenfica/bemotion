@@ -78,8 +78,8 @@ CollapsibleSection::CollapsibleSection(const QString& title, QWidget* parent, QW
     body_ = new QVBoxLayout(content_);
     body_->setContentsMargins(4, 6, 2, 8);
     body_->setSpacing(4);
+    col->addWidget(content_); // parented first: shown on its own, a widget would flash up as a window
     content_->setVisible(header_->isChecked());
-    col->addWidget(content_);
     connect(header_, &QToolButton::toggled, this, [this, title, setArrow](bool open) {
         content_->setVisible(open);
         collapsedSections()[title] = !open;

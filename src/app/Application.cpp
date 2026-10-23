@@ -17,6 +17,7 @@
 #include "ui/HomeScreen.h"
 #include "ui/IntroScreen.h"
 #include "ui/Keymap.h"
+#include "ui/Style.h"
 #include "ui/Theme.h"
 
 #include <QAction>
@@ -144,7 +145,7 @@ int Application::run(int argc, char** argv) {
     platform::startLog();
     platform::log("Qt " + std::string(qVersion()) + " on " + QSysInfo::prettyProductName().toStdString() + ", screen scale " +
                   std::to_string(app.devicePixelRatio()));
-    QApplication::setStyle("Fusion"); // the palette and style sheet do the rest
+    QApplication::setStyle(new ui::Style); // Fusion with our check boxes; the palette and style sheet do the rest
     initShared();
     // The interface font: Inter ships with bemotion (other families come from the system).
     for (const char* style : {"Regular", "Medium", "SemiBold", "Bold"})

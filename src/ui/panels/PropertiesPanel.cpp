@@ -2,6 +2,7 @@
 
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "app/Automation.h"
 #include "app/PresetLibrary.h"
 #include "core/Data.h"
 #include "core/Presets.h"
@@ -122,7 +123,9 @@ std::string PropertiesPanel::structureKey() {
     Layer* layer = ctx_.selected();
     k << ctx_.selection.size() << ':';
     if (!layer) return k.str() + "comp";
-    k << layer->id << ':' << static_cast<int>(layer->type) << ':' << static_cast<int>(layer->shape.kind) << ':' << layer->parent << ':'
+    k << layer->id << ':' << static_cast<int>(layer->type) << ':' << static_cast<int>(layer->shape.kind) << ':'
+      << static_cast<int>(layer->background.fill) << ':' << layer->background.mediaId << ':' << ctx_.comp().media.size() << ':'
+      << layer->parent << ':'
       << layer->plugin.objectType << ':' << layer->plugin.rows.size() << ':' << layer->plugin.table.rows.size() << 'x'
       << layer->plugin.table.header.size() << ':' << layer->media.mediaId << ':' << layer->media.hasAudio
       << ':' << PresetLibrary::all().size() << ':' << presetMessage_;
@@ -454,6 +457,8 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                         on->setChecked(fill ? l->shape.fillEnabled : l->shape.strokeEnabled);
                     }
                 });
+            } else if (group == "Background" && layer.type == LayerType::Background) {
+                buildBackgroundRows(section, layer);
             } else if (group == "Text" && layer.type == LayerType::Text) {
                 auto* text = new QPlainTextEdit;
                 text->setFixedHeight(text->fontMetrics().height() * 4 + 12);
@@ -771,6 +776,74 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
     buttons->addStretch();
     s->body()->addLayout(buttons);
     col->addWidget(s);
+}
+
+void PropertiesPanel::buildBackgroundRows(CollapsibleSection* section, Layer& layer) {
+    const uint64_t id = layer.id;
+    auto bg = [this, id]() -> BackgroundProps* {
+        Layer* l = ctx_.comp().findLayer(id);
+        return l ? &l->background : nullptr;
+    };
+    auto* fill = newCombo();
+    for (int i = 0; i < static_cast<int>(BackgroundFill::Count); ++i) fill->addItem(backgroundFillLabel(static_cast<BackgroundFill>(i)));
+    fill->setCurrentIndex(static_cast<int>(layer.background.fill));
+    connect(fill, &QComboBox::currentIndexChanged, this, [this, bg](int i) {
+        if (BackgroundProps* b = bg(); b && i >= 0) {
+            b->fill = static_cast<BackgroundFill>(i);
+            ctx_.touch(); // the panel rebuilds: other colors / settings
+        }
+    });
+    section->addPlainRow("Fill", fill);
+    if (layer.background.fill != BackgroundFill::Image) return;
+    // The picture: any image or video of the Media panel, or a new import.
+    auto* media = newCombo();
+    media->addItem("None");
+    int current = 0;
+    std::vector<uint64_t> ids{0};
+    for (const MediaItem& m : ctx_.comp().media) {
+        if (m.kind == MediaKind::Audio) continue;
+        ids.push_back(m.id);
+        media->addItem(QString::fromStdString(m.name));
+        if (m.id == layer.background.mediaId) current = static_cast<int>(ids.size()) - 1;
+    }
+    media->addItem("Import...");
+    media->setCurrentIndex(current);
+    connect(media, &QComboBox::currentIndexChanged, this, [this, bg, ids, id](int i) {
+        BackgroundProps* b = bg();
+        if (!b || i < 0) return;
+        if (i >= static_cast<int>(ids.size())) { // Import...
+            const auto files = platform::openFilesDialog("Background Picture or Video", "Images and videos",
+                                                         {"png", "jpg", "jpeg", "webp", "bmp", "gif", "mp4", "mov", "webm", "mkv", "avi"});
+            if (files.empty()) {
+                key_.clear();
+                return;
+            }
+            MediaItem item;
+            std::string error;
+            if (!automationEnvironment().probeMedia(platform::toUtf8(files.front()), item, error)) {
+                presetMessage_ = "Could not import: " + error;
+                key_.clear();
+                return;
+            }
+            const uint64_t mediaId = ctx_.comp().addMedia(item);
+            if (BackgroundProps* b2 = bg()) b2->mediaId = mediaId;
+        } else {
+            b->mediaId = ids[static_cast<size_t>(i)];
+        }
+        ctx_.touch();
+        key_.clear();
+    });
+    section->addPlainRow("Picture", media);
+    auto* fit = newCombo();
+    for (int i = 0; i < static_cast<int>(BackgroundFit::Count); ++i) fit->addItem(backgroundFitLabel(static_cast<BackgroundFit>(i)));
+    fit->setCurrentIndex(static_cast<int>(layer.background.fit));
+    connect(fit, &QComboBox::currentIndexChanged, this, [this, bg](int i) {
+        if (BackgroundProps* b = bg(); b && i >= 0) {
+            b->fit = static_cast<BackgroundFit>(i);
+            ctx_.touch();
+        }
+    });
+    section->addPlainRow("Fit", fit);
 }
 
 QWidget* PropertiesPanel::filePicker(uint64_t layerId, const std::string& paramId) {

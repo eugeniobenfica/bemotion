@@ -50,6 +50,16 @@ struct PluginCommand {
     std::string name;
     std::string description;
     int runRef = -1; // Lua registry reference of the run function
+    // A button for it (API 5): where ("timeline": the timeline's toolbar), its icon, and whether it
+    // stays pressed (`doc.pressed` then tells the command which way it went).
+    std::string place, icon;
+    bool toggle = false;
+};
+
+// What a command asked of the editor besides changing the project.
+struct CommandOutcome {
+    bool changed = false; // it changed the project
+    int play = -1;        // doc.play(): 1 start, 0 stop playback, -1 nothing
 };
 
 struct Plugin {
@@ -109,7 +119,10 @@ public:
     // Runs a command on `project` (the playhead and selected layer ids are passed to it).
     // The project changes only if the whole command succeeds; `error` explains a failure.
     bool runCommand(const std::string& commandId, Project& project, double time, const std::vector<uint64_t>& selection,
-                    const OpEnvironment& env, std::string& error);
+                    const OpEnvironment& env, std::string& error, bool pressed = false, CommandOutcome* outcome = nullptr);
+    // Where recordings (bemotion.microphone) are saved: the open project's folder.
+    void setProjectFolder(const std::filesystem::path& folder) { projectFolder_ = folder; }
+    const std::filesystem::path& projectFolder() const { return projectFolder_; }
     // Runs a standalone script (a "main" with the same `doc` API, permission "edit"):
     // `bemotion script <project> <file.lua>`. Its print() output goes to `log`.
     static bool runScript(const std::string& code, const std::string& chunkName, Project& project, double time,
@@ -121,6 +134,7 @@ private:
     std::vector<PluginObjectType> types_;
     std::vector<PluginCommand> commands_;
     bool reloadRequested_ = false;
+    std::filesystem::path projectFolder_;
 };
 
 } // namespace bemotion

@@ -9,6 +9,7 @@
 
 #include <QElapsedTimer>
 #include <QMainWindow>
+#include <QPointer>
 
 #include <filesystem>
 #include <map>
@@ -75,7 +76,7 @@ private:
     void save();
     void saveAs();
     void jumpToKeyframe(int direction);
-    void runPluginCommand(const std::string& id);
+    void runPluginCommand(const std::string& id, bool pressed = false);
     void arrange(bool stagger, bool vertical = false);
     void setStatus(const QString& text); // errors and notes next to the menus (empty clears)
     bool copyToClipboard();
@@ -87,7 +88,11 @@ private:
     void minimizeArea(ads::CDockAreaWidget* area);
     void restoreMinimized(size_t index);
     void showTools();
+    void placeToolbar(); // in the timeline, or floating over the viewport (Settings::toolbarInViewport)
     void placeRestoreHandles();
+    void updateMinimizeHandles();
+    int edgeOf(ads::CDockAreaWidget* area, float* along) const; // 0 left, 1 right, 2 top, 3 bottom
+    QPoint handlePos(int edge, float along, QSize size) const;
     QAction* action(ui::Action a, const QString& text, std::function<void()> fn);
 
     EditorContext ctx_;
@@ -116,6 +121,13 @@ private:
         QWidget* handle = nullptr;
     };
     std::vector<Minimized> minimized_;
+    struct MinimizeHandle {
+        QPointer<ads::CDockAreaWidget> area;
+        QWidget* handle = nullptr;
+        int edge = 0;
+    };
+    std::vector<MinimizeHandle> minimizeHandles_;
+    QPoint pointer_, lastCursor_; // where the mouse is (global), for the minimize handles
 
     std::map<ui::Action, QAction*> actions_;
     QTimer* timer_ = nullptr;

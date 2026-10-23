@@ -94,7 +94,10 @@ enum class Icon {
     Paste,
     Transition,
     Table,
-    Cube, // 3D models
+    Cube,       // 3D models
+    Background, // the background object
+    Coffee,     // support (Buy Me a Coffee)
+    Microphone, // recording
 };
 
 Icon iconForLayer(const Layer& layer);
@@ -140,6 +143,7 @@ public:
         active_ = active;
         update();
     }
+    void setActiveColor(Rgba color) { activeColor_ = color; } // 0: the accent (a recording button is red)
     bool active() const { return active_; }
     QSize sizeHint() const override { return {size_, size_}; }
 
@@ -152,6 +156,7 @@ private:
     Icon icon_;
     int size_;
     bool active_ = false;
+    Rgba activeColor_ = 0;
 };
 
 // An object / tool / category tile: big icon and a label underneath. Dragging it

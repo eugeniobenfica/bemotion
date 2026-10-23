@@ -4,6 +4,7 @@
 #include "app/Platform.h"
 #include "app/Settings.h"
 #include "core/Easing.h"
+#include "media/Recorder.h"
 #include "render/PluginCanvas.h"
 
 // Lua is built as C++ (see cmake/Dependencies.cmake): no extern "C".
@@ -326,6 +327,7 @@ struct CommandRun {
     const OpEnvironment* env = nullptr;
     bool mayImport = false;
     int ops = 0;
+    int play = -1; // doc.play()
 };
 CommandRun* g_run = nullptr;
 
@@ -366,10 +368,19 @@ int docLayer(lua_State* L) {
     return docQuery(L, op);
 }
 
-void pushDoc(lua_State* L, double time, const std::vector<uint64_t>& selection) {
+// doc.play(true | false): start or stop playback when the command ends (e.g. while recording).
+int docPlay(lua_State* L) {
+    if (!g_run) return luaL_error(L, "doc can only be used while the command runs");
+    g_run->play = lua_toboolean(L, 1) ? 1 : 0;
+    return 0;
+}
+
+void pushDoc(lua_State* L, double time, const std::vector<uint64_t>& selection, bool pressed = false) {
     const luaL_Reg fns[] = {{"apply", docApply}, {"layers", docLayers}, {"layer", docLayer}, {"composition", docComposition},
-                            {nullptr, nullptr}};
+                            {"play", docPlay}, {nullptr, nullptr}};
     luaL_newlib(L, fns);
+    lua_pushboolean(L, pressed);
+    lua_setfield(L, -2, "pressed");
     lua_pushnumber(L, time);
     lua_setfield(L, -2, "time");
     lua_createtable(L, static_cast<int>(selection.size()), 0);
@@ -393,6 +404,15 @@ int bmRegisterCommand(lua_State* L) {
     c.id = c.pluginId + "." + id;
     c.name = fieldString(L, 1, "name", id);
     c.description = fieldString(L, 1, "description", "");
+    lua_getfield(L, 1, "button"); // { place = "timeline", icon = "mic", toggle = true }
+    if (lua_istable(L, -1)) {
+        c.place = fieldString(L, -1, "place", "timeline");
+        c.icon = fieldString(L, -1, "icon", "plugin");
+        lua_getfield(L, -1, "toggle");
+        c.toggle = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
     lua_getfield(L, 1, "run");
     if (!lua_isfunction(L, -1)) return luaL_error(L, "register_command '%s': run must be a function", id.c_str());
     c.runRef = luaL_ref(L, LUA_REGISTRYINDEX);
@@ -768,6 +788,53 @@ int gMesh(lua_State* L) {
     return 0;
 }
 
+// --- the microphone (permission "microphone") -----------------------------------------------
+
+bool mayRecord(lua_State* L) {
+    Plugin* p = pluginOf(L);
+    return p && p->may("microphone");
+}
+
+int micStart(lua_State* L) {
+    if (!mayRecord(L)) return luaL_error(L, "add \"microphone\" to the plugin's permissions to record");
+    std::string error;
+    if (!media::Recorder::get().start(&error)) return luaL_error(L, "%s", error.c_str());
+    return 0;
+}
+
+// stop() -> the recording's file: <project folder>/Recordings/Recording N.wav
+int micStop(lua_State* L) {
+    if (!mayRecord(L)) return luaL_error(L, "add \"microphone\" to the plugin's permissions to record");
+    fs::path folder = PluginHost::get().projectFolder();
+    if (folder.empty()) folder = platform::defaultProjectsDir();
+    folder /= "Recordings";
+    fs::path file;
+    std::error_code ec;
+    for (int n = 1;; ++n) {
+        file = folder / platform::fromUtf8("Recording " + std::to_string(n) + ".wav");
+        if (!fs::exists(file, ec)) break;
+    }
+    std::string error;
+    if (!media::Recorder::get().stop(file, &error)) return luaL_error(L, "%s", error.c_str());
+    lua_pushstring(L, platform::toUtf8(file).c_str());
+    return 1;
+}
+
+int micRecording(lua_State* L) {
+    lua_pushboolean(L, media::Recorder::get().recording());
+    return 1;
+}
+
+int micLevel(lua_State* L) {
+    lua_pushnumber(L, media::Recorder::get().level());
+    return 1;
+}
+
+int micCancel(lua_State* L) {
+    if (mayRecord(L)) media::Recorder::get().cancel();
+    return 0;
+}
+
 // bemotion.parse_csv(text) -> { {cell, ...}, ... } (rows of strings; see core/Data.h).
 int bmParseCsv(lua_State* L) {
     pushCells(L, parseCsv(luaL_checkstring(L, 1)));
@@ -936,8 +1003,12 @@ lua_State* newSandbox(const std::string& pluginId) {
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);
     luaL_newlib(L, api);
-    lua_pushinteger(L, 4); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes
+    lua_pushinteger(L, 5); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone
     lua_setfield(L, -2, "api_version");
+    const luaL_Reg mic[] = {{"start", micStart}, {"stop", micStop}, {"recording", micRecording}, {"level", micLevel},
+                            {"cancel", micCancel}, {nullptr, nullptr}};
+    luaL_newlib(L, mic);
+    lua_setfield(L, -2, "microphone");
     lua_setglobal(L, "bemotion");
 
     const luaL_Reg gfx[] = {{"rect", gRect},       {"rect_outline", gRectOutline}, {"circle", gCircle}, {"line", gLine},
@@ -1180,13 +1251,14 @@ namespace {
 
 // Calls the function on top of the stack with `doc`, on a copy of `project`.
 bool runWithDoc(lua_State* L, Project& project, double time, const std::vector<uint64_t>& selection,
-                const OpEnvironment& env, bool mayImport, std::string& error) {
+                const OpEnvironment& env, bool mayImport, std::string& error, bool pressed = false,
+                CommandOutcome* outcome = nullptr) {
     CommandRun run;
     run.work = project;
     run.env = &env;
     run.mayImport = mayImport;
     g_run = &run;
-    pushDoc(L, time, selection);
+    pushDoc(L, time, selection, pressed);
     g_budget = kCommandBudget;
     lua_sethook(L, budgetHook, LUA_MASKCOUNT, kHookEvery);
     const bool ok = lua_pcall(L, 1, 0, 0) == LUA_OK;
@@ -1196,6 +1268,10 @@ bool runWithDoc(lua_State* L, Project& project, double time, const std::vector<u
         lua_pop(L, 1);
         return false;
     }
+    if (outcome) {
+        outcome->changed = run.ops > 0;
+        outcome->play = run.play;
+    }
     if (run.ops > 0) project = std::move(run.work);
     return true;
 }
@@ -1203,7 +1279,7 @@ bool runWithDoc(lua_State* L, Project& project, double time, const std::vector<u
 } // namespace
 
 bool PluginHost::runCommand(const std::string& commandId, Project& project, double time, const std::vector<uint64_t>& selection,
-                            const OpEnvironment& env, std::string& error) {
+                            const OpEnvironment& env, std::string& error, bool pressed, CommandOutcome* outcome) {
     const auto it = std::find_if(commands_.begin(), commands_.end(), [&](const PluginCommand& c) { return c.id == commandId; });
     Plugin* plugin = it != commands_.end() ? findPlugin(it->pluginId) : nullptr;
     if (!plugin || !plugin->L || !plugin->enabled) {
@@ -1213,7 +1289,7 @@ bool PluginHost::runCommand(const std::string& commandId, Project& project, doub
     lua_State* L = plugin->L;
     const int top = lua_gettop(L);
     lua_rawgeti(L, LUA_REGISTRYINDEX, it->runRef);
-    const bool ok = runWithDoc(L, project, time, selection, env, plugin->may("media"), error);
+    const bool ok = runWithDoc(L, project, time, selection, env, plugin->may("media"), error, pressed, outcome);
     if (!ok) {
         plugin->log.push_back(it->name + ": " + error);
         if (plugin->log.size() > kMaxLogLines) plugin->log.erase(plugin->log.begin());

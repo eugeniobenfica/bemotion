@@ -33,8 +33,11 @@ struct Settings {
     double maxDuration = 0.0;          // length limit of new projects, seconds (0: none)
     int autosaveMinutes = 5;           // saves open projects this often (0: off)
     bool showIntro = true;             // the opening animation at startup
+    bool showRulers = false;           // the viewport's rulers (View > Rulers)
     bool welcomeAdded = false;         // the Welcome project was put in the projects list once
     std::vector<std::string> toolbar = ui::defaultToolbar(); // tool ids in the timeline's toolbar (ui/Tools.h)
+    bool toolbarInViewport = false;      // the toolbar floats over the viewport ...
+    float toolbarX = 0.5f, toolbarY = 0.0f; // ... with its top-left here (fractions of the free space)
     std::vector<std::string> disabledPlugins; // plugin ids
 };
 

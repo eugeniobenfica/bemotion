@@ -17,7 +17,7 @@ namespace bemotion {
 
 namespace {
 
-constexpr int kTileWidth = 84;
+constexpr int kTileWidth = 72;
 
 // A grid of tiles under a section title.
 struct Section {
@@ -54,7 +54,7 @@ void ObjectsPanel::rebuild() {
     pluginTypes_ = types.size();
     columns_ = std::max(2, (viewport()->width() - 16) / (kTileWidth + 8));
     const int tileW = std::max(56, (viewport()->width() - 16 - 8 * (columns_ - 1)) / columns_);
-    const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.8f), 56, 84));
+    const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.78f), 50, 66));
 
     content_ = new QWidget;
     auto* col = new QVBoxLayout(content_);
@@ -92,6 +92,9 @@ void ObjectsPanel::rebuild() {
     Section scene = section("Scene");
     scene.add(makeTile(ui::Icon::Camera, "Camera", "A camera frames the scene: animate its position, rotation and zoom",
                        ui::kDropCamera, [this] { ctx_.addCamera(); }));
+    scene.add(makeTile(ui::Icon::Background, "Background",
+                       "Fills the whole frame, under everything: a color, a gradient, a picture or a video",
+                       ui::kDropBackground, [this] { ctx_.addBackground(); }));
 
     // Object types from plugins (charts, ...), grouped by plugin.
     std::string lastPlugin;

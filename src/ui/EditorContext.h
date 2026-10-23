@@ -41,7 +41,7 @@ public:
     bool snapping = true;     // magnet: objects, clips and keyframes snap (hold Ctrl to bypass)
     bool showGuides = true;
     bool lockGuides = false;
-    bool showRulers = true;
+    bool showRulers = false; // from Settings::showRulers
     double time = 0.0;
     bool playing = false;
     bool loop = true;
@@ -90,6 +90,7 @@ public:
     Layer& addShape(ShapeKind kind, std::optional<Vec2> position = std::nullopt);
     Layer& addText(std::optional<Vec2> position = std::nullopt);
     Layer& addCamera();
+    Layer& addBackground(); // under everything, over the whole composition
     Layer& addPluginObject(const struct PluginObjectType& type, std::optional<Vec2> position = {});
     void deleteSelected();
     void duplicateSelected();

@@ -1,0 +1,10 @@
+{
+  "id": "recorder",
+  "name": "Recorder",
+  "version": "1.0.0",
+  "author": "bemotion",
+  "description": "Record a voice-over from the microphone, right in the timeline: the timeline plays while you speak, and the recording lands at the playhead.",
+  "main": "main.lua",
+  "api": 5,
+  "permissions": ["edit", "media", "microphone"]
+}

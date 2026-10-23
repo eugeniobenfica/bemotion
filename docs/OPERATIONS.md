@@ -51,8 +51,11 @@ the content: it ends with the last clip, but never passes `max_duration`.
 
 **`layer.add`** → `{"layer": id, "name": name}`
 - `type`: `text`, `rectangle`, `ellipse`, `polygon`, `star`, `line`, `camera`,
-  `media` (with `"media": id` from `media.import`) or `plugin` (with
-  `"object": "charts.bar"`).
+  `media` (with `"media": id` from `media.import`), `background` (fills the
+  whole frame; goes to the bottom; `fill`: `solid`, `linear`, `radial` or
+  `image` with `"media": id` and `fit`: `cover`, `contain`, `stretch`) or
+  `plugin` (with `"object": "charts.bar"`). Background properties:
+  `bg_color`, `bg_color2`, `bg_angle`, `bg_zoom`, `bg_offset`, `bg_darken`.
 - `name`, `text` (text layers), `position` (default: the center), `start`
   (seconds, default 0), `duration` (default 5; media: their own length),
   `parent` (a compound), `above` / `below` (a layer) or `"at": "bottom"`
@@ -62,7 +65,7 @@ the content: it ends with the last clip, but never passes `max_duration`.
 `label` (0–7), `start` (moves the clip and its keyframes), `in`, `out` (trim,
 kept between neighbors on its track), and for text `text`, `font`, `style`,
 `align` (`left`, `center`, `right`); for shapes `shape` (kind), `fill`,
-`stroke` (booleans).
+`stroke` (booleans); for backgrounds `fill`, `media`, `fit`.
 
 **`layer.remove`** — `layer` (a compound takes its contents along).
 
@@ -107,8 +110,9 @@ Removes every keyframe.
 
 ## Transitions and arranging
 
-**`transition.add`** — `layer`, `transition` (`fade`, `slide_left`,
-`slide_right`, `slide_up`, `slide_down`, `zoom`, `pop`, `spin`), `edge` (`in`,
+**`transition.add`** — `layer`, `transition` (`fade`, `fade_up`, `slide_left`,
+`slide_right`, `slide_up`, `slide_down`, `zoom`, `pop`, `stretch`, `spin`,
+`swing`, `roll`), `edge` (`in`,
 `out` or `both`; default `in`), `duration` (seconds, default 0.5). Keyframes at
 the clip's start and/or end; keys already there are replaced.
 

@@ -2,6 +2,7 @@
 
 #include <QScrollArea>
 
+#include <string>
 #include <vector>
 
 class QButtonGroup;
@@ -15,8 +16,9 @@ class Tile;
 } // namespace ui
 
 // How clips come in and go away (core/Transitions.h): pick where (start, end
-// or both) and how long, then click a transition to put it on the selected
-// clips. Each one is keyframes at the clip's edges, editable afterwards.
+// or both) and how long, open a category, then click a transition to put it on
+// the selected clips. Each one is keyframes at the clip's edges, editable
+// afterwards.
 class TransitionsPanel : public QScrollArea {
     Q_OBJECT
 public:
@@ -35,6 +37,7 @@ private:
     ui::DragValue* duration_ = nullptr;
     int columns_ = 0;
     int edgeChoice_ = 0; // 0 in, 1 out, 2 both
+    std::string category_; // the open category ("": the list of categories)
     float seconds_ = 0.5f;
 };
 

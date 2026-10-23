@@ -37,6 +37,9 @@ class IconButton;
 //   double-click a text           edit it in place; a compound: enter it
 class ViewportPanel : public QWidget {
     Q_OBJECT
+signals:
+    void toolbarDropped(QPoint at); // the toolbar's grip was dropped here
+
 public:
     explicit ViewportPanel(EditorContext& ctx, QWidget* parent = nullptr);
 

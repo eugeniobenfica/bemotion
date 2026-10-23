@@ -19,15 +19,23 @@ namespace bemotion {
 
 namespace {
 
+ui::Icon categoryIcon(const std::string& c) {
+    if (c == "Slide") return ui::Icon::ChevronRight;
+    if (c == "Scale") return ui::Icon::ZoomIn;
+    if (c == "Rotate") return ui::Icon::Reset;
+    return ui::Icon::Transition;
+}
+
 ui::Icon iconOf(const std::string& id) {
-    if (id == "fade") return ui::Icon::Transition;
+    if (id == "fade" || id == "fade_up") return ui::Icon::Transition;
     if (id == "slide_left") return ui::Icon::ChevronLeft;
     if (id == "slide_right") return ui::Icon::ChevronRight;
     if (id == "slide_up") return ui::Icon::ChevronUp;
     if (id == "slide_down") return ui::Icon::ChevronDown;
     if (id == "zoom") return ui::Icon::ZoomIn;
     if (id == "pop") return ui::Icon::Plus;
-    if (id == "spin") return ui::Icon::Reset;
+    if (id == "stretch") return ui::Icon::Ungroup;
+    if (id == "spin" || id == "swing" || id == "roll") return ui::Icon::Reset;
     return ui::Icon::Transition;
 }
 
@@ -42,13 +50,13 @@ TransitionsPanel::TransitionsPanel(EditorContext& ctx, QWidget* parent) : QScrol
 
 void TransitionsPanel::resizeEvent(QResizeEvent* e) {
     QScrollArea::resizeEvent(e);
-    if (std::max(2, (viewport()->width() - 16) / 92) != columns_) rebuild();
+    if (std::max(2, (viewport()->width() - 16) / 80) != columns_) rebuild();
 }
 
 void TransitionsPanel::rebuild() {
-    columns_ = std::max(2, (viewport()->width() - 16) / 92);
+    columns_ = std::max(2, (viewport()->width() - 16) / 80);
     const int tileW = std::max(56, (viewport()->width() - 16 - 8 * (columns_ - 1)) / columns_);
-    const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.8f), 56, 84));
+    const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.78f), 50, 66));
 
     auto* content = new QWidget;
     auto* col = new QVBoxLayout(content);
@@ -84,26 +92,48 @@ void TransitionsPanel::rebuild() {
     col->addLayout(length);
     col->addSpacing(4);
 
-    col->addWidget(ui::sectionLabel("Transitions"));
+    // The categories, or the transitions of the open one.
+    tiles_.clear();
     auto* grid = new QGridLayout;
     grid->setSpacing(8);
     grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-    tiles_.clear();
-    const auto& list = transitions();
-    for (int i = 0; i < static_cast<int>(list.size()); ++i) {
-        auto* t = new ui::Tile(iconOf(list[i].id), list[i].name);
-        t->setTileSize(tile);
-        t->setToolTip(QString("%1\n\nClick to put it on the selected clips.").arg(list[i].about));
-        connect(t, &QAbstractButton::clicked, this, [this, i] { apply(i); });
-        grid->addWidget(t, i / columns_, i % columns_);
-        tiles_.push_back(t);
+    int n = 0;
+    if (category_.empty()) {
+        col->addWidget(ui::sectionLabel("Transitions"));
+        for (const char* c : transitionCategories()) {
+            auto* t = new ui::Tile(categoryIcon(c), c);
+            t->setTileSize(tile);
+            const std::string name = c;
+            connect(t, &QAbstractButton::clicked, this, [this, name] {
+                category_ = name;
+                QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
+            });
+            grid->addWidget(t, n / columns_, n % columns_);
+            ++n;
+        }
+    } else {
+        auto* head = new QHBoxLayout;
+        auto* back = new ui::IconButton(ui::Icon::Back, "All transitions", 24);
+        connect(back, &QAbstractButton::clicked, this, [this] {
+            category_.clear();
+            QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
+        });
+        head->addWidget(back);
+        head->addWidget(new QLabel(QString::fromStdString(category_)), 1);
+        col->addLayout(head);
+        const auto& list = transitions();
+        for (int i = 0; i < static_cast<int>(list.size()); ++i) {
+            if (category_ != list[i].category) continue;
+            auto* t = new ui::Tile(iconOf(list[i].id), list[i].name);
+            t->setTileSize(tile);
+            t->setToolTip(QString("%1\n\nClick to put it on the selected clips.").arg(list[i].about));
+            connect(t, &QAbstractButton::clicked, this, [this, i] { apply(i); });
+            grid->addWidget(t, n / columns_, n % columns_);
+            tiles_.push_back(t);
+            ++n;
+        }
     }
     col->addLayout(grid);
-    auto* hint = new QLabel("Transitions are keyframes at the clip's start or end: move them in the timeline, "
-                            "or ease them like any animation.");
-    hint->setWordWrap(true);
-    ui::setTone(hint, ui::Tone::TextFaint);
-    col->addWidget(hint);
     col->addStretch();
     setWidget(content);
 }

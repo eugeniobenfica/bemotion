@@ -631,9 +631,13 @@ bemotion.register_object {
       { id = "easing", label = "Easing", type = "choice", choices = EASINGS, default = "Ease Out", group = "Animation" },
       { id = "reveal", label = "Reveal", type = "choice", choices = { "Slide Up", "Slide In", "Fade" },
         default = "Slide Up", group = "Animation" } },
-    { { id = "highlight", label = "Highlight Row", type = "number", default = 0, min = 0, max = 100, step = 0.05,
+    { { id = "sort", label = "Sort", type = "choice", choices = { "None", "Ascending", "Descending" },
+        default = "None", group = "Sorting & Highlight" },
+      { id = "sort_column", label = "Sort By Column", type = "number", default = 1, min = 1, max = 50, step = 0.05,
+        format = "%.0f", group = "Sorting & Highlight" },
+      { id = "highlight", label = "Highlight Row", type = "number", default = 0, min = 0, max = 100, step = 0.05,
         format = "%.0f (0 = none)", group = "Sorting & Highlight" },
-      { id = "highlight_color", label = "Highlight Color", type = "color", default = "#E8B93155",
+      { id = "highlight_color", label = "Highlight Color", type = "color", default = "#FFFFFF38",
         group = "Sorting & Highlight" } },
     { { id = "title", label = "Title", type = "text", default = "", group = "Text" },
       { id = "font_size", label = "Font Size", type = "number", default = 28, min = 6, max = 200,
@@ -646,9 +650,31 @@ bemotion.register_object {
     for _, r in ipairs(rows) do ncols = math.max(ncols, #r) end
     local x0, y0, x1, y1 = frame(o, g)
     if ncols == 0 then return end
+    -- Rows in display order: sorted by a column on request (numbers as numbers), keeping their
+    -- position in the data for "Highlight Row".
+    local order = {}
+    for i, r in ipairs(rows) do order[i] = { cells = r, index = i } end
+    if o.sort ~= "None" then
+      local c = math.floor(o.sort_column + 0.5)
+      local descending = o.sort == "Descending"
+      table.sort(order, function(a, b)
+        local x, y = a.cells[c] or "", b.cells[c] or ""
+        local nx, ny = bemotion.number(x), bemotion.number(y)
+        if nx and ny then
+          if nx ~= ny then
+            if descending then return nx > ny end
+            return nx < ny
+          end
+        elseif x ~= y then
+          if descending then return x > y end
+          return x < y
+        end
+        return a.index < b.index
+      end)
+    end
     local lines = {}
     if o.show_header then lines[1] = { cells = header, header = true } end
-    for i, r in ipairs(rows) do lines[#lines + 1] = { cells = r, index = i } end
+    for i, r in ipairs(order) do lines[#lines + 1] = { cells = r.cells, index = r.index, stripe = i } end
     if #lines == 0 then return end
 
     -- Columns as wide as their longest text, then scaled to the width of the object.
@@ -666,6 +692,8 @@ bemotion.register_object {
     local row_h = math.min(fs * 2.1, ((y1 - y0) - gap * (#lines - 1)) / #lines)
     if row_h <= 2 then return end
     local size = math.min(fs * math.min(1, scale), row_h * 0.5)
+    -- The table sits in the middle of its frame (below the title, if any).
+    y0 = y0 + math.max(0, ((y1 - y0) - (#lines * row_h + gap * (#lines - 1))) / 2)
 
     -- Numbers line up on the right of their column.
     local numeric = {}
@@ -692,7 +720,7 @@ bemotion.register_object {
         local fill
         if line.header then fill = o.header_color
         elseif h > 0 and line.index == h then fill = o.highlight_color
-        elseif o.stripes and line.index % 2 == 0 then fill = o.stripe_color
+        elseif o.stripes and line.stripe % 2 == 0 then fill = o.stripe_color
         else fill = o.row_color end
         g.rect(x0 + dx, y + dy, x1 - x0, row_h, bemotion.with_alpha(fill, alpha), math.min(o.corner, row_h / 2))
         local x = x0 + dx
