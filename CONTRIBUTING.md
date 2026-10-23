@@ -5,8 +5,9 @@
 Thanks for your interest! bemotion aims to stay **simple, fast and easy to
 maintain**, so a few guidelines:
 
-1. **Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first.** Keep
-   `src/core` free of UI code and put each panel's logic in its own class.
+1. **Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) first.** It explains the
+   layers, the rules, how to add properties, effects, operations and panels,
+   and how to work alongside others (including AI agents) without conflicts.
 2. **Style:** C++20, 4-space indentation, 120 columns. A `.clang-format` file
    is provided — run `clang-format -i` on the files you touch.
    Types are `PascalCase`, functions and variables `camelCase`, private
