@@ -8,6 +8,7 @@
 // instruction budget per draw, so a broken plugin cannot hang the editor.
 // See docs/PLUGINS.md for the API.
 
+#include "core/Ops.h"
 #include "core/Project.h"
 
 #include <filesystem>
@@ -40,6 +41,16 @@ struct PluginObjectType {
     int drawRef = -1; // Lua registry reference of the draw function
 };
 
+// An action a plugin adds to the Plugins menu: Lua that edits the project
+// through operations (core/Ops.h), as one undoable step.
+struct PluginCommand {
+    std::string id; // "<plugin id>.<command id>"
+    std::string pluginId;
+    std::string name;
+    std::string description;
+    int runRef = -1; // Lua registry reference of the run function
+};
+
 struct Plugin {
     std::string id, name, version, author, description;
     std::filesystem::path dir;
@@ -48,6 +59,10 @@ struct Plugin {
     std::string error;     // load error (the plugin is inactive)
     std::string drawError; // last runtime error, cleared on success
     std::vector<std::string> log; // print() output
+    // What the plugin may do beyond drawing (plugin.json "permissions"):
+    //   "edit"  change the project (commands)     "media"  import media files
+    std::vector<std::string> permissions;
+    bool may(const std::string& permission) const;
     lua_State* L = nullptr;
 };
 
@@ -84,10 +99,22 @@ public:
 
     void draw(const Layer& layer, double time, render::PluginCanvas& canvas);
 
+    // Commands of enabled plugins, in load order.
+    std::vector<const PluginCommand*> commands() const;
+    // Runs a command on `project` (the playhead and selected layer ids are passed to it).
+    // The project changes only if the whole command succeeds; `error` explains a failure.
+    bool runCommand(const std::string& commandId, Project& project, double time, const std::vector<uint64_t>& selection,
+                    const OpEnvironment& env, std::string& error);
+    // Runs a standalone script (a "main" with the same `doc` API, permission "edit"):
+    // `bemotion script <project> <file.lua>`. Its print() output goes to `log`.
+    static bool runScript(const std::string& code, const std::string& chunkName, Project& project, double time,
+                          const OpEnvironment& env, std::vector<std::string>& log, std::string& error);
+
 private:
     void loadPlugin(const std::filesystem::path& dir, bool builtin);
     std::vector<Plugin> plugins_;
     std::vector<PluginObjectType> types_;
+    std::vector<PluginCommand> commands_;
     bool reloadRequested_ = false;
 };
 

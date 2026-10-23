@@ -1,0 +1,10 @@
+{
+  "id": "layout",
+  "name": "Layout",
+  "version": "1.0.0",
+  "author": "bemotion",
+  "description": "Commands that arrange and time the selected layers: distribute, stagger, fade in.",
+  "main": "main.lua",
+  "api": 2,
+  "permissions": ["edit"]
+}

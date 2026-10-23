@@ -1,5 +1,7 @@
 #include "core/Serialization.h"
 
+#include "core/Validate.h"
+
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
@@ -341,7 +343,7 @@ std::string serializeProject(const Project& project) {
     return root.dump(2);
 }
 
-bool deserializeProject(const std::string& text, Project& out, std::string* error) {
+bool deserializeProject(const std::string& text, Project& out, std::string* error, std::vector<Issue>* repairs) {
     try {
         const json root = json::parse(text);
         // "mirage" is the format id used before the project was renamed.
@@ -400,6 +402,10 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
             for (const auto& gj : cj.value("guides", json::array()))
                 c.guides.push_back({gj.value("vertical", true), gj.value("position", 0.0f)});
         }
+        // A damaged or hand-edited file still opens: whatever breaks the rules is fixed here,
+        // so the editor (and everything else) only ever sees valid projects.
+        std::vector<Issue> fixed = repair(p);
+        if (repairs) *repairs = std::move(fixed);
         out = std::move(p);
         return true;
     } catch (const std::exception& e) {
@@ -450,7 +456,7 @@ bool saveProject(const Project& source, const std::filesystem::path& path, std::
     return true;
 }
 
-bool loadProject(const std::filesystem::path& path, Project& out, std::string* error) {
+bool loadProject(const std::filesystem::path& path, Project& out, std::string* error, std::vector<Issue>* repairs) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {
         if (error) *error = "Could not open the file.";
@@ -458,7 +464,7 @@ bool loadProject(const std::filesystem::path& path, Project& out, std::string* e
     }
     std::stringstream ss;
     ss << f.rdbuf();
-    if (!deserializeProject(ss.str(), out, error)) return false;
+    if (!deserializeProject(ss.str(), out, error, repairs)) return false;
     for (MediaItem& m : out.comp.media) { // the project's own folder first, then where the file was
         std::error_code ec;
         if (!m.relative.empty() && std::filesystem::exists(path.parent_path() / pathFromUtf8(m.relative), ec))

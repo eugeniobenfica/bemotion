@@ -60,6 +60,7 @@ public:
     void toggleSelected(uint64_t layerId);
     void selectRange(uint64_t layerId); // from the primary layer to `layerId` in the stack
     void selectAll();
+    void pruneSelection(); // drops layers that no longer exist
     void clearKeySelection() { selectedKeys.clear(); }
     bool isKeySelected(const KeySelection& k) const;
 
@@ -125,7 +126,6 @@ private:
     template <typename Fn>
     void forEachSelectedKey(Fn&& fn); // fn(PropertyRef&, keyIndex)
     Layer& insertLayer(Layer layer);
-    void pruneSelection();
     bool pendingCommit_ = false;
     uint64_t revision_ = 0;
 };

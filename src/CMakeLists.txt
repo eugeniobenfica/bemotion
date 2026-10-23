@@ -5,6 +5,9 @@ add_library(bemotion_core STATIC
     core/Geometry.cpp
     core/History.cpp
     core/Animated.cpp
+    core/Describe.cpp
+    core/Ops.cpp
+    core/Validate.cpp
     core/Layer.cpp
     core/Presets.cpp
     core/Project.cpp
@@ -18,6 +21,7 @@ add_executable(bemotion WIN32
     main.cpp
     app/Application.cpp
     app/AppIcon.cpp
+    app/Automation.cpp
     app/DevScript.cpp
     app/EffectLibrary.cpp
     app/Platform.cpp

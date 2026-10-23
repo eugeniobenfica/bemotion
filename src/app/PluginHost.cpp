@@ -28,6 +28,7 @@ using json = nlohmann::json;
 constexpr int kHookEvery = 10000;   // instructions between budget checks
 constexpr int kDrawBudget = 400;    // x kHookEvery instructions per draw call
 constexpr int kLoadBudget = 2000;   // ... and for running main.lua
+constexpr int kCommandBudget = 20000; // ... and for a command (one-off, may build a whole scene)
 constexpr size_t kMaxLogLines = 50;
 
 // Per-call state shared with the Lua C functions (the editor is single threaded).
@@ -39,6 +40,12 @@ std::string readFile(const fs::path& file) {
     std::stringstream ss;
     ss << in.rdbuf();
     return ss.str();
+}
+
+// Windows editors often start UTF-8 files with a byte order mark, which Lua does not accept.
+std::string withoutBom(std::string code) {
+    if (code.rfind("\xEF\xBB\xBF", 0) == 0) code.erase(0, 3);
+    return code;
 }
 
 void budgetHook(lua_State* L, lua_Debug*) {
@@ -236,8 +243,159 @@ int bmPrint(lua_State* L) {
     return 0;
 }
 
-// Object types registered while main.lua runs, appended by the host afterwards.
+// Object types and commands registered while main.lua runs, appended by the host afterwards.
 std::vector<PluginObjectType>* g_registering = nullptr;
+std::vector<PluginCommand>* g_registeringCommands = nullptr;
+
+// --- Lua <-> JSON (operations travel as JSON) ----------------------------------------------
+
+json toJson(lua_State* L, int idx, int depth = 0) {
+    idx = lua_absindex(L, idx);
+    if (depth > 32) luaL_error(L, "table nested too deeply");
+    switch (lua_type(L, idx)) {
+    case LUA_TNIL: return nullptr;
+    case LUA_TBOOLEAN: return static_cast<bool>(lua_toboolean(L, idx));
+    case LUA_TNUMBER:
+        if (lua_isinteger(L, idx)) return static_cast<int64_t>(lua_tointeger(L, idx));
+        return lua_tonumber(L, idx);
+    case LUA_TSTRING: return std::string(lua_tostring(L, idx));
+    case LUA_TTABLE: {
+        // A sequence 1..n is an array; anything else an object (an empty table is an object).
+        const lua_Integer n = static_cast<lua_Integer>(lua_rawlen(L, idx));
+        bool array = n > 0;
+        if (array) {
+            lua_pushnil(L);
+            while (lua_next(L, idx)) {
+                lua_pop(L, 1);
+                if (!lua_isinteger(L, -1) || lua_tointeger(L, -1) < 1 || lua_tointeger(L, -1) > n) array = false;
+            }
+        }
+        if (array) {
+            json a = json::array();
+            for (lua_Integer i = 1; i <= n; ++i) {
+                lua_rawgeti(L, idx, i);
+                a.push_back(toJson(L, -1, depth + 1));
+                lua_pop(L, 1);
+            }
+            return a;
+        }
+        json o = json::object();
+        lua_pushnil(L);
+        while (lua_next(L, idx)) {
+            if (lua_type(L, -2) == LUA_TSTRING) o[lua_tostring(L, -2)] = toJson(L, -1, depth + 1);
+            lua_pop(L, 1);
+        }
+        return o;
+    }
+    default: luaL_error(L, "operations can only hold numbers, strings, booleans and tables"); return nullptr;
+    }
+}
+
+void pushJson(lua_State* L, const json& j) {
+    switch (j.type()) {
+    case json::value_t::null: lua_pushnil(L); break;
+    case json::value_t::boolean: lua_pushboolean(L, j.get<bool>()); break;
+    case json::value_t::number_integer:
+    case json::value_t::number_unsigned: lua_pushinteger(L, j.get<lua_Integer>()); break;
+    case json::value_t::number_float: lua_pushnumber(L, j.get<double>()); break;
+    case json::value_t::string: lua_pushstring(L, j.get<std::string>().c_str()); break;
+    case json::value_t::array:
+        lua_createtable(L, static_cast<int>(j.size()), 0);
+        for (size_t i = 0; i < j.size(); ++i) {
+            pushJson(L, j[i]);
+            lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+        }
+        break;
+    default:
+        lua_createtable(L, 0, static_cast<int>(j.size()));
+        for (const auto& [k, v] : j.items()) {
+            pushJson(L, v);
+            lua_setfield(L, -2, k.c_str());
+        }
+        break;
+    }
+}
+
+// --- the document a command edits ---------------------------------------------------------
+
+struct CommandRun {
+    Project work; // a copy: becomes the project only if the command succeeds
+    const OpEnvironment* env = nullptr;
+    bool mayImport = false;
+    int ops = 0;
+};
+CommandRun* g_run = nullptr;
+
+// doc.apply(op | {op, op, ...}): runs operations now (later calls see their effect) and
+// returns their results; a failing operation raises an error that ends the command.
+int docApply(lua_State* L) {
+    if (!g_run) return luaL_error(L, "doc can only be used while the command runs");
+    luaL_checktype(L, 1, LUA_TTABLE);
+    const json ops = toJson(L, 1);
+    const bool single = ops.is_object();
+    for (const json& op : single ? json::array({ops}) : ops)
+        if (op.is_object() && op.value("op", std::string()) == "media.import" && !g_run->mayImport)
+            return luaL_error(L, "media.import needs the \"media\" permission in plugin.json");
+    const OpsResult r = applyOps(g_run->work, ops, *g_run->env);
+    if (!r.ok) return luaL_error(L, "%s", r.error.c_str());
+    g_run->ops += single ? 1 : static_cast<int>(ops.size());
+    pushJson(L, single ? r.results[0] : r.results);
+    return 1;
+}
+
+// Shortcuts over doc.apply for the most common reads and writes.
+int docQuery(lua_State* L, json op) {
+    const OpsResult r = applyOps(g_run->work, op, *g_run->env);
+    if (!r.ok) return luaL_error(L, "%s", r.error.c_str());
+    pushJson(L, r.results[0]);
+    return 1;
+}
+json layerRef(lua_State* L, int idx) {
+    if (lua_isinteger(L, idx)) return static_cast<int64_t>(lua_tointeger(L, idx));
+    return std::string(luaL_checkstring(L, idx));
+}
+int docLayers(lua_State* L) { return g_run ? docQuery(L, {{"op", "query.layers"}}) : 0; }
+int docComposition(lua_State* L) { return g_run ? docQuery(L, {{"op", "query.composition"}}) : 0; }
+int docLayer(lua_State* L) {
+    if (!g_run) return 0;
+    json op = {{"op", "query.layer"}, {"layer", layerRef(L, 1)}};
+    if (lua_isnumber(L, 2)) op["time"] = lua_tonumber(L, 2);
+    return docQuery(L, op);
+}
+
+void pushDoc(lua_State* L, double time, const std::vector<uint64_t>& selection) {
+    const luaL_Reg fns[] = {{"apply", docApply}, {"layers", docLayers}, {"layer", docLayer}, {"composition", docComposition},
+                            {nullptr, nullptr}};
+    luaL_newlib(L, fns);
+    lua_pushnumber(L, time);
+    lua_setfield(L, -2, "time");
+    lua_createtable(L, static_cast<int>(selection.size()), 0);
+    for (size_t i = 0; i < selection.size(); ++i) {
+        lua_pushinteger(L, static_cast<lua_Integer>(selection[i]));
+        lua_rawseti(L, -2, static_cast<lua_Integer>(i + 1));
+    }
+    lua_setfield(L, -2, "selection");
+}
+
+int bmRegisterCommand(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    if (!g_registeringCommands) return luaL_error(L, "register_command can only be called while the plugin loads");
+    Plugin* plugin = pluginOf(L);
+    if (!plugin || !plugin->may("edit"))
+        return luaL_error(L, "register_command: add \"permissions\": [\"edit\"] to plugin.json to change projects");
+    PluginCommand c;
+    const std::string id = fieldString(L, 1, "id", "");
+    if (id.empty()) return luaL_error(L, "register_command: missing id");
+    c.pluginId = plugin->id;
+    c.id = c.pluginId + "." + id;
+    c.name = fieldString(L, 1, "name", id);
+    c.description = fieldString(L, 1, "description", "");
+    lua_getfield(L, 1, "run");
+    if (!lua_isfunction(L, -1)) return luaL_error(L, "register_command '%s': run must be a function", id.c_str());
+    c.runRef = luaL_ref(L, LUA_REGISTRYINDEX);
+    g_registeringCommands->push_back(std::move(c));
+    return 0;
+}
 
 PluginParamKind kindFromName(const std::string& s) {
     if (s == "color") return PluginParamKind::Color;
@@ -383,11 +541,12 @@ lua_State* newSandbox(const std::string& pluginId) {
     lua_pushcfunction(L, bmPrint);
     lua_setglobal(L, "print");
 
-    const luaL_Reg api[] = {{"register_object", bmRegisterObject}, {"ease", bmEase},       {"color", bmColor},
+    const luaL_Reg api[] = {{"register_object", bmRegisterObject}, {"register_command", bmRegisterCommand}, {"ease", bmEase},
+                            {"color", bmColor},
                             {"mix", bmMix},                         {"with_alpha", bmWithAlpha}, {"format", bmFormat},
                             {nullptr, nullptr}};
     luaL_newlib(L, api);
-    lua_pushinteger(L, 1);
+    lua_pushinteger(L, 2); // 2: commands and operations
     lua_setfield(L, -2, "api_version");
     lua_setglobal(L, "bemotion");
 
@@ -506,6 +665,8 @@ void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
         p.author = m.value("author", std::string());
         p.description = m.value("description", std::string());
         mainFile = m.value("main", mainFile);
+        for (const auto& perm : m.value("permissions", json::array()))
+            if (perm.is_string()) p.permissions.push_back(perm.get<std::string>());
     } catch (const std::exception& e) {
         p.id = platform::toUtf8(dir.filename());
         p.name = p.id;
@@ -516,6 +677,7 @@ void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
     if (Plugin* existing = findPlugin(p.id)) {
         if (existing->L) lua_close(existing->L);
         std::erase_if(types_, [&](const PluginObjectType& t) { return t.pluginId == p.id; });
+        std::erase_if(commands_, [&](const PluginCommand& c) { return c.pluginId == p.id; });
         std::erase_if(plugins_, [&](const Plugin& q) { return q.id == p.id; });
     }
     const auto& disabled = settings().disabledPlugins;
@@ -526,9 +688,11 @@ void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
 
     plugin.L = newSandbox(plugin.id);
     lua_State* L = plugin.L;
-    const std::string code = readFile(dir / platform::fromUtf8(mainFile));
+    const std::string code = withoutBom(readFile(dir / platform::fromUtf8(mainFile)));
     std::vector<PluginObjectType> registered;
+    std::vector<PluginCommand> registeredCommands;
     g_registering = &registered;
+    g_registeringCommands = &registeredCommands;
     g_budget = kLoadBudget;
     lua_sethook(L, budgetHook, LUA_MASKCOUNT, kHookEvery);
     const std::string chunk = "@" + plugin.id + "/" + mainFile;
@@ -537,12 +701,100 @@ void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
         lua_pop(L, 1);
     }
     g_registering = nullptr;
+    g_registeringCommands = nullptr;
     if (!plugin.error.empty()) {
         lua_close(L);
         plugin.L = nullptr;
         return;
     }
     for (auto& t : registered) types_.push_back(std::move(t));
+    for (auto& c : registeredCommands) commands_.push_back(std::move(c));
+}
+
+bool Plugin::may(const std::string& permission) const {
+    return std::find(permissions.begin(), permissions.end(), permission) != permissions.end();
+}
+
+std::vector<const PluginCommand*> PluginHost::commands() const {
+    std::vector<const PluginCommand*> out;
+    for (const auto& c : commands_)
+        for (const auto& p : plugins_)
+            if (p.id == c.pluginId && p.enabled && p.L) out.push_back(&c);
+    return out;
+}
+
+namespace {
+
+// Calls the function on top of the stack with `doc`, on a copy of `project`.
+bool runWithDoc(lua_State* L, Project& project, double time, const std::vector<uint64_t>& selection,
+                const OpEnvironment& env, bool mayImport, std::string& error) {
+    CommandRun run;
+    run.work = project;
+    run.env = &env;
+    run.mayImport = mayImport;
+    g_run = &run;
+    pushDoc(L, time, selection);
+    g_budget = kCommandBudget;
+    lua_sethook(L, budgetHook, LUA_MASKCOUNT, kHookEvery);
+    const bool ok = lua_pcall(L, 1, 0, 0) == LUA_OK;
+    g_run = nullptr;
+    if (!ok) {
+        error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "the command failed";
+        lua_pop(L, 1);
+        return false;
+    }
+    if (run.ops > 0) project = std::move(run.work);
+    return true;
+}
+
+} // namespace
+
+bool PluginHost::runCommand(const std::string& commandId, Project& project, double time, const std::vector<uint64_t>& selection,
+                            const OpEnvironment& env, std::string& error) {
+    const auto it = std::find_if(commands_.begin(), commands_.end(), [&](const PluginCommand& c) { return c.id == commandId; });
+    Plugin* plugin = it != commands_.end() ? findPlugin(it->pluginId) : nullptr;
+    if (!plugin || !plugin->L || !plugin->enabled) {
+        error = "the command " + commandId + " is not available";
+        return false;
+    }
+    lua_State* L = plugin->L;
+    const int top = lua_gettop(L);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, it->runRef);
+    const bool ok = runWithDoc(L, project, time, selection, env, plugin->may("media"), error);
+    if (!ok) {
+        plugin->log.push_back(it->name + ": " + error);
+        if (plugin->log.size() > kMaxLogLines) plugin->log.erase(plugin->log.begin());
+    }
+    lua_settop(L, top);
+    return ok;
+}
+
+bool PluginHost::runScript(const std::string& source, const std::string& chunkName, Project& project, double time,
+                           const OpEnvironment& env, std::vector<std::string>& log, std::string& error) {
+    const std::string code = withoutBom(source);
+    // A throwaway sandbox with its own (fake) plugin entry, so print() has somewhere to go.
+    const std::string id = "script";
+    Plugin p;
+    p.id = id;
+    p.name = chunkName;
+    p.permissions = {"edit", "media"};
+    PluginHost& host = get();
+    host.plugins_.push_back(std::move(p));
+    lua_State* L = newSandbox(id);
+    host.plugins_.back().L = L;
+    bool ok = false;
+    g_budget = kCommandBudget;
+    lua_sethook(L, budgetHook, LUA_MASKCOUNT, kHookEvery);
+    // The script's body is the command: `doc` comes as its argument (local doc = ...).
+    if (luaL_loadbufferx(L, code.data(), code.size(), ("@" + chunkName).c_str(), "t") != LUA_OK) {
+        error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "syntax error";
+    } else {
+        ok = runWithDoc(L, project, time, {}, env, true, error);
+    }
+    log = host.plugins_.back().log;
+    lua_close(L);
+    host.plugins_.pop_back();
+    return ok;
 }
 
 std::vector<const PluginObjectType*> PluginHost::objectTypes() const {

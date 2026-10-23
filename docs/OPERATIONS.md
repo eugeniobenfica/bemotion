@@ -1,0 +1,118 @@
+# Operations reference (version 1)
+
+Operations are how anything outside the interface changes a project: Lua
+plugins and scripts, the command line (`bemotion apply`) and AI tools. Each one
+is a JSON object with an `"op"` and its fields:
+
+```json
+{ "op": "layer.add", "type": "text", "text": "Hello", "position": [960, 540] }
+```
+
+A **batch** is a list, or `{"version": 1, "ops": [...]}`. Batches are
+**atomic**: they run on a copy of the project, which replaces the original only
+if every operation succeeded and the result follows every rule
+(`src/core/Validate.h`). A failure names the operation and explains what is
+wrong — often with a suggestion (`there is no layer named "Titel"; did you mean
+"Title"?`). Later operations see what earlier ones did, so a batch can create a
+layer and then animate it.
+
+## Conventions
+
+| | |
+| --- | --- |
+| **Layers** | by id (`12`, or `"#12"`) or by name (`"Title"`, when unique). `layer.add` returns the new id. |
+| **Time** | seconds from the start of the composition (`1.5`). |
+| **Positions** | composition pixels, origin at the top-left; `[x, y]`. Inside a compound, relative to it. |
+| **Colors** | `"#RRGGBB"`, `"#RRGGBBAA"` or `[r, g, b(, a)]` from 0 to 1. |
+| **Percent** | scale, opacity, trim… are percentages (`100` = full). Rotation in degrees, clockwise. |
+| **Easing** | the segment *starting* at a keyframe: `linear`, `ease_in`, `ease_out`, `ease_in_out` (default), `back_in`, `back_out`, `elastic`, `bounce`, `hold`. |
+
+### Property ids (`"prop"`)
+
+| Layers | Properties |
+| --- | --- |
+| every layer | `anchor`, `position`, `scale`, `rotation`, `opacity` |
+| shapes | `size`, `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end` |
+| text | `font_size`, `text_color`, `tracking`, `line_height`, `reveal` |
+| camera | `position`, `rotation`, `camera_zoom` |
+| media with sound | `volume` |
+| plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
+| effects | `fx<index>.<param>` (e.g. `fx0.size`; `effect.add` lists the params) |
+
+`query.layer` lists a layer's properties with their values and keyframes.
+
+## Composition
+
+**`composition.set`** — `name`, `width`, `height` (16–16384), `fps` (1–240),
+`background`. The duration follows the content: it ends with the last clip.
+
+## Layers
+
+**`layer.add`** → `{"layer": id, "name": name}`
+- `type`: `text`, `rectangle`, `ellipse`, `polygon`, `star`, `line`, `camera`,
+  `media` (with `"media": id` from `media.import`) or `plugin` (with
+  `"object": "charts.bar"`).
+- `name`, `text` (text layers), `position` (default: the center), `start`
+  (seconds, default 0), `duration` (default 5; media: their own length),
+  `parent` (a compound), `above` / `below` (a layer) or `"at": "bottom"`
+  (default: on top).
+
+**`layer.set`** → `{"in": s, "out": s}` — any of `name`, `visible`, `locked`,
+`label` (0–7), `start` (moves the clip and its keyframes), `in`, `out` (trim,
+kept between neighbors on its track), and for text `text`, `font`, `style`,
+`align` (`left`, `center`, `right`); for shapes `shape` (kind), `fill`,
+`stroke` (booleans).
+
+**`layer.remove`** — `layer` (a compound takes its contents along).
+
+**`layer.move`** — `layer`, `to`: `top`, `bottom`, `up`, `down` (stacking order).
+
+**`layer.split`** → `{"layer": id of the second part}` — `layer`, `time`
+(strictly inside the clip).
+
+**`layer.duplicate`** → `{"layer": id}` — `layer` (not compounds yet).
+
+**`group`** → `{"layer": compound id}` — `layers` (list, same parent), `name`,
+`time` (whose transforms set the compound's center).
+
+**`ungroup`** — `layer` (a compound), `time`: the layers keep their look.
+
+## Values and keyframes
+
+**`property.set`** — `layer`, `prop`, `value`, `time` (default 0). On an
+animated property it sets (or adds) the keyframe at `time`; otherwise the
+static value.
+
+**`key.add`** — `layer`, `prop`, `time`, `value` (default: the current value
+there), `easing`.
+
+**`key.remove`** — `layer`, `prop`, `time` (of the key).
+
+**`key.clear`** — `layer`, `prop`, `time` (the value kept, default 0), `value`.
+Removes every keyframe.
+
+**`key.easing`** — `layer`, `prop`, `easing`, and `time` (one key) or
+`"all": true`.
+
+## Effects
+
+**`effect.add`** → `{"index": i, "params": [...]}` — `layer`, `effect`
+(`gaussian_blur`, `directional_blur`, `brightness_contrast`, `hue_saturation`,
+`tint`, `invert`, `fill`, `wave_warp`, `outline`, `glow`, `drop_shadow`,
+`motion_blur`), `params` (`{"size": 30}`; ids from the result).
+
+**`effect.remove`** — `layer`, `index`. **`effect.set`** — `layer`, `index`,
+`enabled`, `samples` (motion blur, 2–64).
+
+## Media
+
+**`media.import`** → `{"media": id, "name", "kind", "width", "height",
+"duration"}` — `path`. Then `layer.add` with `"type": "media", "media": id`.
+(Plugins need the `media` permission.)
+
+## Queries (change nothing)
+
+**`query.composition`** — size, frame rate, duration, background, media items.
+**`query.layers`** — every layer, top first: id, name, type, in, out, track
+row, parent. **`query.layer`** — `layer`, `time`: everything about one layer,
+with each property's value at `time` and its keyframes.

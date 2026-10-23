@@ -110,7 +110,12 @@ first minute.
 - **Plugins** are sandboxed Lua scripts that add new kinds of objects
 - The bundled **Charts** plugin draws animated column / bar, line / area and
   donut charts from a data table you can paste from a spreadsheet
-- See [docs/PLUGINS.md](docs/PLUGINS.md) to write your own
+- Plugin **commands** edit the project (the bundled *Layout* plugin
+  distributes, staggers and fades layers) — see [docs/PLUGINS.md](docs/PLUGINS.md)
+- **Robot-friendly**: scripts and AI assistants create and edit projects from
+  the command line — `describe`, `apply` [operations](docs/OPERATIONS.md),
+  Lua `script`s, `render` contact sheets to look at, `validate` — every change
+  checked, atomic and undoable ([docs/AUTOMATION.md](docs/AUTOMATION.md))
 
 </td>
 </tr>

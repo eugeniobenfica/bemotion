@@ -171,7 +171,9 @@ void DevScript::step(QWidget* window) {
                 if (down) modifiers_ |= mod;
                 else modifiers_ &= ~mod;
             }
-            QWidget* focus = QApplication::focusWidget() ? QApplication::focusWidget() : window;
+            QWidget* focus = QApplication::activePopupWidget() ? QApplication::activePopupWidget() // an open menu first
+                           : QApplication::focusWidget()      ? QApplication::focusWidget()
+                                                              : window;
             if (down) QTest::keyPress(focus, key, Qt::KeyboardModifiers(modifiers_));
             else QTest::keyRelease(focus, key, Qt::KeyboardModifiers(modifiers_));
             return;
@@ -179,7 +181,9 @@ void DevScript::step(QWidget* window) {
         if (c.op == "type") {
             std::string text;
             for (const std::string& a : c.args) text += (text.empty() ? "" : " ") + a;
-            QWidget* focus = QApplication::focusWidget() ? QApplication::focusWidget() : window;
+            QWidget* focus = QApplication::activePopupWidget() ? QApplication::activePopupWidget() // an open menu first
+                           : QApplication::focusWidget()      ? QApplication::focusWidget()
+                                                              : window;
             QTest::keyClicks(focus, QString::fromStdString(text));
             return;
         }

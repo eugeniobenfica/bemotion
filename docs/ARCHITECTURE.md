@@ -40,6 +40,17 @@ tests in `tests/`.
   Files from before the rename (format id `"mirage"`) still load.
 - **`History`** — undo/redo by snapshots: after each completed edit the whole
   project is serialized. Editing code never deals with undo.
+- **`Validate`** — every rule a project must follow, in one place (sizes,
+  unique ids, tracks contiguous and without overlaps, compounds that exist,
+  sorted keyframes, finite numbers…). `validate()` reports, `repair()` fixes;
+  every loaded file is repaired, so the rest of the program only sees valid
+  projects.
+- **`Ops`** — operations: the one way to change a project from outside the
+  interface (plugins, the command line, AI tools). JSON in, JSON out, atomic
+  batches checked by `validate()`, errors that name the culprit and suggest a
+  fix. Reference: [OPERATIONS.md](OPERATIONS.md). New capabilities for
+  scripts are added here, once, for everyone.
+- **`Describe`** — a compact text summary of a project (for terminals and AIs).
 - **`Presets`** — "Quick Animations"; they only write regular keyframes.
 - **`Geometry`** — shape outlines and trim paths.
 
@@ -140,7 +151,12 @@ trimmed clips stay in sync with their source.
 home screen and the editor with the intro on top while it plays. With
 `--export` it renders headlessly from the command line instead (no window).
 `Platform` wraps OS specifics through Qt: known folders, native file dialogs,
-the file manager, the trash and UTF-8 paths.
+the file manager, the trash and UTF-8 paths. `Automation` is the command line
+for scripts and AIs (`describe`, `validate`, `apply`, `script`, `render`,
+`new`; see [AUTOMATION.md](AUTOMATION.md)) and provides what operations need
+from above the core (media probing, plugin objects). `PluginHost` runs Lua
+plugins: objects that draw, and commands that edit through operations on a
+copy of the project (one undo step, nothing changes on error).
 
 ### Developer aids
 

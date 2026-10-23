@@ -55,6 +55,22 @@ frames=$(find "$out/frames" -name 'f_*.png' | wc -l)
 echo "  png sequence: $frames frames"
 [ "$frames" -gt 100 ] || { echo "  FAILED: png sequence"; failed=1; }
 
+echo "== automation (new, apply, script, describe, validate)"
+auto="$out/auto.bemotion"
+"$exe" new "$(native "$auto")" >/dev/null
+"$exe" apply "$(native "$auto")" --ops '[{"op":"layer.add","type":"text","name":"T","text":"Hi"},{"op":"key.add","layer":"T","prop":"opacity","time":0,"value":0},{"op":"key.add","layer":"T","prop":"opacity","time":1,"value":100}]' >/dev/null ||
+    { echo "  FAILED: apply"; failed=1; }
+printf 'local doc = ...\ndoc.apply { op = "layer.add", type = "star", name = "S" }\n' > "$out/s.lua"
+"$exe" script "$(native "$auto")" "$(native "$out/s.lua")" >/dev/null || { echo "  FAILED: script"; failed=1; }
+if "$exe" apply "$(native "$auto")" --ops '{"op":"property.set","layer":"Nope","prop":"opacity","value":1}' >/dev/null; then
+    echo "  FAILED: a bad operation was accepted"; failed=1
+fi
+summary="$("$exe" describe "$(native "$auto")")"
+case "$summary" in *'"T" text "Hi"'*'opacity 2 keys'*) ;; *) echo "  FAILED: describe"; failed=1 ;; esac
+case "$summary" in *'"S" star'*) ;; *) echo "  FAILED: script result"; failed=1 ;; esac
+"$exe" validate "$(native "$auto")" >/dev/null || { echo "  FAILED: validate"; failed=1; }
+echo "  ok unless reported above"
+
 echo "== interface (offscreen)"
 gui() { # name, capture frame, args...
     local name="$1" frame="$2"

@@ -1,5 +1,6 @@
 #include "ui/EditorWindow.h"
 
+#include "app/Automation.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "app/RecentProjects.h"
@@ -337,6 +338,24 @@ void EditorWindow::buildMenus() {
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction("Reset Layout", this, [this] { resetLayout(); });
 
+    // Plugins: their commands (rebuilt when plugins change) and the plugin manager.
+    QMenu* plugins = bar->addMenu("Plugins");
+    auto fillPlugins = [this, plugins] {
+        plugins->clear();
+        plugins->setToolTipsVisible(true);
+        const auto commands = PluginHost::get().commands();
+        for (const PluginCommand* c : commands) {
+            const std::string id = c->id;
+            QAction* a = plugins->addAction(QString::fromStdString(c->name), this, [this, id] { runPluginCommand(id); });
+            a->setToolTip(QString::fromStdString(c->description));
+        }
+        if (commands.empty()) plugins->addAction("No plugin commands installed")->setEnabled(false);
+        plugins->addSeparator();
+        plugins->addAction("Manage Plugins...", this, [] { ui::openSettings(ui::SettingsTab::Plugins); });
+    };
+    fillPlugins();
+    connect(plugins, &QMenu::aboutToShow, this, fillPlugins);
+
     QMenu* help = bar->addMenu("Help");
     help->addAction(action(Action::Help, "Keyboard Shortcuts", [] { ui::openHelp(ui::HelpTab::Shortcuts); }));
     help->addSeparator();
@@ -496,6 +515,20 @@ bool EditorWindow::confirmClose() {
         return !ctx_.isDirty();
     }
     return true;
+}
+
+void EditorWindow::runPluginCommand(const std::string& id) {
+    std::string error;
+    ctx_.playing = false;
+    platform::log("running plugin command " + id);
+    if (!PluginHost::get().runCommand(id, ctx_.project, ctx_.time, ctx_.selection, automationEnvironment(), error)) {
+        platform::log("plugin command failed: " + error);
+        status_->setText(QString::fromStdString("Plugin: " + error));
+        return;
+    }
+    ctx_.pruneSelection();
+    ctx_.touch(); // one undo step
+    status_->clear();
 }
 
 void EditorWindow::dropFiles(const std::vector<std::filesystem::path>& files, bool onMediaPanel) {

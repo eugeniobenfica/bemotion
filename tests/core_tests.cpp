@@ -1,6 +1,9 @@
 // Minimal, dependency-free unit tests for the document model.
 
 #include "core/Animated.h"
+#include "core/Describe.h"
+#include "core/Ops.h"
+#include "core/Validate.h"
 #include "core/Geometry.h"
 #include "core/History.h"
 #include "core/Presets.h"
@@ -557,6 +560,125 @@ void testHistory() {
     CHECK(p.comp.layers.size() == 1);
 }
 
+// --- operations, validation ------------------------------------------------------------------
+
+OpsResult run(Project& p, const char* ops) { return applyOps(p, nlohmann::json::parse(ops)); }
+
+void testOpsBuildAndQuery() {
+    Project p;
+    OpsResult r = run(p, R"([
+        {"op": "layer.add", "type": "text", "text": "Hello", "name": "Title", "position": [960, 400]},
+        {"op": "layer.add", "type": "rectangle", "name": "Card", "start": 1, "duration": 3},
+        {"op": "property.set", "layer": "Card", "prop": "fill_color", "value": "#4F8EF7"},
+        {"op": "key.add", "layer": "Title", "prop": "opacity", "time": 0, "value": 0, "easing": "ease_out"},
+        {"op": "key.add", "layer": "Title", "prop": "opacity", "time": 1, "value": 100},
+        {"op": "query.layer", "layer": "Title", "time": 0.5}
+    ])");
+    CHECK(r.ok);
+    CHECK(r.changed);
+    CHECK(p.comp.layers.size() == 2);
+    const nlohmann::json& title = r.results[5];
+    CHECK(title["name"] == "Title");
+    CHECK(title["props"]["opacity"]["keys"].size() == 2);
+    CHECK(title["props"]["opacity"]["keys"][0]["easing"] == "ease_out");
+    const Layer* card = nullptr;
+    for (const Layer& l : p.comp.layers)
+        if (l.name == "Card") card = &l;
+    CHECK(card && near(static_cast<float>(card->inPoint), 1.0f) && near(static_cast<float>(card->outPoint), 4.0f));
+    CHECK(card && near(card->shape.fillColor.base.b, 0xF7 / 255.0f));
+    CHECK(validate(p).empty());
+}
+
+void testOpsAtomic() {
+    Project p;
+    run(p, R"({"op": "layer.add", "type": "ellipse", "name": "Dot"})");
+    const std::string before = serializeProject(p);
+    // The second operation fails: the first must not stay applied either.
+    OpsResult r = run(p, R"([
+        {"op": "property.set", "layer": "Dot", "prop": "opacity", "value": 10},
+        {"op": "property.set", "layer": "Dot", "prop": "opacty", "value": 10}
+    ])");
+    CHECK(!r.ok);
+    CHECK(r.failedIndex == 1);
+    CHECK(r.error.find("did you mean \"opacity\"") != std::string::npos);
+    CHECK(serializeProject(p) == before);
+    // Unknown names and operations explain themselves too.
+    CHECK(run(p, R"({"op": "layer.set", "layer": "Dott", "visible": false})").error.find("\"Dot\"") != std::string::npos);
+    CHECK(run(p, R"({"op": "layer.ad", "type": "text"})").error.find("layer.add") != std::string::npos);
+    CHECK(!run(p, R"({"version": 99, "ops": []})").ok);
+}
+
+void testOpsStructure() {
+    Project p;
+    OpsResult r = run(p, R"([
+        {"op": "layer.add", "type": "star", "name": "A", "position": [800, 540]},
+        {"op": "layer.add", "type": "polygon", "name": "B", "position": [1100, 540]},
+        {"op": "group", "layers": ["A", "B"], "name": "Pair"},
+        {"op": "effect.add", "layer": "Pair", "effect": "glow", "params": {"size": 30}},
+        {"op": "layer.split", "layer": "A", "time": 2},
+        {"op": "layer.move", "layer": "Pair", "to": "bottom"}
+    ])");
+    CHECK(r.ok);
+    const uint64_t pair = r.results[2]["layer"];
+    const Layer* g = p.comp.findLayer(pair);
+    CHECK(g && g->type == LayerType::Compound && g->name == "Pair");
+    CHECK(g && g->effects.size() == 1);
+    CHECK(r.results[4]["layer"].get<uint64_t>() != 0);
+    CHECK(validate(p).empty());
+    // Ungrouping keeps the layers.
+    CHECK(run(p, R"({"op": "ungroup", "layer": "Pair"})").ok);
+    CHECK(p.comp.layers.size() == 3);
+    CHECK(validate(p).empty());
+    // A clip cannot be moved onto another clip of its track.
+    run(p, R"([{"op": "layer.add", "type": "line", "name": "L1", "start": 0, "duration": 2}])");
+    const std::string before = serializeProject(p);
+    const OpsResult bad = run(p, R"({"op": "layer.split", "layer": "L1", "time": 5})");
+    CHECK(!bad.ok);
+    CHECK(serializeProject(p) == before);
+}
+
+void testOpsRoundTrip() {
+    Project p;
+    run(p, R"([
+        {"op": "composition.set", "width": 1080, "height": 1920, "fps": 25, "background": "#202020", "name": "Reel"},
+        {"op": "layer.add", "type": "text", "text": "Hi", "name": "T"},
+        {"op": "key.add", "layer": "T", "prop": "position", "time": 0, "value": [540, 2000]},
+        {"op": "key.add", "layer": "T", "prop": "position", "time": 0.8, "value": [540, 960], "easing": "back_out"}
+    ])");
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    CHECK(serializeProject(back) == serializeProject(p));
+    CHECK(p.comp.width == 1080 && p.comp.fps == 25 && p.name == "Reel");
+    const std::string text = describeProject(p);
+    CHECK(text.find("\"T\" text \"Hi\"") != std::string::npos);
+    CHECK(text.find("position 2 keys") != std::string::npos);
+}
+
+void testValidateAndRepair() {
+    Project p;
+    run(p, R"([
+        {"op": "layer.add", "type": "rectangle", "name": "R1"},
+        {"op": "layer.add", "type": "rectangle", "name": "R2"},
+        {"op": "layer.add", "type": "text", "name": "T"}
+    ])");
+    CHECK(validate(p).empty());
+    // Break every rule at once, like a damaged or hand-edited file would.
+    auto& L = p.comp.layers;
+    L[0].id = L[1].id;                                     // duplicate id
+    L[1].transform.opacity.base = std::nanf("");           // not a number
+    L[1].track = L[2].track;                               // overlaps T on its track
+    L[2].parent = 12345;                                   // missing compound
+    L[2].inPoint = 3.0, L[2].outPoint = 1.0;               // out before in
+    L[0].transform.rotation.keys = {{2.0, 10.0f}, {1.0, 0.0f}}; // keys out of order
+    L[0].type = LayerType::Media, L[0].media.mediaId = 77; // media that is not there
+    CHECK(validate(p).size() >= 6);
+    const auto fixed = repair(p);
+    CHECK(!fixed.empty());
+    CHECK(validate(p).empty());
+    CHECK(p.comp.layers.size() == 3); // nothing lost
+    CHECK(std::isfinite(p.comp.layers[1].transform.opacity.base) || std::isfinite(p.comp.layers[0].transform.opacity.base));
+}
+
 } // namespace
 
 int main() {
@@ -590,6 +712,11 @@ int main() {
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
         {"media", testMedia},
+        {"operations: build and query", testOpsBuildAndQuery},
+        {"operations: atomic batches and errors", testOpsAtomic},
+        {"operations: compounds, effects, split, order", testOpsStructure},
+        {"operations: file round trip and describe", testOpsRoundTrip},
+        {"validate and repair", testValidateAndRepair},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

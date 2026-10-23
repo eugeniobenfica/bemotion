@@ -54,3 +54,51 @@ Helpers: `bemotion.ease(name, t)` (`"ease_out"`, `"back_out"`, `"bounce"`…),
 `bemotion.color(hex)`, `bemotion.mix(a, b, t)`, `bemotion.with_alpha(c, k)`,
 `bemotion.format(value, decimals)`. `print` goes to the Plugin Manager log.
 Colors can be `"#RRGGBB[AA]"` strings or tables.
+
+## Commands: editing the project (API 2)
+
+Besides objects, a plugin can add **commands** to the *Plugins* menu: Lua that
+changes the project through [operations](OPERATIONS.md), the same ones the
+command line and AI tools use. Declare the permission in `plugin.json`:
+
+```json
+{ "id": "layout", "name": "Layout", "main": "main.lua", "api": 2, "permissions": ["edit"] }
+```
+
+```lua
+bemotion.register_command {
+  id = "fade_in", name = "Fade In Selected",
+  description = "Opacity from 0 to 100% over half a second",
+  run = function(doc)
+    for _, id in ipairs(doc.selection) do
+      local l = doc.layer(id)
+      doc.apply {
+        { op = "key.add", layer = id, prop = "opacity", time = l["in"], value = 0, easing = "ease_out" },
+        { op = "key.add", layer = id, prop = "opacity", time = l["in"] + 0.5, value = 100 },
+      }
+    end
+  end,
+}
+```
+
+`doc` is the project while the command runs:
+
+- `doc.apply(op)` or `doc.apply({op, op, ...})` runs operations right away and
+  returns their results (`doc.apply{op = "layer.add", ...}.layer` is the new
+  id). A failing operation raises an error with the reason.
+- `doc.layers()`, `doc.layer(id_or_name[, time])`, `doc.composition()` read it
+  (the `query.*` operations).
+- `doc.time` is the playhead, `doc.selection` the selected layer ids.
+
+A command is **one undo step**, and it runs on a copy: if it raises an error
+(or an operation fails), the project stays exactly as it was and the message
+goes to the plugin's log. Permissions: `edit` for commands, `media` to use
+`media.import`. The bundled [Layout plugin](../assets/plugins/layout/main.lua)
+is a complete example.
+
+The same `doc` API runs standalone scripts from the command line — the script
+receives `doc` as its argument (`local doc = ...`):
+
+```bash
+bemotion script project.bemotion build.lua
+```

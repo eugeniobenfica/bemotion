@@ -1,6 +1,7 @@
 #include "app/Application.h"
 
 #include "app/AppIcon.h"
+#include "app/Automation.h"
 #include "app/DevScript.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
@@ -92,6 +93,17 @@ int Application::run(int argc, char** argv) {
     std::optional<exporting::Settings> cliExport;
     const std::vector<std::string> args = platform::arguments(argc, argv); // UTF-8, also on Windows
     const int count = static_cast<int>(args.size());
+    QCoreApplication::setApplicationName("bemotion");
+    QCoreApplication::setOrganizationName("bemotion");
+    if (count > 1 && isAutomationCommand(args[1])) { // describe, validate, apply, render, new
+        QCoreApplication core(argc, argv);
+        attachParentConsole();
+        initShared();
+        const int code = runAutomation(args);
+        media::MediaManager::get().release();
+        PluginHost::get().shutdown();
+        return code;
+    }
     for (int i = 1; i < count; ++i) {
         const std::string& arg = args[i];
         auto next = [&]() { return i + 1 < count ? args[++i] : std::string(); };
@@ -258,9 +270,11 @@ void Application::scriptStep() {
         const QString file = QString::fromStdString(shot);
         window_->grab().save(file);
         const int dot = file.lastIndexOf('.');
-        for (QWidget* w : QApplication::topLevelWidgets())
-            if (w != window_ && w->isVisible() && !w->windowTitle().isEmpty() && !qobject_cast<QMenu*>(w))
-                w->grab().save(file.left(dot) + "-" + w->windowTitle().replace(' ', '_') + file.mid(dot));
+        for (QWidget* w : QApplication::topLevelWidgets()) {
+            if (w == window_ || !w->isVisible()) continue;
+            const QString title = qobject_cast<QMenu*>(w) ? QString("menu") : w->windowTitle().replace(' ', '_');
+            if (!title.isEmpty()) w->grab().save(file.left(dot) + "-" + title + file.mid(dot));
+        }
     }
     if (script_->wantsQuit()) {
         script_.reset();
@@ -270,13 +284,7 @@ void Application::scriptStep() {
 }
 
 int Application::runCommandLineExport(const std::filesystem::path& projectPath, exporting::Settings settings) {
-#ifdef _WIN32
-    // GUI-subsystem executable: print to the terminal that launched us, if any.
-    if (!GetStdHandle(STD_OUTPUT_HANDLE) && AttachConsole(ATTACH_PARENT_PROCESS)) {
-        std::freopen("CONOUT$", "w", stdout);
-        std::freopen("CONOUT$", "w", stderr);
-    }
-#endif
+    attachParentConsole();
     Project project;
     std::string error;
     if (projectPath.empty() || settings.output.empty()) {

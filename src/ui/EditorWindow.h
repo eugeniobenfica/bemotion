@@ -70,6 +70,7 @@ private:
     void save();
     void saveAs();
     void jumpToKeyframe(int direction);
+    void runPluginCommand(const std::string& id);
     void resetLayout();
     void maximizeDock(ads::CDockWidget* dock);
     QAction* action(ui::Action a, const QString& text, std::function<void()> fn);
