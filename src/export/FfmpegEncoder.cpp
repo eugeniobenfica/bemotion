@@ -64,28 +64,39 @@ std::vector<const char*> audioEncoders(Format f) {
     }
 }
 
-// The pixel format to encode in: the first of `wanted` the encoder supports, else its first one.
-AVPixelFormat pickPixelFormat(const AVCodecContext* ctx, const AVCodec* codec, std::initializer_list<AVPixelFormat> wanted) {
+// The formats an encoder accepts (avcodec_get_supported_config since FFmpeg 7.1; the
+// codec's own lists before, e.g. FFmpeg 6 on Ubuntu 24.04).
+template <typename T>
+std::vector<T> supported(const AVCodecContext* ctx, const AVCodec* codec, bool pixel) {
+    std::vector<T> out;
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(61, 13, 100)
     const void* list = nullptr;
     int count = 0;
-    if (avcodec_get_supported_config(ctx, codec, AV_CODEC_CONFIG_PIX_FORMAT, 0, &list, &count) < 0 || !list || count == 0)
-        return *wanted.begin();
-    const auto* fmts = static_cast<const AVPixelFormat*>(list);
+    if (avcodec_get_supported_config(ctx, codec, pixel ? AV_CODEC_CONFIG_PIX_FORMAT : AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &list,
+                                     &count) >= 0 && list)
+        out.assign(static_cast<const T*>(list), static_cast<const T*>(list) + count);
+#else
+    (void)ctx;
+    const T* list = pixel ? reinterpret_cast<const T*>(codec->pix_fmts) : reinterpret_cast<const T*>(codec->sample_fmts);
+    for (; list && static_cast<int>(*list) != -1; ++list) out.push_back(*list);
+#endif
+    return out;
+}
+
+// The pixel format to encode in: the first of `wanted` the encoder supports, else its first one.
+AVPixelFormat pickPixelFormat(const AVCodecContext* ctx, const AVCodec* codec, std::initializer_list<AVPixelFormat> wanted) {
+    const auto fmts = supported<AVPixelFormat>(ctx, codec, true);
+    if (fmts.empty()) return *wanted.begin();
     for (AVPixelFormat w : wanted)
-        for (int i = 0; i < count; ++i)
-            if (fmts[i] == w) return w;
+        if (std::find(fmts.begin(), fmts.end(), w) != fmts.end()) return w;
     return fmts[0];
 }
 
 AVSampleFormat pickSampleFormat(const AVCodecContext* ctx, const AVCodec* codec) {
-    const void* list = nullptr;
-    int count = 0;
-    if (avcodec_get_supported_config(ctx, codec, AV_CODEC_CONFIG_SAMPLE_FORMAT, 0, &list, &count) < 0 || !list || count == 0)
-        return AV_SAMPLE_FMT_FLTP;
-    const auto* fmts = static_cast<const AVSampleFormat*>(list);
+    const auto fmts = supported<AVSampleFormat>(ctx, codec, false);
+    if (fmts.empty()) return AV_SAMPLE_FMT_FLTP;
     for (AVSampleFormat w : {AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_FLT, AV_SAMPLE_FMT_S16})
-        for (int i = 0; i < count; ++i)
-            if (fmts[i] == w) return w;
+        if (std::find(fmts.begin(), fmts.end(), w) != fmts.end()) return w;
     return fmts[0];
 }
 
