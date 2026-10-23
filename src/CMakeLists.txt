@@ -16,12 +16,19 @@ add_library(bemotion_core STATIC
 target_include_directories(bemotion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion_core PUBLIC nlohmann_json::nlohmann_json)
 
+# The operations reference, built into the program for AI assistants (app/McpServer.cpp).
+file(READ ${PROJECT_SOURCE_DIR}/docs/OPERATIONS.md BEMOTION_OPS_REFERENCE)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/docs/OPERATIONS.md)
+configure_file(app/OperationsReference.cpp.in ${CMAKE_CURRENT_BINARY_DIR}/generated/OperationsReference.cpp @ONLY)
+
 # --- bemotion: the desktop application -----------------------------------------
 add_executable(bemotion WIN32
     main.cpp
     app/Application.cpp
     app/AppIcon.cpp
     app/Automation.cpp
+    app/McpServer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/OperationsReference.cpp
     app/DevScript.cpp
     app/EffectLibrary.cpp
     app/Platform.cpp

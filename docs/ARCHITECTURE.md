@@ -153,7 +153,8 @@ home screen and the editor with the intro on top while it plays. With
 `Platform` wraps OS specifics through Qt: known folders, native file dialogs,
 the file manager, the trash and UTF-8 paths. `Automation` is the command line
 for scripts and AIs (`describe`, `validate`, `apply`, `script`, `render`,
-`new`; see [AUTOMATION.md](AUTOMATION.md)) and provides what operations need
+`new`; see [AUTOMATION.md](AUTOMATION.md)) and `bemotion mcp`, an MCP server
+(`McpServer`) with the same abilities as tools for AI assistants; it also provides what operations need
 from above the core (media probing, plugin objects). `PluginHost` runs Lua
 plugins: objects that draw, and commands that edit through operations on a
 copy of the project (one undo step, nothing changes on error).

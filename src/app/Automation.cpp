@@ -1,16 +1,21 @@
 #include "app/Automation.h"
 
+#include "app/McpServer.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "core/Describe.h"
 #include "core/Serialization.h"
 #include "core/Validate.h"
+#include "media/AudioEngine.h"
 #include "media/MediaIO.h"
+#include "media/MediaManager.h"
 #include "render/OffscreenRenderer.h"
 
 #include "stb_image_write.h"
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
@@ -40,6 +45,7 @@ constexpr const char* kUsage =
     "  bemotion render <project> [--at t1,t2,...] [--count N] [--width W] [--each] --out <file.png>\n"
     "  bemotion script <project> <file.lua | -> [--time T] [--out <file>] [--dry-run] [--describe]\n"
     "  bemotion new <project> [--width W] [--height H] [--fps F]\n"
+    "  bemotion mcp                    (MCP server for AI assistants: JSON-RPC on stdin / stdout)\n"
     "  bemotion <project> --export <file> [--format mp4|png|mov|webm|gif] [--scale N] [--transparent]\n";
 
 // Options after the positional arguments: "--name value" or "--flag".
@@ -186,61 +192,39 @@ int renderCmd(const Args& a) {
     Project p;
     if (!load(a.positional[0], p)) return 1;
     const Composition& c = p.comp;
-
     std::vector<double> times;
     if (const std::string at = a.value("at"); !at.empty()) {
         std::stringstream ss(at);
-        for (std::string item; std::getline(ss, item, ',');) times.push_back(std::clamp(std::strtod(item.c_str(), nullptr), 0.0, c.duration));
-    } else { // evenly spread over the composition, the last frame included
-        const int n = std::clamp(std::atoi(a.value("count", "6").c_str()), 1, 64);
-        for (int i = 0; i < n; ++i) times.push_back(n == 1 ? 0.0 : c.snapToFrame((c.duration - c.frameDuration()) * i / (n - 1)));
+        for (std::string item; std::getline(ss, item, ',');) times.push_back(std::strtod(item.c_str(), nullptr));
+    } else {
+        times = spreadTimes(c, std::atoi(a.value("count", "6").c_str()));
     }
-    const int width = std::clamp(std::atoi(a.value("width", times.size() > 1 && !a.flag("each") ? "480" : "960").c_str()), 16, 8192);
-    const float scale = static_cast<float>(width) / c.width;
-    const int fw = std::max(1, static_cast<int>(std::lround(c.width * scale))), fh = std::max(1, static_cast<int>(std::lround(c.height * scale)));
-    render::OffscreenRenderer renderer;
-    std::string error;
-    if (!renderer.init(fw, fh, error)) {
-        std::fprintf(stderr, "error: %s\n", error.c_str());
-        return 1;
-    }
-    auto writePng = [](const std::string& file, int w, int h, const std::vector<uint8_t>& rgba) {
+    const bool each = a.flag("each") || times.size() == 1;
+    const int width = std::atoi(a.value("width", each ? "960" : "480").c_str());
+    auto writeFile = [](const std::string& file, const std::vector<uint8_t>& png) {
         std::ofstream out(platform::fromUtf8(file), std::ios::binary);
-        if (!out) return false;
-        stbi_write_png_to_func([](void* ctx, void* data, int size) { static_cast<std::ofstream*>(ctx)->write(static_cast<char*>(data), size); },
-                               &out, w, h, 4, rgba.data(), w * 4);
+        out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
         return static_cast<bool>(out);
     };
+    std::vector<uint8_t> png;
+    std::string error;
     json files = json::array();
-    std::vector<uint8_t> frame;
-    if (a.flag("each") || times.size() == 1) {
+    if (each) {
         const std::string base = outFile.size() > 4 && outFile.substr(outFile.size() - 4) == ".png" ? outFile.substr(0, outFile.size() - 4) : outFile;
         for (double t : times) {
-            renderer.render(c, t, scale, true, frame);
+            if (!renderFramesPng(c, {t}, width, png, error)) return usageError(error);
             char suffix[32];
             std::snprintf(suffix, sizeof suffix, "_%06.2fs.png", t);
             const std::string file = times.size() == 1 ? base + ".png" : base + suffix;
-            if (!writePng(file, fw, fh, frame)) return usageError("cannot write " + file);
+            if (!writeFile(file, png)) return usageError("cannot write " + file);
             files.push_back({{"time", t}, {"file", file}});
         }
-    } else { // a contact sheet: left to right, top to bottom, 4 px apart
-        const int cols = std::min<int>(static_cast<int>(times.size()), times.size() <= 4 ? 2 : 3), rows = static_cast<int>((times.size() + cols - 1) / cols);
-        const int gap = 4, sw = cols * fw + (cols + 1) * gap, sh = rows * fh + (rows + 1) * gap;
-        std::vector<uint8_t> sheet(static_cast<size_t>(sw) * sh * 4, 0);
-        for (size_t i = 0; i < sheet.size(); i += 4) sheet[i] = sheet[i + 1] = sheet[i + 2] = 40, sheet[i + 3] = 255;
-        for (size_t k = 0; k < times.size(); ++k) {
-            renderer.render(c, times[k], scale, true, frame);
-            const int x0 = gap + static_cast<int>(k % cols) * (fw + gap), y0 = gap + static_cast<int>(k / cols) * (fh + gap);
-            for (int y = 0; y < fh; ++y)
-                std::copy_n(frame.data() + static_cast<size_t>(y) * fw * 4, static_cast<size_t>(fw) * 4,
-                            sheet.data() + (static_cast<size_t>(y0 + y) * sw + x0) * 4);
-            files.push_back({{"time", times[k]}, {"row", k / cols}, {"column", k % cols}});
-        }
-        if (!writePng(outFile, sw, sh, sheet)) return usageError("cannot write " + outFile);
-        print(json{{"ok", true}, {"sheet", outFile}, {"frames", files}}.dump(2) + "\n");
+        print(json{{"ok", true}, {"files", files}}.dump(2) + "\n");
         return 0;
     }
-    print(json{{"ok", true}, {"files", files}}.dump(2) + "\n");
+    if (!renderFramesPng(c, times, width, png, error)) return usageError(error);
+    if (!writeFile(outFile, png)) return usageError("cannot write " + outFile);
+    print(json{{"ok", true}, {"sheet", outFile}, {"times", times}}.dump(2) + "\n");
     return 0;
 }
 
@@ -300,6 +284,78 @@ int newProject(const Args& a) {
 
 } // namespace
 
+std::vector<double> spreadTimes(const Composition& c, int count) {
+    const int n = std::clamp(count, 1, 64);
+    std::vector<double> times;
+    for (int i = 0; i < n; ++i) times.push_back(n == 1 ? 0.0 : c.snapToFrame((c.duration - c.frameDuration()) * i / (n - 1)));
+    return times;
+}
+
+bool renderFramesPng(const Composition& c, std::vector<double> times, int frameWidth, std::vector<uint8_t>& png, std::string& error) {
+    if (times.empty()) times = {0.0};
+    for (double& t : times) t = std::clamp(t, 0.0, c.duration);
+    const float scale = static_cast<float>(std::clamp(frameWidth, 16, 8192)) / c.width;
+    const int fw = std::max(1, static_cast<int>(std::lround(c.width * scale))), fh = std::max(1, static_cast<int>(std::lround(c.height * scale)));
+    render::OffscreenRenderer renderer;
+    if (!renderer.init(fw, fh, error)) return false;
+    // One frame as is; several on a contact sheet, left to right and top to bottom, 4 px apart.
+    const int n = static_cast<int>(times.size());
+    const int cols = n == 1 ? 1 : std::min(n, n <= 4 ? 2 : 3), rows = (n + cols - 1) / cols;
+    const int gap = n == 1 ? 0 : 4, sw = cols * fw + (cols + 1) * gap, sh = rows * fh + (rows + 1) * gap;
+    std::vector<uint8_t> sheet(static_cast<size_t>(sw) * sh * 4, 0);
+    for (size_t i = 0; i < sheet.size(); i += 4) sheet[i] = sheet[i + 1] = sheet[i + 2] = 40, sheet[i + 3] = 255;
+    std::vector<uint8_t> frame;
+    for (int k = 0; k < n; ++k) {
+        renderer.render(c, times[k], scale, true, frame);
+        const int x0 = gap + (k % cols) * (fw + gap), y0 = gap + (k / cols) * (fh + gap);
+        for (int y = 0; y < fh; ++y)
+            std::copy_n(frame.data() + static_cast<size_t>(y) * fw * 4, static_cast<size_t>(fw) * 4,
+                        sheet.data() + (static_cast<size_t>(y0 + y) * sw + x0) * 4);
+    }
+    png.clear();
+    stbi_write_png_to_func(
+        [](void* ctx, void* data, int size) {
+            auto* out = static_cast<std::vector<uint8_t>*>(ctx);
+            out->insert(out->end(), static_cast<uint8_t*>(data), static_cast<uint8_t*>(data) + size);
+        },
+        &png, sw, sh, 4, sheet.data(), sw * 4);
+    if (png.empty()) {
+        error = "could not encode the image";
+        return false;
+    }
+    return true;
+}
+
+bool exportProject(Project project, exporting::Settings settings, const std::function<void(int, int)>& progress, std::string& error) {
+    if (settings.output.extension().empty()) {
+        settings.output += exporting::formatExtension(settings.format);
+    } else {
+        for (int k = 0; k < static_cast<int>(exporting::Format::Count); ++k)
+            if (settings.output.extension() == exporting::formatExtension(static_cast<exporting::Format>(k)))
+                settings.format = static_cast<exporting::Format>(k);
+    }
+    project.comp.fitDuration();
+    if (settings.end <= settings.start) settings.end = project.comp.duration;
+    PluginHost::get().reconcile(project.comp);
+    // Audio decodes in the background: wait for it.
+    for (int tries = 0; !media::MediaManager::get().audioReady(project.comp) && tries < 60000; ++tries) {
+        media::MediaManager::get().update(project.comp);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    settings.mixAudio = media::AudioEngine::mix;
+    exporting::ExportJob job;
+    if (!job.start(project, settings, error)) return false;
+    while (job.running()) {
+        job.step(0.25);
+        if (progress) progress(job.framesDone(), job.framesTotal());
+    }
+    if (!job.succeeded()) {
+        error = job.cancelled() ? "cancelled" : job.error();
+        return false;
+    }
+    return true;
+}
+
 OpEnvironment automationEnvironment() {
     OpEnvironment env;
     env.probeMedia = [](const std::string& path, MediaItem& out, std::string& error) {
@@ -326,7 +382,7 @@ OpEnvironment automationEnvironment() {
 }
 
 bool isAutomationCommand(const std::string& arg) {
-    return arg == "describe" || arg == "validate" || arg == "apply" || arg == "render" || arg == "new" || arg == "script" || arg == "help" ||
+    return arg == "describe" || arg == "validate" || arg == "apply" || arg == "render" || arg == "new" || arg == "script" || arg == "mcp" || arg == "help" ||
            arg == "--help" || arg == "-h";
 }
 
@@ -338,6 +394,7 @@ int runAutomation(const std::vector<std::string>& args) {
     if (cmd == "render") return renderCmd(parse(args, {"each"}));
     if (cmd == "new") return newProject(parse(args, {}));
     if (cmd == "script") return script(parse(args, {"dry-run", "describe"}));
+    if (cmd == "mcp") return runMcpServer(); // AI assistants: JSON-RPC on stdin / stdout
     print(kUsage);
     return 0;
 }

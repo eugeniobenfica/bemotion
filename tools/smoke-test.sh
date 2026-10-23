@@ -71,6 +71,15 @@ case "$summary" in *'"S" star'*) ;; *) echo "  FAILED: script result"; failed=1 
 "$exe" validate "$(native "$auto")" >/dev/null || { echo "  FAILED: validate"; failed=1; }
 echo "  ok unless reported above"
 
+echo "== MCP server (bemotion mcp)"
+py="$(command -v python3 || command -v python || true)"
+if [ -n "$py" ]; then
+    "$py" "$root/tools/mcp-test.py" "$(native "$exe")" "$(native "$out/mcp")" | sed 's/^/  /' || failed=1
+    [ "${PIPESTATUS[0]}" = 0 ] || failed=1
+else
+    echo "  skipped (no python)"
+fi
+
 echo "== interface (offscreen)"
 gui() { # name, capture frame, args...
     local name="$1" frame="$2"

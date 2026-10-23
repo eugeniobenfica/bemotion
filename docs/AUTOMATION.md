@@ -25,6 +25,46 @@ bemotion promo.bemotion --export promo.mp4       # the video
 `apply` and `script` accept `--dry-run` (check without saving), `--out` (save
 elsewhere) and `--describe` (include the new summary in the result).
 
+## Connecting an AI assistant (MCP)
+
+`bemotion mcp` is an [MCP](https://modelcontextprotocol.io) server: assistants
+that speak the Model Context Protocol (Claude Desktop, Claude Code, and many
+others) get bemotion's tools directly — no terminal needed. Its tools:
+`describe_project`, `create_project`, `query_layer`, `apply_operations`,
+`run_lua`, `render_frames` (returns the image, so the assistant sees its work),
+`validate_project`, `export_video` and `get_operations_reference`.
+
+With the installer, the program is
+`%LOCALAPPDATA%\Programs\bemotion\bemotion.exe` (or wherever you unzipped the
+portable version).
+
+**Claude Desktop** — *Settings › Developer › Edit Config* opens
+`claude_desktop_config.json`; add:
+
+```json
+{
+  "mcpServers": {
+    "bemotion": {
+      "command": "C:\\Users\\YOU\\AppData\\Local\\Programs\\bemotion\\bemotion.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+then restart Claude Desktop. **Claude Code**:
+
+```bash
+claude mcp add bemotion -- "C:\Users\YOU\AppData\Local\Programs\bemotion\bemotion.exe" mcp
+```
+
+Other assistants take the same two things: the command (`bemotion.exe`) and
+its argument (`mcp`). Then ask, for example: *"Create
+C:\Videos\promo.bemotion, 1080x1920, with my logo bouncing in and the title
+'Launch day' fading up, then export it to MP4"*. The assistant works on the
+files you name, with the same checks as everywhere else; `bemotion.log` (in
+`%APPDATA%\bemotion`) lists the tools it called.
+
 ## A loop for AI assistants
 
 1. **Read**: `bemotion describe <project>` — a few lines per layer: id, name,

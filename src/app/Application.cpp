@@ -297,43 +297,21 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
         return 1;
     }
     initShared();
-    if (settings.output.extension().empty()) settings.output += exporting::formatExtension(settings.format);
-    else
-        for (int k = 0; k < static_cast<int>(exporting::Format::Count); ++k)
-            if (settings.output.extension() == exporting::formatExtension(static_cast<exporting::Format>(k)))
-                settings.format = static_cast<exporting::Format>(k);
-    project.comp.fitDuration();
-    settings.end = project.comp.duration;
-    PluginHost::get().reconcile(project.comp);
-    // Audio decodes in the background: wait for it.
-    for (int tries = 0; !media::MediaManager::get().audioReady(project.comp) && tries < 60000; ++tries) {
-        media::MediaManager::get().update(project.comp);
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-    }
-    settings.mixAudio = media::AudioEngine::mix;
-
-    exporting::ExportJob job;
+    int reported = -1;
+    const bool ok = exportProject(std::move(project), settings, [&](int done, int total) {
+        const int percent = done * 100 / std::max(1, total);
+        if (percent / 10 == reported) return;
+        reported = percent / 10;
+        std::printf("exporting... %d%% (%d/%d frames)\n", percent, done, total);
+        std::fflush(stdout);
+    }, error);
     int result = 0;
-    if (!job.start(project, settings, error)) {
+    if (!ok) {
         std::fprintf(stderr, "error: %s\n", error.c_str());
         result = 1;
+    } else {
+        std::printf("done: %s\n", platform::toUtf8(settings.output).c_str());
     }
-    int reported = -1;
-    while (job.running()) {
-        job.step(0.25);
-        const int percent = job.framesDone() * 100 / std::max(1, job.framesTotal());
-        if (percent / 10 != reported) {
-            reported = percent / 10;
-            std::printf("exporting... %d%% (%d/%d frames)\n", percent, job.framesDone(), job.framesTotal());
-            std::fflush(stdout);
-        }
-    }
-    if (result == 0 && !job.succeeded()) {
-        std::fprintf(stderr, "error: %s\n", job.error().c_str());
-        result = 1;
-    }
-    if (result == 0)
-        std::printf("done: %s (%d frames, %.1f s)\n", platform::toUtf8(settings.output).c_str(), job.framesTotal(), job.elapsedSeconds());
     media::MediaManager::get().release();
     PluginHost::get().shutdown();
     return result;

@@ -115,7 +115,8 @@ first minute.
 - **Robot-friendly**: scripts and AI assistants create and edit projects from
   the command line — `describe`, `apply` [operations](docs/OPERATIONS.md),
   Lua `script`s, `render` contact sheets to look at, `validate` — every change
-  checked, atomic and undoable ([docs/AUTOMATION.md](docs/AUTOMATION.md))
+  checked, atomic and undoable — and `bemotion mcp` plugs it straight into
+  Claude and other MCP assistants ([docs/AUTOMATION.md](docs/AUTOMATION.md))
 
 </td>
 </tr>
@@ -172,6 +173,18 @@ Runs on 64-bit Windows 10 (1809 or later) and Windows 11, on any x86-64 CPU —
 optimized code paths for newer processors are picked at runtime. The files are
 not signed yet, so SmartScreen may warn on first launch (*More info › Run anyway*).
 If something goes wrong, `%APPDATA%emotionemotion.log` says what happened.
+
+### Building the installer yourself
+
+With MSYS2 set up as in *Getting started* (below) and Skia built once,
+double-click **`build-release.bat`** — or, in an MSYS2 UCRT64 shell:
+
+```bash
+tools/build-release.sh
+```
+
+It builds a Release in `build-release/`, runs the tests, packages and checks the
+package; the installer and the portable zip land in `dist/`.
 
 ## Getting started
 

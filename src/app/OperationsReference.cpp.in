@@ -1,0 +1,9 @@
+// Generated from docs/OPERATIONS.md when CMake configures (see src/CMakeLists.txt): the
+// reference the MCP server hands to AI assistants (get_operations_reference).
+
+namespace bemotion {
+
+extern const char* const kOperationsReference;
+const char* const kOperationsReference = R"bmref(@BEMOTION_OPS_REFERENCE@)bmref";
+
+} // namespace bemotion
