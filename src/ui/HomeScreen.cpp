@@ -1,6 +1,7 @@
 #include "ui/HomeScreen.h"
 
 #include "app/Platform.h"
+#include "app/PluginHost.h"
 #include "core/Serialization.h"
 #include "render/SceneRenderer.h"
 #include "ui/Dialogs.h"
@@ -323,6 +324,7 @@ void HomeScreen::refresh() {
         Preview pv;
         Project p;
         if (loadProject(r.path, p)) {
+            PluginHost::get().reconcile(p.comp); // plugin objects (charts) as the editor would show them
             const qreal dpr = devicePixelRatioF();
             pv.thumbnail = renderThumbnail(p, QSize(static_cast<int>(400 * dpr), static_cast<int>(225 * dpr)));
             pv.project = std::move(p);

@@ -27,7 +27,7 @@ jobs:
             mingw-w64-ucrt-x86_64-ffmpeg mingw-w64-ucrt-x86_64-harfbuzz mingw-w64-ucrt-x86_64-icu
             mingw-w64-ucrt-x86_64-libjpeg-turbo mingw-w64-ucrt-x86_64-libwebp mingw-w64-ucrt-x86_64-libpng
             mingw-w64-ucrt-x86_64-expat mingw-w64-ucrt-x86_64-zlib mingw-w64-ucrt-x86_64-freetype
-            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-nsis
 
       - name: Cache Skia
         id: skia
@@ -53,7 +53,7 @@ jobs:
         run: tools/smoke-test.sh build smoke
 
       - name: Package
-        run: tools/deploy-windows.sh build dist/bemotion
+        run: tools/package-windows.sh build dist
 
       - name: Smoke test (package)
         run: tools/smoke-test.sh dist/bemotion smoke-package
@@ -62,7 +62,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bemotion-windows
-          path: dist/bemotion
+          path: |
+            dist/bemotion-*-setup.exe
+            dist/bemotion-*-portable.zip
 
       - name: Upload smoke test output
         if: always()

@@ -1,5 +1,7 @@
 #include "app/DevScript.h"
 
+#include "app/Platform.h"
+
 #include <QApplication>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -10,6 +12,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 
 namespace bemotion {
@@ -50,7 +53,7 @@ bool DevScript::load(const std::filesystem::path& file) {
         std::istringstream words(line);
         Command c;
         if (!(words >> c.op)) continue;
-        for (std::string w; words >> w;) c.args.push_back(w);
+        for (std::string w; words >> std::quoted(w);) c.args.push_back(w); // "quoted" for spaces
         commands_.push_back(std::move(c));
     }
     return true;
@@ -126,11 +129,10 @@ void DevScript::step(QWidget* window) {
     // Run commands until one consumes this frame.
     while (next_ < commands_.size()) {
         const Command& c = commands_[next_++];
-        if (const char* trace = std::getenv("BEMOTION_SCRIPT_TRACE")) // a log file of the commands run
-            if (FILE* f = std::fopen(trace, "a")) {
-                std::fprintf(f, "[frame %d] %s\n", frame_, c.op.c_str());
-                std::fclose(f);
-            }
+        if (const std::string trace = platform::env("BEMOTION_SCRIPT_TRACE"); !trace.empty()) { // a log of the commands run
+            std::ofstream log(platform::fromUtf8(trace), std::ios::app);
+            log << "[frame " << frame_ << "] " << c.op << "\n";
+        }
         auto num = [&](size_t i, float fallback = 0.0f) { return i < c.args.size() ? std::strtof(c.args[i].c_str(), nullptr) : fallback; };
         if (c.op == "wait") {
             waitFrames_ = static_cast<int>(num(0, 1)) - 1;

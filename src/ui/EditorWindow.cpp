@@ -453,9 +453,11 @@ void EditorWindow::save() {
     if (ctx_.path.empty()) return saveAs();
     std::string err;
     if (!ctx_.save(&err)) {
+        platform::log("save failed: " + err);
         status_->setText(QString::fromStdString("Save failed: " + err));
         return;
     }
+    platform::log("saved " + platform::toUtf8(ctx_.path));
     status_->clear();
     recents_.touch(ctx_.path, ctx_.project.name);
 }
@@ -499,6 +501,7 @@ bool EditorWindow::confirmClose() {
 void EditorWindow::dropFiles(const std::vector<std::filesystem::path>& files, bool onMediaPanel) {
     // Like After Effects: dropped on the Media panel they are only imported; anywhere else they
     // also become layers at the playhead.
+    for (const auto& f : files) platform::log("importing " + platform::toUtf8(f));
     media_->importFiles(files, !onMediaPanel);
 }
 

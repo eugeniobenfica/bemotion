@@ -29,3 +29,6 @@ desktop.ini
 
 # Dependencies built locally (tools/skia/build-skia.sh)
 third_party/
+
+# Packages (tools/package-*.sh)
+dist/

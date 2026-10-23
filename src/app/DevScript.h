@@ -5,7 +5,7 @@
 //
 //   BEMOTION_SCRIPT=steps.txt bemotion project.bemotion
 //
-// One command per line ('#' starts a comment); coordinates are window pixels:
+// One command per line ('#' starts a comment; "quote" arguments with spaces); coordinates are window pixels:
 //   wait N                 let N frames (~16 ms each) pass
 //   move X Y [N]           move the mouse there (over N frames, default 1)
 //   down B / up B          press / release mouse button B (0 left, 1 right, 2 middle);

@@ -144,6 +144,14 @@ the file manager, the trash and UTF-8 paths.
 
 ### Developer aids
 
+- `<app data>/bemotion.log` (`platform::log`) records startup, opened and saved
+  projects, imports and crashes; it starts fresh at each launch.
+- Paths, arguments and environment variables are UTF-8 everywhere
+  (`platform::arguments`, `platform::env`): on Windows the C runtime would hand
+  them over in the legacy code page.
+- `tools/smoke-test.sh <dir>` exports the Welcome project to every format and
+  opens the app offscreen; `tools/package-windows.sh` builds the installer
+  (`tools/installer/bemotion.nsi`) and the portable zip.
 - `BEMOTION_CAPTURE=shot.png` saves the window at frame `BEMOTION_CAPTURE_FRAME`
   (default 60, about 16 ms each) and quits.
 - `BEMOTION_APPDATA=dir` keeps settings, layout and caches in `dir` instead of

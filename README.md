@@ -151,6 +151,23 @@ first minute.
 
 </details>
 
+## Download (Windows)
+
+Grab `bemotion-<version>-setup.exe` from the latest successful
+[build](https://github.com/eugeniobenfica/bemotion/actions/workflows/build.yml)
+(*Artifacts › bemotion-windows*), or build it yourself (below).
+
+- **Installer**: installs for your user only (no administrator rights), adds a
+  Start Menu shortcut (desktop shortcut optional), opens `.bemotion` files with a
+  double-click and can be removed from *Settings › Apps*. Your settings and
+  projects stay when you uninstall.
+- **Portable zip**: unzip anywhere (even a USB stick) and run `bemotion.exe`.
+
+Runs on 64-bit Windows 10 (1809 or later) and Windows 11, on any x86-64 CPU —
+optimized code paths for newer processors are picked at runtime. The files are
+not signed yet, so SmartScreen may warn on first launch (*More info › Run anyway*).
+If something goes wrong, `%APPDATA%emotionemotion.log` says what happened.
+
 ## Getting started
 
 bemotion is built with CMake and needs a few system libraries — **Qt 6** (≥ 6.4),
@@ -168,7 +185,7 @@ tools/skia/build-skia.sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/bemotion.exe
-tools/deploy-windows.sh build dist/bemotion   # a folder that runs on any Windows PC
+tools/package-windows.sh build dist           # installer + portable zip (needs: pacman -S mingw-w64-ucrt-x86_64-nsis)
 ```
 
 **Linux** (Ubuntu 24.04):

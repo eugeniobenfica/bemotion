@@ -28,6 +28,7 @@
 #include <QPixmap>
 #include <QResizeEvent>
 #include <QStackedWidget>
+#include <QSysInfo>
 #include <QTimer>
 #include <QUrl>
 
@@ -89,9 +90,11 @@ int Application::run(int argc, char** argv) {
     // Command line: bemotion [project] [--export <file> [--format mp4|png|mov|webm|gif] [--scale N] [--transparent]]
     std::filesystem::path projectArg;
     std::optional<exporting::Settings> cliExport;
-    for (int i = 1; i < argc; ++i) {
-        const std::string arg = argv[i];
-        auto next = [&]() { return i + 1 < argc ? std::string(argv[++i]) : std::string(); };
+    const std::vector<std::string> args = platform::arguments(argc, argv); // UTF-8, also on Windows
+    const int count = static_cast<int>(args.size());
+    for (int i = 1; i < count; ++i) {
+        const std::string& arg = args[i];
+        auto next = [&]() { return i + 1 < count ? args[++i] : std::string(); };
         if (arg == "--write-icon" || arg == "--write-mark") { // developer aid: refresh the branding files
             const std::string file = next();
             return writeAppIcon(platform::fromUtf8(file), arg == "--write-mark") ? 0 : 1;
@@ -122,6 +125,9 @@ int Application::run(int argc, char** argv) {
     }
 
     QApplication app(argc, argv);
+    platform::startLog();
+    platform::log("Qt " + std::string(qVersion()) + " on " + QSysInfo::prettyProductName().toStdString() + ", screen scale " +
+                  std::to_string(app.devicePixelRatio()));
     QApplication::setStyle("Fusion"); // the palette and style sheet do the rest
     initShared();
     // The interface font: Inter ships with bemotion (other families come from the system).
@@ -129,10 +135,15 @@ int Application::run(int argc, char** argv) {
         QFontDatabase::addApplicationFont(QString::fromStdString(platform::toUtf8(Fonts::interFile(style))));
     applySettings();
     media::AudioEngine::get().start();
+    platform::log("fonts, plugins and media ready");
     buildWindow();
-    if (const char* script = std::getenv("BEMOTION_SCRIPT")) {
+    platform::log("window shown");
+    if (const std::string script = platform::env("BEMOTION_SCRIPT"); !script.empty()) {
         script_ = std::make_unique<DevScript>();
-        if (!script_->load(platform::fromUtf8(script))) script_.reset();
+        if (!script_->load(platform::fromUtf8(script))) {
+            platform::log("could not read the script " + script);
+            script_.reset();
+        }
     }
     auto* timer = new QTimer(window_);
     connect(timer, &QTimer::timeout, this, [this] { frame(); });
@@ -142,6 +153,7 @@ int Application::run(int argc, char** argv) {
     else if (settings().showIntro) intro_->start(platform::assetsDir() / "welcome" / "Welcome.bemotion");
 
     const int result = QApplication::exec();
+    platform::log("quitting");
     delete window_; // the editor first: it stops using media and plugins
     window_ = nullptr;
     media::AudioEngine::get().stop();
@@ -225,10 +237,10 @@ void Application::frame() {
     // next ones, which drive that dialog.
     if (script_) QTimer::singleShot(0, this, [this] { scriptStep(); });
     // Developer aid: BEMOTION_CAPTURE=<file> saves frame BEMOTION_CAPTURE_FRAME (default 60) and quits.
-    if (const char* capture = std::getenv("BEMOTION_CAPTURE")) {
-        const char* at = std::getenv("BEMOTION_CAPTURE_FRAME");
-        if (frameIndex_ == (at ? std::atoi(at) : 60)) {
-            window_->grab().save(capture);
+    if (const std::string capture = platform::env("BEMOTION_CAPTURE"); !capture.empty()) {
+        const std::string at = platform::env("BEMOTION_CAPTURE_FRAME");
+        if (frameIndex_ == (at.empty() ? 60 : std::atoi(at.c_str()))) {
+            window_->grab().save(QString::fromStdString(capture));
             window_->canClose = nullptr;
             window_->close();
         }
@@ -322,7 +334,9 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
 void Application::openProject(const std::filesystem::path& path) {
     Project project;
     std::string err;
+    platform::log("opening " + platform::toUtf8(path));
     if (!loadProject(path, project, &err)) {
+        platform::log("could not open it: " + err);
         home_->setError("Could not open \"" + platform::toUtf8(path.filename()) + "\": " + err);
         return;
     }

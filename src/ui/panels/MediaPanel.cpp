@@ -378,7 +378,10 @@ void MediaPanel::importFiles(const std::vector<std::filesystem::path>& files, bo
         ctx_.touch();
     }
     std::string msg;
-    for (const std::string& e : errors) msg += (msg.empty() ? "" : "\n") + e;
+    for (const std::string& e : errors) {
+        platform::log("import error: " + e);
+        msg += (msg.empty() ? "" : "\n") + e;
+    }
     showMessage(msg);
 }
 

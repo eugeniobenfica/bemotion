@@ -9,9 +9,21 @@
 #include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QDateTime>
 #include <QUrl>
 
 #include <cstdlib>
+#include <exception>
+#include <fstream>
+#include <mutex>
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 namespace bemotion::platform {
 
@@ -43,7 +55,29 @@ std::string toUtf8(const fs::path& path) {
     return std::string(s.begin(), s.end());
 }
 
-fs::path fromUtf8(const std::string& utf8) { return fs::path(std::u8string(utf8.begin(), utf8.end())); }
+fs::path fromUtf8(const std::string& utf8) {
+    try {
+        return fs::path(std::u8string(utf8.begin(), utf8.end()));
+    } catch (const std::exception&) { // not UTF-8 after all: read it in the system code page
+        return fs::path(utf8);
+    }
+}
+
+std::vector<std::string> arguments(int argc, char** argv) {
+    std::vector<std::string> out;
+#ifdef _WIN32
+    int n = 0;
+    if (wchar_t** wide = CommandLineToArgvW(GetCommandLineW(), &n)) {
+        for (int i = 0; i < n; ++i) out.push_back(QString::fromWCharArray(wide[i]).toStdString());
+        LocalFree(wide);
+        return out;
+    }
+#endif
+    for (int i = 0; i < argc; ++i) out.emplace_back(argv[i]);
+    return out;
+}
+
+std::string env(const char* name) { return qEnvironmentVariable(name).toStdString(); }
 
 fs::path executableDir() {
     if (QCoreApplication::instance()) return fromQ(QCoreApplication::applicationDirPath());
@@ -52,9 +86,9 @@ fs::path executableDir() {
 
 fs::path appDataDir() {
     // Developer aid: BEMOTION_APPDATA points settings, layout and caches elsewhere (scripted UI tests).
-    if (const char* dir = std::getenv("BEMOTION_APPDATA"); dir && *dir) return ensureDir(fromUtf8(dir));
+    if (const std::string dir = env("BEMOTION_APPDATA"); !dir.empty()) return ensureDir(fromUtf8(dir));
 #if defined(_WIN32)
-    if (const char* roaming = std::getenv("APPDATA"); roaming && *roaming) return ensureDir(fromUtf8(roaming) / "bemotion");
+    if (const std::string roaming = env("APPDATA"); !roaming.empty()) return ensureDir(fromUtf8(roaming) / "bemotion");
     return ensureDir(fromQ(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)) / "bemotion");
 #elif defined(__APPLE__)
     return ensureDir(fromQ(QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation)) / "bemotion"); // Application Support
@@ -126,5 +160,54 @@ bool moveToTrash(const fs::path& path, std::string* error) {
     if (error) *error = "the file could not be moved to the trash.";
     return false;
 }
+
+// --- diagnostics -----------------------------------------------------------------------------
+
+namespace {
+
+std::mutex& logMutex() {
+    static std::mutex m;
+    return m;
+}
+
+void writeLog(const std::string& line, bool truncate) {
+    const std::lock_guard<std::mutex> lock(logMutex());
+    std::ofstream out(logFile(), truncate ? std::ios::trunc : std::ios::app);
+    out << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz").toStdString() << "  " << line << '\n';
+}
+
+#ifdef _WIN32
+LONG WINAPI onCrash(EXCEPTION_POINTERS* info) {
+    char buf[96];
+    std::snprintf(buf, sizeof buf, "CRASH: exception 0x%08lX at %p", info->ExceptionRecord->ExceptionCode,
+                  info->ExceptionRecord->ExceptionAddress);
+    writeLog(buf, false);
+    return EXCEPTION_CONTINUE_SEARCH; // Windows Error Reporting still gets it
+}
+#endif
+
+} // namespace
+
+fs::path logFile() { return appDataDir() / "bemotion.log"; }
+
+void startLog() {
+    writeLog("bemotion " BEMOTION_VERSION " started", true);
+#ifdef _WIN32
+    SetUnhandledExceptionFilter(onCrash);
+#endif
+    std::set_terminate([] {
+        std::string what = "unknown";
+        try {
+            if (auto e = std::current_exception()) std::rethrow_exception(e);
+        } catch (const std::exception& e) {
+            what = e.what();
+        } catch (...) {
+        }
+        writeLog("CRASH: unhandled exception: " + what, false);
+        std::abort();
+    });
+}
+
+void log(const std::string& line) { writeLog(line, false); }
 
 } // namespace bemotion::platform
