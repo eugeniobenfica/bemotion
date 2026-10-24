@@ -319,7 +319,10 @@ void HomeScreen::buildUi() {
     footer->addWidget(gear);
     auto* help = new QPushButton("?");
     help->setFixedSize(30, 30);
-    help->setStyleSheet("padding: 0;");
+    // Flat like the icon buttons beside it.
+    help->setStyleSheet(QString("QPushButton { background: transparent; padding: 0; border-radius: 5px; color: %1; }"
+                                "QPushButton:hover { background: %2; color: %3; }")
+                            .arg(theme::q(theme::kTextDim).name(), theme::q(theme::kBgHover).name(), theme::q(theme::kText).name()));
     help->setToolTip("Help, shortcuts, credits and license (F1)");
     connect(help, &QPushButton::clicked, this, [] { ui::openHelp(ui::HelpTab::About); });
     footer->addWidget(help);
@@ -469,15 +472,11 @@ void HomeScreen::rebuildGrid() {
         cc->setContentsMargins(22, 18, 22, 18);
         cc->setSpacing(6);
         cc->addWidget(styled("Choose a folder for your projects", theme::kText, 1.2f, true));
+        // The sidebar's Projects Folder button picks it (one way to do it, not two).
         auto* why = styled("bemotion lists every project in it, and saves new ones there. "
-                           "Pick any folder: an existing one or a new one.", theme::kTextDim);
+                           "Pick any folder with Projects Folder, at the bottom left.", theme::kTextDim);
         why->setWordWrap(true);
         cc->addWidget(why);
-        cc->addSpacing(6);
-        auto* pick = ui::accentButton("Choose Folder...");
-        pick->setFixedWidth(180);
-        connect(pick, &QPushButton::clicked, this, [this] { chooseProjectsFolder(); });
-        cc->addWidget(pick, 0, Qt::AlignLeft);
         col->addWidget(card);
         col->addSpacing(18);
         if (items.empty()) {
