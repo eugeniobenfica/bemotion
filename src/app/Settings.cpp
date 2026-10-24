@@ -93,6 +93,8 @@ void loadSettings() {
         s.autosaveMinutes = std::clamp(j.value("autosave_minutes", s.autosaveMinutes), 0, 120);
         s.showIntro = j.value("show_intro", s.showIntro);
         s.showRulers = j.value("show_rulers", s.showRulers);
+        s.previewQuality = j.value("preview_quality", s.previewQuality);
+        if (s.previewQuality != 2 && s.previewQuality != 4) s.previewQuality = 1;
         s.welcomeAdded = j.value("welcome_added", s.welcomeAdded);
         s.projectsFolder = j.value("projects_folder", s.projectsFolder);
         s.toolbarInViewport = j.value("toolbar_in_viewport", s.toolbarInViewport);
@@ -118,7 +120,7 @@ void saveSettings() {
               {"timeline_layer_row", s.timelineLayerRow}, {"timeline_property_row", s.timelinePropertyRow},
               {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}, {"ui_font", s.uiFont},
               {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames},
-              {"max_duration", s.maxDuration}, {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"show_rulers", s.showRulers}, {"welcome_added", s.welcomeAdded}, {"projects_folder", s.projectsFolder}, {"toolbar", s.toolbar},
+              {"max_duration", s.maxDuration}, {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"show_rulers", s.showRulers}, {"preview_quality", s.previewQuality}, {"welcome_added", s.welcomeAdded}, {"projects_folder", s.projectsFolder}, {"toolbar", s.toolbar},
               {"toolbar_in_viewport", s.toolbarInViewport}, {"toolbar_in_window", s.toolbarInWindow}, {"toolbar_x", s.toolbarX}, {"toolbar_y", s.toolbarY},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));

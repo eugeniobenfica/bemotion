@@ -34,6 +34,7 @@ struct Settings {
     int autosaveMinutes = 5;           // saves open projects this often (0: off)
     bool showIntro = true;             // the opening animation at startup
     bool showRulers = false;           // the viewport's rulers (View > Rulers)
+    int previewQuality = 1;            // raster preview divisor: 1, 2 or 4 (export is unaffected)
     bool welcomeAdded = false;         // the Welcome project was put in the projects folder once
     std::string projectsFolder;        // where projects live, chosen by the user (empty: not yet)
     std::vector<std::string> toolbar = ui::defaultToolbar(); // tool ids in the timeline's toolbar (ui/Tools.h)

@@ -1,9 +1,10 @@
-// "Export Video" dialog: settings, then progress, then the result.
+// Video and portable project export: settings, progress and result.
 
 #include "ui/Dialogs.h"
 
 #include "app/Platform.h"
 #include "app/Settings.h"
+#include "app/ProjectPackage.h"
 #include "export/Export.h"
 #include "media/AudioEngine.h"
 #include "media/MediaManager.h"
@@ -28,6 +29,10 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <future>
+#include <memory>
 #include <cmath>
 #include <cstdio>
 
@@ -61,6 +66,7 @@ struct Remembered {
     exporting::Settings settings;
     int scaleIndex = 0;
     bool customRange = false;
+    bool package = false;
     double rangeStart = 0.0, rangeEnd = 0.0;
 };
 Remembered& remembered() {
@@ -71,7 +77,7 @@ Remembered& remembered() {
 class ExportDialog : public QDialog {
 public:
     ExportDialog(EditorContext& ctx, QWidget* parent) : QDialog(parent), ctx_(ctx) {
-        setWindowTitle("Export Video");
+        setWindowTitle("Export");
         setMinimumWidth(560);
         Remembered& r = remembered();
         exporting::Settings& s = r.settings;
@@ -97,9 +103,21 @@ public:
         connect(timer_, &QTimer::timeout, this, [this] { stepExport(); });
         refreshSettings();
     }
+    ~ExportDialog() override {
+        timer_->stop();
+        if (packageFuture_.valid()) {
+            packageCancel_->store(true);
+            packageFuture_.wait();
+        }
+    }
 
 protected:
     void reject() override {
+        if (packageRunning_) {
+            packageCancel_->store(true);
+            progressInfo_->setText("Cancelling...");
+            return;
+        }
         if (job_.running()) { // Esc / close while exporting cancels it
             job_.cancel();
             showResult();
@@ -115,7 +133,8 @@ private:
         auto* page = new QWidget;
         auto* col = new QVBoxLayout(page);
         col->setContentsMargins(0, 0, 0, 0);
-        auto* form = new QFormLayout;
+        form_ = new QFormLayout;
+        auto* form = form_;
         form->setHorizontalSpacing(16);
         form->setVerticalSpacing(8);
 
@@ -126,13 +145,16 @@ private:
             if (!formatAvailable(f))
                 if (auto* model = qobject_cast<QStandardItemModel*>(format_->model())) model->item(i)->setEnabled(false);
         }
-        format_->setCurrentIndex(static_cast<int>(r.settings.format));
+        format_->addItem("Project package (.zip)");
+        format_->setCurrentIndex(r.package ? static_cast<int>(Format::Count) : static_cast<int>(r.settings.format));
         connect(format_, &QComboBox::currentIndexChanged, this, [this](int i) {
-            exporting::Settings& s = remembered().settings;
-            s.format = static_cast<Format>(i);
+            Remembered& r = remembered();
+            exporting::Settings& s = r.settings;
+            r.package = i == static_cast<int>(Format::Count);
+            if (!r.package) s.format = static_cast<Format>(i);
             s.output = platform::fromUtf8(output_->text().toStdString());
-            s.output.replace_extension(formatExtension(s.format));
-            if (!formatSupportsAlpha(s.format)) s.transparent = false;
+            s.output.replace_extension(r.package ? ".zip" : formatExtension(s.format));
+            if (!r.package && !formatSupportsAlpha(s.format)) s.transparent = false;
             refreshSettings();
         });
         form->addRow("Format", format_);
@@ -156,14 +178,16 @@ private:
         qualityLabel_ = new QLabel("Quality");
         form->addRow(qualityLabel_, quality_);
 
-        auto* rangeRow = new QHBoxLayout;
+        rangeOptions_ = new QWidget;
+        auto* rangeRow = new QHBoxLayout(rangeOptions_);
+        rangeRow->setContentsMargins(0, 0, 0, 0);
         auto* entire = new QRadioButton("Entire composition");
         auto* custom = new QRadioButton("Custom");
         (r.customRange ? custom : entire)->setChecked(true);
         rangeRow->addWidget(entire);
         rangeRow->addWidget(custom);
         rangeRow->addStretch();
-        form->addRow("Range", rangeRow);
+        form->addRow("Range", rangeOptions_);
         rangeBox_ = new QWidget;
         auto* rb = new QHBoxLayout(rangeBox_);
         rb->setContentsMargins(0, 0, 0, 0);
@@ -206,7 +230,9 @@ private:
         auto* browse = new QPushButton("Browse...");
         connect(browse, &QPushButton::clicked, this, [this] {
             exporting::Settings& s = remembered().settings;
-            if (auto file = platform::saveFileDialog("Export to", s.output, formatLabel(s.format), formatExtension(s.format))) {
+            const bool package = remembered().package;
+            if (auto file = platform::saveFileDialog("Export to", s.output, package ? "Project package" : formatLabel(s.format),
+                                                     package ? ".zip" : formatExtension(s.format))) {
                 s.output = *file;
                 output_->setText(QString::fromStdString(platform::toUtf8(s.output)));
                 refreshSettings();
@@ -263,8 +289,13 @@ private:
         auto* cancel = new QPushButton("Cancel");
         cancel->setMinimumSize(120, 34);
         connect(cancel, &QPushButton::clicked, this, [this] {
-            job_.cancel();
-            showResult();
+            if (packageRunning_) {
+                packageCancel_->store(true);
+                progressInfo_->setText("Cancelling...");
+            } else {
+                job_.cancel();
+                showResult();
+            }
         });
         buttons->addWidget(cancel);
         col->addLayout(buttons);
@@ -298,8 +329,8 @@ private:
             buttons->addWidget(b);
         }
         connect(reveal_, &QPushButton::clicked, this, [this] {
-            const auto& out = job_.settings().output;
-            const bool seq = job_.settings().format == exporting::Format::PngSequence;
+            const auto& out = packageResultMode_ ? packageOutput_ : job_.settings().output;
+            const bool seq = !packageResultMode_ && job_.settings().format == exporting::Format::PngSequence;
             platform::revealInFileManager(seq ? out.parent_path() / platform::fromUtf8(platform::toUtf8(out.stem()) + "_0000.png") : out);
         });
         connect(play_, &QPushButton::clicked, this, [this] { platform::openWithDefaultApp(job_.settings().output); });
@@ -317,20 +348,22 @@ private:
         outputSize(ctx_.comp(), s, w, h);
         sizeInfo_->setText(QString("%1 × %2 px  ·  %3 fps").arg(w).arg(h).arg(ctx_.comp().fps, 0, 'g', 4));
         const bool sequence = s.format == Format::PngSequence;
-        quality_->setVisible(!sequence);
-        qualityLabel_->setVisible(!sequence);
-        rangeBox_->setVisible(r.customRange);
-        const bool alpha = formatSupportsAlpha(s.format);
-        transparent_->setVisible(alpha);
-        transparentLabel_->setVisible(alpha);
+        form_->setRowVisible(scale_, !r.package);
+        form_->setRowVisible(sizeInfo_, !r.package);
+        form_->setRowVisible(quality_, !r.package && !sequence);
+        form_->setRowVisible(rangeOptions_, !r.package);
+        form_->setRowVisible(rangeBox_, !r.package && r.customRange);
+        const bool alpha = !r.package && formatSupportsAlpha(s.format);
+        form_->setRowVisible(transparent_, alpha);
         {
             const QSignalBlocker b(transparent_);
             transparent_->setChecked(s.transparent);
         }
         output_->setText(QString::fromStdString(platform::toUtf8(s.output)));
-        sequenceNote_->setVisible(sequence);
-        sequenceNote_->setText(QString("Frames are saved as %1_0000.png, _0001.png, ...")
-                                   .arg(QString::fromStdString(platform::toUtf8(s.output.stem()))));
+        form_->setRowVisible(sequenceNote_, r.package || sequence);
+        sequenceNote_->setText(r.package ? QString("Includes the project and its linked media and plugin files. Extract the ZIP to open it on another computer.")
+                                        : QString("Frames are saved as %1_0000.png, _0001.png, ...")
+                                              .arg(QString::fromStdString(platform::toUtf8(s.output.stem()))));
         adjustSize();
     }
 
@@ -345,18 +378,73 @@ private:
             showError("Choose where to save the export.");
             return;
         }
+        if (r.package) {
+            s.output.replace_extension(".zip");
+            startPackage();
+            return;
+        }
+        packageResultMode_ = false;
         if (s.output.extension() != exporting::formatExtension(s.format)) s.output += exporting::formatExtension(s.format);
         s.mixAudio = media::AudioEngine::mix;
         showError("");
         pages_->setCurrentIndex(1);
         progressTitle_->setText("Preparing...");
         progressFile_->setText(QString::fromStdString(platform::toUtf8(s.output.filename())));
+        bar_->setRange(0, 1000);
         bar_->setValue(0);
         waiting_ = true;
         timer_->start(0);
     }
 
+    void startPackage() {
+        packageOutput_ = remembered().settings.output;
+        packageResultMode_ = true;
+        packageCancel_ = std::make_shared<std::atomic_bool>(false);
+        try {
+            packageFuture_ = std::async(std::launch::async,
+                [project = ctx_.project, file = ctx_.path, output = packageOutput_, cancel = packageCancel_] {
+                    PackageResult result;
+                    result.ok = packageProject(project, file, output, &result.error, cancel.get());
+                    return result;
+                });
+        } catch (const std::exception& e) {
+            showError(std::string("Could not start project packaging: ") + e.what());
+            return;
+        }
+        packageRunning_ = true;
+        showError("");
+        pages_->setCurrentIndex(1);
+        progressTitle_->setText("Packaging project...");
+        progressFile_->setText(QString::fromStdString(platform::toUtf8(packageOutput_.filename())));
+        progressInfo_->setText("Collecting linked files...");
+        bar_->setRange(0, 0);
+        timer_->start(30);
+    }
+
     void stepExport() {
+        if (packageRunning_) {
+            if (packageFuture_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+            PackageResult result;
+            try {
+                result = packageFuture_.get();
+            } catch (const std::exception& e) {
+                result.error = e.what();
+            }
+            packageRunning_ = false;
+            timer_->stop();
+            pages_->setCurrentIndex(2);
+            bar_->setRange(0, 1000);
+            bar_->setValue(result.ok ? 1000 : 0);
+            const bool cancelled = !result.ok && packageCancel_->load();
+            resultTitle_->setText(result.ok ? "Project package ready" : cancelled ? "Export cancelled" : "Export failed");
+            ui::setTone(resultTitle_, result.ok ? ui::Tone::Accent : cancelled ? ui::Tone::Text : ui::Tone::Danger);
+            resultInfo_->setText(result.ok ? "Project and linked files are ready to share." : "");
+            resultPath_->setText(result.ok ? QString::fromStdString(platform::toUtf8(packageOutput_))
+                                          : cancelled ? QString() : QString::fromStdString(result.error));
+            reveal_->setVisible(result.ok);
+            play_->hide();
+            return;
+        }
         if (waiting_) { // audio of the composition still decoding
             media::MediaManager::get().update(ctx_.comp());
             if (!media::MediaManager::get().audioReady(ctx_.comp())) {
@@ -422,14 +510,23 @@ private:
         error_->setVisible(!message.empty());
     }
 
+    struct PackageResult {
+        bool ok = false;
+        std::string error;
+    };
     EditorContext& ctx_;
     exporting::ExportJob job_;
+    std::future<PackageResult> packageFuture_;
+    std::shared_ptr<std::atomic_bool> packageCancel_;
+    std::filesystem::path packageOutput_;
+    bool packageRunning_ = false, packageResultMode_ = false;
     QStackedWidget* pages_;
     QTimer* timer_;
     bool waiting_ = false;
     QComboBox *format_ = nullptr, *scale_ = nullptr, *quality_ = nullptr;
     QLabel *sizeInfo_ = nullptr, *qualityLabel_ = nullptr, *transparentLabel_ = nullptr, *sequenceNote_ = nullptr, *error_ = nullptr;
-    QWidget* rangeBox_ = nullptr;
+    QFormLayout* form_ = nullptr;
+    QWidget *rangeBox_ = nullptr, *rangeOptions_ = nullptr;
     DragValue *from_ = nullptr, *to_ = nullptr;
     QCheckBox* transparent_ = nullptr;
     QLineEdit* output_ = nullptr;

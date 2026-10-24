@@ -37,6 +37,7 @@ add_executable(bemotion WIN32
     app/EffectLibrary.cpp
     app/Platform.cpp
     app/PluginHost.cpp
+    app/ProjectPackage.cpp
     app/PresetLibrary.cpp
     app/Recovery.cpp
     app/Settings.cpp

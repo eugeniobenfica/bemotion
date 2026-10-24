@@ -23,7 +23,7 @@ enum class Action {
     // Keyframes
     EasyEase, EaseIn, EaseOut,
     // View
-    FitView, ActualSize, ZoomIn, ZoomOut, FullScreen,
+    FitView, ActualSize, ZoomIn, ZoomOut, FullScreen, ViewportFullscreen,
     Count
 };
 

@@ -87,6 +87,7 @@ private:
     void autosave();
     void resetLayout();
     void maximizeDock(ads::CDockWidget* dock);
+    void toggleViewportFullscreen();
     void minimizeArea(ads::CDockAreaWidget* area);
     void restoreMinimized(size_t index);
     void showTools();
@@ -108,6 +109,10 @@ private:
     ads::CDockManager* docks_ = nullptr;
     QByteArray defaultLayout_;
     QByteArray beforeMaximize_; // restored by the next maximize toggle
+    QByteArray viewportFullscreenLayout_;
+    bool viewportFullscreen_ = false;
+    bool windowWasFullscreen_ = false;
+    QByteArray windowGeometryBeforeFullscreen_;
     ObjectsPanel* objects_ = nullptr;
     MediaPanel* media_ = nullptr;
     ToolsPanel* tools_ = nullptr;

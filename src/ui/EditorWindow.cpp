@@ -211,6 +211,7 @@ void EditorWindow::buildDocks() {
     media_ = new MediaPanel(ctx_);
     tools_ = new ToolsPanel(ctx_);
     viewport_ = new ViewportPanel(ctx_);
+    viewport_->setPreviewQuality(settings().previewQuality);
     properties_ = new PropertiesPanel(ctx_);
     effects_ = new EffectsPanel(ctx_);
     transitions_ = new TransitionsPanel(ctx_);
@@ -237,6 +238,11 @@ void EditorWindow::buildDocks() {
     connect(timeline_, &TimelinePanel::toolbarDragActive, this, &EditorWindow::showToolbarTargets);
     connect(timeline_, &TimelinePanel::toolbarDockRequested, this, &EditorWindow::dockToolbar);
     connect(viewport_, &ViewportPanel::toolbarDropped, this, [moveToolbar](QPoint at) { moveToolbar(true, at); });
+    connect(viewport_, &ViewportPanel::previewQualityChanged, this, [](int divisor) {
+        settings().previewQuality = divisor;
+        saveSettings();
+    });
+    connect(viewport_, &ViewportPanel::viewportFullscreenRequested, this, &EditorWindow::toggleViewportFullscreen);
     connect(timeline_, &TimelinePanel::toolbarMoveRequested, this, moveToolbar);
     connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] { QTimer::singleShot(0, this, [this] { placeToolbar(); }); });
     QTimer::singleShot(0, this, [this] { placeToolbar(); });
@@ -530,6 +536,29 @@ void EditorWindow::maximizeDock(ads::CDockWidget* dock) {
     if (dock->objectName() != "Viewport" && dock->isAutoHide()) dock->setAutoHide(false);
 }
 
+void EditorWindow::toggleViewportFullscreen() {
+    if (viewportFullscreen_) {
+        docks_->restoreState(viewportFullscreenLayout_);
+        menuBar()->setVisible(true);
+        viewportFullscreen_ = false;
+        viewport_->setViewportFullscreen(false);
+        if (!windowWasFullscreen_) {
+            window()->showNormal();
+            window()->restoreGeometry(windowGeometryBeforeFullscreen_);
+        }
+        return;
+    }
+    viewportFullscreenLayout_ = docks_->saveState();
+    windowWasFullscreen_ = window()->isFullScreen();
+    windowGeometryBeforeFullscreen_ = window()->saveGeometry();
+    for (auto& [name, dock] : dockWidgets_)
+        if (name != "Viewport" && !dock->isAutoHide() && !dock->isClosed()) dock->setAutoHide(true);
+    menuBar()->setVisible(false);
+    viewportFullscreen_ = true;
+    viewport_->setViewportFullscreen(true);
+    window()->showFullScreen();
+}
+
 // --- menus and shortcuts ------------------------------------------------------------------
 
 QAction* EditorWindow::action(Action a, const QString& text, std::function<void()> fn) {
@@ -672,6 +701,7 @@ void EditorWindow::buildMenus() {
     view->addAction(action(Action::ActualSize, "Actual Size (100%)", [this] { viewport_->setZoom(1.0f); }));
     view->addAction(action(Action::ZoomIn, "Zoom In", [this] { viewport_->zoomBy(1.25f); }));
     view->addAction(action(Action::ZoomOut, "Zoom Out", [this] { viewport_->zoomBy(1.0f / 1.25f); }));
+    view->addAction(action(Action::ViewportFullscreen, "Viewport Fullscreen", [this] { toggleViewportFullscreen(); }));
     view->addSeparator();
     QAction* snap = action(Action::ToggleSnapping, "Snapping", [this] { ctx_.snapping = !ctx_.snapping; });
     snap->setCheckable(true);
@@ -782,6 +812,13 @@ void EditorWindow::buildMenus() {
 }
 
 bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
+    if (viewportFullscreen_ && event->type() == QEvent::KeyPress) {
+        auto* key = static_cast<QKeyEvent*>(event);
+        if (key->key() == Qt::Key_Escape && !key->isAutoRepeat()) {
+            toggleViewportFullscreen();
+            return true;
+        }
+    }
     if (event->type() == QEvent::MouseMove) pointer_ = static_cast<QMouseEvent*>(event)->globalPosition().toPoint();
     if (watched == docks_ && event->type() == QEvent::Resize) {
         placeRestoreHandles();

@@ -4,6 +4,7 @@
 #include "app/Settings.h"
 #include "core/Snapping.h"
 #include "render/SceneRenderer.h"
+#include "ui/AppSignals.h"
 #include "ui/Draw.h"
 #include "ui/EditorContext.h"
 #include "ui/Mime.h"
@@ -14,6 +15,8 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkSurface.h"
 
+#include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QDragEnterEvent>
 #include <QKeyEvent>
@@ -170,6 +173,30 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     fitButton_->setFixedSize(46, 26);
     fitButton_->setToolTip("Fit composition to view (Ctrl+0)\nWheel: zoom  ·  Middle/right drag or Space+drag: pan");
     connect(fitButton_, &QPushButton::clicked, this, [this] { requestFit(); });
+    qualityButton_ = new QToolButton(this);
+    qualityButton_->setPopupMode(QToolButton::InstantPopup);
+    qualityButton_->setFixedSize(70, 26);
+    qualityButton_->setText("Full");
+    qualityButton_->setToolTip("Preview resolution (export quality is unchanged)");
+    auto* qualityMenu = new QMenu(qualityButton_);
+    auto* qualityGroup = new QActionGroup(qualityMenu);
+    for (const auto& [label, divisor] : {std::pair{"Full", 1}, {"Half", 2}, {"Quarter", 4}}) {
+        auto* action = qualityMenu->addAction(label);
+        action->setCheckable(true);
+        action->setChecked(divisor == previewDivisor_);
+        action->setData(divisor);
+        qualityGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, divisor] { setPreviewQuality(divisor); });
+    }
+    qualityButton_->setMenu(qualityMenu);
+    fullscreenButton_ = new QPushButton("Fullscreen", this);
+    fullscreenButton_->setFixedSize(86, 26);
+    fullscreenButton_->setToolTip("Show only the viewport in fullscreen (Esc to return)");
+    connect(fullscreenButton_, &QPushButton::clicked, this, &ViewportPanel::viewportFullscreenRequested);
+    connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
+        frameValid_ = false;
+        update();
+    });
 }
 
 // --- view ---------------------------------------------------------------------------------
@@ -201,6 +228,23 @@ void ViewportPanel::zoomAround(Vec2 screenPoint, float newZoom) {
 
 void ViewportPanel::zoomBy(float factor) { zoomAround({width() * 0.5f, height() * 0.5f}, zoom_ * factor); }
 void ViewportPanel::setZoom(float zoom) { zoomAround({width() * 0.5f, height() * 0.5f}, zoom); }
+
+void ViewportPanel::setPreviewQuality(int divisor) {
+    divisor = divisor == 4 ? 4 : divisor == 2 ? 2 : 1;
+    if (previewDivisor_ == divisor) return;
+    previewDivisor_ = divisor;
+    qualityButton_->setText(divisor == 1 ? "Full" : divisor == 2 ? "Half" : "Quarter");
+    for (QAction* action : qualityButton_->menu()->actions()) action->setChecked(action->data().toInt() == divisor);
+    frameValid_ = false;
+    update();
+    emit previewQualityChanged(divisor);
+}
+
+void ViewportPanel::setViewportFullscreen(bool fullscreen) {
+    fullscreenButton_->setText(fullscreen ? "Exit fullscreen" : "Fullscreen");
+    fullscreenButton_->setFixedWidth(fullscreen ? 110 : 86);
+    positionHud();
+}
 
 bool ViewportPanel::setSpaceHeld(bool held) {
     spaceHeld_ = held;
@@ -235,6 +279,9 @@ void ViewportPanel::positionHud() {
     zoomInButton_->move(x, y);
     x += 26 + 4;
     fitButton_->move(x, y);
+    const int controlsY = width() >= 520 ? y : y - 32;
+    qualityButton_->move(12, controlsY);
+    fullscreenButton_->move(88, controlsY);
 }
 
 // --- painting ---------------------------------------------------------------------------------
@@ -248,24 +295,30 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     Draw d(p);
     d.rectFilled(Pt(0, 0), Pt(width(), height()), theme::kCanvas);
 
-    // The composition through Skia, at device resolution.
-    const qreal dpr = devicePixelRatioF();
-    const QSize px(static_cast<int>(std::ceil(width() * dpr)), static_cast<int>(std::ceil(height() * dpr)));
-    if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
-    frame_.fill(Qt::transparent);
-    {
+    // Cache the scene independently of hover/selection overlays. Media may finish decoding
+    // without a document revision, so compositions with imported media remain uncached.
+    const qreal rasterScale = devicePixelRatioF() / previewDivisor_;
+    const QSize px(std::max(1, static_cast<int>(std::ceil(width() * rasterScale))),
+                   std::max(1, static_cast<int>(std::ceil(height() * rasterScale))));
+    const FrameKey key{ctx_.revision(), t, px, origin_, zoom_, rasterScale, throughCamera_};
+    if (!frameValid_ || key != frameKey_ || !c.media.empty()) {
+        if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
+        frame_.fill(Qt::transparent);
         const SkImageInfo info = qtImageInfo(px.width(), px.height());
         sk_sp<SkSurface> surface = SkSurfaces::WrapPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()));
+        frameValid_ = static_cast<bool>(surface);
         if (surface) {
-            const float z = static_cast<float>(dpr);
+            const float z = static_cast<float>(rasterScale);
             render::drawComposition(surface->getCanvas(), c, t, render::View{origin_ * z, zoom_ * z, world_}, true, throughCamera_);
+            frameKey_ = key;
         }
     }
     const Vec2 compMax = sceneView().toScreen(compSize_);
     d.rectFilled(Pt(origin_.x + 4, origin_.y + 6), Pt(compMax.x + 4, compMax.y + 6), theme::shade(90), 2.0f);
-    frame_.setDevicePixelRatio(dpr);
-    // The shadow goes under the frame: draw the frame (only the composition area is opaque) after it.
-    p.drawImage(QPointF(0, 0), frame_);
+    // Upscale only the scene; handles, rulers, guides and HUD retain native resolution.
+    p.setRenderHint(QPainter::SmoothPixmapTransform, previewDivisor_ > 1);
+    p.drawImage(rect(), frame_);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     d.rect(pt(origin_), pt(compMax), theme::kBorder);
     drawGuides(p);
     drawOverlay(p);

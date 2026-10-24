@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 namespace bemotion::render {
@@ -114,12 +115,18 @@ void drawMesh(SkCanvas* canvas, const Mesh& mesh, const MeshView& view) {
     const float dist = ortho ? 0.0f : 1.0f + 1.0f / std::tan(std::clamp(view.fov, 0.5f, 150.0f) * 3.14159265f / 360.0f);
 
     // Vertices in view space (unit sphere, y up, z toward the viewer) and on screen.
-    std::vector<V3> vs(n), ns(n);
+    struct ShadedNormal {
+        V3 normal;
+        SkColor colors[2];
+        uint8_t ready = 0;
+    };
+    std::vector<V3> vs(n);
+    std::vector<ShadedNormal> ns(view.flat ? 0 : n);
     std::vector<SkPoint> screen(n);
     for (size_t i = 0; i < n; ++i) {
         const V3 p = rot.apply((at(mesh.positions, i) - c) * (1.0f / mesh.radius));
         vs[i] = p;
-        ns[i] = rot.apply(at(mesh.normals, i));
+        if (!view.flat) ns[i].normal = rot.apply(at(mesh.normals, i));
         const float k = ortho ? 1.0f : (dist - 1.0f) / std::max(1e-3f, dist - p.z);
         screen[i] = {view.offset.x + p.x * k * fit, view.offset.y - p.y * k * fit};
     }
@@ -145,34 +152,63 @@ void drawMesh(SkCanvas* canvas, const Mesh& mesh, const MeshView& view) {
     const V3 light = normalized({view.light[0], view.light[1], view.light[2]});
     const V3 half = normalized(light + V3{0, 0, 1});
     const float ambient = std::clamp(view.ambient, 0.0f, 1.0f), shine = std::clamp(view.shine, 0.0f, 1.0f);
-    auto shade = [&](V3 normal, V3 toEye, Color base) {
+    struct Lighting {
+        float diffuse, specular;
+    };
+    auto lighting = [&](V3 normal, V3 toEye) {
         if (dot(normal, toEye) < 0.0f) normal = normal * -1.0f; // the inside of an open surface
         const float diffuse = std::max(0.0f, dot(normal, light));
         const float spec = shine * std::pow(std::max(0.0f, dot(normal, half)), 40.0f);
-        const float k = ambient + (1.0f - ambient) * diffuse;
-        auto ch = [&](float v, float tint) { return std::clamp(v * tint * k + spec, 0.0f, 1.0f); };
+        return Lighting{ambient + (1.0f - ambient) * diffuse, spec};
+    };
+    auto shade = [&](Lighting value, Color base) {
+        auto ch = [&](float v, float tint) { return std::clamp(v * tint * value.diffuse + value.specular, 0.0f, 1.0f); };
         return SkColor4f{ch(base.r, view.tint.r), ch(base.g, view.tint.g), ch(base.b, view.tint.b),
-                         std::clamp(base.a * view.tint.a * view.opacity, 0.0f, 1.0f)};
+                         std::clamp(base.a * view.tint.a * view.opacity, 0.0f, 1.0f)}.toSkColor();
     };
 
-    std::vector<SkPoint> pos;
-    std::vector<SkColor> col;
-    pos.reserve(order.size() * 3);
-    col.reserve(order.size() * 3);
+    if (order.size() > static_cast<size_t>(std::numeric_limits<int>::max() / 3)) return;
+    // Fill Skia's final storage directly instead of allocating and copying two triangle arrays.
+    SkVertices::Builder builder(SkVertices::kTriangles_VertexMode, static_cast<int>(order.size() * 3), 0,
+                               SkVertices::kHasColors_BuilderFlag);
+    if (!builder.isValid()) return;
+    SkPoint* pos = builder.positions();
+    SkColor* col = builder.colors();
+    size_t out = 0;
     for (const Tri& tri : order) {
         const uint32_t idx[3] = {mesh.indices[tri.i * 3], mesh.indices[tri.i * 3 + 1], mesh.indices[tri.i * 3 + 2]};
         const V3 faceN = normalized(cross(vs[idx[1]] - vs[idx[0]], vs[idx[2]] - vs[idx[0]]));
         const V3 centroid = (vs[idx[0]] + vs[idx[1]] + vs[idx[2]]) * (1.0f / 3.0f);
         const V3 toEye = ortho ? V3{0, 0, 1} : normalized(eye - centroid);
+        const Lighting faceLight = view.flat ? lighting(faceN, toEye) : Lighting{};
         for (uint32_t i : idx) {
-            pos.push_back(screen[i]);
-            V3 normal = view.flat ? faceN : ns[i];
-            if (!view.flat && dot(normal, faceN) < 0.0f) normal = normal * -1.0f; // keep smooth normals on the face's side
-            col.push_back(shade(normal, toEye, view.meshColors ? mesh.colors[i] : Color::fromHex(0xFFFFFF)).toSkColor());
+            pos[out] = screen[i];
+            const Color base = view.meshColors ? mesh.colors[i] : Color::fromHex(0xFFFFFF);
+            if (view.flat) {
+                col[out++] = shade(faceLight, base);
+                continue;
+            }
+            ShadedNormal& vertex = ns[i];
+            V3 normal = vertex.normal;
+            bool flipped = false;
+            if (dot(normal, faceN) < 0.0f) {
+                normal = normal * -1.0f;
+                flipped = !flipped;
+            }
+            if (dot(normal, toEye) < 0.0f) {
+                normal = normal * -1.0f;
+                flipped = !flipped;
+            }
+            const unsigned side = flipped ? 1u : 0u, bit = 1u << side;
+            // Shared vertices need lighting at most once per facing side, not once per triangle.
+            if (!(vertex.ready & bit)) {
+                vertex.colors[side] = shade(lighting(normal, toEye), base);
+                vertex.ready |= bit;
+            }
+            col[out++] = vertex.colors[side];
         }
     }
-    const sk_sp<SkVertices> vertices =
-        SkVertices::MakeCopy(SkVertices::kTriangles_VertexMode, static_cast<int>(pos.size()), pos.data(), nullptr, col.data());
+    const sk_sp<SkVertices> vertices = builder.detach();
     SkPaint paint;
     paint.setAntiAlias(true);
     canvas->drawVertices(vertices, SkBlendMode::kDst, paint); // kDst: the vertex colors as they are

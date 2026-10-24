@@ -39,11 +39,16 @@ class ViewportPanel : public QWidget {
     Q_OBJECT
 signals:
     void toolbarDropped(QPoint at); // the toolbar's grip was dropped here
+    void viewportFullscreenRequested();
+    void previewQualityChanged(int divisor);
 
 public:
     explicit ViewportPanel(EditorContext& ctx, QWidget* parent = nullptr);
 
     void sync(); // redraws when what it shows changed
+    void setPreviewQuality(int divisor); // 1 full, 2 half, 4 quarter; exports are unaffected
+    int previewQuality() const { return previewDivisor_; }
+    void setViewportFullscreen(bool fullscreen);
 
     // Keeps the composition fitted to the panel until the user zooms or pans.
     void requestFit() {
@@ -160,6 +165,9 @@ private:
     ui::IconButton* zoomInButton_ = nullptr;
     QToolButton* zoomLevel_ = nullptr;
     QPushButton* fitButton_ = nullptr;
+    QToolButton* qualityButton_ = nullptr;
+    QPushButton* fullscreenButton_ = nullptr;
+    int previewDivisor_ = 1;
 
     // What was last drawn (to redraw only on change).
     struct Signature {
@@ -170,6 +178,17 @@ private:
         bool snapping = false, guides = false, rulers = false, playing = false;
         bool operator==(const Signature&) const = default;
     } drawn_;
+    struct FrameKey {
+        uint64_t revision = 0;
+        double time = -1.0;
+        QSize pixels;
+        Vec2 origin;
+        float zoom = 0.0f;
+        qreal scale = 0.0;
+        bool throughCamera = true;
+        bool operator==(const FrameKey&) const = default;
+    } frameKey_;
+    bool frameValid_ = false;
     QImage frame_; // the rendered composition
 };
 
