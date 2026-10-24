@@ -741,7 +741,8 @@ private:
                         return list;
                     }() + " files");
                 std::error_code ec;
-                if (!std::filesystem::is_regular_file(std::filesystem::u8path(path), ec)) fail("there is no file \"" + path + "\"");
+                if (!std::filesystem::is_regular_file(std::filesystem::path(std::u8string(path.begin(), path.end())), ec))
+                    fail("there is no file \"" + path + "\"");
             }
             p->text = path;
             p->relative.clear();

@@ -2,6 +2,7 @@
 
 #include "core/Transitions.h"
 #include "ui/EditorContext.h"
+#include "ui/Mime.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 

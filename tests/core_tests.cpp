@@ -793,7 +793,8 @@ void testFileParams() {
     Project back;
     CHECK(loadProject(dir / "moved" / "test.bemotion", back));
     const PluginParam* m = back.comp.layers.empty() ? nullptr : back.comp.layers[0].plugin.find("model");
-    CHECK(m && m->kind == PluginParamKind::File && fs::exists(fs::u8path(m->text)) && m->accept.size() == 2);
+    CHECK(m && m->kind == PluginParamKind::File && fs::exists(fs::path(std::u8string(m->text.begin(), m->text.end()))) &&
+          m->accept.size() == 2);
     CHECK(back.comp.layers[0].plugin.find("shading")->choice == 1);
     fs::remove_all(dir);
 }
