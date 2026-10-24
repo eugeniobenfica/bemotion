@@ -27,6 +27,8 @@ if [ ! -f "$skia/lib/libskia.a" ]; then
 fi
 command -v makensis >/dev/null || { echo "NSIS missing: pacman -S mingw-w64-ucrt-x86_64-nsis"; exit 1; }
 
+echo "== speech model (downloaded once)"
+tools/fetch-speech-model.sh
 echo "== configure ($build, Skia: $skia)"
 cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIA_ROOT="$(cygpath -m "$skia" 2>/dev/null || echo "$skia")" >/dev/null
 echo "== build"

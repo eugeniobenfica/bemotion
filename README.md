@@ -110,6 +110,10 @@ does.
 - **Subtitles**: captions one after another at the bottom of the frame, on a
   box; type them, import / export `.srt`, edit them in a list, see them as
   blocks on the timeline
+- **Speech to text**: right-click a clip with speech, *Transcribe to
+  Subtitles*: the words land as captions at their time. Accurate (Whisper
+  large-v3-turbo) and fast on the GPU, offline, the model built in — nothing
+  to download or set up
 - **Media**: import images, video and audio (Ctrl+I or drop files on the
   window) into the *Media* panel; media layers animate like everything else
   and get an animatable *Volume*
@@ -294,11 +298,12 @@ nlohmann/json, stb, Lua, miniaudio) is fetched on the first configure.
 **Windows** — in an [MSYS2](https://www.msys2.org) **UCRT64** shell:
 
 ```bash
-pacman -S --needed git patch mingw-w64-ucrt-x86_64-{toolchain,cmake,ninja,pkgconf,python,gn}   mingw-w64-ucrt-x86_64-{qt6-base,qt6-svg,qt6-tools,ffmpeg,harfbuzz,icu,libjpeg-turbo,libwebp,libpng,expat,zlib,freetype}
+pacman -S --needed git patch mingw-w64-ucrt-x86_64-{toolchain,cmake,ninja,pkgconf,python,gn}   mingw-w64-ucrt-x86_64-{qt6-base,qt6-svg,qt6-tools,ffmpeg,whisper.cpp,harfbuzz,icu,libjpeg-turbo,libwebp,libpng,expat,zlib,freetype}
 tools/skia/build-skia.sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/bemotion.exe
+tools/fetch-speech-model.sh                   # once: the speech-to-text model (~550 MB) the package ships
 tools/package-windows.sh build dist           # installer + portable zip (needs: pacman -S mingw-w64-ucrt-x86_64-nsis)
 ```
 

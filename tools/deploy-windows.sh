@@ -37,6 +37,17 @@ copy_deps() {
     done
 }
 copy_deps "$out/bemotion.exe"
+# whisper.cpp's compute backends (CPU variants, Vulkan...) are loaded at run time, from beside the
+# executable: ldd does not see them.
+for dll in "$prefix"/bin/ggml-*.dll; do cp "$dll" "$out/"; done
+# The speech-to-text model ships inside: nobody has to download anything (tools/fetch-speech-model.sh).
+models="${BEMOTION_MODELS:-$HOME/bemotion-deps/models}"
+if ls "$models"/ggml-*.bin >/dev/null 2>&1; then
+    mkdir -p "$out/assets/models"
+    cp "$models"/ggml-*.bin "$out/assets/models/"
+else
+    echo "warning: no speech model in $models (run tools/fetch-speech-model.sh): transcription will be missing"
+fi
 find "$out" -name '*.dll' -print0 | while IFS= read -r -d '' dll; do copy_deps "$dll"; done
 
 echo "Deployed to $out ($(find "$out" -name '*.dll' | wc -l) DLLs)"

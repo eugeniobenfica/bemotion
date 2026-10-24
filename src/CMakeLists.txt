@@ -50,6 +50,7 @@ add_executable(bemotion WIN32
     media/MediaIO.cpp
     media/MediaManager.cpp
     media/Recorder.cpp
+    media/Transcriber.cpp
     render/Fonts.cpp
     render/LogoMark.cpp
     render/Mesh3D.cpp
@@ -83,6 +84,7 @@ add_executable(bemotion WIN32
     ui/panels/ToolsPanel.cpp
     ui/panels/TransitionsPanel.cpp
     ui/panels/AnimationsPanel.cpp
+    ui/Transcribe.cpp
     ui/panels/ViewportPanel.cpp)
 set_target_properties(bemotion PROPERTIES AUTOMOC ON)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -93,6 +95,10 @@ target_link_libraries(bemotion PRIVATE
     skia
     PkgConfig::FFMPEG
     stb lua miniaudio)
+if(WHISPER_FOUND)
+    target_link_libraries(bemotion PRIVATE PkgConfig::WHISPER)
+    target_compile_definitions(bemotion PRIVATE BEMOTION_WHISPER=1)
+endif()
 target_compile_definitions(bemotion PRIVATE
     BEMOTION_VERSION="${PROJECT_VERSION}"
     BEMOTION_SOURCE_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")

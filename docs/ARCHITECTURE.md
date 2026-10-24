@@ -263,6 +263,17 @@ Rules:
   with this waveform while capturing, following capture time beyond the
   composition end. This preview stays outside the document: stopping the
   Recorder plugin creates the saved media layer once, as one undoable edit.
+- `media/Transcriber` turns speech into captions with whisper.cpp (linked when
+  found, `BEMOTION_WHISPER`; MSYS2's FFmpeg depends on it anyway): the clip's
+  audio at 16 kHz mono, greedy decoding with a few candidates, the
+  voice-activity model to skip silence, the GPU when there is one (flash
+  attention off: it gives garbage on some AMD / Vulkan drivers), long
+  segments split for reading (`splitLongCaptions`). On Windows the ggml
+  backends are DLLs loaded at run time; a development build loads them from
+  where ggml lives. Models: `platform::speechModelFolders()`
+  (`$BEMOTION_MODELS`, `assets/models`, app data); `tools/fetch-speech-model.sh`
+  downloads them once, `deploy-windows.sh` ships them. `ui/Transcribe` runs it
+  on a thread with progress and Stop and fills a Subtitles layer.
 - `export/ExportJob` snapshots the project and feeds an `Encoder` frame by
   frame from the calling thread (`step()`), so the UI stays responsive and
   cancelling is trivial. `FfmpegEncoder` (MP4 / H.264, MOV / ProRes, WebM /

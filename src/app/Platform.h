@@ -27,6 +27,9 @@ fs::path assetsDir();
 // The Welcome project the home screen always lists: bemotion's own copy in the app data
 // folder (made from the bundled one when missing), so edits to it are kept. Empty on failure.
 fs::path welcomeProject();
+// Where the speech-to-text models are looked for, in order: $BEMOTION_MODELS, the bundled
+// ones (assets/models), the user's (app data / models).
+std::vector<fs::path> speechModelFolders();
 
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const char* extension);
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions);

@@ -11,6 +11,7 @@
 #include "render/Fonts.h"
 #include "ui/EditorContext.h"
 #include "ui/PropertyRow.h"
+#include "ui/Transcribe.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -822,6 +823,26 @@ void PropertiesPanel::buildCaptions(QVBoxLayout* col, Layer& layer) {
     row2->addWidget(exportSrt);
     row2->addStretch();
     s->body()->addLayout(row2);
+    // Speech to text: the clips with sound, one of which fills this layer.
+    std::vector<std::pair<uint64_t, std::string>> sounds;
+    for (const Layer& l : ctx_.comp().layers)
+        if (ui::canTranscribe(ctx_, l.id)) sounds.emplace_back(l.id, l.name);
+    auto* transcribe = ui::accentButton("Transcribe Speech...");
+    transcribe->setToolTip(sounds.empty() ? "Add a video or audio clip with speech first"
+                                          : "The words spoken in a clip become these captions, at their time");
+    transcribe->setEnabled(!sounds.empty());
+    connect(transcribe, &QPushButton::clicked, this, [this, transcribe, sounds, id] {
+        if (sounds.size() == 1) {
+            ui::transcribeClip(ctx_, sounds.front().first, id, this);
+            return;
+        }
+        QMenu menu;
+        for (const auto& [clip, name] : sounds)
+            menu.addAction(ui::menuIcon(ui::Icon::Audio, theme::kTextDim), QString::fromStdString(name),
+                           [this, clip = clip, id] { ui::transcribeClip(ctx_, clip, id, this); });
+        menu.exec(transcribe->mapToGlobal(QPoint(0, transcribe->height())));
+    });
+    s->body()->addWidget(transcribe);
     col->addWidget(s);
 }
 

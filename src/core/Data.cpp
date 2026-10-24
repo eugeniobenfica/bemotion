@@ -286,4 +286,36 @@ std::string toSrt(const std::vector<Caption>& captions) {
     return out;
 }
 
+void splitLongCaptions(std::vector<Caption>& captions, size_t maxChars) {
+    std::vector<Caption> out;
+    for (const Caption& c : captions) {
+        if (c.text.size() <= maxChars || maxChars < 8) {
+            out.push_back(c);
+            continue;
+        }
+        std::vector<std::string> pieces(1);
+        std::string word;
+        auto flush = [&] {
+            if (word.empty()) return;
+            if (!pieces.back().empty() && pieces.back().size() + 1 + word.size() > maxChars) pieces.emplace_back();
+            pieces.back() += (pieces.back().empty() ? "" : " ") + word;
+            word.clear();
+        };
+        for (char ch : c.text) {
+            if (ch == ' ' || ch == '\n') flush();
+            else word += ch;
+        }
+        flush();
+        size_t total = 0;
+        for (const auto& p : pieces) total += p.size();
+        double at = c.start;
+        for (size_t i = 0; i < pieces.size(); ++i) {
+            const double end = i + 1 == pieces.size() ? c.end : at + (c.end - c.start) * static_cast<double>(pieces[i].size()) / std::max<size_t>(1, total);
+            out.push_back({at, end, pieces[i]});
+            at = end;
+        }
+    }
+    captions = std::move(out);
+}
+
 } // namespace bemotion

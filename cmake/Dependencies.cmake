@@ -6,6 +6,8 @@
 #   FFmpeg      - libavformat / libavcodec / libavfilter / libswscale / libswresample:
 #                 reading video and audio, writing MP4 / MOV / WebM / GIF
 #   HarfBuzz, ICU, libpng, libjpeg, libwebp, expat, zlib - used by Skia
+#   whisper.cpp - speech to text (optional: MSYS2's FFmpeg already depends on it; without it
+#                 transcription is not offered)
 #
 # Built once with tools/skia/build-skia.sh (pinned revision):
 #   Skia        - 2D rendering of compositions, text shaping, image filters
@@ -30,6 +32,12 @@ pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
     libavformat libavcodec libavfilter libswscale libswresample libavutil)
 pkg_check_modules(SKIA_DEPS REQUIRED IMPORTED_TARGET
     harfbuzz icu-uc icu-i18n libpng libjpeg libwebp libwebpmux libwebpdemux expat zlib)
+pkg_check_modules(WHISPER IMPORTED_TARGET whisper)
+if(WHISPER_FOUND)
+    message(STATUS "whisper.cpp ${WHISPER_VERSION}: speech to text on")
+else()
+    message(STATUS "whisper.cpp not found: speech to text off")
+endif()
 if(UNIX AND NOT APPLE)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig freetype2)
 endif()

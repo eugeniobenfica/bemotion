@@ -103,6 +103,14 @@ fs::path documentsDir() {
     return fromQ(docs);
 }
 
+std::vector<fs::path> speechModelFolders() {
+    std::vector<fs::path> folders;
+    if (const std::string env = platform::env("BEMOTION_MODELS"); !env.empty()) folders.push_back(fromUtf8(env));
+    folders.push_back(assetsDir() / "models");
+    folders.push_back(appDataDir() / "models");
+    return folders;
+}
+
 fs::path welcomeProject() {
     const fs::path copy = appDataDir() / "Welcome" / "Welcome to bemotion.bemotion";
     std::error_code ec;

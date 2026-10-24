@@ -3,12 +3,14 @@
 #include "app/McpServer.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "core/Data.h"
 #include "core/Describe.h"
 #include "core/Serialization.h"
 #include "core/Validate.h"
 #include "media/AudioEngine.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
+#include "media/Transcriber.h"
 #include "render/OffscreenRenderer.h"
 
 #include "stb_image_write.h"
@@ -45,6 +47,7 @@ constexpr const char* kUsage =
     "  bemotion render <project> [--at t1,t2,...] [--count N] [--width W] [--each] --out <file.png>\n"
     "  bemotion script <project> <file.lua | -> [--time T] [--out <file>] [--dry-run] [--describe]\n"
     "  bemotion new <project> [--width W] [--height H] [--fps F]\n"
+    "  bemotion transcribe <audio or video> [--language auto|en|pt|...] [--from s] [--to s] [--cpu] [--out <file.srt>]\n"
     "  bemotion mcp                    (MCP server for AI assistants: JSON-RPC on stdin / stdout)\n"
     "  bemotion <project> --export <file> [--format mp4|png|mov|webm|gif] [--scale N] [--transparent]\n";
 
@@ -381,8 +384,49 @@ OpEnvironment automationEnvironment() {
     return env;
 }
 
+// Speech to text: the captions of a file's audio, as SubRip.
+int transcribeCmd(const Args& a) {
+    if (a.positional.size() != 1) return usageError("transcribe takes one audio or video file");
+    media::TranscribeOptions options;
+    if (!media::findSpeechModels(platform::speechModelFolders(), options)) {
+        std::fprintf(stderr, "error: no speech model (tools/fetch-speech-model.sh, then set BEMOTION_MODELS or put it in assets/models)\n");
+        return 1;
+    }
+    options.language = a.value("language", "auto");
+    options.gpu = !a.flag("cpu");
+    std::vector<Caption> captions;
+    std::string error;
+    int shown = -10;
+    const auto started = std::chrono::steady_clock::now();
+    const bool ok = media::transcribe(platform::fromUtf8(a.positional[0]), std::atof(a.value("from", "0").c_str()),
+                                      std::atof(a.value("to", "0").c_str()), options, captions,
+                                      [&](float f) {
+                                          if (const int pct = static_cast<int>(f * 100); pct >= shown + 10) {
+                                              std::fprintf(stderr, "%d%%\n", pct);
+                                              shown = pct;
+                                          }
+                                          return true;
+                                      },
+                                      &error);
+    if (!ok) {
+        std::fprintf(stderr, "error: %s\n", error.c_str());
+        return 1;
+    }
+    std::fprintf(stderr, "%zu captions in %.1f s (%s)\n", captions.size(),
+                 std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count(),
+                 platform::toUtf8(options.model.filename()).c_str());
+    const std::string srt = toSrt(captions);
+    if (const std::string file = a.value("out"); !file.empty()) {
+        std::ofstream out(platform::fromUtf8(file), std::ios::binary);
+        out << srt;
+    } else {
+        print(srt);
+    }
+    return 0;
+}
+
 bool isAutomationCommand(const std::string& arg) {
-    return arg == "describe" || arg == "validate" || arg == "apply" || arg == "render" || arg == "new" || arg == "script" || arg == "mcp" || arg == "help" ||
+    return arg == "transcribe" || arg == "describe" || arg == "validate" || arg == "apply" || arg == "render" || arg == "new" || arg == "script" || arg == "mcp" || arg == "help" ||
            arg == "--help" || arg == "-h";
 }
 
@@ -394,6 +438,7 @@ int runAutomation(const std::vector<std::string>& args) {
     if (cmd == "render") return renderCmd(parse(args, {"each"}));
     if (cmd == "new") return newProject(parse(args, {}));
     if (cmd == "script") return script(parse(args, {"dry-run", "describe"}));
+    if (cmd == "transcribe") return transcribeCmd(parse(args, {"cpu"}));
     if (cmd == "mcp") return runMcpServer(); // AI assistants: JSON-RPC on stdin / stdout
     print(kUsage);
     return 0;

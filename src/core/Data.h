@@ -34,5 +34,8 @@ std::vector<Caption> parseSrt(const std::string& text);
 // A time as people write it: "1.5", "0:01.5", "00:00:01,500" (seconds; false if not a time).
 bool parseCaptionTime(const std::string& text, double& seconds);
 std::string toSrt(const std::vector<Caption>& captions);
+// Captions longer than `maxChars` become several in a row, at word boundaries, sharing its
+// time in proportion to their length (comfortable to read).
+void splitLongCaptions(std::vector<Caption>& captions, size_t maxChars);
 
 } // namespace bemotion

@@ -36,6 +36,7 @@ struct Settings {
     int previewQuality = 1;            // raster preview divisor: 1, 2 or 4 (export is unaffected)
     bool welcomeAdded = false;         // the Welcome project was put in the projects folder once
     std::string projectsFolder;        // where projects live, chosen by the user (empty: not yet)
+    std::string speechLanguage = "auto"; // speech to text: "auto" or a language code ("en", "pt"...)
     std::vector<std::string> toolbar = ui::defaultToolbar(); // tool ids in the timeline's toolbar (ui/Tools.h)
     bool toolbarInViewport = false;      // the toolbar floats outside the timeline ...
     bool toolbarInWindow = false;        // window-relative floating position; older viewport positions stay unchanged

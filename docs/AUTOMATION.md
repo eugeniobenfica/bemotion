@@ -19,6 +19,7 @@ bemotion script promo.bemotion build.lua         # Lua with the plugin doc API (
 bemotion render promo.bemotion --count 6 --out sheet.png   # look at it: a contact sheet
 bemotion render promo.bemotion --at 0,1.5 --each --out frame.png
 bemotion validate promo.bemotion                 # checks the rules (--fix repairs and saves)
+bemotion transcribe voice.wav --language en      # speech -> SubRip captions (--out file.srt, --from / --to s, --cpu)
 bemotion promo.bemotion --export promo.mp4       # the video
 ```
 

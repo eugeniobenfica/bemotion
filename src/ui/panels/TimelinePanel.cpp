@@ -5,6 +5,7 @@
 #include "core/Snapping.h"
 #include "core/Presets.h"
 #include "core/Transitions.h"
+#include "ui/Transcribe.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
 #include "ui/AppSignals.h"
@@ -1631,6 +1632,11 @@ void TimelinePanel::showTrackMenu(QPoint global) {
     });
     menu.addAction("Duplicate\tCtrl+D", [this] { ctx_.duplicateSelected(); });
     menu.addAction("Split at Playhead\tCtrl+K", [this] { ctx_.splitSelectedAtPlayhead(); });
+    if (ui::canTranscribe(ctx_, focus)) {
+        QAction* t = menu.addAction(ui::menuIcon(ui::Icon::Subtitles, theme::kTextDim), "Transcribe to Subtitles...",
+                                    [this, focus] { ui::transcribeClip(ctx_, focus, 0, this); });
+        t->setToolTip("The words spoken in this clip become a Subtitles layer, at their time");
+    }
     menu.addSeparator();
     menu.addAction("Create Compound\tCtrl+G", [this] { ctx_.createCompound(); });
     menu.addAction("Release Compound\tCtrl+Shift+G", [this] { ctx_.releaseSelectedCompounds(); })->setEnabled(ctx_.selectionHasCompound());

@@ -921,6 +921,10 @@ void testSubtitles() {
     CHECK(caps.size() == 2 && near(static_cast<float>(caps[0].start), 1.0f) && near(static_cast<float>(caps[0].end), 2.5f));
     CHECK(caps.size() == 2 && caps[0].text == "Hello there" && caps[1].text == "Second\nline");
     CHECK(parseSrt(toSrt(caps)) == caps);
+    std::vector<Caption> longOne = {{0, 10, "one two three four five six seven eight nine ten eleven twelve"}};
+    splitLongCaptions(longOne, 20);
+    CHECK(longOne.size() >= 3 && near(static_cast<float>(longOne.front().start), 0) && near(static_cast<float>(longOne.back().end), 10));
+    for (size_t i = 1; i < longOne.size(); ++i) CHECK(longOne[i].text.size() <= 20 && near(static_cast<float>(longOne[i].start), static_cast<float>(longOne[i - 1].end)));
     double t = 0;
     CHECK(parseCaptionTime("0:01.50", t) && near(static_cast<float>(t), 1.5f) && !parseCaptionTime("abc", t));
     Project p;

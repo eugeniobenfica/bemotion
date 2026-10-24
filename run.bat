@@ -17,6 +17,8 @@ if not exist "%MSYS%\cmake.exe" (
 )
 rem Qt, FFmpeg and the compiler come from MSYS2.
 set "PATH=%MSYS%;%PATH%"
+rem The speech-to-text model, once tools\fetch-speech-model.sh has fetched it.
+if not defined BEMOTION_MODELS if exist "%USERPROFILE%\bemotion-deps\models" set "BEMOTION_MODELS=%USERPROFILE%\bemotion-deps\models"
 
 set "BUILDNOW=1"
 set "OPEN=1"
