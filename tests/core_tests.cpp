@@ -759,6 +759,38 @@ void testArrangeAndTransitions() {
     CHECK(!run(p, R"({"op": "transition.add", "layer": "A", "transition": "fdae"})").ok);
 }
 
+void testCutTransitions() {
+    Project p;
+    CHECK(run(p, R"([{"op": "layer.add", "type": "rectangle", "name": "Clip", "duration": 4},
+                     {"op": "layer.split", "layer": "Clip", "time": 2},
+                     {"op": "layer.add", "type": "camera"}])").ok);
+    Composition& c = p.comp;
+    Layer* first = nullptr;
+    for (Layer& l : c.layers)
+        if (l.name == "Clip" && near(static_cast<float>(l.inPoint), 0.0f)) first = &l;
+    CHECK(first && nextOnTrack(c, *first));
+    const std::string cut = R"({"op": "transition.add", "transition": "fade", "edge": "cut", "duration": 1, "layer": )" +
+                            std::to_string(first ? first->id : 0) + "}";
+    const uint64_t firstId = first ? first->id : 0;
+    CHECK(run(p, cut.c_str()).ok);
+    first = c.findLayer(firstId); // operations replace the composition as a whole
+    Layer* second = first ? nextOnTrack(c, *first) : nullptr;
+    CHECK(first && second && first->transitionOut.joined && second->transitionIn.joined);
+    CHECK(near(first->transitionOut.duration, 0.5f) && near(second->transitionIn.duration, 0.5f)); // half each side of the cut
+    CHECK(near(first->transform.opacity.valueAt(1.999), 0.0f, 2.0f) && near(second->transform.opacity.valueAt(2.5), 100.0f));
+    CHECK(transitionPartner(c, *second, TransitionEdge::In) == first);
+    CHECK(resizeTransition(c, *second, TransitionEdge::In, 0.8));
+    CHECK(near(first->transitionOut.duration, 0.8f)); // the other half follows
+    CHECK(removeTransition(c, *first, TransitionEdge::Out));
+    CHECK(!first->transitionOut.active() && !second->transitionIn.active());
+    // Cameras and sound clips are refused; 3D transitions make the layer 3D.
+    for (const Layer& l : c.layers)
+        if (l.type == LayerType::Camera) CHECK(!canTakeTransition(l));
+    CHECK(canTakeTransition(*first, "turn") && applyTransition(*first, "turn", TransitionEdge::In, 0.5) && first->threeD);
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back) && validate(back).empty());
+}
+
 void testFileParams() {
     // A plugin object with a file parameter (like a 3D model), its path saved relative to the project.
     namespace fs = std::filesystem;
@@ -927,6 +959,7 @@ int main() {
         {"background", testBackground},
         {"3d camera", testCamera3D},
         {"3d camera tilt", testCamera3DTilt},
+        {"cut transitions", testCutTransitions},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

@@ -278,6 +278,15 @@ protected:
             e->acceptProposedAction();
     }
     void dragMoveEvent(QDragMoveEvent* e) override {
+        std::string transition;
+        if (ui::readTextMime(e->mimeData(), ui::kTransitionMime, transition)) {
+            // Shows where it goes; a clip that cannot take it refuses the drop.
+            panel_->transitionDrop_ = panel_->transitionDropAt(e->position(), transition);
+            if (panel_->transitionDrop_.ok) e->acceptProposedAction();
+            else e->ignore();
+            update();
+            return;
+        }
         double t = 0;
         int gap = 0;
         if (!panel_->dropTimeAndGap(e->position(), t, gap)) return;
@@ -291,6 +300,7 @@ protected:
     }
     void dragLeaveEvent(QDragLeaveEvent*) override {
         panel_->dropActive_ = false;
+        panel_->transitionDrop_ = {};
         panel_->snapLineTime_ = -1.0;
         update();
     }
@@ -302,17 +312,17 @@ protected:
         panel_->snapLineTime_ = -1.0;
         std::string transition;
         if (ui::readTextMime(e->mimeData(), ui::kTransitionMime, transition)) {
-            const auto* item = panel_->itemAt(static_cast<float>(e->position().y()));
-            TimelinePanel::Drag mode;
-            const int index = item && item->kind == TimelinePanel::Item::Track ? panel_->clipHit(*item, static_cast<float>(e->position().x()), mode) : -1;
-            if (index >= 0 && index < static_cast<int>(ctx.comp().layers.size())) {
-                Layer& layer = ctx.comp().layers[index];
-                const bool audioOnly = layer.type == LayerType::Media && layer.media.hasAudio && !layer.media.hasVideo;
-                const bool atStart = mode == TimelinePanel::Drag::LayerIn ||
-                                     (mode == TimelinePanel::Drag::LayerMove && e->position().x() < (panel_->timeToX(layer.inPoint) + panel_->timeToX(layer.outPoint)) * 0.5f);
-                if (!audioOnly && applyTransition(layer, transition, atStart ? TransitionEdge::In : TransitionEdge::Out, 0.5)) ctx.touch();
+            using Spot = TimelinePanel::TransitionDrop::Spot;
+            const TimelinePanel::TransitionDrop drop = panel_->transitionDropAt(e->position(), transition);
+            panel_->transitionDrop_ = {};
+            if (Layer* layer = drop.ok ? ctx.comp().findLayer(drop.layer) : nullptr) {
+                const bool done = drop.spot == Spot::Cut ? applyCutTransition(ctx.comp(), *layer, transition, 1.0)
+                                                         : applyTransition(*layer, transition, drop.spot == Spot::In ? TransitionEdge::In : TransitionEdge::Out, 0.5);
+                if (done) {
+                    ctx.touch();
+                    e->acceptProposedAction();
+                }
             }
-            e->acceptProposedAction();
             panel_->relayout();
             return;
         }
@@ -1194,6 +1204,7 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
             d.rect(Pt(r.topLeft()), Pt(r.bottomRight()), theme::accent(160));
         }
     }
+    paintTransitionDrop(d);
     // An object or media item dragged in: a new row at the gap, starting at the drop time.
     if (dropActive_) {
         float gy = rowsBottom_;
@@ -1306,12 +1317,17 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
             d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::accent(85), 5.0f);
             d.rect({left, y + 5}, {right, y + h - 5}, selectedTransition ? theme::kText : theme::kAccent, 5.0f,
                    selectedTransition ? 2.0f : 1.0f);
-            ui::drawIcon(d, ui::Icon::Transition, {(left + right) * 0.5f, y + h * 0.5f}, 13.0f, theme::kAccent);
+            // A transition across a cut shows one icon, on the cut (its two halves meet there).
+            if (!transition.joined) ui::drawIcon(d, ui::Icon::Transition, {(left + right) * 0.5f, y + h * 0.5f}, 13.0f, theme::kAccent);
             const float handle = incoming ? right : left;
             d.line({handle, y + 8}, {handle, y + h - 8}, theme::kAccent, 2.0f);
         };
         paintTransition(layer.transitionIn, true);
         paintTransition(layer.transitionOut, false);
+        if (layer.transitionOut.joined) {
+            d.circleFilled({bx2, y + h * 0.5f}, 9.0f, theme::kBgPanel);
+            ui::drawIcon(d, ui::Icon::Transition, {bx2, y + h * 0.5f}, 13.0f, theme::kAccent);
+        }
         d.rectFilled({bx1 + 3, y + 9}, {bx1 + 5, y + h - 9}, toRgba(lc, 0.8f), 1.0f);
         d.rectFilled({bx2 - 5, y + 9}, {bx2 - 3, y + h - 9}, toRgba(lc, 0.8f), 1.0f);
         d.pushClip({std::max(bx1, x0), y}, {std::min(bx2, x1), y + h});
@@ -1427,6 +1443,53 @@ int TimelinePanel::clipHit(const Item& track, float mx, Drag& mode) const {
     return hit;
 }
 
+TimelinePanel::TransitionDrop TimelinePanel::transitionDropAt(QPointF pos, const std::string& transition) const {
+    constexpr float kCutGrab = 10.0f; // px around a cut that mean "between the two clips"
+    const Item* item = itemAt(static_cast<float>(pos.y()));
+    if (!item || item->kind != Item::Track) return {};
+    const auto& layers = ctx_.comp().layers;
+    const float x = static_cast<float>(pos.x());
+    const double eps = ctx_.comp().frameDuration() * 0.5;
+    const int end = std::min(item->first + item->count, static_cast<int>(layers.size()));
+    for (int i = item->first; i < end; ++i)
+        for (int j = item->first; j < end; ++j)
+            if (i != j && std::fabs(layers[i].outPoint - layers[j].inPoint) < eps && std::fabs(x - timeToX(layers[i].outPoint)) <= kCutGrab)
+                return {layers[i].id, TransitionDrop::Spot::Cut,
+                        canTakeTransition(layers[i], transition) && canTakeTransition(layers[j], transition)};
+    Drag mode;
+    const int index = clipHit(*item, x, mode);
+    if (index < 0 || index >= static_cast<int>(layers.size())) return {};
+    const Layer& l = layers[index];
+    const bool atStart = mode == Drag::LayerIn || (mode == Drag::LayerMove && x < (timeToX(l.inPoint) + timeToX(l.outPoint)) * 0.5f);
+    return {l.id, atStart ? TransitionDrop::Spot::In : TransitionDrop::Spot::Out, canTakeTransition(l, transition)};
+}
+
+void TimelinePanel::paintTransitionDrop(ui::Draw& d) {
+    const TransitionDrop& drop = transitionDrop_;
+    const Layer* layer = drop.layer ? ctx_.comp().findLayer(drop.layer) : nullptr;
+    if (!layer) return;
+    for (const Item& r : items_) {
+        if (r.kind != Item::Track || r.track != layer->track) continue;
+        using Spot = TransitionDrop::Spot;
+        const float y = r.top, h = r.h;
+        const double len = drop.spot == Spot::Cut ? 0.5 : std::min(0.5, (layer->outPoint - layer->inPoint) * 0.5);
+        const double t0 = drop.spot == Spot::In ? layer->inPoint : layer->outPoint - len;
+        const double t1 = drop.spot == Spot::Out ? layer->outPoint : drop.spot == Spot::In ? layer->inPoint + len : layer->outPoint + len;
+        const float x0 = timeToX(t0), x1 = std::max(timeToX(t1), x0 + 16.0f);
+        const Rgba line = drop.ok ? theme::kAccent : theme::kDanger;
+        d.rectFilled({x0, y + 3}, {x1, y + h - 3}, drop.ok ? theme::accent(110) : theme::withAlpha(theme::kDanger, 60), 5.0f);
+        d.rect({x0, y + 3}, {x1, y + h - 3}, line, 5.0f, 2.0f);
+        if (!drop.ok) {
+            const char* why = layer->type == LayerType::Camera ? "Cameras take no transitions"
+                              : (layer->type == LayerType::Media && layer->media.hasAudio && !layer->media.hasVideo)
+                                  ? "Sound clips take no transitions (use Fade In / Out in Effects)"
+                                  : "This clip cannot take this transition";
+            d.text({x1 + 8, y + (h - d.textHeight()) * 0.5f}, theme::kDanger, QString::fromUtf8(why));
+        }
+        return;
+    }
+}
+
 TimelinePanel::TransitionHit TimelinePanel::transitionHit(const Item& track, float mx) const {
     const auto& layers = ctx_.comp().layers;
     for (int i = track.first; i < track.first + track.count && i < static_cast<int>(layers.size()); ++i) {
@@ -1451,7 +1514,7 @@ bool TimelinePanel::deleteSelectedTransition() {
     if (!selectedTransitionLayer_) return false;
     Layer* layer = ctx_.comp().findLayer(selectedTransitionLayer_);
     const TransitionEdge edge = selectedTransitionIncoming_ ? TransitionEdge::In : TransitionEdge::Out;
-    const bool removed = layer && removeTransition(*layer, edge);
+    const bool removed = layer && removeTransition(ctx_.comp(), *layer, edge); // a cut's other half goes too
     selectedTransitionLayer_ = 0;
     if (removed) ctx_.touch();
     relayout();
@@ -1912,7 +1975,7 @@ void TimelinePanel::updateLayerDrag(QPointF pos) {
         const float duration = static_cast<float>(std::clamp(dragOrigTransitionDuration_ + sign * raw, 0.05, layer->outPoint - layer->inPoint));
         ClipTransition& transition = drag_ == Drag::TransitionIn ? layer->transitionIn : layer->transitionOut;
         if (std::fabs(transition.duration - duration) > 1e-4f &&
-            resizeTransition(*layer, drag_ == Drag::TransitionIn ? TransitionEdge::In : TransitionEdge::Out, duration))
+            resizeTransition(comp, *layer, drag_ == Drag::TransitionIn ? TransitionEdge::In : TransitionEdge::Out, duration))
             ctx_.touch();
         break;
     }

@@ -692,10 +692,17 @@ private:
             fail("unknown transition \"" + id + "\"" + suggest(id, ids));
         }
         const std::string edgeName = has(op, "edge") ? text(op["edge"], "edge") : "in";
+        if (edgeName == "cut") { // across the cut after this clip (with the next one on its track)
+            const double duration = number(op, "duration", 1.0);
+            if (duration <= 0) fail("\"duration\" must be positive");
+            if (!nextOnTrack(c_, l)) fail("layer \"" + l.name + "\" has no clip right after it on its track (\"cut\" needs one)");
+            if (!applyCutTransition(c_, l, id, duration)) fail("these clips cannot take a transition");
+            return json::object();
+        }
         TransitionEdge edge = TransitionEdge::In;
         if (edgeName == "out") edge = TransitionEdge::Out;
         else if (edgeName == "both") edge = TransitionEdge::Both;
-        else if (edgeName != "in") fail("\"edge\" must be \"in\", \"out\" or \"both\"");
+        else if (edgeName != "in") fail("\"edge\" must be \"in\", \"out\", \"both\" or \"cut\"");
         const double duration = number(op, "duration", 0.5);
         if (duration <= 0) fail("\"duration\" must be positive");
         if (!applyTransition(l, id, edge, duration)) fail("layer \"" + l.name + "\" cannot take a transition (" + typeName(l) + ")");

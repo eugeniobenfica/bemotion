@@ -23,6 +23,7 @@ ui::Icon categoryIcon(const std::string& c) {
     if (c == "Slide") return ui::Icon::ChevronRight;
     if (c == "Scale") return ui::Icon::ZoomIn;
     if (c == "Rotate") return ui::Icon::Reset;
+    if (c == "3D") return ui::Icon::Camera;
     return ui::Icon::Transition;
 }
 
@@ -36,6 +37,13 @@ ui::Icon iconOf(const std::string& id) {
     if (id == "pop") return ui::Icon::Plus;
     if (id == "stretch") return ui::Icon::Ungroup;
     if (id == "spin" || id == "swing" || id == "roll") return ui::Icon::Reset;
+    if (id == "fade_down" || id == "drop") return ui::Icon::ChevronDown;
+    if (id == "whip_left") return ui::Icon::ChevronLeft;
+    if (id == "whip_right") return ui::Icon::ChevronRight;
+    if (id == "zoom_out") return ui::Icon::ZoomOut;
+    if (id == "elastic") return ui::Icon::Plus;
+    if (id == "squash") return ui::Icon::Ungroup;
+    if (id == "turn" || id == "tilt" || id == "fly") return ui::Icon::Camera;
     return ui::Icon::Transition;
 }
 
@@ -98,7 +106,8 @@ void TransitionsPanel::rebuild() {
             if (category_ != list[i].category) continue;
             auto* t = new ui::Tile(iconOf(list[i].id), list[i].name);
             t->setTileSize(tile);
-            t->setToolTip(QString("%1\n\nDrag it to the start or end of a clip. Drag its edge on the timeline to set its duration.").arg(list[i].about));
+            t->setToolTip(QString("%1\n\nDrag it onto the start or end of a clip, or onto the cut between two clips. "
+                                  "Drag its edge on the timeline to set its duration.").arg(list[i].about));
             const std::string id = list[i].id;
             t->setDragData([id] { return ui::makeTextMime(ui::kTransitionMime, id); });
             grid->addWidget(t, n / columns_, n % columns_);
@@ -113,9 +122,10 @@ void TransitionsPanel::rebuild() {
 
 void TransitionsPanel::sync() {
     if (!isVisible()) return;
-    bool canApply = false;
-    for (Layer* l : ctx_.selectedLayers())
-        canApply = canApply || !(l->type == LayerType::Media && l->media.hasAudio && !l->media.hasVideo);
+    // Dimmed when the selection cannot take transitions (nothing selected: anything goes).
+    const auto selected = ctx_.selectedLayers();
+    bool canApply = selected.empty();
+    for (Layer* l : selected) canApply = canApply || canTakeTransition(*l);
     for (ui::Tile* t : tiles_) t->setDimmed(!canApply);
 }
 

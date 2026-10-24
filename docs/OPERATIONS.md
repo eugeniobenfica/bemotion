@@ -113,11 +113,15 @@ Removes every keyframe.
 
 ## Transitions and arranging
 
-**`transition.add`** — `layer`, `transition` (`fade`, `fade_up`, `slide_left`,
-`slide_right`, `slide_up`, `slide_down`, `zoom`, `pop`, `stretch`, `spin`,
-`swing`, `roll`), `edge` (`in`,
-`out` or `both`; default `in`), `duration` (seconds, default 0.5). Keyframes at
-the clip's start and/or end; keys already there are replaced.
+**`transition.add`** — `layer`, `transition` (Fade: `fade`, `fade_up`,
+`fade_down`; Slide: `slide_left`, `slide_right`, `slide_up`, `slide_down`,
+`whip_left`, `whip_right`, `drop`; Scale: `zoom`, `zoom_out`, `pop`,
+`stretch`, `squash`, `elastic`; Rotate: `spin`, `swing`, `roll`; 3D: `turn`,
+`tilt`, `fly`, which make the layer 3D), `edge` (`in`, `out`, `both`, or
+`cut`: across the cut after this clip, with the next clip on its track, half
+the duration on each side; default `in`), `duration` (seconds, default 0.5;
+1 for `cut`). Keyframes at the clip's start and/or end; keys already there
+are replaced. Cameras and sound-only clips take none.
 
 **`arrange.distribute`** — `layers` (list, or `"all"`), `axis` (`x` or `y`),
 `time` (default 0). Even spacing: three or more layers keep the outer two in

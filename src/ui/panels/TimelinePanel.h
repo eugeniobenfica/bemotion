@@ -26,6 +26,7 @@ class TimelineRuler;
 class TimelineRows;
 class ToolPill;
 namespace ui {
+class Draw;
 class IconButton;
 }
 
@@ -102,6 +103,13 @@ private:
         bool resize = false;
         explicit operator bool() const { return layer != 0; }
     };
+    // Where a transition dragged in from the Transitions panel would go.
+    struct TransitionDrop {
+        enum class Spot { In, Out, Cut };
+        uint64_t layer = 0; // the clip (for a cut: the one before it)
+        Spot spot = Spot::In;
+        bool ok = false;    // the clip (or both clips of the cut) can take it
+    };
     // Where a vertical drag would land.
     struct DropTarget {
         bool valid = false;
@@ -149,6 +157,8 @@ private:
     void wheel(QWheelEvent* e);
     const Item* itemAt(float y) const;
     int clipHit(const Item& track, float x, Drag& mode) const;
+    TransitionDrop transitionDropAt(QPointF pos, const std::string& transition) const;
+    void paintTransitionDrop(ui::Draw& d);
     TransitionHit transitionHit(const Item& track, float x) const;
     void clickLayer(uint64_t id);
     void clickTrack(const Item& track);
@@ -271,6 +281,7 @@ private:
     double followedTime_ = -1.0; // playhead time the view last followed (see sync)
     std::vector<double> timeTargets_;
     double snapLineTime_ = -1.0;
+    TransitionDrop transitionDrop_; // while a transition is dragged over the rows
     uint64_t selectedTransitionLayer_ = 0;
     bool selectedTransitionIncoming_ = true;
     // Box selection by dragging on empty timeline space.

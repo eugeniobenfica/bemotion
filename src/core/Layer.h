@@ -189,6 +189,9 @@ struct MediaProps {
 struct ClipTransition {
     std::string id;
     float duration = 0.5f;
+    // Half of a transition on the cut between this clip and its neighbor on the track (this
+    // clip's out and the next one's in): they change together.
+    bool joined = false;
     bool active() const { return !id.empty(); }
 };
 

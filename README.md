@@ -126,8 +126,9 @@ does.
   custom cubic-bezier curve editor; Easy Ease with F9
 - **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
   Draw On… stackable, importable, savable
-- **Transitions** panel by category (Fade, Slide, Scale, Rotate) at a clip's
-  start, end or both, with any duration — plain keyframes you can still edit
+- **Transitions** panel by category (Fade, Slide, Scale, Rotate, 3D): drag
+  one onto a clip's start or end, or onto the cut between two clips; drag its
+  edge for the duration — plain keyframes you can still edit
 - Add keyframes right in the Graph Editor (right-click, double-click or *+*)
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…
   stackable, keyframable, with presets
