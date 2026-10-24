@@ -309,15 +309,68 @@ uint64_t Composition::splitLayer(uint64_t id, double t) {
     return addLayer(std::move(tail)).id;
 }
 
+namespace {
+const Layer* activeCamera(const Composition& c, double t) {
+    for (const Layer& l : c.layers)
+        if (l.type == LayerType::Camera && l.activeAt(t)) return &l;
+    return nullptr;
+}
+} // namespace
+
 Affine Composition::cameraAt(double t) const {
-    for (const Layer& l : layers) {
-        if (l.type != LayerType::Camera || !l.activeAt(t)) continue;
-        // The camera frame (composition-sized, scaled by 1/zoom) maps onto the composition.
-        const float zoom = std::max(0.01f, l.camera.zoom.valueAt(t) * 0.01f);
-        const Affine frame = l.matrixAt(t) * Affine::scale(1.0f / zoom);
-        return Affine::translate(center()) * frame.inverse();
+    const Layer* cam = activeCamera(*this, t);
+    if (!cam) return {};
+    // The camera frame (composition-sized, scaled by 1/zoom) maps onto the composition.
+    const float zoom = std::max(0.01f, cam->camera.zoom.valueAt(t) * 0.01f);
+    const Affine frame = cam->matrixAt(t) * Affine::scale(1.0f / zoom);
+    return Affine::translate(center()) * frame.inverse();
+}
+
+bool Composition::viewFor(const Layer& layer, double t, Affine& out) const {
+    const Layer* top = &layer; // what is inside a compound lies flat in it: the compound's depth counts
+    for (int guard = 0; top->parent && guard < 32; ++guard) {
+        const Layer* p = findLayer(top->parent);
+        if (!p) break;
+        top = p;
     }
-    return {};
+    if (!top->threeD || top->type == LayerType::Camera || top->type == LayerType::Background) {
+        out = cameraAt(t);
+        return true;
+    }
+    // Layers are planes facing the camera: seen in perspective, a layer at distance d is scaled
+    // by focal / d around the camera's axis. At the camera's own Z it matches the 2D camera.
+    Vec2 eye = center();
+    float eyeZ = 0.0f, roll = 0.0f, zoom = 1.0f;
+    if (const Layer* cam = activeCamera(*this, t)) {
+        eye = cam->transform.position.valueAt(t);
+        eyeZ = cam->transform.depth.valueAt(t);
+        roll = cam->transform.rotation.valueAt(t);
+        zoom = std::max(0.01f, cam->camera.zoom.valueAt(t) * 0.01f);
+    }
+    const float focal = focalLength();
+    const float distance = focal + top->transform.depth.valueAt(t) - eyeZ;
+    if (!(distance > focal * 0.01f)) return false; // behind the camera, or too close to draw (100x)
+    out = Affine::translate(center()) * Affine::scale(zoom * focal / distance) * Affine::rotateDeg(-roll) *
+          Affine::translate(eye * -1.0f);
+    return true;
+}
+
+std::vector<const Layer*> Composition::drawOrder(double t, bool cameras) const {
+    std::vector<const Layer*> order;
+    for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
+        if (!it->activeAt(t) || (it->type == LayerType::Camera && !cameras)) continue;
+        if (it->parent && findLayer(it->parent)) continue; // drawn by its compound
+        order.push_back(&*it);
+    }
+    for (size_t i = 0; i < order.size();) { // each run of neighboring 3D layers: farthest first
+        size_t j = i;
+        while (j < order.size() && order[j]->threeD) ++j;
+        std::stable_sort(order.begin() + i, order.begin() + j, [t](const Layer* a, const Layer* b) {
+            return a->transform.depth.valueAt(t) > b->transform.depth.valueAt(t);
+        });
+        i = j > i ? j : i + 1;
+    }
+    return order;
 }
 
 // --- compounds -----------------------------------------------------------------------

@@ -115,6 +115,15 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
   media layer refers to one by id and stores where the source's first frame
   sits in composition time (`MediaProps::start`, moved by `shiftTime`).
 - **Cameras** — the top-most active camera frames the scene (`cameraAt`).
+  **3D layers** (`Layer::threeD`, top level only) have a Z position
+  (`transform.depth`, `position_z`) and the camera, which has one too, sees
+  them in perspective: planes facing the camera, scaled by focal / distance
+  (`viewFor`; `focalLength` is a 50 mm lens on the width), so their transform
+  stays an `Affine` and editing, picking and effects work as for 2D layers.
+  Hidden when at or behind the camera. `drawOrder` is the stacking order with
+  each run of neighboring 3D layers sorted farthest first; rendering and
+  `hitTest` both follow it. The viewport's free view shows 3D layers flat,
+  from the front.
 
 ### Identity and units
 

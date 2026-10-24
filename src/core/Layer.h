@@ -52,6 +52,7 @@ struct TransformProps {
     AnimVec2 scale{Vec2{100.0f, 100.0f}}; // percent
     AnimFloat rotation{0.0f};             // degrees, clockwise
     AnimFloat opacity{100.0f};            // percent
+    AnimFloat depth{0.0f};                // Z position, px (3D layers and cameras): larger is farther away
 };
 
 struct ShapeProps {
@@ -71,7 +72,9 @@ struct ShapeProps {
 };
 
 // A camera frames the scene: its position is the composition point shown at
-// the center, rotation rolls the view and zoom magnifies it.
+// the center, rotation rolls the view and zoom magnifies it. Its Z position
+// moves it toward (larger) or away from the layers: 3D layers are seen in
+// perspective at their own Z position (see Composition::viewFor).
 struct CameraProps {
     AnimFloat zoom{100.0f}; // percent
     Vec2 frameSize{1920.0f, 1080.0f}; // composition size, kept in sync (not saved)
@@ -201,6 +204,9 @@ struct Layer {
     bool visible = true;
     bool locked = false;
     int label = 0;
+    // A 3D layer has a Z position and the camera sees it in perspective (nearer is
+    // bigger and moves faster). Only top-level layers count; never cameras or backgrounds.
+    bool threeD = false;
 
     double inPoint = 0.0; // seconds, layer is active in [inPoint, outPoint)
     double outPoint = 10.0;

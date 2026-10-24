@@ -268,6 +268,7 @@ private:
     std::vector<std::pair<KeySelection, double>> dragKeys_;
     bool keysMoved_ = false;
     double playheadGrab_ = 0.0;
+    double followedTime_ = -1.0; // playhead time the view last followed (see sync)
     std::vector<double> timeTargets_;
     double snapLineTime_ = -1.0;
     uint64_t selectedTransitionLayer_ = 0;

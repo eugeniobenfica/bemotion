@@ -178,6 +178,10 @@ private:
                     l.parent = 0;
                 }
             }
+            if (l.threeD && (l.type == LayerType::Camera || l.type == LayerType::Background)) {
+                report(where, "cameras and backgrounds are not 3D layers (switched off)");
+                l.threeD = false;
+            }
             if (l.type == LayerType::Background && l.background.mediaId && !c.findMedia(l.background.mediaId)) {
                 report(layerName(l), "its background picture is not among the media items (cleared)");
                 l.background.mediaId = 0;

@@ -366,6 +366,23 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             group = prop.group;
             section = new CollapsibleSection(QString::fromUtf8(prop.group));
             col->addWidget(section);
+            if (group == "Transform" && layer.type != LayerType::Camera && layer.type != LayerType::Background && !layer.parent) {
+                // A 3D layer gets a Z position: the camera sees it in perspective (parallax).
+                auto* on = new QCheckBox;
+                on->setToolTip("Seen in perspective by the camera at its Z position: nearer layers look bigger and move faster");
+                connect(on, &QCheckBox::toggled, this, [this](bool v) {
+                    for (Layer* l : ctx_.selectedLayers())
+                        if (l->type != LayerType::Camera && l->type != LayerType::Background && !l->parent) l->threeD = v;
+                    ctx_.touch(); // the Z Position row comes and goes (the panel rebuilds)
+                });
+                section->addPlainRow("3D Layer", on);
+                refreshers_.push_back([this, id, on] {
+                    if (const Layer* l = ctx_.comp().findLayer(id)) {
+                        const QSignalBlocker b(on);
+                        on->setChecked(l->threeD);
+                    }
+                });
+            }
             if (layer.type == LayerType::Plugin) {
                 for (PluginParam& p : layer.plugin.params) {
                     if (p.group != group || p.kind == PluginParamKind::Number || p.kind == PluginParamKind::Color) continue;

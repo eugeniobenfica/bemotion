@@ -224,6 +224,7 @@ json encodeLayer(const Layer& constLayer) {
                                                     : "shape";
     j["visible"] = layer.visible;
     j["locked"] = layer.locked;
+    if (layer.threeD) j["three_d"] = true;
     j["label"] = layer.label;
     j["in"] = layer.inPoint;
     j["out"] = layer.outPoint;
@@ -311,6 +312,7 @@ Layer decodeLayer(const json& j) {
     }
     layer.visible = j.value("visible", true);
     layer.locked = j.value("locked", false);
+    layer.threeD = j.value("three_d", false); // before properties: a 3D layer has a Z position
     layer.label = j.value("label", 0);
     layer.inPoint = j.value("in", 0.0);
     layer.outPoint = j.value("out", 10.0);

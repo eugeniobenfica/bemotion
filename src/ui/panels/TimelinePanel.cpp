@@ -172,6 +172,8 @@ public:
     explicit TimelineRuler(TimelinePanel* panel) : panel_(panel) {
         setFixedHeight(static_cast<int>(kRulerHeight));
         setMouseTracking(true);
+        edgeTimer_.setInterval(16);
+        connect(&edgeTimer_, &QTimer::timeout, this, [this] { edgeTick(); });
     }
 
 protected:
@@ -194,15 +196,13 @@ protected:
     void mouseMoveEvent(QMouseEvent* e) override {
         setCursor(e->position().x() >= panel_->trackX0() ? Qt::SizeHorCursor : Qt::ArrowCursor);
         if (panel_->drag_ != TimelinePanel::Drag::Playhead) return;
-        EditorContext& ctx = panel_->ctx_;
-        ctx.playing = false;
-        double t = panel_->xToTime(static_cast<float>(e->position().x())) + panel_->playheadGrab_;
-        // With the magnet on (or Shift held) the playhead snaps to clip edges and keyframes.
-        if ((ctx.snapping || shiftHeld()) && !ctrlHeld()) t = panel_->snappedDelta({0.0}, t, true);
-        ctx.setTime(t);
-        panel_->relayout();
+        mouseX_ = static_cast<float>(e->position().x());
+        dragTo(mouseX_);
+        // Near or past an edge the timeline scrolls on its own, the playhead riding along.
+        if (edgeSpeed() != 0.0f && !edgeTimer_.isActive()) edgeTimer_.start();
     }
     void mouseReleaseEvent(QMouseEvent*) override {
+        edgeTimer_.stop();
         panel_->drag_ = TimelinePanel::Drag::None;
         panel_->snapLineTime_ = -1.0;
         panel_->relayout();
@@ -210,7 +210,44 @@ protected:
     void wheelEvent(QWheelEvent* e) override { panel_->wheel(e); }
 
 private:
+    static constexpr float kEdge = 28.0f; // px from an edge of the track area where scrolling starts
+
+    // Pixels to scroll per tick: faster the further past the edge (0 inside).
+    float edgeSpeed() const {
+        const float left = panel_->trackX0() + kEdge, right = panel_->trackX0() + panel_->trackW() - kEdge;
+        const float over = mouseX_ < left ? mouseX_ - left : mouseX_ > right ? mouseX_ - right : 0.0f;
+        if (over == 0.0f) return 0.0f;
+        return std::copysign(std::clamp(std::fabs(over) * 0.4f, 2.0f, 48.0f), over);
+    }
+    void edgeTick() {
+        const float speed = panel_->drag_ == TimelinePanel::Drag::Playhead ? edgeSpeed() : 0.0f;
+        if (speed == 0.0f || panel_->pxPerSec_ <= 0.0) {
+            edgeTimer_.stop();
+            return;
+        }
+        panel_->scroll_ = std::max(0.0, panel_->scroll_ + speed / panel_->pxPerSec_);
+        panel_->clampView();
+        // The playhead stays under the mouse, kept inside the track area.
+        dragTo(std::clamp(mouseX_, panel_->trackX0(), panel_->trackX0() + panel_->trackW()));
+        // The playhead lands on a frame, maybe just left of the view when zoomed in: keep it in sight.
+        if (panel_->ctx_.time < panel_->scroll_) {
+            panel_->scroll_ = panel_->ctx_.time;
+            panel_->relayout();
+        }
+    }
+    void dragTo(float x) {
+        EditorContext& ctx = panel_->ctx_;
+        ctx.playing = false;
+        double t = panel_->xToTime(x) + panel_->playheadGrab_;
+        // With the magnet on (or Shift held) the playhead snaps to clip edges and keyframes.
+        if ((ctx.snapping || shiftHeld()) && !ctrlHeld()) t = panel_->snappedDelta({0.0}, t, true);
+        ctx.setTime(t);
+        panel_->relayout();
+    }
+
     TimelinePanel* panel_;
+    QTimer edgeTimer_;
+    float mouseX_ = 0.0f;
 };
 
 class TimelineRows : public QWidget {
@@ -979,14 +1016,18 @@ void TimelinePanel::syncBreadcrumb() {
 void TimelinePanel::sync() {
     if (!isVisible()) return;
     const Composition& comp = ctx_.comp();
-    // Keep playback visible once the playhead reaches the edge of the timeline.
-    // Manual scrubbing and edits keep their current view instead.
-    if (ctx_.playing && drag_ == Drag::None && pxPerSec_ > 0.0) {
+    // Keep the playhead visible when it leaves the timeline: playing, or moved by keys (frame
+    // steps, Home / End). Scrolling away by hand keeps the view; a playhead drag scrolls itself.
+    const bool moved = ctx_.time != followedTime_;
+    followedTime_ = ctx_.time;
+    if ((ctx_.playing || moved) && drag_ == Drag::None && pxPerSec_ > 0.0) {
         const float left = trackX0() + 16.0f;
         const float right = trackX0() + trackW() - 16.0f;
         const float playhead = timeToX(ctx_.time);
         if (playhead < left || playhead > right) {
-            scroll_ = std::max(0.0, ctx_.time - trackW() * 0.70 / pxPerSec_);
+            // Going forward it lands on the left part of the view, going back on the right part.
+            const double at = ctx_.playing || playhead > right ? 0.70 : 0.30;
+            scroll_ = std::max(0.0, ctx_.time - trackW() * at / pxPerSec_);
             clampView();
         }
     }

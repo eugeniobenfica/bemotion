@@ -41,6 +41,7 @@ void describeLayer(std::string& out, Composition& c, Layer& l, int depth) {
     line += "  " + seconds(l.inPoint) + "-" + seconds(l.outPoint) + " s";
     const Vec2 pos = l.transform.position.valueAt(l.inPoint);
     if (l.type != LayerType::Camera) line += "  at (" + fmt("%.0f", pos.x) + ", " + fmt("%.0f", pos.y) + ")";
+    if (l.threeD || l.type == LayerType::Camera) line += "  z " + fmt("%.0f", l.transform.depth.valueAt(l.inPoint)) + (l.threeD ? " (3D)" : "");
     if (!l.visible) line += "  hidden";
     if (l.locked) line += "  locked";
     // What moves: property, keyframe count and span.

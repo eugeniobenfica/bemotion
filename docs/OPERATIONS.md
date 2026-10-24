@@ -31,10 +31,10 @@ layer and then animate it.
 
 | Layers | Properties |
 | --- | --- |
-| every layer | `anchor`, `position`, `scale`, `rotation`, `opacity` |
+| every layer | `anchor`, `position`, `scale`, `rotation`, `opacity`; 3D layers `position_z` |
 | shapes | `size`, `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end` |
 | text | `font_size`, `text_color`, `tracking`, `line_height`, `reveal` |
-| camera | `position`, `rotation`, `camera_zoom` |
+| camera | `position`, `position_z`, `rotation`, `camera_zoom` |
 | media with sound | `volume` |
 | plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
 | effects | `fx<index>.<param>` (e.g. `fx0.size`; `effect.add` lists the params) |
@@ -58,10 +58,13 @@ the content: it ends with the last clip, but never passes `max_duration`.
   `bg_color`, `bg_color2`, `bg_angle`, `bg_zoom`, `bg_offset`, `bg_darken`.
 - `name`, `text` (text layers), `position` (default: the center), `start`
   (seconds, default 0), `duration` (default 5; media: their own length),
+  `three_d` (a 3D layer) and `z` (its Z position; alone it makes the layer 3D;
+  a camera's own Z),
   `parent` (a compound), `above` / `below` (a layer) or `"at": "bottom"`
   (default: on top).
 
 **`layer.set`** → `{"in": s, "out": s}` — any of `name`, `visible`, `locked`,
+`three_d` (not cameras or backgrounds),
 `label` (0–7), `start` (moves the clip and its keyframes), `in`, `out` (trim,
 kept between neighbors on its track), and for text `text`, `font`, `style`,
 `align` (`left`, `center`, `right`); for shapes `shape` (kind), `fill`,

@@ -139,7 +139,8 @@ does.
 
 ### ✦ Edit
 - **Timeline** with multi-clip tracks, trimming, cut tool (C), split at
-  playhead (Ctrl+K), snapping to clips, keys and the playhead
+  playhead (Ctrl+K), snapping to clips, keys and the playhead; dragging the
+  playhead past an edge scrolls the timeline along
 - **Your own toolbar**: the toolbar's *+* opens every tool; drag them into
   the toolbar, reorder them, drag them out to remove; drag its grip to float
   it over the viewport
@@ -149,7 +150,10 @@ does.
 - **Autosave and recovery**: projects save themselves every few minutes, and
   changes a crash would lose are offered back the next time
 - **Viewport** with box selection, rulers, guides and smart snapping
-- **Camera** with position, rotation and zoom
+- **Camera** with position, rotation and zoom — and depth: turn on **3D
+  Layer** and give layers a Z position, and the camera sees them in
+  perspective as it moves (parallax, flying through the scene, like a
+  multiplane camera or After Effects' 3D layers)
 
 </td>
 <td valign="top">

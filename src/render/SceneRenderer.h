@@ -58,12 +58,13 @@ bool hasActiveEffects(const Layer& layer);
 using MediaProvider = std::function<sk_sp<SkImage>(const Composition& comp, const Layer& layer, double time)>;
 void setMediaProvider(MediaProvider provider);
 
-// The direct child of a compound under a scene-space point (0 if none), for
-// picking a layer inside a compound.
-uint64_t hitTestInside(const Composition& comp, double time, Vec2 scenePoint, uint64_t compoundId);
+// The direct child of a compound under a composition point (0 if none), for
+// picking a layer inside a compound. throughCamera: as the camera shows it
+// (Composition::viewFor), else as the free view does.
+uint64_t hitTestInside(const Composition& comp, double time, Vec2 compPoint, uint64_t compoundId, bool throughCamera);
 
-// Top-most visible, unlocked layer under a scene-space point. Cameras only
-// count with includeCameras (their frame is their body).
-uint64_t hitTest(const Composition& comp, double time, Vec2 scenePoint, bool includeCameras = false);
+// Top-most visible, unlocked layer under a composition point, in drawing order
+// (3D layers by depth). Cameras only count with includeCameras (their frame is their body).
+uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint, bool throughCamera, bool includeCameras = false);
 
 } // namespace bemotion::render

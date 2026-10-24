@@ -376,6 +376,14 @@ private:
                  suggest(type, {"text", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "background", "plugin"}));
         }
         if (has(op, "name")) l.name = text(op["name"], "name");
+        // A 3D layer ("three_d": true) at Z position "z" (a "z" alone makes it 3D; a camera's own Z).
+        if (has(op, "three_d") || has(op, "z")) {
+            const bool on = has(op, "three_d") ? boolean(op["three_d"], "three_d") : l.type != LayerType::Camera;
+            if (l.type == LayerType::Background || (on && l.type == LayerType::Camera))
+                fail("\"" + std::string(has(op, "three_d") ? "three_d" : "z") + "\" does not apply to " + type + " layers");
+            l.threeD = on;
+            if (has(op, "z")) l.transform.depth.base = static_cast<float>(number(op["z"], "z"));
+        }
         l.name = c_.uniqueLayerName(l.name.empty() ? type : l.name);
         if (l.type != LayerType::Media) l.label = static_cast<int>(c_.nextLayerId % kLabelColorCount);
         if (start > 0.0) l.shiftTime(start - l.inPoint);
@@ -450,6 +458,12 @@ private:
         }
         if (has(op, "visible")) l.visible = boolean(op["visible"], "visible");
         if (has(op, "locked")) l.locked = boolean(op["locked"], "locked");
+        if (has(op, "three_d")) {
+            const bool on = boolean(op["three_d"], "three_d");
+            if (on && (l.type == LayerType::Camera || l.type == LayerType::Background))
+                fail(std::string("\"three_d\" does not apply to ") + typeName(l) + " layers (cameras always see in 3D)");
+            l.threeD = on;
+        }
         if (has(op, "label")) {
             const double v = number(op["label"], "label");
             if (v < 0 || v >= kLabelColorCount || v != std::floor(v)) fail("\"label\" must be 0 to 7");
@@ -843,6 +857,7 @@ private:
         if (l.parent) j["parent"] = l.parent;
         if (!l.visible) j["visible"] = false;
         if (l.locked) j["locked"] = true;
+        if (l.threeD) j["three_d"] = true;
         if (!l.effects.empty()) j["effects"] = l.effects.size();
         return j;
     }

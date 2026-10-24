@@ -63,12 +63,21 @@ struct Handles {
 // The composition being edited, for the helpers below: layers inside compounds live in their
 // compound's space.
 const Composition* g_comp = nullptr;
+bool g_throughCamera = true; // the view looks through the camera (else the free view)
 
-// `view` extended with the layer's enclosing compounds: maps the layer's
+// The camera the layer is seen through (scene -> composition): one per layer, since 3D layers
+// are seen at their own depth. False when the camera does not see the layer (behind it).
+bool cameraOf(const Layer& layer, double t, Affine& out) {
+    out = {};
+    return !g_comp || !g_throughCamera || g_comp->viewFor(layer, t, out);
+}
+
+// `view` with the layer's camera and enclosing compounds: maps the layer's
 // parent space (where its position lives) to the screen.
 render::View parentView(const render::View& view, const Layer& layer, double t) {
     render::View v = view;
-    if (g_comp && layer.parent) v.camera = view.camera * g_comp->parentMatrix(layer, t);
+    Affine camera;
+    if (g_comp && cameraOf(layer, t, camera)) v.camera = camera * g_comp->parentMatrix(layer, t);
     return v;
 }
 
@@ -76,6 +85,8 @@ Affine parentOf(const Layer& layer, double t) { return g_comp ? g_comp->parentMa
 
 bool computeHandles(const Layer& layer, double t, const render::View& sceneView, Handles& h) {
     if (layer.type == LayerType::Background) return false; // it is the frame: nothing to move or scale
+    Affine camera;
+    if (!cameraOf(layer, t, camera)) return false; // behind the camera: not seen
     const render::View view = parentView(sceneView, layer, t);
     Vec2 mn, mx;
     if (!render::localBounds(layer, t, mn, mx, g_comp)) return false;
@@ -124,10 +135,11 @@ void outline(Draw& d, const Handles& h, Rgba col, float thickness) {
 
 bool near(Vec2 a, Vec2 b, float r) { return (a - b).length() <= r; }
 
-// Axis-aligned bounds of a layer in composition pixels (as seen through `camera`).
-bool compBox(const Layer& layer, double t, const Affine& camera, Vec2& mn, Vec2& mx) {
+// Axis-aligned bounds of a layer in composition pixels (as the view shows it).
+bool compBox(const Layer& layer, double t, Vec2& mn, Vec2& mx) {
     Vec2 lmn, lmx;
-    if (!render::localBounds(layer, t, lmn, lmx, g_comp)) return false;
+    Affine camera;
+    if (!render::localBounds(layer, t, lmn, lmx, g_comp) || !cameraOf(layer, t, camera)) return false;
     const Affine m = camera * parentOf(layer, t) * layer.matrixAt(t);
     const Vec2 corners[4] = {m.apply(lmn), m.apply({lmx.x, lmn.y}), m.apply(lmx), m.apply({lmn.x, lmx.y})};
     mn = mx = corners[0];
@@ -211,6 +223,7 @@ void ViewportPanel::layout() {
     }
     origin_ = Vec2{w * 0.5f, h * 0.5f} + pan_ - compSize_ * (zoom_ * 0.5f);
     world_ = throughCamera_ ? c.cameraAt(ctx_.time) : Affine{};
+    g_throughCamera = throughCamera_;
 }
 
 void ViewportPanel::zoomAround(Vec2 screenPoint, float newZoom) {
@@ -389,7 +402,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
     // Hover outline for the layer under the cursor.
     int pathKey = -1, pathPart = 0;
     if (drag_ == Drag::None && hovered_ && !spaceHeld_ && !dropHover_ && !pathHit(mouse_, pathKey, pathPart)) {
-        const uint64_t hover = render::hitTest(comp, t, view.screenToScene(mouse_), !throughCamera_);
+        const uint64_t hover = render::hitTest(comp, t, view.toComp(mouse_), throughCamera_, !throughCamera_);
         Handles h{};
         if (hover && !ctx_.isSelected(hover) && computeHandles(*comp.findLayer(hover), t, view, h)) outline(d, h, theme::accent(110), 1.0f);
     }
@@ -743,17 +756,18 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
             }
         }
         if (drag_ == Drag::None) {
-            const Vec2 scenePoint = view.screenToScene(mouse);
+            const Vec2 compPoint = view.toComp(mouse);
             // With a compound open (timeline), clicks pick among its contents.
             if (ctx_.scope && !comp.findLayer(ctx_.scope)) ctx_.scope = 0;
-            uint64_t hit = ctx_.scope ? render::hitTestInside(comp, t, scenePoint, ctx_.scope) : render::hitTest(comp, t, scenePoint, !throughCamera_);
+            uint64_t hit = ctx_.scope ? render::hitTestInside(comp, t, compPoint, ctx_.scope, throughCamera_)
+                                      : render::hitTest(comp, t, compPoint, throughCamera_, !throughCamera_);
             // Inside a compound, clicks pick among its layers; a double-click on a
             // compound goes one level in (like After Effects / Figma groups).
             if (const Layer* cur = ctx_.selected(); cur && !additive) {
                 uint64_t inner = 0;
-                if (cur->parent) inner = render::hitTestInside(comp, t, scenePoint, cur->parent);
+                if (cur->parent) inner = render::hitTestInside(comp, t, compPoint, cur->parent, throughCamera_);
                 if (!inner && cur->type == LayerType::Compound && doubleClick) {
-                    inner = render::hitTestInside(comp, t, scenePoint, cur->id);
+                    inner = render::hitTestInside(comp, t, compPoint, cur->id, throughCamera_);
                     if (inner) ctx_.enterScope(cur->id); // its timeline opens too
                 }
                 if (inner) hit = inner;
@@ -782,7 +796,7 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
                         dragStartPositions_.emplace_back(l->id, l->transform.position.valueAt(t));
                         moving.push_back(l->id);
                         Vec2 mn, mx;
-                        if (l->activeAt(t) && compBox(*l, t, world_, mn, mx)) {
+                        if (l->activeAt(t) && compBox(*l, t, mn, mx)) {
                             dragBoxMin_ = {std::min(dragBoxMin_.x, mn.x), std::min(dragBoxMin_.y, mn.y)};
                             dragBoxMax_ = {std::max(dragBoxMax_.x, mx.x), std::max(dragBoxMax_.y, mx.y)};
                         }
@@ -862,18 +876,21 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
         Vec2 delta = mouseComp - dragStartMouse_;
         if (mods & Qt::ShiftModifier) (std::fabs(delta.x) > std::fabs(delta.y) ? delta.y : delta.x) = 0.0f;
         if (ctx_.snapping && !(mods & Qt::ControlModifier)) delta = delta + snapMove(dragBoxMin_, dragBoxMax_, delta);
-        const Vec2 sceneDelta = world_.inverse().applyVector(delta); // the camera may zoom or rotate the view
-        for (const auto& [id, start] : dragStartPositions_)
-            if (Layer* l = ctx_.comp().findLayer(id)) // inside a compound: in its (scaled, rotated) space
-                l->transform.position.set(t, start + parentOf(*l, t).inverse().applyVector(sceneDelta));
+        // The camera may zoom or rotate the view (3D layers: each at its depth); inside a
+        // compound the position is in its (scaled, rotated) space.
+        for (const auto& [id, start] : dragStartPositions_) {
+            Layer* l = ctx_.comp().findLayer(id);
+            Affine camera;
+            if (l && cameraOf(*l, t, camera)) l->transform.position.set(t, start + (camera * parentOf(*l, t)).inverse().applyVector(delta));
+        }
         break;
     }
     case Drag::Scale: {
         Layer* layer = ctx_.comp().findLayer(dragLayer_);
         if (!layer) break;
         auto& tr = layer->transform;
-        const Affine pre = parentOf(*layer, t) * Affine::translate(dragStartPosition_) * Affine::rotateDeg(dragStartRotation_);
-        const Vec2 q = pre.inverse().apply(view.screenToScene(mouse));
+        const Affine pre = Affine::translate(dragStartPosition_) * Affine::rotateDeg(dragStartRotation_);
+        const Vec2 q = pre.inverse().apply(parentView(view, *layer, t).screenToScene(mouse));
         const Vec2 v = dragCorner_ - tr.anchor.valueAt(t);
         Vec2 s = dragStartScale_;
         if (mods & Qt::ShiftModifier) {
@@ -1048,7 +1065,7 @@ void ViewportPanel::collectSnapTargets(const std::vector<uint64_t>& exclude) {
     for (const Layer& l : comp.layers) {
         if (!l.activeAt(ctx_.time) || std::find(exclude.begin(), exclude.end(), l.id) != exclude.end()) continue;
         Vec2 mn, mx;
-        if (!compBox(l, ctx_.time, world_, mn, mx)) continue;
+        if (!compBox(l, ctx_.time, mn, mx)) continue;
         snapTargetsX_.insert(snapTargetsX_.end(), {mn.x, (mn.x + mx.x) * 0.5, mx.x});
         snapTargetsY_.insert(snapTargetsY_.end(), {mn.y, (mn.y + mx.y) * 0.5, mx.y});
     }
@@ -1144,7 +1161,7 @@ void ViewportPanel::beginTextEdit(uint64_t layerId) {
 void ViewportPanel::placeTextEditor() {
     Layer* layer = ctx_.comp().findLayer(textEdit_);
     Vec2 mn, mx;
-    if (!layer || !layer->activeAt(ctx_.time) || !compBox(*layer, ctx_.time, world_, mn, mx)) {
+    if (!layer || !layer->activeAt(ctx_.time) || !compBox(*layer, ctx_.time, mn, mx)) {
         endTextEdit(true);
         return;
     }

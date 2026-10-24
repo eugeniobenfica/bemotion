@@ -823,6 +823,38 @@ void testBackground() {
     CHECK(validate(back).empty());
 }
 
+void testCamera3D() {
+    Project p; // 1920x1080: focal length 2666.7
+    CHECK(run(p, R"([{"op": "layer.add", "type": "rectangle", "name": "Far", "z": 2666.6667, "position": [1060, 540]},
+                     {"op": "layer.add", "type": "rectangle", "name": "Flat", "position": [1060, 540]},
+                     {"op": "layer.add", "type": "ellipse", "name": "Near", "three_d": true}])").ok);
+    Composition& c = p.comp;
+    const uint64_t farId = c.layers[2].id;
+    CHECK(c.layers[2].threeD && c.layers[2].name == "Far");
+    Affine m;
+    // Without a camera: twice as far, half the size (around the center).
+    CHECK(c.viewFor(*c.findLayer(farId), 0, m) && near(m.apply({1060, 540}).x, 1010.0f));
+    CHECK(c.viewFor(c.layers[1], 0, m) && near(m.apply({1060, 540}).x, 1060.0f)); // 2D: not affected
+    // Drawn by depth among the 3D layers: the far one first even though it is not at the bottom.
+    CHECK(run(p, R"({"op": "layer.move", "layer": "Far", "to": "top"})").ok);
+    const auto order = c.drawOrder(0);
+    CHECK(order.size() == 3 && order.front()->name == "Flat" && order[1]->name == "Far" && order[2]->name == "Near");
+    // A camera at Z 2666.7 reaches the far layer's plane: seen at its size; the near one is behind it.
+    CHECK(run(p, R"([{"op": "layer.add", "type": "camera", "z": 2666.6667}])").ok);
+    CHECK(c.viewFor(*c.findLayer(farId), 0, m) && near(m.apply({1060, 540}).x, 1060.0f));
+    for (const Layer& l : c.layers)
+        if (l.name == "Near") CHECK(!c.viewFor(l, 0, m));
+    CHECK(!run(p, R"({"op": "layer.set", "layer": "Camera", "three_d": true})").ok); // cameras always see in 3D
+    CHECK(run(p, R"({"op": "property.set", "layer": "Near", "prop": "position_z", "value": 100})").ok);
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    const Layer* near3D = nullptr;
+    for (const Layer& l : back.comp.layers)
+        if (l.name == "Near") near3D = &l;
+    CHECK(near3D && near3D->threeD && near(near3D->transform.depth.valueAt(0), 100.0f));
+    CHECK(validate(back).empty());
+}
+
 } // namespace
 
 int main() {
@@ -867,6 +899,7 @@ int main() {
         {"arrange and transitions", testArrangeAndTransitions},
         {"file parameters", testFileParams},
         {"background", testBackground},
+        {"3d camera", testCamera3D},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

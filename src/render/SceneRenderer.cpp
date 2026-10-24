@@ -469,12 +469,17 @@ void drawComposition(SkCanvas* canvas, const Composition& comp, double time, con
     canvas->save();
     canvas->clipRect(frame, true); // layers are clipped to the composition frame
     const Affine screen = Affine::translate(view.origin) * Affine::scale(view.zoom);
-    const Affine viewMatrix = screen * (throughCamera ? comp.cameraAt(time) : Affine{});
-    for (auto it = comp.layers.rbegin(); it != comp.layers.rend(); ++it) {
-        if (!it->activeAt(time) || it->type == LayerType::Camera) continue;
-        if (it->parent && comp.findLayer(it->parent)) continue; // drawn by its compound
-        // Backgrounds stay on the frame whatever the camera does.
-        drawLayer(canvas, *it, time, (it->type == LayerType::Background ? screen : viewMatrix) * it->matrixAt(time), view.zoom, &comp);
+    const Affine flat = throughCamera ? comp.cameraAt(time) : Affine{};
+    for (const Layer* layer : comp.drawOrder(time)) {
+        // Backgrounds stay on the frame whatever the camera does. 3D layers are seen in
+        // perspective through the camera (the free view shows them flat, from the front).
+        Affine camera = layer->type == LayerType::Background ? Affine{} : flat;
+        float zoom = view.zoom;
+        if (throughCamera && layer->threeD) {
+            if (!comp.viewFor(*layer, time, camera)) continue; // behind the camera
+            zoom *= std::sqrt(std::fabs(camera.determinant() / std::max(1e-12f, std::fabs(flat.determinant())))); // effects shrink with distance
+        }
+        drawLayer(canvas, *layer, time, screen * camera * layer->matrixAt(time), zoom, &comp);
     }
     canvas->restore();
 }
@@ -537,27 +542,35 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
     return true;
 }
 
-uint64_t hitTestInside(const Composition& comp, double time, Vec2 scenePoint, uint64_t compoundId) {
+namespace {
+// The composition point in the layer's own space (false: the camera does not see it).
+bool toLocal(const Composition& comp, const Layer& layer, double time, Vec2 compPoint, bool throughCamera, Vec2& out) {
+    Affine camera;
+    if (throughCamera && !comp.viewFor(layer, time, camera)) return false;
+    out = (camera * comp.worldMatrix(layer, time)).inverse().apply(compPoint);
+    return true;
+}
+} // namespace
+
+uint64_t hitTestInside(const Composition& comp, double time, Vec2 compPoint, uint64_t compoundId, bool throughCamera) {
     for (const auto& layer : comp.layers) {
         if (layer.parent != compoundId || !comp.visibleAt(layer, time) || layer.locked || layer.type == LayerType::Camera ||
             layer.type == LayerType::Background) // a click on the empty frame should not pick the background
             continue;
-        Vec2 mn, mx;
-        if (!localBounds(layer, time, mn, mx, &comp)) continue;
-        const Vec2 p = comp.worldMatrix(layer, time).inverse().apply(scenePoint);
+        Vec2 mn, mx, p;
+        if (!localBounds(layer, time, mn, mx, &comp) || !toLocal(comp, layer, time, compPoint, throughCamera, p)) continue;
         if (p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y) return layer.id;
     }
     return 0;
 }
 
-uint64_t hitTest(const Composition& comp, double time, Vec2 scenePoint, bool includeCameras) {
-    for (const auto& layer : comp.layers) {
-        if (!layer.activeAt(time) || layer.locked) continue;
-        if (layer.parent && comp.findLayer(layer.parent)) continue; // picked through its compound
-        if ((layer.type == LayerType::Camera && !includeCameras) || layer.type == LayerType::Background) continue;
-        Vec2 mn, mx;
-        if (!localBounds(layer, time, mn, mx, &comp)) continue;
-        const Vec2 p = layer.matrixAt(time).inverse().apply(scenePoint);
+uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint, bool throughCamera, bool includeCameras) {
+    const std::vector<const Layer*> order = comp.drawOrder(time, true);
+    for (auto it = order.rbegin(); it != order.rend(); ++it) { // the top-most first, as drawn
+        const Layer& layer = **it;
+        if (layer.locked || (layer.type == LayerType::Camera && !includeCameras) || layer.type == LayerType::Background) continue;
+        Vec2 mn, mx, p;
+        if (!localBounds(layer, time, mn, mx, &comp) || !toLocal(comp, layer, time, compPoint, throughCamera, p)) continue;
         if (p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y) return layer.id;
     }
     return 0;
