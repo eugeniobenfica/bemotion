@@ -6,6 +6,7 @@
 #include "core/Easing.h"
 #include "media/Recorder.h"
 #include "render/PluginCanvas.h"
+#include "ui/AppSignals.h"
 
 // Lua is built as C++ (see cmake/Dependencies.cmake): no extern "C".
 #include <lauxlib.h>
@@ -1346,8 +1347,19 @@ Plugin* PluginHost::findPlugin(const std::string& id) {
     return nullptr;
 }
 
+void PluginHost::processPendingReload() {
+    // A running command's Lua state owns the take's start time and stop action.
+    if (!reloadRequested_ || media::Recorder::get().recording()) return;
+    reloadRequested_ = false;
+    load();
+    emit ui::AppSignals::get().pluginsChanged();
+}
+
 void PluginHost::setEnabled(const std::string& pluginId, bool enabled) {
-    if (Plugin* p = findPlugin(pluginId)) p->enabled = enabled;
+    if (Plugin* p = findPlugin(pluginId)) {
+        if (!enabled && p->may("microphone") && media::Recorder::get().recording()) return;
+        p->enabled = enabled;
+    }
     auto& disabled = settings().disabledPlugins;
     std::erase(disabled, pluginId);
     if (!enabled) disabled.push_back(pluginId);
@@ -1364,6 +1376,39 @@ bool PluginHost::install(const fs::path& manifest, std::string* error) {
         if (error) *error = e.what();
         return false;
     }
+    requestReload();
+    return true;
+}
+
+bool PluginHost::uninstall(const std::string& pluginId, std::string* error) {
+    const Plugin* plugin = findPlugin(pluginId);
+    if (!plugin || plugin->builtin) {
+        if (error) *error = "only installed plugins can be removed";
+        return false;
+    }
+    if (media::Recorder::get().recording()) {
+        if (error) *error = "stop recording before removing this plugin";
+        return false;
+    }
+    std::error_code ec;
+    const auto status = fs::symlink_status(plugin->dir, ec);
+    if (ec || fs::is_symlink(status)) {
+        if (error) *error = "linked plugin folders cannot be removed here";
+        return false;
+    }
+    const fs::path folder = fs::canonical(plugin->dir, ec);
+    if (ec) {
+        if (error) *error = "the plugin folder could not be found";
+        return false;
+    }
+    const fs::path root = fs::canonical(userDir(), ec);
+    if (ec || folder.parent_path() != root || folder != root / plugin->dir.filename()) {
+        if (error) *error = "the plugin is outside the installed plugins folder";
+        return false;
+    }
+    if (!platform::moveToTrash(folder, error)) return false;
+    std::erase(settings().disabledPlugins, pluginId);
+    saveSettings();
     requestReload();
     return true;
 }

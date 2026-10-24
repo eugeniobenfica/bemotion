@@ -964,9 +964,10 @@ void ViewportPanel::dragLeaveEvent(QDragLeaveEvent*) {
 void ViewportPanel::dropEvent(QDropEvent* e) {
     if (e->mimeData()->hasFormat(ui::kToolbarMime)) {
         // Where the grip was grabbed (x in the bar): the bar lands under the mouse as it was held.
-        const int grabX = e->mimeData()->data(ui::kToolbarMime).toInt();
+        const auto grab = e->mimeData()->data(ui::kToolbarMime).split(',');
+        const QPoint offset(grab[0].toInt(), grab.size() > 1 ? grab[1].toInt() : 14);
         e->acceptProposedAction();
-        emit toolbarDropped(e->position().toPoint() - QPoint(grabX, 14));
+        emit toolbarDropped(e->position().toPoint() - offset);
         return;
     }
     if (!updateDrop(e->mimeData(), vec(e->position()), e->modifiers())) return;

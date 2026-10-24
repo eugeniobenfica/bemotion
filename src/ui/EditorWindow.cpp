@@ -70,9 +70,17 @@ std::filesystem::path layoutFile() { return platform::appDataDir() / "layout.ads
 // Real drop targets stay above the floating toolbar while its grip is dragged.
 class ToolbarTarget : public QPushButton {
 public:
-    ToolbarTarget(const char* label, QWidget* parent) : QPushButton(label, parent) { setAcceptDrops(true); }
+    explicit ToolbarTarget(QWidget* parent) : QPushButton(parent) {
+        setAcceptDrops(true);
+        setFocusPolicy(Qt::NoFocus);
+    }
 
 protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        ui::Draw d(p);
+        d.rect({1.5f, 1.5f}, {width() - 1.5f, height() - 1.5f}, theme::kAccent, 6.0f, isDown() ? 3.0f : 1.5f);
+    }
     void dragEnterEvent(QDragEnterEvent* e) override {
         if (!e->mimeData()->hasFormat(ui::kToolbarMime)) return e->ignore();
         setDown(true);
@@ -216,6 +224,7 @@ void EditorWindow::buildDocks() {
         s.toolbarInViewport = toViewport;
         s.toolbarInWindow = false;
         if (toViewport) {
+            timeline_->setToolPillVertical(false);
             QWidget* pill = timeline_->toolPill();
             const QSize free = viewport_->size() - pill->sizeHint();
             if (at.x() < 0) at = QPoint(free.width() / 2, 10); // its default place: top center
@@ -294,14 +303,18 @@ QRect EditorWindow::toolbarBounds() const {
 }
 
 void EditorWindow::showToolbarTargets(bool visible) {
-    const char* labels[] = {"Top", "Bottom", "Left", "Right"};
-    const QPointF positions[] = {{0.5, 0}, {0.5, 1}, {0, 0.5}, {1, 0.5}};
-    for (int i = 0; i < 4; ++i) {
+    const QPointF positions[] = {{0.5, 0}, {0.5, 1}, {0, 0.5}, {1, 0.5}, {0, 0}};
+    for (int i = 0; i < 5; ++i) {
         if (!toolbarTargets_[i]) {
-            auto* target = new ToolbarTarget(labels[i], this);
-            target->setToolTip("Drop the toolbar here");
-            connect(target, &QPushButton::clicked, this, [this, position = positions[i]] {
-                dockToolbar(position);
+            auto* target = new ToolbarTarget(this);
+            target->setAccessibleName(i == 4 ? "Return toolbar to timeline" : "Float toolbar at window edge");
+            connect(target, &QPushButton::clicked, this, [this, i, position = positions[i]] {
+                if (i == 4) {
+                    settings().toolbarInViewport = false;
+                    settings().toolbarInWindow = false;
+                    saveSettings();
+                    placeToolbar();
+                } else dockToolbar(position);
                 showToolbarTargets(false);
             });
             toolbarTargets_[i] = target;
@@ -309,8 +322,9 @@ void EditorWindow::showToolbarTargets(bool visible) {
     }
     positionToolbarTargets();
     for (auto* target : toolbarTargets_) {
-        target->setVisible(visible);
-        if (visible) target->raise();
+        const bool show = visible && (target != toolbarTargets_[4] || (settings().toolbarInViewport && timeline_->isVisible()));
+        target->setVisible(show);
+        if (show) target->raise();
     }
 }
 
@@ -320,10 +334,14 @@ void EditorWindow::positionToolbarTargets() {
     for (int i = 0; i < 4; ++i) {
         auto* target = toolbarTargets_[i];
         if (!target) continue;
-        target->resize(target->sizeHint().expandedTo(QSize(76, 32)));
+        target->resize(i < 2 ? QSize(112, 32) : QSize(32, 112));
         target->move(bounds.topLeft() + QPoint(
             static_cast<int>(positions[i].x() * std::max(0, bounds.width() - target->width())),
             static_cast<int>(positions[i].y() * std::max(0, bounds.height() - target->height()))));
+    }
+    if (auto* target = toolbarTargets_[4]) {
+        target->resize(190, 32);
+        target->move(timeline_->mapTo(this, QPoint(6, 4)));
     }
 }
 
@@ -333,6 +351,7 @@ void EditorWindow::placeToolbar() {
         timeline_->dockToolPill();
         return;
     }
+    timeline_->setToolPillVertical(settings().toolbarInWindow && (settings().toolbarX == 0.0f || settings().toolbarX == 1.0f));
     QWidget* host = settings().toolbarInWindow ? static_cast<QWidget*>(this) : viewport_;
     if (pill->parentWidget() != host) {
         timeline_->releaseToolPill();
@@ -799,8 +818,17 @@ bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
 
 void EditorWindow::tick() {
     const double dt = std::min(0.25, clock_.restart() / 1000.0);
-    ctx_.tick(dt);
-    PluginHost::get().processPendingReload();
+    auto& recorder = media::Recorder::get();
+    if (recorder.recording() && recordingStart_ >= 0.0) {
+        auto preview = recorder.preview();
+        ctx_.time = recordingStart_ + preview.seconds;
+        ctx_.playing = true;
+        timeline_->setRecordingPreview(recordingStart_, recordingScope_, std::move(preview));
+    } else {
+        recordingStart_ = -1.0;
+        timeline_->clearRecordingPreview();
+        ctx_.tick(dt);
+    }
     media::MediaManager::get().update(ctx_.comp());
     media::AudioEngine::get().update(ctx_.comp(), ctx_.time, ctx_.playing);
 
@@ -966,6 +994,9 @@ void EditorWindow::markRecovered() {
 }
 
 void EditorWindow::runPluginCommand(const std::string& id, bool pressed) {
+    auto& recorder = media::Recorder::get();
+    const bool wasRecording = recorder.recording();
+    const double start = ctx_.time;
     std::string error;
     ctx_.playing = false;
     platform::log("running plugin command " + id);
@@ -975,7 +1006,19 @@ void EditorWindow::runPluginCommand(const std::string& id, bool pressed) {
         platform::log("plugin command failed: " + error);
         setStatus(QString::fromStdString("Plugin: " + error));
         timeline_->setPluginButtonPressed(id, false); // a toggle that failed stays up
+        if (!wasRecording && recorder.recording()) recorder.cancel();
+        if (!recorder.recording()) timeline_->clearRecordingPreview();
         return;
+    }
+    if (!wasRecording && recorder.recording()) {
+        recordingStart_ = start;
+        // The Recorder plugin imports its finished clip into the root composition.
+        recordingScope_ = 0;
+        ctx_.scope = recordingScope_;
+        timeline_->setRecordingPreview(start, recordingScope_, recorder.preview());
+    } else if (!recorder.recording()) {
+        recordingStart_ = -1.0;
+        timeline_->clearRecordingPreview();
     }
     if (outcome.changed) {
         ctx_.pruneSelection();

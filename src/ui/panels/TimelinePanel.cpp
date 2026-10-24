@@ -291,7 +291,16 @@ public:
     }
     QSize sizeHint() const override {
         const int n = static_cast<int>(tools().size());
-        return {static_cast<int>(kGrip + kPad * 2 + n * (kSize + kGap) + kSize * 0.8f + 8), static_cast<int>(kSize + 2)};
+        const QSize size(static_cast<int>(kGrip + kPad * 2 + n * (kSize + kGap) + kSize * 0.8f + 8), static_cast<int>(kSize + 2));
+        return vertical_ ? size.transposed() : size;
+    }
+
+    void setVertical(bool vertical) {
+        if (vertical_ == vertical) return;
+        vertical_ = vertical;
+        hover_ = -1;
+        updateGeometry();
+        update();
     }
 
 protected:
@@ -300,9 +309,14 @@ protected:
         ui::Draw d(p);
         d.rectFilled({0, 0}, {float(width()), float(height())}, theme::kBgDeep, 7.0f);
         if (parentWidget() != panel_) d.rect({0.5f, 0.5f}, {width() - 0.5f, height() - 0.5f}, theme::kBorder, 7.0f); // floating
-        for (int r = 0; r < 3; ++r) // the grip
-            for (int c = 0; c < 2; ++c)
-                d.circleFilled({5.0f + c * 4.0f, height() * 0.5f + (r - 1) * 5.0f}, 1.2f, hover_ == -3 ? theme::kText : theme::kTextFaint);
+        if (hover_ != -1) // the grip is a hover affordance, not an active tool
+            for (int r = 0; r < 3; ++r)
+                for (int c = 0; c < 2; ++c) {
+                    const float across = (vertical_ ? width() : height()) * 0.5f + (r - 1) * 5.0f;
+                    const float along = 5.0f + c * 4.0f;
+                    d.circleFilled(vertical_ ? Pt(across, along) : Pt(along, across), 1.2f,
+                                   hover_ == -3 ? theme::kText : theme::kTextFaint);
+                }
         const auto ts = tools();
         EditorContext& ctx = panel_->ctx_;
         const auto& catalog = ui::toolCatalog();
@@ -319,9 +333,10 @@ protected:
         if (hover_ == -2) d.rectFilled(Pt(plus.topLeft()), Pt(plus.bottomRight()), theme::kBgHover, 5.0f);
         ui::drawIcon(d, ui::Icon::Plus, Pt(plus.center()), kSize * 0.45f, hover_ == -2 ? theme::kText : theme::kTextFaint);
         if (dropAt_ >= 0) {
-            const float x = dropAt_ < static_cast<int>(ts.size()) ? static_cast<float>(buttonRect(dropAt_).left()) - 1.0f
-                                                                  : static_cast<float>(plusRect().left()) - 1.0f;
-            d.line({x, 1}, {x, float(height()) - 1}, theme::kAccent, 2.0f);
+            const QRectF next = dropAt_ < static_cast<int>(ts.size()) ? buttonRect(dropAt_) : plusRect();
+            const float at = static_cast<float>(vertical_ ? next.top() : next.left()) - 1.0f;
+            d.line(vertical_ ? Pt(1, at) : Pt(at, 1),
+                   vertical_ ? Pt(float(width()) - 1, at) : Pt(at, float(height()) - 1), theme::kAccent, 2.0f);
         }
     }
     bool event(QEvent* e) override {
@@ -352,6 +367,9 @@ protected:
                 menu.addAction(labels[i], [this, position = positions[i]] { emit panel_->toolbarDockRequested(position); });
             menu.exec(e->globalPosition().toPoint());
             pressed_ = -1;
+            hover_ = -1;
+            unsetCursor();
+            update();
         }
         if (e->button() == Qt::RightButton && pressed_ >= 0) {
             const int at = pressed_;
@@ -367,13 +385,17 @@ protected:
             pressed_ = -1; // the grip: the whole bar goes where it is dropped
             auto* drag = new QDrag(this);
             auto* mime = new QMimeData;
-            mime->setData(ui::kToolbarMime, QByteArray::number(static_cast<int>(pressPos_.x())));
+            mime->setData(ui::kToolbarMime, QByteArray::number(static_cast<int>(pressPos_.x())) + "," +
+                          QByteArray::number(static_cast<int>(pressPos_.y())));
             drag->setMimeData(mime);
             drag->setPixmap(grab());
             drag->setHotSpot(pressPos_.toPoint());
             emit panel_->toolbarDragActive(true);
             drag->exec(Qt::MoveAction);
             emit panel_->toolbarDragActive(false);
+            hover_ = -1;
+            unsetCursor();
+            update();
             return;
         }
         if ((e->buttons() & Qt::LeftButton) && pressed_ >= 0 && (e->position() - pressPos_).manhattanLength() > 6) {
@@ -416,6 +438,7 @@ protected:
     }
     void leaveEvent(QEvent*) override {
         hover_ = -1;
+        unsetCursor();
         update();
     }
     void dragEnterEvent(QDragEnterEvent* e) override {
@@ -424,7 +447,8 @@ protected:
     void dragMoveEvent(QDragMoveEvent* e) override {
         const auto ts = tools();
         int at = 0;
-        while (at < static_cast<int>(ts.size()) && e->position().x() > buttonRect(at).center().x()) ++at;
+        while (at < static_cast<int>(ts.size()) &&
+               (vertical_ ? e->position().y() > buttonRect(at).center().y() : e->position().x() > buttonRect(at).center().x())) ++at;
         dropAt_ = at;
         e->acceptProposedAction();
         update();
@@ -461,13 +485,14 @@ private:
             if (const int i = ui::toolIndex(id); i >= 0) out.push_back(i);
         return out;
     }
-    QRectF buttonRect(int i) const { return {kGrip + kPad + i * (kSize + kGap), 1.0, kSize, kSize}; }
+    QRectF oriented(QRectF r) const { return vertical_ ? QRectF(r.y(), r.x(), r.height(), r.width()) : r; }
+    QRectF buttonRect(int i) const { return oriented({kGrip + kPad + i * (kSize + kGap), 1.0, kSize, kSize}); }
     QRectF plusRect() const {
         const float x = kGrip + kPad + static_cast<float>(tools().size()) * (kSize + kGap) + 2.0f;
-        return {x, 1.0 + kSize * 0.1, kSize * 0.8, kSize * 0.8};
+        return oriented({x, 1.0 + kSize * 0.1, kSize * 0.8, kSize * 0.8});
     }
     int indexAt(QPointF p) const { // a tool, -2 the "+", -3 the grip, -1 nothing
-        if (p.x() < kGrip) return -3;
+        if ((vertical_ ? p.y() : p.x()) < kGrip) return -3;
         const int n = static_cast<int>(tools().size());
         for (int i = 0; i < n; ++i)
             if (buttonRect(i).contains(p)) return i;
@@ -486,6 +511,7 @@ private:
     }
 
     TimelinePanel* panel_;
+    bool vertical_ = false;
     int hover_ = -1, pressed_ = -1, dropAt_ = -1;
     QPointF pressPos_;
 };
@@ -626,7 +652,12 @@ QWidget* TimelinePanel::rowsWidget() const { return rows_; }
 QWidget* TimelinePanel::toolPill() const { return pill_; }
 
 void TimelinePanel::rebuildPluginButtons() {
-    for (auto& [id, b] : pluginButtons_) b->deleteLater();
+    std::map<std::string, bool> active;
+    for (const auto& [id, b] : pluginButtons_) active[id] = b->active();
+    while (auto* item = pluginBar_->takeAt(0)) {
+        if (auto* widget = item->widget()) widget->deleteLater();
+        delete item;
+    }
     pluginButtons_.clear();
     for (const PluginCommand* c : PluginHost::get().commands()) {
         if (c->place != "timeline") continue;
@@ -634,6 +665,7 @@ void TimelinePanel::rebuildPluginButtons() {
         if (c->icon == "mic" || c->icon == "microphone") b->setActiveColor(theme::kDanger);
         const std::string id = c->id;
         const bool toggle = c->toggle;
+        if (toggle) b->setActive(active[id]);
         connect(b, &QAbstractButton::clicked, this, [this, b, id, toggle] {
             const bool pressed = toggle && !b->active();
             if (toggle) b->setActive(pressed);
@@ -656,7 +688,10 @@ void TimelinePanel::releaseToolPill() {
     divider_->hide();
 }
 
+void TimelinePanel::setToolPillVertical(bool vertical) { pill_->setVertical(vertical); }
+
 void TimelinePanel::dockToolPill() {
+    pill_->setVertical(false);
     if (pill_->parentWidget() == this) return;
     pill_->setParent(this);
     bar_->insertWidget(0, pill_);
@@ -684,12 +719,38 @@ void TimelinePanel::zoomAround(float x, double factor) {
     relayout();
 }
 
+void TimelinePanel::setRecordingPreview(double start, uint64_t scope, media::RecordingPreview preview) {
+    if (!recordingPreviewActive_) {
+        graphMode_ = false;
+        scrollY_ = 0.0f;
+    }
+    recordingPreviewActive_ = true;
+    recordingStart_ = start;
+    recordingScope_ = scope;
+    recordingPreview_ = std::move(preview);
+    const double end = recordingStart_ + recordingPreview_.seconds;
+    if (pxPerSec_ > 0.0 && timeToX(end) > trackX0() + trackW() - 20)
+        scroll_ = std::max(0.0, end - (trackW() - 40) / pxPerSec_);
+    relayout();
+}
+
+void TimelinePanel::clearRecordingPreview() {
+    if (!recordingPreviewActive_) return;
+    recordingPreviewActive_ = false;
+    recordingPreview_ = {};
+    relayout();
+}
+
+double TimelinePanel::visibleEnd() const {
+    return hasRecordingPreview() ? std::max(ctx_.comp().duration, recordingStart_ + recordingPreview_.seconds) : ctx_.comp().duration;
+}
+
 void TimelinePanel::clampView() {
     const Composition& comp = ctx_.comp();
     leftWidth_ = std::clamp(300.0f, 220.0f, std::max(220.0f, rows_->width() * 0.5f));
     const double w = trackW();
     // Clips may run past the composition end: keep them reachable.
-    double contentEnd = comp.duration;
+    double contentEnd = visibleEnd();
     for (const Layer& l : comp.layers) contentEnd = std::max(contentEnd, l.outPoint);
     const double minPx = w / (std::max(contentEnd, 0.1) * 4.0);
     if (pxPerSec_ <= 0.0) {
@@ -728,6 +789,14 @@ void TimelinePanel::computeItems() {
     auto& layers = comp.layers;
     const auto trackRows = comp.trackRows();
     float y = -scrollY_;
+    if (hasRecordingPreview()) {
+        Item recording;
+        recording.kind = Item::Recording;
+        recording.top = y;
+        recording.h = layerRowHeight();
+        items_.push_back(recording);
+        y += recording.h;
+    }
     for (int r = 0; r < static_cast<int>(trackRows.size()); ++r) {
         const TrackRow& row = trackRows[r];
         // A compound's contents live in its own timeline (double-click it to open).
@@ -970,8 +1039,8 @@ void TimelinePanel::paintRuler(QPainter& p, int width) {
             }
     }
     // Past the end of the composition (nothing to mark while it is empty: it grows with its content).
-    const float endX = timeToX(comp.duration);
-    if (!comp.layers.empty()) d.rectFilled({endX, 0}, {x1, h}, theme::shade(90));
+    const float endX = timeToX(visibleEnd());
+    if (!comp.layers.empty() || hasRecordingPreview()) d.rectFilled({endX, 0}, {x1, h}, theme::shade(90));
     // Playhead handle.
     const float ph = timeToX(ctx_.time);
     const Pt head[5] = {{ph - 6, 3}, {ph + 6, 3}, {ph + 6, 14}, {ph, 20}, {ph - 6, 14}};
@@ -991,11 +1060,12 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
             if (item.top > bottom || item.top + item.h < 0) continue;
             switch (item.kind) {
             case Item::Track: paintTrack(p, item, width); break;
+            case Item::Recording: paintRecording(p, item, width); break;
             case Item::Group: paintGroup(p, item, width); break;
             case Item::Prop: paintPropKeys(p, item, width); break;
             }
         }
-        if (ctx_.comp().layers.empty()) {
+        if (ctx_.comp().layers.empty() && !hasRecordingPreview()) {
             const QString hint = "Add text or graphics from the Objects panel to start animating.";
             d.text({(width - d.textWidth(hint)) * 0.5f, rowsBottom_ + 24}, theme::kTextFaint, hint);
         }
@@ -1005,8 +1075,8 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
     const float x0 = trackX0(), x1 = x0 + trackW();
     d.line({x0 - 1, 0}, {x0 - 1, bottom}, theme::kBorder);
     d.pushClip({x0, 0}, {x1, bottom});
-    const float endX = timeToX(ctx_.comp().duration);
-    if (endX < x1 && !ctx_.comp().layers.empty()) d.rectFilled({endX, 0}, {x1, bottom}, theme::shade(80));
+    const float endX = timeToX(visibleEnd());
+    if (endX < x1 && (!ctx_.comp().layers.empty() || hasRecordingPreview())) d.rectFilled({endX, 0}, {x1, bottom}, theme::shade(80));
     const float ph = timeToX(ctx_.time);
     d.line({ph, 0}, {ph, bottom}, theme::kAccent, 1.5f);
     if (snapLineTime_ >= 0.0) { // what the dragged item snapped to
@@ -1073,6 +1143,35 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
         d.line({tx, 0}, {tx, bottom}, theme::kAccent, 1.0f);
         d.text({tx + 6, gy - 8}, theme::kText, ui::formatTimecode(dropTime_, ctx_.comp().fps));
     }
+}
+
+void TimelinePanel::paintRecording(QPainter& p, const Item& item, float width) {
+    ui::Draw d(p);
+    const float y = item.top, h = item.h, cy = y + h * 0.5f;
+    d.rectFilled({0, y}, {width, y + h}, theme::accent(24));
+    d.line({0, y + h - 1}, {width, y + h - 1}, theme::kBorder);
+    ui::drawIcon(d, ui::Icon::Microphone, {kChipX + 18, cy}, 14.0f, theme::kDanger);
+    d.pushClip({kNameX, y}, {leftWidth_ - 6, y + h});
+    d.text({kNameX, cy - d.textHeight() * 0.5f}, theme::kText, QStringLiteral("Recording"));
+    d.popClip();
+    d.pushClip({trackX0(), y}, {trackX0() + trackW(), y + h});
+    const float begin = timeToX(recordingStart_);
+    const float end = std::max(begin + 4, timeToX(recordingStart_ + recordingPreview_.seconds));
+    d.rectFilled({begin, y + 4}, {end, y + h - 4}, theme::accent(55), 4.0f);
+    d.rect({begin, y + 4}, {end, y + h - 4}, theme::kAccent, 4.0f);
+    const auto& peaks = recordingPreview_.peaks;
+    const float first = std::max(begin + 1, trackX0()), last = std::min(end - 1, trackX0() + trackW());
+    for (float x = first; x < last; x += 2) {
+        const double t0 = std::max(0.0, xToTime(x) - recordingStart_);
+        const double t1 = std::max(0.0, xToTime(x + 2) - recordingStart_);
+        const size_t from = static_cast<size_t>(t0 * media::RecordingPreview::kPeaksPerSecond);
+        const size_t to = std::min(peaks.size(), static_cast<size_t>(t1 * media::RecordingPreview::kPeaksPerSecond) + 1);
+        float peak = 0.0f;
+        for (size_t i = from; i < to; ++i) peak = std::max(peak, peaks[i]);
+        const float amplitude = std::max(0.5f, std::sqrt(peak) * (h - 10) * 0.45f);
+        d.line({x, cy - amplitude}, {x, cy + amplitude}, theme::kAccent, 1.4f);
+    }
+    d.popClip();
 }
 
 void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
@@ -1413,6 +1512,7 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
         relayout();
         return;
     }
+    if (item->kind == Item::Recording) return;
     auto& layers = ctx_.comp().layers;
     if (item->kind == Item::Track) {
         const Item row = *item;

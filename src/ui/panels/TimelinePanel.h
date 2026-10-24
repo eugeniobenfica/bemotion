@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ui/EditorContext.h"
+#include "media/RecordingBuffer.h"
 
 #include <QPointF>
 #include <QWidget>
@@ -35,6 +36,8 @@ class TimelinePanel : public QWidget {
 public:
     explicit TimelinePanel(EditorContext& ctx, QWidget* parent = nullptr);
     void sync(); // from the editor's tick
+    void setRecordingPreview(double start, uint64_t scope, media::RecordingPreview preview);
+    void clearRecordingPreview();
 
     enum class Ease { Linear, EasyEase, EaseIn, EaseOut, Hold };
     // Applies an easing to the selected keyframes (F9 = Easy Ease, like After Effects).
@@ -52,6 +55,7 @@ signals:
 
 public:
     QWidget* toolPill() const;
+    void setToolPillVertical(bool vertical);
     void setPluginButtonPressed(const std::string& commandId, bool pressed);
     void rebuildPluginButtons();
     void releaseToolPill(); // out of the timeline's bar (it floats elsewhere)
@@ -75,7 +79,7 @@ private:
 
     // One laid out row of the body.
     struct Item {
-        enum Kind { Track, Group, Prop } kind = Track;
+        enum Kind { Track, Group, Prop, Recording } kind = Track;
         float top = 0, h = 0;
         int rowIndex = 0;           // Track: position among the visible tracks
         uint64_t track = 0;
@@ -118,6 +122,13 @@ private:
     void paintRuler(QPainter& p, int width);
     void paintRows(QPainter& p, QSize size);
     void paintTrack(QPainter& p, const Item& item, float width);
+    void paintRecording(QPainter& p, const Item& item, float width);
+    bool hasRecordingPreview() const { return recordingPreviewActive_ && recordingScope_ == ctx_.scope; }
+    double visibleEnd() const;
+    bool recordingPreviewActive_ = false;
+    double recordingStart_ = 0.0;
+    uint64_t recordingScope_ = 0;
+    media::RecordingPreview recordingPreview_;
     void paintGroup(QPainter& p, const Item& item, float width);
     void paintPropKeys(QPainter& p, const Item& item, float width);
     void paintWaveform(QPainter& p, const Layer& layer, QPointF a, QPointF b, uint32_t color) const;

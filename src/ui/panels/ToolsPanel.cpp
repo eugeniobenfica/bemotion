@@ -16,6 +16,7 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -31,7 +32,11 @@ ToolsPanel::ToolsPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(parent
 
 void ToolsPanel::resizeEvent(QResizeEvent* e) {
     QScrollArea::resizeEvent(e);
-    if (std::max(2, (viewport()->width() - 16) / 80) != columns_) rebuild();
+    // Replacing the scroll widget during its show/resize can leave the new tiles unpainted.
+    if (std::max(2, (viewport()->width() - 16) / 80) != columns_)
+        QTimer::singleShot(0, this, [this] {
+            if (std::max(2, (viewport()->width() - 16) / 80) != columns_) rebuild();
+        });
 }
 
 void ToolsPanel::rebuild() {
@@ -56,7 +61,7 @@ void ToolsPanel::rebuild() {
             if (tool.modal != modal) continue;
             auto* t = new ui::Tile(tool.icon, tool.label);
             t->setTileSize(tile);
-            t->setToolTip(QString::fromStdString(ui::toolTooltip(tool)) + "\n\nDrag it into the timeline's toolbar to keep it at hand.");
+            t->setToolTip(QString::fromStdString(ui::toolTooltip(tool)) + "\n\nDrag it into the toolbar to keep it at hand.");
             t->setDragData([i] { return ui::makeMime(ui::kToolMime, i); });
             connect(t, &QAbstractButton::clicked, this, [this, i] {
                 const ui::ToolInfo& tool = ui::toolCatalog()[i];

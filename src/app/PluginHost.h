@@ -86,10 +86,7 @@ public:
     // Reloading from UI code is deferred to the start of the next frame, when
     // nothing holds pointers into the plugin list.
     void requestReload() { reloadRequested_ = true; }
-    void processPendingReload() {
-        if (reloadRequested_) load();
-        reloadRequested_ = false;
-    }
+    void processPendingReload();
 
     const std::vector<Plugin>& plugins() const { return plugins_; }
     // Object types of enabled plugins, in load order.
@@ -100,6 +97,7 @@ public:
     void setEnabled(const std::string& pluginId, bool enabled);
     // Copies the folder containing `manifest` (a plugin.json) into the user plugins folder.
     bool install(const std::filesystem::path& manifest, std::string* error = nullptr);
+    bool uninstall(const std::string& pluginId, std::string* error = nullptr);
     static std::filesystem::path userDir();
 
     Layer createLayer(const PluginObjectType& type, Vec2 position, double duration) const;

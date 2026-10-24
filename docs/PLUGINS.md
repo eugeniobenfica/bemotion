@@ -6,6 +6,10 @@ plugins in `<app data>/bemotion/plugins` (*Plugins → Install Plugin…* copies
 folder there). The bundled [Charts plugin](../assets/plugins/charts/main.lua)
 is a complete example.
 
+Settings > Plugins displays cards for installed and bundled plugins, with
+installation and enable controls. Remove moves an installed plugin folder to
+Trash; bundled plugins stay installed and can be disabled.
+
 ```json
 { "id": "myplugin", "name": "My Plugin", "version": "1.0.0", "author": "me",
   "description": "What it adds.", "main": "main.lua", "api": 3 }
@@ -185,7 +189,12 @@ With the **`microphone` permission**, `bemotion.microphone.start()` records
 the default microphone, `stop()` saves it (WAV, in the project's
 `Recordings` folder) and returns the file, `recording()`, `level()` (0–1) and
 `cancel()`. The bundled [Recorder](../assets/plugins/recorder/main.lua) is a
-voice-over button in a dozen lines:
+voice-over button in a dozen lines. While capturing, the editor shows a
+growing recording clip and waveform in the timeline, following the captured
+audio even beyond the composition end. This temporary preview is replaced by
+the normal media layer when the command stops and imports the WAV, with no
+duplicate clip or extra undo steps:
+
 
 ```lua
 local started_at = 0

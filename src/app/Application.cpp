@@ -244,6 +244,7 @@ void Application::buildWindow() {
 
 void Application::frame() {
     ++frameIndex_;
+    PluginHost::get().processPendingReload(); // Settings also manages plugins from the home screen.
     // Each step runs on its own: a step that opens a modal dialog (exec) must not hold up the
     // next ones, which drive that dialog.
     if (script_) QTimer::singleShot(0, this, [this] { scriptStep(); });

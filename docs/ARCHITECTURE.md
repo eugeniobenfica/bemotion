@@ -241,6 +241,11 @@ Rules:
   (FFmpeg, `FfmpegMedia.cpp`). `MediaManager` caches `SkImage`s, keeps one
   video reader per (composition, layer) and decodes audio in the background.
   `AudioEngine` plays the timeline (miniaudio) and mixes audio for exports.
+  `Recorder` keeps mono capture samples and a 100 Hz peak envelope in
+  `RecordingBuffer`. The editor shows a growing, noneditable recording clip
+  with this waveform while capturing, following capture time beyond the
+  composition end. This preview stays outside the document: stopping the
+  Recorder plugin creates the saved media layer once, as one undoable edit.
 - `export/ExportJob` snapshots the project and feeds an `Encoder` frame by
   frame from the calling thread (`step()`), so the UI stays responsive and
   cancelling is trivial. `FfmpegEncoder` (MP4 / H.264, MOV / ProRes, WebM /
@@ -263,7 +268,7 @@ Rules:
   panels in Qt Advanced Docking System docks (layout saved in
   `layout.ads`; a saved layout missing a newer panel is replaced by the
   default), and a **16 ms timer** (`tick()`) that drives playback, media,
-  audio, plugin reloads, undo commits and every panel's `sync()`. A slower
+  audio, undo commits and every panel's `sync()`. A slower
   timer keeps crash-recovery copies and autosaves (`app/Recovery`).
   - Panel headers have only tabs and a **minimize** button (no close, undock,
     tabs-menu or pin buttons): a minimized panel hides and leaves a handle on
@@ -279,6 +284,9 @@ Rules:
     context menu offers the same positions. Normalized coordinates preserve
     the position when resizing. The optional `toolbar_in_window` setting
     defaults to false so older free viewport positions keep their meaning.
+    Edge targets are accent outlines without labels, with an extra target over
+    the timeline toolbar to restore it. Side positions use a vertical toolbar;
+    its grip appears on hover and clears its hover/cursor state after dragging.
   - Panels minimize from a handle that appears, on hover, where the restore
     handle will be. No focus highlight on panels.
   - Never `show()` / `setVisible(true)` a widget before it has a parent: for
@@ -318,7 +326,10 @@ Rules:
 - **`AppSignals`** — app-wide notifications (shortcuts, appearance, toolbar,
   plugins changed) between windows that do not own each other.
 - Dialogs live in `ui/Dialogs.h` (export, Settings, Help); Settings and Help are
-  `PagedWindow`s.
+  `PagedWindow`s. Settings shows plugins as responsive cards with install,
+  enable and folder controls. Installed plugins can be moved to Trash;
+  bundled plugins can be disabled. The host checks that removal stays inside
+  the user plugin folder.
 - All interface text is **English**, short, sentence case, with After Effects /
   Premiere terms.
 
@@ -348,6 +359,8 @@ Rules:
   shares with MCP (`automationEnvironment`, `renderFramesPng`, `exportProject`).
 - **`McpServer`** — `bemotion mcp`, the Model Context Protocol server (§10).
 - **`PluginHost`** — Lua plugins (§9).
+  The application's frame timer processes pending reloads even on the home
+  screen; reloads wait until capture stops, then notify the plugin views.
 - **`DevScript`** — scripted mouse / keyboard input for UI checks (§13).
 
 ## 9. Plugins

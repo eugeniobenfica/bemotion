@@ -5,6 +5,7 @@
 
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "media/Recorder.h"
 #include "app/Settings.h"
 #include "render/Fonts.h"
 #include "ui/AppSignals.h"
@@ -28,7 +29,9 @@
 #include <QPlainTextEdit>
 #include <QPointer>
 #include <QPushButton>
+#include <QResizeEvent>
 #include <QSlider>
+#include <QStringList>
 #include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -39,6 +42,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace bemotion::ui {
 
@@ -674,13 +678,96 @@ QWidget* shortcutsPage() {
     return page;
 }
 
+// Cards read theme colors while painting; controls keep their normal focus and keyboard behavior.
+class PluginCard : public QWidget {
+public:
+    PluginCard() {
+        setMinimumHeight(220);
+        connect(&AppSignals::get(), &AppSignals::appearanceChanged, this, [this] { update(); });
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        Draw d(p);
+        d.rectFilled({0.5f, 0.5f}, {width() - 0.5f, height() - 0.5f}, theme::kBgRaised, 8.0f);
+        d.rect({0.5f, 0.5f}, {width() - 0.5f, height() - 0.5f}, theme::kBorder, 8.0f);
+    }
+};
+
+class PluginGrid : public QWidget {
+public:
+    PluginGrid() {
+        grid_ = new QGridLayout(this);
+        grid_->setContentsMargins(0, 0, 0, 0);
+        grid_->setSpacing(12);
+    }
+    void addCard(QWidget* card) {
+        cards_.push_back(card);
+        grid_->addWidget(card, static_cast<int>(cards_.size()) - 1, 0);
+    }
+
+protected:
+    void resizeEvent(QResizeEvent* e) override {
+        QWidget::resizeEvent(e);
+        const int columns = std::clamp((width() + 12) / 252, 1, 3);
+        if (columns == columns_) return;
+        for (int c = 0; c < columns_; ++c) grid_->setColumnStretch(c, 0);
+        columns_ = columns;
+        for (int i = 0; i < static_cast<int>(cards_.size()); ++i) {
+            grid_->removeWidget(cards_[i]);
+            grid_->addWidget(cards_[i], i / columns, i % columns);
+        }
+        for (int c = 0; c < columns; ++c) grid_->setColumnStretch(c, 1);
+    }
+
+private:
+    QGridLayout* grid_;
+    std::vector<QWidget*> cards_;
+    int columns_ = 1;
+};
+
+QLabel* pluginText(const QString& text, Tone tone = Tone::TextDim) {
+    auto* label = new QLabel(text);
+    label->setWordWrap(true);
+    label->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    setTone(label, tone);
+    return label;
+}
+
 QWidget* pluginsPage() {
     PluginHost& host = PluginHost::get();
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
     addPageHeader(col, "Plugins", [] { enableAllPlugins(); });
     auto* buttons = new QHBoxLayout;
-    auto* install = accentButton("Install Plugin...");
+    auto* folder = new QPushButton("Open plugins folder");
+    QObject::connect(folder, &QPushButton::clicked, folder, [] { platform::revealInFileManager(PluginHost::userDir()); });
+    auto* reload = new QPushButton("Reload");
+    QObject::connect(reload, &QPushButton::clicked, reload, [] {
+        PluginHost::get().requestReload();
+        emit AppSignals::get().pluginsChanged();
+        if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
+    });
+    auto* docs = new QPushButton("Write a plugin");
+    QObject::connect(docs, &QPushButton::clicked, docs, [] { platform::openWithDefaultApp(kPluginDocsUrl); });
+    for (QPushButton* b : {folder, reload, docs}) buttons->addWidget(b);
+    buttons->addStretch();
+    col->addLayout(buttons);
+    if (!g_message.empty()) col->addWidget(pluginText(QString::fromStdString(g_message)));
+    col->addSpacing(6);
+
+    auto* cards = new PluginGrid;
+    auto* add = new PluginCard;
+    auto* addCol = new QVBoxLayout(add);
+    addCol->setContentsMargins(16, 16, 16, 16);
+    addCol->setSpacing(10);
+    auto* addTitle = pageTitle("Add a plugin");
+    setTone(addTitle, Tone::Text);
+    addCol->addWidget(addTitle);
+    addCol->addWidget(pluginText("Add objects and workflows to your editor. Choose the plugin.json file from a plugin folder."));
+    addCol->addStretch();
+    auto* install = accentButton("Install plugin...");
     QObject::connect(install, &QPushButton::clicked, install, [] {
         if (auto manifest = platform::openFileDialog("Install Plugin (choose its plugin.json)", "bemotion plugin", "json")) {
             std::string error;
@@ -689,63 +776,87 @@ QWidget* pluginsPage() {
             if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
         }
     });
-    auto* folder = new QPushButton("Open Plugins Folder");
-    QObject::connect(folder, &QPushButton::clicked, folder, [] { platform::revealInFileManager(PluginHost::userDir()); });
-    auto* reload = new QPushButton("Reload");
-    QObject::connect(reload, &QPushButton::clicked, reload, [] {
-        PluginHost::get().requestReload();
-        emit AppSignals::get().pluginsChanged();
-        if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
-    });
-    auto* docs = new QPushButton("Write a Plugin");
-    QObject::connect(docs, &QPushButton::clicked, docs, [] { platform::openWithDefaultApp(kPluginDocsUrl); });
-    for (QPushButton* b : {install, folder, reload, docs}) buttons->addWidget(b);
-    buttons->addStretch();
-    col->addLayout(buttons);
-    if (!g_message.empty()) col->addWidget(hintLabel(QString::fromStdString(g_message)));
-    col->addWidget(hintLabel("Plugins add new kinds of objects. They run in a sandbox: no access to your files or the network."));
+    addCol->addWidget(install, 0, Qt::AlignLeft);
+    cards->addCard(add);
 
     for (const Plugin& p : host.plugins()) {
-        auto* line = new QFrame;
-        line->setFrameShape(QFrame::HLine);
-        ui::setTone(line, ui::Tone::Border);
-        col->addWidget(line);
+        auto* card = new PluginCard;
+        auto* body = new QVBoxLayout(card);
+        body->setContentsMargins(16, 16, 16, 16);
+        body->setSpacing(8);
         auto* head = new QHBoxLayout;
+        auto* name = pageTitle(QString::fromStdString(p.name));
+        name->setWordWrap(true);
+        setTone(name, Tone::Text);
+        head->addWidget(name, 1);
         auto* enabled = new QCheckBox;
         enabled->setChecked(p.enabled);
-        enabled->setToolTip(p.enabled ? "Enabled" : "Disabled");
-        const std::string id = p.id;
-        QObject::connect(enabled, &QCheckBox::toggled, enabled, [id](bool on) {
-            PluginHost::get().setEnabled(id, on);
-            emit AppSignals::get().pluginsChanged();
-        });
-        head->addWidget(enabled);
-        auto* name = new QLabel(QString::fromStdString(p.name));
-        QFont f = name->font();
-        f.setPointSizeF(f.pointSizeF() * 1.1);
-        f.setWeight(QFont::DemiBold);
-        name->setFont(f);
-        head->addWidget(name);
-        head->addWidget(hintLabel(QString::fromStdString("v" + p.version + (p.author.empty() ? "" : "  ·  " + p.author))));
-        if (p.builtin) head->addWidget(paragraph("built-in", theme::kAccent));
-        head->addStretch();
-        auto* show = new QPushButton("Show Folder");
-        const std::filesystem::path dir = p.dir;
-        QObject::connect(show, &QPushButton::clicked, show, [dir] { platform::revealInFileManager(dir); });
-        head->addWidget(show);
-        col->addLayout(head);
-        auto* body = new QVBoxLayout;
-        body->setContentsMargins(28, 0, 0, 0);
-        if (!p.description.empty()) body->addWidget(paragraph(QString::fromStdString(p.description), theme::kText));
+        enabled->setEnabled(!(p.may("microphone") && media::Recorder::get().recording()));
+        enabled->setAccessibleName(QString::fromStdString("Enable " + p.name));
+        enabled->setToolTip("Enable or disable this plugin");
+        head->addWidget(enabled, 0, Qt::AlignTop);
+        body->addLayout(head);
+        body->addWidget(pluginText(QString::fromStdString("v" + p.version + (p.author.empty() ? "" : " by " + p.author)), Tone::TextFaint));
+        if (!p.description.empty()) body->addWidget(pluginText(QString::fromStdString(p.description), Tone::Text));
+        if (!p.permissions.empty()) {
+            QStringList permissions;
+            for (const std::string& permission : p.permissions) {
+                if (permission == "edit") permissions << "Edit project";
+                else if (permission == "media") permissions << "Import media";
+                else if (permission == "files") permissions << "Read chosen files";
+                else if (permission == "microphone") permissions << "Microphone";
+                else permissions << QString::fromStdString(permission);
+            }
+            body->addWidget(pluginText("Permissions: " + permissions.join(", "), Tone::TextFaint));
+        }
         if (!p.error.empty()) {
-            body->addWidget(paragraph(QString::fromStdString("Failed to load: " + p.error), theme::kDanger));
+            body->addWidget(pluginText(QString::fromStdString("Failed to load: " + p.error), Tone::Danger));
         } else {
             std::string objects;
             for (const PluginObjectType* t : host.objectTypes())
                 if (t->pluginId == p.id) objects += (objects.empty() ? "" : ", ") + t->name;
-            if (!objects.empty()) body->addWidget(hintLabel(QString::fromStdString("Objects: " + objects)));
+            if (!objects.empty()) body->addWidget(pluginText(QString::fromStdString("Objects: " + objects)));
         }
-        if (!p.drawError.empty()) body->addWidget(paragraph(QString::fromStdString("Last error: " + p.drawError), theme::kDanger));
+        if (!p.drawError.empty()) body->addWidget(pluginText(QString::fromStdString("Last error: " + p.drawError), Tone::Danger));
+        body->addStretch();
+        auto* foot = new QHBoxLayout;
+        auto* status = pluginText(p.enabled ? (p.error.empty() ? "Enabled" : "Failed to load") : "Disabled",
+                                  p.enabled ? (p.error.empty() ? Tone::Accent : Tone::Danger) : Tone::TextFaint);
+        foot->addWidget(status);
+        if (p.builtin) foot->addWidget(pluginText("Built-in", Tone::TextFaint));
+        foot->addStretch();
+        body->addLayout(foot);
+        auto* actions = new QHBoxLayout;
+        auto* show = new QPushButton("Show folder");
+        show->setToolTip(p.builtin ? "Open this bundled plugin's folder" : "Open the installed plugin's folder to manage its files");
+        const std::filesystem::path dir = p.dir;
+        QObject::connect(show, &QPushButton::clicked, show, [dir] { platform::revealInFileManager(dir); });
+        actions->addWidget(show);
+        const std::string id = p.id;
+        if (!p.builtin) {
+            auto* remove = new QPushButton("Remove");
+            setTone(remove, Tone::Danger);
+            remove->setToolTip("Move this installed plugin to Trash");
+            QObject::connect(remove, &QPushButton::clicked, remove, [id, name = QString::fromStdString(p.name)] {
+                const QString question = QString("Move %name% to Trash?").replace("%name%", name);
+                if (QMessageBox::question(g_window, "Remove plugin", question, QMessageBox::Yes | QMessageBox::No,
+                                          QMessageBox::No) != QMessageBox::Yes) return;
+                std::string error;
+                g_message = PluginHost::get().uninstall(id, &error) ? "Plugin moved to Trash." : "Could not remove: " + error;
+                emit AppSignals::get().pluginsChanged();
+                if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
+            });
+            actions->addWidget(remove);
+        }
+        actions->addStretch();
+        body->addLayout(actions);
+        QObject::connect(enabled, &QCheckBox::toggled, enabled, [id, status](bool on) {
+            PluginHost::get().setEnabled(id, on);
+            status->setText(on ? "Enabled" : "Disabled");
+            setTone(status, on ? Tone::Accent : Tone::TextFaint);
+            emit AppSignals::get().pluginsChanged();
+            if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
+        });
         if (!p.log.empty()) {
             auto* toggle = new QPushButton(QString("Log (%1)").arg(p.log.size()));
             toggle->setCheckable(true);
@@ -755,16 +866,17 @@ QWidget* pluginsPage() {
             QString text;
             for (const auto& l : p.log) text += QString::fromStdString(l) + "\n";
             log->setPlainText(text);
-            log->hide();
-            QObject::connect(toggle, &QPushButton::toggled, log, &QWidget::setVisible);
             auto* tr = new QHBoxLayout;
             tr->addWidget(toggle);
             tr->addStretch();
             body->addLayout(tr);
             body->addWidget(log);
+            log->hide();
+            QObject::connect(toggle, &QPushButton::toggled, log, &QWidget::setVisible);
         }
-        col->addLayout(body);
+        cards->addCard(card);
     }
+    col->addWidget(cards);
     return page;
 }
 
@@ -798,6 +910,9 @@ void openSettings(SettingsTab tab) {
                                     {"Plugins", Icon::Plugin, pluginsPage}},
                                    footer);
         g_window->resize(780, 600);
+        QObject::connect(&AppSignals::get(), &AppSignals::pluginsChanged, g_window, [] {
+            if (g_window) QTimer::singleShot(0, g_window, [] { if (g_window) g_window->rebuild(); });
+        });
         QObject::connect(resetAll, &QPushButton::clicked, g_window, [] {
             if (QMessageBox::question(g_window, "Reset All", "Reset every setting to its default?") != QMessageBox::Yes) return;
             const bool keepAdvanced = settings().advanced; // a view choice, not a preference

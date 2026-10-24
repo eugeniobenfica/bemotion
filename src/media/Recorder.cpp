@@ -24,7 +24,7 @@ constexpr ma_uint32 kChannels = 1; // a voice: mono
 struct State {
     std::unique_ptr<ma_device> device;
     std::mutex mutex;
-    std::vector<float> samples;
+    RecordingBuffer buffer;
     std::atomic<float> peak{0.0f};
 };
 
@@ -41,7 +41,7 @@ void onCapture(ma_device*, void*, const void* input, ma_uint32 frames) {
     for (ma_uint32 i = 0; i < frames * kChannels; ++i) peak = std::max(peak, std::fabs(in[i]));
     s.peak = std::max(peak, s.peak.load() * 0.9f);
     std::lock_guard lock(s.mutex);
-    s.samples.insert(s.samples.end(), in, in + frames * kChannels);
+    s.buffer.append(std::span<const float>(in, frames * kChannels));
 }
 
 void closeDevice() {
@@ -71,7 +71,7 @@ bool Recorder::start(std::string* error) {
     }
     {
         std::lock_guard lock(s.mutex);
-        s.samples.clear();
+        s.buffer.clear();
     }
     s.peak = 0.0f;
     ma_device_config config = ma_device_config_init(ma_device_type_capture);
@@ -103,7 +103,7 @@ bool Recorder::stop(const std::filesystem::path& file, std::string* error) {
     std::vector<float> samples;
     {
         std::lock_guard lock(s.mutex);
-        samples.swap(s.samples);
+        samples = s.buffer.takeSamples();
     }
     if (samples.empty()) {
         if (error) *error = "nothing was recorded (is the microphone muted?)";
@@ -137,7 +137,7 @@ bool Recorder::stop(const std::filesystem::path& file, std::string* error) {
 void Recorder::cancel() {
     closeDevice();
     std::lock_guard lock(state().mutex);
-    state().samples.clear();
+    state().buffer.clear();
 }
 
 bool Recorder::recording() const { return state().device != nullptr; }
@@ -147,7 +147,13 @@ float Recorder::level() const { return state().peak.load(); }
 double Recorder::seconds() const {
     State& s = state();
     std::lock_guard lock(s.mutex);
-    return static_cast<double>(s.samples.size()) / (kRate * kChannels);
+    return s.buffer.seconds();
+}
+
+RecordingPreview Recorder::preview() const {
+    State& s = state();
+    std::lock_guard lock(s.mutex);
+    return s.buffer.preview();
 }
 
 } // namespace bemotion::media

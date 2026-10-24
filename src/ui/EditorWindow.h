@@ -95,7 +95,7 @@ private:
     void dockToolbar(QPointF position);
     void showToolbarTargets(bool visible);
     void positionToolbarTargets();
-    QPushButton* toolbarTargets_[4]{};
+    QPushButton* toolbarTargets_[5]{};
     void placeRestoreHandles();
     void updateMinimizeHandles();
     int edgeOf(ads::CDockAreaWidget* area, float* along) const; // 0 left, 1 right, 2 top, 3 bottom
@@ -142,6 +142,8 @@ private:
     QElapsedTimer sinceSave_; // autosave interval
     QLabel* status_ = nullptr; // errors next to the menus
     QString lastTitle_;
+    double recordingStart_ = -1.0;
+    uint64_t recordingScope_ = 0;
     bool spaceDown_ = false;
 };
 

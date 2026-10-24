@@ -4,6 +4,8 @@
 // "microphone" permission drive it: bemotion.microphone.*). One recording at
 // a time; the samples stay in memory until stop() writes them.
 
+#include "media/RecordingBuffer.h"
+
 #include <filesystem>
 #include <string>
 
@@ -20,6 +22,7 @@ public:
     bool recording() const;
     float level() const;   // recent peak, 0..1
     double seconds() const; // recorded so far
+    RecordingPreview preview() const;
 
 private:
     Recorder() = default;
