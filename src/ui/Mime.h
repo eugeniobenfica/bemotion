@@ -21,12 +21,25 @@ inline constexpr const char* kMediaMime = "application/x-bemotion-media";
 inline constexpr const char* kToolMime = "application/x-bemotion-tool";
 // The toolbar itself, dragged by its grip (to the viewport, or back to the timeline).
 inline constexpr const char* kToolbarMime = "application/x-bemotion-toolbar";
+inline constexpr const char* kTransitionMime = "application/x-bemotion-transition";
 
 template <typename T>
 QMimeData* makeMime(const char* type, T value) {
     auto* m = new QMimeData;
     m->setData(type, QByteArray(reinterpret_cast<const char*>(&value), sizeof(T)));
     return m;
+}
+
+inline QMimeData* makeTextMime(const char* type, const std::string& value) {
+    auto* m = new QMimeData;
+    m->setData(type, QByteArray::fromStdString(value));
+    return m;
+}
+
+inline bool readTextMime(const QMimeData* m, const char* type, std::string& out) {
+    if (!m || !m->hasFormat(type)) return false;
+    out = m->data(type).toStdString();
+    return !out.empty();
 }
 
 template <typename T>

@@ -103,6 +103,7 @@ void TransitionsPanel::rebuild() {
         for (const char* c : transitionCategories()) {
             auto* t = new ui::Tile(categoryIcon(c), c);
             t->setTileSize(tile);
+            tiles_.push_back(t);
             const std::string name = c;
             connect(t, &QAbstractButton::clicked, this, [this, name] {
                 category_ = name;
@@ -126,7 +127,9 @@ void TransitionsPanel::rebuild() {
             if (category_ != list[i].category) continue;
             auto* t = new ui::Tile(iconOf(list[i].id), list[i].name);
             t->setTileSize(tile);
-            t->setToolTip(QString("%1\n\nClick to put it on the selected clips.").arg(list[i].about));
+            t->setToolTip(QString("%1\n\nClick to put it on the selected clips, or drag it to a clip edge.").arg(list[i].about));
+            const std::string id = list[i].id;
+            t->setDragData([id] { return ui::makeTextMime(ui::kTransitionMime, id); });
             connect(t, &QAbstractButton::clicked, this, [this, i] { apply(i); });
             grid->addWidget(t, n / columns_, n % columns_);
             tiles_.push_back(t);

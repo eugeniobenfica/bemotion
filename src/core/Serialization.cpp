@@ -273,6 +273,9 @@ json encodeLayer(const Layer& constLayer) {
             effects.push_back({{"type", audioEffectId(e.type)}, {"enabled", e.enabled}, {"value", e.value}});
         j["audio_effects"] = std::move(effects);
     }
+    if (layer.transitionIn.active() || layer.transitionOut.active())
+        j["transitions"] = {{"in", {{"id", layer.transitionIn.id}, {"duration", layer.transitionIn.duration}}},
+                            {"out", {{"id", layer.transitionOut.id}, {"duration", layer.transitionOut.duration}}}};
     return j;
 }
 
@@ -359,6 +362,16 @@ Layer decodeLayer(const json& j) {
             layer.audioEffects.push_back(e);
             break;
         }
+    }
+    if (const auto transitions = j.find("transitions"); transitions != j.end() && transitions->is_object()) {
+        auto decodeTransition = [&](const char* edge, ClipTransition& out) {
+            if (const auto value = transitions->find(edge); value != transitions->end() && value->is_object()) {
+                out.id = value->value("id", std::string());
+                out.duration = value->value("duration", 0.5f);
+            }
+        };
+        decodeTransition("in", layer.transitionIn);
+        decodeTransition("out", layer.transitionOut);
     }
     return layer;
 }

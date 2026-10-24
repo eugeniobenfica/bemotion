@@ -374,7 +374,10 @@ void EffectsPanel::rebuildBrowser() {
         }
         return;
     }
-    if (!canApply) col->addWidget(faint("Select layers, then click an effect to apply it."));
+    if (!canApply) {
+        col->addWidget(faint("Select a layer to browse its effects."));
+        return;
+    }
 
     auto effectTile = [&](EffectType type, TileGrid& grid) {
         ui::Tile* t = grid.add(categoryIcon(effectCategory(type)), effectLabel(type));

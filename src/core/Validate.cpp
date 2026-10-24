@@ -208,6 +208,8 @@ private:
             if (l.audioEffects.size() != audioEffectsBefore) report(where, "unknown or invalid audio effects (removed)");
             for (AudioEffect& e : l.audioEffects)
                 e.value = e.type == AudioEffectType::Gain ? std::clamp(e.value, -60.0f, 24.0f) : std::clamp(e.value, 0.01f, 60.0f);
+            for (ClipTransition* transition : {&l.transitionIn, &l.transitionOut})
+                if (!std::isfinite(transition->duration) || transition->duration <= 0.0f) transition->id.clear(), transition->duration = 0.5f;
 
             const Layer pristine = l; // for default values
             for (const PropertyRef& prop : l.properties()) {

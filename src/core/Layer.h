@@ -177,6 +177,14 @@ struct MediaProps {
     double sourceTime(double t) const { return t - start; }
 };
 
+// Timeline-facing record of a transition. Its animation remains compatible
+// with existing projects, while this metadata lets the clip show and accept it.
+struct ClipTransition {
+    std::string id;
+    float duration = 0.5f;
+    bool active() const { return !id.empty(); }
+};
+
 constexpr int kLabelColorCount = 8;
 Color labelColor(int index);
 
@@ -206,6 +214,7 @@ struct Layer {
     BackgroundProps background;
     std::vector<Effect> effects; // applied in order
     std::vector<AudioEffect> audioEffects; // mixed in order for audio media
+    ClipTransition transitionIn, transitionOut;
 
     // All animatable properties that apply to this layer's type, in UI order.
     std::vector<PropertyRef> properties();

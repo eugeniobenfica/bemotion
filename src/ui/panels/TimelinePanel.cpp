@@ -3,6 +3,7 @@
 #include "app/PluginHost.h"
 #include "app/Settings.h"
 #include "core/Snapping.h"
+#include "core/Transitions.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
 #include "ui/AppSignals.h"
@@ -236,7 +237,8 @@ protected:
         update();
     }
     void dragEnterEvent(QDragEnterEvent* e) override {
-        if (e->mimeData()->hasFormat(ui::kObjectMime) || e->mimeData()->hasFormat(ui::kMediaMime)) e->acceptProposedAction();
+        if (e->mimeData()->hasFormat(ui::kObjectMime) || e->mimeData()->hasFormat(ui::kMediaMime) || e->mimeData()->hasFormat(ui::kTransitionMime))
+            e->acceptProposedAction();
     }
     void dragMoveEvent(QDragMoveEvent* e) override {
         double t = 0;
@@ -261,6 +263,22 @@ protected:
         int gap = 0;
         panel_->dropActive_ = false;
         panel_->snapLineTime_ = -1.0;
+        std::string transition;
+        if (ui::readTextMime(e->mimeData(), ui::kTransitionMime, transition)) {
+            const auto* item = panel_->itemAt(static_cast<float>(e->position().y()));
+            TimelinePanel::Drag mode;
+            const int index = item && item->kind == TimelinePanel::Item::Track ? panel_->clipHit(*item, static_cast<float>(e->position().x()), mode) : -1;
+            if (index >= 0 && index < static_cast<int>(ctx.comp().layers.size())) {
+                Layer& layer = ctx.comp().layers[index];
+                const bool audioOnly = layer.type == LayerType::Media && layer.media.hasAudio && !layer.media.hasVideo;
+                const bool atStart = mode == TimelinePanel::Drag::LayerIn ||
+                                     (mode == TimelinePanel::Drag::LayerMove && e->position().x() < (panel_->timeToX(layer.inPoint) + panel_->timeToX(layer.outPoint)) * 0.5f);
+                if (!audioOnly && applyTransition(layer, transition, atStart ? TransitionEdge::In : TransitionEdge::Out, 0.5)) ctx.touch();
+            }
+            e->acceptProposedAction();
+            panel_->relayout();
+            return;
+        }
         if (!panel_->dropTimeAndGap(e->position(), t, gap)) return;
         uint64_t mediaId = 0;
         int kind = 0;
@@ -1227,6 +1245,17 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
         d.rectFilled(a, b, toRgba(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
         if (selected) d.rect(a, b, primary ? theme::kText : theme::ink(170), 5.0f, primary ? 1.8f : 1.3f);
         if (layer.type == LayerType::Media && layer.media.hasAudio) paintWaveform(p, layer, a, b, toRgba(lc, 0.75f));
+        auto paintTransition = [&](const ClipTransition& transition, bool incoming) {
+            if (!transition.active()) return;
+            const float duration = std::max(16.0f, std::fabs(timeToX(layer.inPoint + transition.duration) - bx1));
+            const float left = incoming ? bx1 + 2.0f : bx2 - duration - 2.0f;
+            const float right = incoming ? bx1 + duration + 2.0f : bx2 - 2.0f;
+            d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::accent(85), 5.0f);
+            d.rect({left, y + 5}, {right, y + h - 5}, theme::kAccent, 5.0f);
+            ui::drawIcon(d, ui::Icon::Transition, {(left + right) * 0.5f, y + h * 0.5f}, 13.0f, theme::kAccent);
+        };
+        paintTransition(layer.transitionIn, true);
+        paintTransition(layer.transitionOut, false);
         d.rectFilled({bx1 + 3, y + 9}, {bx1 + 5, y + h - 9}, toRgba(lc, 0.8f), 1.0f);
         d.rectFilled({bx2 - 5, y + 9}, {bx2 - 3, y + h - 9}, toRgba(lc, 0.8f), 1.0f);
         d.pushClip({std::max(bx1, x0), y}, {std::min(bx2, x1), y + h});

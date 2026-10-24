@@ -123,8 +123,14 @@ bool applyTransition(Layer& layer, const std::string& id, TransitionEdge edge, d
     if (!def) return false;
     const double length = layer.outPoint - layer.inPoint;
     duration = std::clamp(duration, 0.05, edge == TransitionEdge::Both ? length * 0.5 : length);
-    if (edge != TransitionEdge::Out) applyPreset(presetOf(def->in, duration), layer, layer.inPoint);
-    if (edge != TransitionEdge::In) applyPreset(presetOf(def->out, duration), layer, layer.outPoint - duration);
+    if (edge != TransitionEdge::Out) {
+        applyPreset(presetOf(def->in, duration), layer, layer.inPoint);
+        layer.transitionIn = {id, static_cast<float>(duration)};
+    }
+    if (edge != TransitionEdge::In) {
+        applyPreset(presetOf(def->out, duration), layer, layer.outPoint - duration);
+        layer.transitionOut = {id, static_cast<float>(duration)};
+    }
     return true;
 }
 
