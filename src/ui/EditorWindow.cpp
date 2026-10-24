@@ -643,6 +643,7 @@ void EditorWindow::buildMenus() {
     edit->addAction(action(Action::Paste, "Paste", [this] { pasteFromClipboard(); }));
     edit->addAction(action(Action::Duplicate, "Duplicate", [this] { ctx_.duplicateSelected(); }));
     edit->addAction(action(Action::Delete, "Delete", [this] {
+        if (timeline_->deleteSelectedTransition()) return;
         if (!ctx_.selectedKeys.empty()) ctx_.deleteSelectedKeys();
         else ctx_.deleteSelected();
     }));

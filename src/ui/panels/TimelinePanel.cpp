@@ -979,6 +979,17 @@ void TimelinePanel::syncBreadcrumb() {
 void TimelinePanel::sync() {
     if (!isVisible()) return;
     const Composition& comp = ctx_.comp();
+    // Keep playback visible once the playhead reaches the edge of the timeline.
+    // Manual scrubbing and edits keep their current view instead.
+    if (ctx_.playing && drag_ == Drag::None && pxPerSec_ > 0.0) {
+        const float left = trackX0() + 16.0f;
+        const float right = trackX0() + trackW() - 16.0f;
+        const float playhead = timeToX(ctx_.time);
+        if (playhead < left || playhead > right) {
+            scroll_ = std::max(0.0, ctx_.time - trackW() * 0.70 / pxPerSec_);
+            clampView();
+        }
+    }
     timecode_->setText(QString::fromStdString(ui::formatTimecode(ctx_.time, comp.fps)));
     frameInfo_->setText(QString("frame %1").arg(comp.frameAt(ctx_.time)));
     frameInfo_->setToolTip(QString("Frame %1 of %2  ·  %3 fps").arg(comp.frameAt(ctx_.time)).arg(comp.frameCount() - 1).arg(comp.fps, 0, 'g', 4));
@@ -1250,9 +1261,13 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
             const float duration = std::max(16.0f, std::fabs(timeToX(layer.inPoint + transition.duration) - bx1));
             const float left = incoming ? bx1 + 2.0f : bx2 - duration - 2.0f;
             const float right = incoming ? bx1 + duration + 2.0f : bx2 - 2.0f;
+            const bool selectedTransition = selectedTransitionLayer_ == layer.id && selectedTransitionIncoming_ == incoming;
             d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::accent(85), 5.0f);
-            d.rect({left, y + 5}, {right, y + h - 5}, theme::kAccent, 5.0f);
+            d.rect({left, y + 5}, {right, y + h - 5}, selectedTransition ? theme::kText : theme::kAccent, 5.0f,
+                   selectedTransition ? 2.0f : 1.0f);
             ui::drawIcon(d, ui::Icon::Transition, {(left + right) * 0.5f, y + h * 0.5f}, 13.0f, theme::kAccent);
+            const float handle = incoming ? right : left;
+            d.line({handle, y + 8}, {handle, y + h - 8}, theme::kAccent, 2.0f);
         };
         paintTransition(layer.transitionIn, true);
         paintTransition(layer.transitionOut, false);
@@ -1371,7 +1386,39 @@ int TimelinePanel::clipHit(const Item& track, float mx, Drag& mode) const {
     return hit;
 }
 
+TimelinePanel::TransitionHit TimelinePanel::transitionHit(const Item& track, float mx) const {
+    const auto& layers = ctx_.comp().layers;
+    for (int i = track.first; i < track.first + track.count && i < static_cast<int>(layers.size()); ++i) {
+        const Layer& layer = layers[i];
+        const float begin = timeToX(layer.inPoint), end = timeToX(layer.outPoint);
+        auto findHit = [&](const ClipTransition& transition, bool incoming) -> TransitionHit {
+            if (!transition.active()) return {};
+            const float width = std::max(16.0f, static_cast<float>(transition.duration * pxPerSec_));
+            const float left = incoming ? begin + 2.0f : end - width - 2.0f;
+            const float right = incoming ? begin + width + 2.0f : end - 2.0f;
+            if (mx < left || mx > right) return {};
+            const float handle = incoming ? right : left;
+            return {layer.id, incoming, std::fabs(mx - handle) <= kEdgeGrab};
+        };
+        if (TransitionHit hit = findHit(layer.transitionIn, true)) return hit;
+        if (TransitionHit hit = findHit(layer.transitionOut, false)) return hit;
+    }
+    return {};
+}
+
+bool TimelinePanel::deleteSelectedTransition() {
+    if (!selectedTransitionLayer_) return false;
+    Layer* layer = ctx_.comp().findLayer(selectedTransitionLayer_);
+    const TransitionEdge edge = selectedTransitionIncoming_ ? TransitionEdge::In : TransitionEdge::Out;
+    const bool removed = layer && removeTransition(*layer, edge);
+    selectedTransitionLayer_ = 0;
+    if (removed) ctx_.touch();
+    relayout();
+    return removed;
+}
+
 void TimelinePanel::clickLayer(uint64_t id) {
+    selectedTransitionLayer_ = 0;
     if (ctrlHeld()) ctx_.toggleSelected(id);
     else if (shiftHeld()) ctx_.selectRange(id);
     else if (!ctx_.isSelected(id)) ctx_.select(id);
@@ -1574,6 +1621,16 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
             return;
         }
         // Track area.
+        if (left) {
+            if (const TransitionHit transition = transitionHit(row, x)) {
+                selectedTransitionLayer_ = transition.layer;
+                selectedTransitionIncoming_ = transition.incoming;
+                if (transition.resize && !ctrlHeld() && !shiftHeld())
+                    beginLayerDrag(transition.incoming ? Drag::TransitionIn : Drag::TransitionOut, transition.layer, pos);
+                relayout();
+                return;
+            }
+        }
         Drag mode = Drag::None;
         const int hit = clipHit(row, x, mode);
         if (ctx_.tool == Tool::Razor) {
@@ -1674,7 +1731,8 @@ void TimelinePanel::rowsMove(QMouseEvent* e) {
         updateKeyDrag(pos);
         return;
     }
-    if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName) {
+    if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName ||
+        drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut) {
         updateLayerDrag(pos);
         return;
     }
@@ -1690,7 +1748,8 @@ void TimelinePanel::rowsMove(QMouseEvent* e) {
         Drag mode;
         clipHit(*item, static_cast<float>(pos.x()), mode);
         if (ctx_.tool == Tool::Razor) cursor = Qt::PointingHandCursor;
-        else if (mode == Drag::LayerIn || mode == Drag::LayerOut) cursor = Qt::SizeHorCursor;
+        else if (transitionHit(*item, static_cast<float>(pos.x())).resize || mode == Drag::LayerIn || mode == Drag::LayerOut)
+            cursor = Qt::SizeHorCursor;
     }
     rows_->setCursor(cursor);
     if (item && item->kind == Item::Prop && pos.x() >= trackX0()) {
@@ -1709,7 +1768,9 @@ void TimelinePanel::rowsRelease(QMouseEvent* e) {
         return;
     }
     if (drag_ == Drag::Keys) endKeyDrag();
-    else if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName) endLayerDrag(pos);
+    else if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName ||
+             drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut)
+        endLayerDrag(pos);
     if (marquee_) marquee_ = false;
     snapLineTime_ = -1.0;
     relayout();
@@ -1724,6 +1785,8 @@ void TimelinePanel::beginLayerDrag(Drag mode, uint64_t id, QPointF pos) {
     dragY_ = static_cast<float>(pos.y());
     dragOrigIn_ = layer->inPoint;
     dragOrigOut_ = layer->outPoint;
+    const ClipTransition& transition = mode == Drag::TransitionIn ? layer->transitionIn : layer->transitionOut;
+    dragOrigTransitionDuration_ = transition.duration;
     dragApplied_ = 0.0;
     restacking_ = false;
     dragClips_.clear();
@@ -1802,6 +1865,16 @@ void TimelinePanel::updateLayerDrag(QPointF pos) {
         comp.setOutPoint(layer->id, dragOrigOut_ + snappedDelta({dragOrigOut_}, raw));
         ctx_.touch();
         break;
+    case Drag::TransitionIn:
+    case Drag::TransitionOut: {
+        const double sign = drag_ == Drag::TransitionIn ? 1.0 : -1.0;
+        const float duration = static_cast<float>(std::clamp(dragOrigTransitionDuration_ + sign * raw, 0.05, layer->outPoint - layer->inPoint));
+        ClipTransition& transition = drag_ == Drag::TransitionIn ? layer->transitionIn : layer->transitionOut;
+        if (std::fabs(transition.duration - duration) > 1e-4f &&
+            resizeTransition(*layer, drag_ == Drag::TransitionIn ? TransitionEdge::In : TransitionEdge::Out, duration))
+            ctx_.touch();
+        break;
+    }
     default: break;
     }
     relayout();
@@ -1809,7 +1882,8 @@ void TimelinePanel::updateLayerDrag(QPointF pos) {
 
 void TimelinePanel::endLayerDrag(QPointF pos) {
     computeItems();
-    if (restacking_) {
+    if (drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut) {
+    } else if (restacking_) {
         const DropTarget t = dropTargetAt(static_cast<float>(pos.y()), drag_);
         if (t.valid) {
             if (drag_ == Drag::LayerName) {

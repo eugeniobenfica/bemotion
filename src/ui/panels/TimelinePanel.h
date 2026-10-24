@@ -60,6 +60,7 @@ public:
     void rebuildPluginButtons();
     void releaseToolPill(); // out of the timeline's bar (it floats elsewhere)
     void dockToolPill();    // back into it
+    bool deleteSelectedTransition();
 
 protected:
     void dragEnterEvent(QDragEnterEvent* e) override;
@@ -75,7 +76,7 @@ private:
     //   LayerMove  drag a clip: moves it in time and, vertically, onto another
     //              track (drop in a row) or onto a new track (drop between rows)
     //   LayerIn/Out  trim a clip edge
-    enum class Drag { None, Keys, LayerName, LayerMove, LayerIn, LayerOut, Playhead };
+    enum class Drag { None, Keys, LayerName, LayerMove, LayerIn, LayerOut, TransitionIn, TransitionOut, Playhead };
 
     // One laid out row of the body.
     struct Item {
@@ -94,6 +95,12 @@ private:
     struct ClipRect {
         uint64_t id;
         float top, bottom, x1, x2;
+    };
+    struct TransitionHit {
+        uint64_t layer = 0;
+        bool incoming = true;
+        bool resize = false;
+        explicit operator bool() const { return layer != 0; }
     };
     // Where a vertical drag would land.
     struct DropTarget {
@@ -142,6 +149,7 @@ private:
     void wheel(QWheelEvent* e);
     const Item* itemAt(float y) const;
     int clipHit(const Item& track, float x, Drag& mode) const;
+    TransitionHit transitionHit(const Item& track, float x) const;
     void clickLayer(uint64_t id);
     void clickTrack(const Item& track);
     void showTrackMenu(QPoint global);
@@ -248,6 +256,7 @@ private:
     QPointF dragStart_;
     uint64_t dragLayer_ = 0;
     double dragOrigIn_ = 0.0, dragOrigOut_ = 0.0, dragApplied_ = 0.0;
+    float dragOrigTransitionDuration_ = 0.0f;
     bool restacking_ = false; // vertical drag past the threshold: show the drop gap
     float dragY_ = 0.0f;
     std::vector<uint64_t> dragMoving_; // clips moving in time (a compound brings its contents)
@@ -261,6 +270,8 @@ private:
     double playheadGrab_ = 0.0;
     std::vector<double> timeTargets_;
     double snapLineTime_ = -1.0;
+    uint64_t selectedTransitionLayer_ = 0;
+    bool selectedTransitionIncoming_ = true;
     // Box selection by dragging on empty timeline space.
     bool marquee_ = false;
     QPointF marqueeStart_, marqueeEnd_;

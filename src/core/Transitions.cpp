@@ -84,6 +84,20 @@ AnimationPreset presetOf(const char* tracks, double duration) {
     return p;
 }
 
+void removePresetKeys(const AnimationPreset& preset, Layer& layer, double time) {
+    const double start = std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - preset.duration));
+    const double end = start + preset.duration;
+    auto properties = layer.properties();
+    for (const PresetTrack& track : preset.tracks) {
+        const PropertyRef* property = layer.findProperty(properties, track.property.c_str());
+        if (!property) continue;
+        for (int i = property->anim->keyCount() - 1; i >= 0; --i) {
+            const double keyTime = property->anim->keyTime(i);
+            if (keyTime >= start - kTimeEpsilon && keyTime <= end + kTimeEpsilon) property->anim->removeKey(i);
+        }
+    }
+}
+
 } // namespace
 
 const std::vector<TransitionInfo>& transitions() {
@@ -132,6 +146,39 @@ bool applyTransition(Layer& layer, const std::string& id, TransitionEdge edge, d
         layer.transitionOut = {id, static_cast<float>(duration)};
     }
     return true;
+}
+
+bool resizeTransition(Layer& layer, TransitionEdge edge, double duration) {
+    ClipTransition* transition = edge == TransitionEdge::In ? &layer.transitionIn : edge == TransitionEdge::Out ? &layer.transitionOut : nullptr;
+    if (!transition || !transition->active()) return false;
+    const std::string id = transition->id;
+    if (!removeTransition(layer, edge)) return false;
+    return applyTransition(layer, id, edge, duration);
+}
+
+bool removeTransition(Layer& layer, TransitionEdge edge) {
+    bool removed = false;
+    auto remove = [&](ClipTransition& transition, const char* tracks, double time) {
+        if (!transition.active()) return;
+        removePresetKeys(presetOf(tracks, transition.duration), layer, time);
+        transition = {};
+        removed = true;
+    };
+    if (edge != TransitionEdge::Out) {
+        const Definition* definition = nullptr;
+        for (const Definition& candidate : kDefinitions)
+            if (candidate.info.id == layer.transitionIn.id) definition = &candidate;
+        if (definition) remove(layer.transitionIn, definition->in, layer.inPoint);
+        else if (layer.transitionIn.active()) layer.transitionIn = {}, removed = true;
+    }
+    if (edge != TransitionEdge::In) {
+        const Definition* definition = nullptr;
+        for (const Definition& candidate : kDefinitions)
+            if (candidate.info.id == layer.transitionOut.id) definition = &candidate;
+        if (definition) remove(layer.transitionOut, definition->out, layer.outPoint - layer.transitionOut.duration);
+        else if (layer.transitionOut.active()) layer.transitionOut = {}, removed = true;
+    }
+    return removed;
 }
 
 } // namespace bemotion

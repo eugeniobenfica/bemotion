@@ -32,4 +32,10 @@ const char* transitionEdgeId(TransitionEdge edge); // "in", "out", "both"
 // False when the layer cannot take it (cameras).
 bool applyTransition(Layer& layer, const std::string& id, TransitionEdge edge, double duration);
 
+// Changes the duration while replacing the keyframes made at the old duration.
+bool resizeTransition(Layer& layer, TransitionEdge edge, double duration);
+
+// Removes the transition metadata and the keyframes generated for its current duration.
+bool removeTransition(Layer& layer, TransitionEdge edge);
+
 } // namespace bemotion

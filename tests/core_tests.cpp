@@ -747,11 +747,15 @@ void testArrangeAndTransitions() {
     CHECK(run(p, R"({"op": "arrange.stagger", "layers": "all", "step": 0.5})").ok);
     CHECK(validate(p).empty());
     CHECK(run(p, R"({"op": "transition.add", "layer": "A", "transition": "fade", "edge": "both", "duration": 0.5})").ok);
-    const Layer* a = nullptr;
-    for (const Layer& l : p.comp.layers)
+    Layer* a = nullptr;
+    for (Layer& l : p.comp.layers)
         if (l.name == "A") a = &l;
     CHECK(a && a->transform.opacity.keyCount() == 4);
     CHECK(near(a->transform.opacity.valueAt(a->inPoint), 0.0f) && near(a->transform.opacity.valueAt(a->inPoint + 1.0), 100.0f));
+    CHECK(a && resizeTransition(*a, TransitionEdge::In, 0.75));
+    CHECK(a && near(a->transitionIn.duration, 0.75f));
+    CHECK(a && removeTransition(*a, TransitionEdge::Both));
+    CHECK(a && !a->transitionIn.active() && !a->transitionOut.active() && a->transform.opacity.keyCount() == 0);
     CHECK(!run(p, R"({"op": "transition.add", "layer": "A", "transition": "fdae"})").ok);
 }
 

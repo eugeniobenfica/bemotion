@@ -5,8 +5,6 @@
 #include <string>
 #include <vector>
 
-class QButtonGroup;
-
 namespace bemotion {
 
 class EditorContext;
@@ -15,10 +13,8 @@ class DragValue;
 class Tile;
 } // namespace ui
 
-// How clips come in and go away (core/Transitions.h): pick where (start, end
-// or both) and how long, open a category, then click a transition to put it on
-// the selected clips. Each one is keyframes at the clip's edges, editable
-// afterwards.
+// How clips come in and go away (core/Transitions.h): open a category and drag
+// one onto a clip edge. Its duration and deletion are handled on the timeline.
 class TransitionsPanel : public QScrollArea {
     Q_OBJECT
 public:
@@ -30,15 +26,10 @@ protected:
 
 private:
     void rebuild();
-    void apply(int index);
     EditorContext& ctx_;
     std::vector<ui::Tile*> tiles_;
-    QButtonGroup* edge_ = nullptr;
-    ui::DragValue* duration_ = nullptr;
     int columns_ = 0;
-    int edgeChoice_ = 0; // 0 in, 1 out, 2 both
     std::string category_; // the open category ("": the list of categories)
-    float seconds_ = 0.5f;
 };
 
 } // namespace bemotion
