@@ -36,6 +36,8 @@ public:
     void refresh();
     void setError(const std::string& message);
     void openNewProjectDialog();
+    // Asks where projects live (the first time, or to change it); false if the user cancels.
+    bool chooseProjectsFolder();
 
 protected:
     void resizeEvent(QResizeEvent* e) override;

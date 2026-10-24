@@ -22,13 +22,14 @@ std::string env(const char* name); // "" when unset
 
 fs::path executableDir();
 fs::path appDataDir();         // per-user settings, created on demand (BEMOTION_APPDATA overrides it)
-fs::path defaultProjectsDir(); // Documents/bemotion, created on demand
+fs::path documentsDir(); // the user's Documents (where dialogs start when there is no projects folder yet)
 fs::path assetsDir();
 
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const char* extension);
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions);
 // Several files at once; `extensions` without dots ("png", "mp4", ...). Empty when cancelled.
 std::vector<fs::path> openFilesDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions);
+std::optional<fs::path> chooseFolderDialog(const char* title, const fs::path& start);
 std::optional<fs::path> saveFileDialog(const char* title, const fs::path& suggested, const char* filterName,
                                        const char* extension);
 

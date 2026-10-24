@@ -201,8 +201,9 @@ does.
 <details>
 <summary><b>All the details</b></summary>
 
-- **Home screen** with every project in the projects folder (found by itself,
-  live thumbnails) plus the ones opened from elsewhere, search, the Welcome
+- **Home screen** with every project in the projects folder you choose (found
+  by itself, live thumbnails; nothing is created on its own) plus the ones
+  opened from elsewhere, search, the Welcome
   project, a *⋯* menu on each card (show in folder, delete to the Recycle Bin
   / Trash) and a *New Project* dialog with format presets (Full HD, 4K,
   Vertical/Reels, Square…) and an optional length limit
@@ -249,7 +250,14 @@ Grab `bemotion-<version>-setup.exe` from the latest successful
 Runs on 64-bit Windows 10 (1809 or later) and Windows 11, on any x86-64 CPU —
 optimized code paths for newer processors are picked at runtime. The files are
 not signed yet, so SmartScreen may warn on first launch (*More info › Run anyway*).
-If something goes wrong, `%APPDATA%emotionemotion.log` says what happened.
+If something goes wrong, `%APPDATA%\bemotion\bemotion.log` says what happened.
+
+### Running from the sources
+
+Double-click **`run.bat`**: it rebuilds only what changed (seconds; the first
+time it configures and builds everything) and opens bemotion. `run.bat
+--no-build` just opens the last build, `run.bat project.bemotion` opens a
+project, `run.bat --build-only` only builds.
 
 ### Building the installer yourself
 

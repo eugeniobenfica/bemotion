@@ -97,10 +97,10 @@ fs::path appDataDir() {
 #endif
 }
 
-fs::path defaultProjectsDir() {
+fs::path documentsDir() {
     QString docs = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-    if (docs.isEmpty()) docs = QDir::homePath() + "/Documents";
-    return ensureDir(fromQ(docs) / "bemotion");
+    if (docs.isEmpty()) docs = QDir::homePath();
+    return fromQ(docs);
 }
 
 fs::path assetsDir() {
@@ -127,6 +127,12 @@ std::optional<fs::path> openFileDialog(const char* title, const char* filterName
     const QString file = QFileDialog::getOpenFileName(dialogParent(), QString::fromUtf8(title), QString(), filterFor(filterName, extensions));
     if (file.isEmpty()) return std::nullopt;
     return fromQ(file);
+}
+
+std::optional<fs::path> chooseFolderDialog(const char* title, const fs::path& start) {
+    const QString dir = QFileDialog::getExistingDirectory(dialogParent(), QString::fromUtf8(title), qpath(start));
+    if (dir.isEmpty()) return std::nullopt;
+    return fromQ(dir);
 }
 
 std::vector<fs::path> openFilesDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions) {

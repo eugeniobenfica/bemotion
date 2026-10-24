@@ -806,7 +806,7 @@ int micStart(lua_State* L) {
 int micStop(lua_State* L) {
     if (!mayRecord(L)) return luaL_error(L, "add \"microphone\" to the plugin's permissions to record");
     fs::path folder = PluginHost::get().projectFolder();
-    if (folder.empty()) folder = platform::defaultProjectsDir();
+    if (folder.empty()) folder = projectsFolderOrDocuments();
     folder /= "Recordings";
     fs::path file;
     std::error_code ec;

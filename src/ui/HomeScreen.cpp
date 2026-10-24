@@ -233,7 +233,7 @@ HomeScreen::HomeScreen(RecentProjects& recents, QWidget* parent) : QWidget(paren
     });
     // Projects saved, copied or removed in the projects folder show up by themselves.
     watcher_ = new QFileSystemWatcher(this);
-    watcher_->addPath(QString::fromStdString(platform::toUtf8(platform::defaultProjectsDir())));
+    if (const auto folder = projectsFolder(); !folder.empty()) watcher_->addPath(QString::fromStdString(platform::toUtf8(folder)));
     auto* later = new QTimer(this);
     later->setSingleShot(true);
     later->setInterval(400);
@@ -297,7 +297,19 @@ void HomeScreen::buildUi() {
     auto* footer = new QHBoxLayout;
     footer->setSpacing(6);
     auto* folder = new QPushButton("Projects Folder");
-    connect(folder, &QPushButton::clicked, this, [] { platform::revealInFileManager(platform::defaultProjectsDir()); });
+    folder->setToolTip(projectsFolder().empty() ? QString("Choose where your projects live")
+                                                : QString::fromStdString(platform::toUtf8(projectsFolder())));
+    connect(folder, &QPushButton::clicked, this, [this, folder] {
+        if (projectsFolder().empty()) {
+            chooseProjectsFolder();
+            return;
+        }
+        QMenu menu;
+        menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Show in File Manager",
+                       [] { platform::revealInFileManager(projectsFolder()); });
+        menu.addAction("Change Folder...", [this] { chooseProjectsFolder(); });
+        menu.exec(folder->mapToGlobal(QPoint(0, folder->height())));
+    });
     footer->addWidget(folder, 1);
     auto* coffee = new ui::IconButton(ui::Icon::Coffee, "Support bemotion: buy a coffee (it stays free thanks to you)", 30);
     connect(coffee, &QAbstractButton::clicked, this, [] { platform::openWithDefaultApp(kSupportUrl); });
@@ -321,8 +333,9 @@ void HomeScreen::buildUi() {
     main->setSpacing(6);
     auto* head = new QHBoxLayout;
     auto* title = styled("Projects", theme::kText, 1.8f, true);
-    title->setToolTip("Every project in " + QString::fromStdString(platform::toUtf8(platform::defaultProjectsDir())) +
-                      ", and the ones you opened from elsewhere");
+    if (!projectsFolder().empty())
+        title->setToolTip("Every project in " + QString::fromStdString(platform::toUtf8(projectsFolder())) +
+                          ", and the ones you opened from elsewhere");
     head->addWidget(title);
     head->addStretch(1);
     search_ = new QLineEdit;
@@ -380,7 +393,10 @@ void HomeScreen::refresh() {
     }
     std::error_code ec;
     int scanned = 0;
-    for (auto it = fs::recursive_directory_iterator(platform::defaultProjectsDir(), fs::directory_options::skip_permission_denied, ec);
+    const fs::path folder = projectsFolder();
+    if (folder.empty()) ec = std::make_error_code(std::errc::no_such_file_or_directory); // no folder chosen yet: recents only
+    for (auto it = folder.empty() ? fs::recursive_directory_iterator()
+                                  : fs::recursive_directory_iterator(folder, fs::directory_options::skip_permission_denied, ec);
          !ec && it != fs::recursive_directory_iterator() && scanned < 500; it.increment(ec)) {
         if (it.depth() >= 3) it.disable_recursion_pending();
         std::error_code fe;
@@ -444,6 +460,32 @@ void HomeScreen::rebuildGrid() {
     grid_ = new QWidget;
     auto* col = new QVBoxLayout(grid_);
     col->setContentsMargins(0, 0, 0, 24);
+    if (projectsFolder().empty()) { // first: where projects live (nothing is created on its own)
+        auto* card = new QFrame;
+        card->setObjectName("folderCard");
+        card->setStyleSheet(QString("#folderCard { background: %1; border: 1px solid %2; border-radius: 10px; }")
+                                .arg(theme::q(theme::kBgPanel).name(), theme::q(theme::kBorder).name()));
+        auto* cc = new QVBoxLayout(card);
+        cc->setContentsMargins(22, 18, 22, 18);
+        cc->setSpacing(6);
+        cc->addWidget(styled("Choose a folder for your projects", theme::kText, 1.2f, true));
+        auto* why = styled("bemotion lists every project in it, and saves new ones there. "
+                           "Pick any folder: an existing one or a new one.", theme::kTextDim);
+        why->setWordWrap(true);
+        cc->addWidget(why);
+        cc->addSpacing(6);
+        auto* pick = ui::accentButton("Choose Folder...");
+        pick->setFixedWidth(180);
+        connect(pick, &QPushButton::clicked, this, [this] { chooseProjectsFolder(); });
+        cc->addWidget(pick, 0, Qt::AlignLeft);
+        col->addWidget(card);
+        col->addSpacing(18);
+        if (items.empty()) {
+            col->addStretch(1);
+            scroll_->setWidget(grid_);
+            return;
+        }
+    }
     if (items.empty()) {
         col->addStretch(1);
         auto* t1 = styled("No projects yet", theme::kText, 1.5f, true);
@@ -506,6 +548,29 @@ void HomeScreen::rebuildGrid() {
     if (shown == 0) col->addWidget(styled(QString("No projects match \"%1\".").arg(search_->text()), theme::kTextDim));
     col->addStretch(1);
     scroll_->setWidget(grid_);
+}
+
+bool HomeScreen::chooseProjectsFolder() {
+    const auto current = projectsFolder();
+    const auto folder = platform::chooseFolderDialog("Choose a Folder for Your Projects", current.empty() ? platform::documentsDir() : current);
+    if (!folder) return false;
+    settings().projectsFolder = platform::toUtf8(*folder);
+    // The first folder gets the Welcome project, to take apart.
+    if (!settings().welcomeAdded) {
+        const auto copy = *folder / "Welcome to bemotion.bemotion";
+        std::error_code ec;
+        if (!std::filesystem::exists(copy, ec)) std::filesystem::copy_file(platform::assetsDir() / "welcome" / "Welcome.bemotion", copy, ec);
+        settings().welcomeAdded = !ec;
+    }
+    saveSettings();
+    if (!watcher_->directories().isEmpty()) watcher_->removePaths(watcher_->directories());
+    watcher_->addPath(QString::fromStdString(platform::toUtf8(*folder)));
+    // The sidebar's tooltips name the folder: rebuilt with it.
+    const QString search = search_->text();
+    buildUi();
+    search_->setText(search);
+    refresh();
+    return true;
 }
 
 void HomeScreen::confirmDelete(const RecentProject& item) {
@@ -576,7 +641,9 @@ void HomeScreen::openNewProjectDialog() {
     form->addRow("Background", bg);
     double limit = settings().maxDuration;
     form->addRow("Length", ui::lengthLimitRow(limit, [&limit](double v) { limit = v; }));
-    std::filesystem::path folderPath = platform::defaultProjectsDir();
+    // New projects go to the projects folder: asked for first if there is none yet.
+    if (projectsFolder().empty() && !chooseProjectsFolder()) return;
+    std::filesystem::path folderPath = projectsFolder();
     auto* folderRow = new QHBoxLayout;
     auto* folder = new QLineEdit(QString::fromStdString(platform::toUtf8(folderPath)));
     folder->setReadOnly(true);

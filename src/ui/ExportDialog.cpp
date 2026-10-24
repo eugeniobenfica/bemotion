@@ -3,6 +3,7 @@
 #include "ui/Dialogs.h"
 
 #include "app/Platform.h"
+#include "app/Settings.h"
 #include "export/Export.h"
 #include "media/AudioEngine.h"
 #include "media/MediaManager.h"
@@ -76,7 +77,7 @@ public:
         exporting::Settings& s = r.settings;
         const Composition& comp = ctx.comp();
         if (s.output.empty()) {
-            const auto folder = ctx.path.empty() ? platform::defaultProjectsDir() : ctx.path.parent_path();
+            const auto folder = ctx.path.empty() ? projectsFolderOrDocuments() : ctx.path.parent_path();
             s.output = folder / platform::fromUtf8(ctx.project.name);
             s.format = exporting::formatAvailable(s.format) ? s.format : exporting::Format::PngSequence;
             s.output.replace_extension(exporting::formatExtension(s.format));
@@ -310,7 +311,7 @@ private:
     void refreshSettings() {
         using namespace exporting;
         Remembered& r = remembered();
-        Settings& s = r.settings;
+        exporting::Settings& s = r.settings;
         s.scale = kScales[std::clamp(r.scaleIndex, 0, static_cast<int>(std::size(kScales)) - 1)].scale;
         int w = 0, h = 0;
         outputSize(ctx_.comp(), s, w, h);

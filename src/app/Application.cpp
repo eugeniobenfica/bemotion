@@ -202,16 +202,7 @@ void Application::buildWindow() {
 
     stack_ = new QStackedWidget;
     window_->setCentralWidget(stack_);
-    recents_.load();
-    if (!settings().welcomeAdded) { // first run: the Welcome project waits in the projects list
-        const auto copy = platform::defaultProjectsDir() / "Welcome to bemotion.bemotion";
-        std::error_code ec;
-        if (!std::filesystem::exists(copy, ec))
-            std::filesystem::copy_file(platform::assetsDir() / "welcome" / "Welcome.bemotion", copy, ec);
-        if (!ec) recents_.touch(copy, "Welcome to bemotion");
-        settings().welcomeAdded = true;
-        saveSettings();
-    }
+    recents_.load(); // the Welcome project joins the projects folder when the user picks one (HomeScreen)
     home_ = new HomeScreen(recents_);
     home_->onOpen = [this](const std::filesystem::path& p) { openProject(p); };
     home_->onCreate = [this](const std::filesystem::path& p, Project project) { createProject(std::move(project), p); };

@@ -34,7 +34,8 @@ struct Settings {
     int autosaveMinutes = 5;           // saves open projects this often (0: off)
     bool showIntro = true;             // the opening animation at startup
     bool showRulers = false;           // the viewport's rulers (View > Rulers)
-    bool welcomeAdded = false;         // the Welcome project was put in the projects list once
+    bool welcomeAdded = false;         // the Welcome project was put in the projects folder once
+    std::string projectsFolder;        // where projects live, chosen by the user (empty: not yet)
     std::vector<std::string> toolbar = ui::defaultToolbar(); // tool ids in the timeline's toolbar (ui/Tools.h)
     bool toolbarInViewport = false;      // the toolbar floats outside the timeline ...
     bool toolbarInWindow = false;        // window-relative floating position; older viewport positions stay unchanged
@@ -43,6 +44,10 @@ struct Settings {
 };
 
 Settings& settings();
+// The projects folder the user chose, if it still exists (else empty).
+std::filesystem::path projectsFolder();
+// Where file dialogs start: the projects folder, else Documents.
+std::filesystem::path projectsFolderOrDocuments();
 void loadSettings();
 void saveSettings();
 

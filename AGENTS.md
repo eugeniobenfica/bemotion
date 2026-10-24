@@ -56,8 +56,10 @@ cmake --build build && ctest --test-dir build && tools/smoke-test.sh build smoke
 ```
 
 - The dev executable `build/bemotion.exe` needs `C:\msys64\ucrt64\bin` on
-  `PATH` (Qt / FFmpeg DLLs). Releases: `tools/build-release.sh` (installer and
-  portable zip in `dist/`).
+  `PATH` (Qt / FFmpeg DLLs); `run.bat` sets it, rebuilds what changed and opens
+  it (`--build-only`, `--no-build`), and starts the build folder over when the
+  sources moved. Releases: `tools/build-release.sh` (installer and portable
+  zip in `dist/`).
 - If linking fails with "Permission denied", someone has `bemotion.exe` open —
   maybe the user. Never kill it: rename the running file
   (`build/bemotion-old-running.exe`) and build again.
@@ -98,9 +100,10 @@ cmake --build build && ctest --test-dir build && tools/smoke-test.sh build smoke
 
 ## Safety
 
-- Never touch the user's real settings, recents or projects
-  (`%APPDATA%\bemotion`, `Documents\bemotion`) in tests: always a scratch
-  `BEMOTION_APPDATA`. Never delete user files.
+- Never touch the user's real settings, recents or projects (`%APPDATA%\bemotion`,
+  and the projects folder they chose: the `projects_folder` setting) in tests:
+  always a scratch `BEMOTION_APPDATA`. Never delete user files. bemotion never
+  creates folders on its own: the user picks where projects live.
 - Never record from the microphone, open the camera, or reach the network in
   tests.
 - Ask before adding dependencies, breaking a contract, or anything

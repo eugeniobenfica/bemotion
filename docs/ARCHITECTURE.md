@@ -329,14 +329,15 @@ Rules:
   command-line command without a window (`describe`, `apply`, `mcp`,
   `--export`, …).
 - **`Platform`** — OS specifics through Qt: app data folder (`%APPDATA%\bemotion`,
-  overridable with `BEMOTION_APPDATA`), projects folder, file dialogs, file
+  overridable with `BEMOTION_APPDATA`), Documents, file and folder dialogs, file
   manager, trash, and UTF-8 helpers: **`platform::arguments()` and
   `platform::env()` instead of `argv` / `getenv`** (the Windows C runtime
   hands those over in the legacy code page), `fromUtf8` / `toUtf8` for paths.
   `platform::log()` writes `bemotion.log` (startup, projects, imports, saves,
   plugin and MCP calls, crashes).
 - **`Settings`** — user preferences in `settings.json` (theme, sizes,
-  shortcuts, toolbar, disabled plugins, autosave, the default length limit…)
+  shortcuts, toolbar, disabled plugins, autosave, the default length limit, the
+  projects folder the user picked on the home screen…)
   and the theme library. New settings get defaults and are read tolerantly.
   The Settings window shows the essentials; *Advanced Options* (one switch for
   every page) shows the rest.

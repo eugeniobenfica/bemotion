@@ -860,7 +860,7 @@ void EditorWindow::save() {
 
 void EditorWindow::saveAs() {
     const auto suggested = ctx_.path.empty()
-                               ? platform::defaultProjectsDir() / platform::fromUtf8(ctx_.project.name + kProjectExtension)
+                               ? projectsFolderOrDocuments() / platform::fromUtf8(ctx_.project.name + kProjectExtension)
                                : ctx_.path;
     auto file = platform::saveFileDialog("Save Project As", suggested, "bemotion Project", kProjectExtension);
     if (!file) return;
