@@ -1637,6 +1637,21 @@ void TimelinePanel::showTrackMenu(QPoint global) {
                                     [this, focus] { ui::transcribeClip(ctx_, focus, 0, this); });
         t->setToolTip("The words spoken in this clip become a Subtitles layer, at their time");
     }
+    // 3D Layer, like the Properties checkbox: on for all when any is off.
+    std::vector<Layer*> spatial;
+    for (Layer* l : ctx_.selectedLayers())
+        if (l->type != LayerType::Camera && l->type != LayerType::Background && !l->parent) spatial.push_back(l);
+    if (!spatial.empty()) {
+        const bool all = std::all_of(spatial.begin(), spatial.end(), [](const Layer* l) { return l->threeD; });
+        QAction* threeD = menu.addAction("3D Layer", [this, all] {
+            for (Layer* l : ctx_.selectedLayers())
+                if (l->type != LayerType::Camera && l->type != LayerType::Background && !l->parent) l->threeD = !all;
+            ctx_.touch();
+        });
+        threeD->setCheckable(true);
+        threeD->setChecked(all);
+        threeD->setToolTip("Seen in perspective by the camera at its Z position");
+    }
     menu.addSeparator();
     menu.addAction("Create Compound\tCtrl+G", [this] { ctx_.createCompound(); });
     menu.addAction("Release Compound\tCtrl+Shift+G", [this] { ctx_.releaseSelectedCompounds(); })->setEnabled(ctx_.selectionHasCompound());

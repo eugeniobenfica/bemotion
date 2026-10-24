@@ -971,6 +971,19 @@ void testCounter() {
     loaded.comp.layers.front().text.subtitle = true;
     CHECK(!validate(loaded).empty() && !repair(loaded).empty());
     CHECK(loaded.comp.layers.front().text.subtitle && !loaded.comp.layers.front().text.counter);
+
+    // Its look: decimals, thousands, prefix and suffix, kept in the file.
+    CHECK(formatCounter(1234567.891, 2, ",") == "1,234,567.89" && formatCounter(1234.5, 1, ".") == "1.234,5");
+    CHECK(formatCounter(-1234, 0, " ") == "-1 234" && formatCounter(999, 0, ",") == "999" && formatCounter(-0.001, 1, "") == "0.0");
+    CHECK(run(p, R"({"op":"layer.set","layer":"Counter","decimals":1,"prefix":"R$ ","suffix":" mil","separator":"."})").ok);
+    CHECK(p.comp.layers.front().text.textAt(4) == "R$ 250,0 mil");
+    CHECK(!run(p, R"({"op":"layer.set","layer":"Counter","decimals":9})").ok);
+    CHECK(!run(p, R"({"op":"layer.set","layer":"Counter","separator":"_"})").ok);
+    Project again;
+    CHECK(deserializeProject(serializeProject(p), again) && validate(again).empty());
+    CHECK(again.comp.layers.front().text.textAt(4) == "R$ 250,0 mil");
+    CHECK(run(p, R"({"op":"layer.add","type":"text","name":"Plain"})").ok);
+    CHECK(!run(p, R"({"op":"layer.set","layer":"Plain","suffix":"%"})").ok);
 }
 
 void testLens() {

@@ -20,30 +20,27 @@ namespace bemotion {
 namespace {
 
 ui::Icon categoryIcon(const std::string& c) {
-    if (c == "Slide") return ui::Icon::ChevronRight;
+    if (c == "Fade") return ui::Icon::Fade;
+    if (c == "Slide") return ui::Icon::ArrowRight;
     if (c == "Scale") return ui::Icon::ZoomIn;
     if (c == "Rotate") return ui::Icon::Reset;
-    if (c == "3D") return ui::Icon::Camera;
+    if (c == "3D") return ui::Icon::Cube;
     return ui::Icon::Transition;
 }
 
 ui::Icon iconOf(const std::string& id) {
-    if (id == "fade" || id == "fade_up") return ui::Icon::Transition;
-    if (id == "slide_left") return ui::Icon::ChevronLeft;
-    if (id == "slide_right") return ui::Icon::ChevronRight;
-    if (id == "slide_up") return ui::Icon::ChevronUp;
-    if (id == "slide_down") return ui::Icon::ChevronDown;
+    if (id == "fade") return ui::Icon::Fade;
+    if (id == "fade_up") return ui::Icon::ArrowUp;
+    if (id == "slide_left" || id == "whip_left") return ui::Icon::ArrowLeft;
+    if (id == "slide_right" || id == "whip_right") return ui::Icon::ArrowRight;
+    if (id == "slide_up") return ui::Icon::ArrowUp;
+    if (id == "slide_down" || id == "fade_down" || id == "drop") return ui::Icon::ArrowDown;
     if (id == "zoom") return ui::Icon::ZoomIn;
-    if (id == "pop") return ui::Icon::Plus;
-    if (id == "stretch") return ui::Icon::Ungroup;
-    if (id == "spin" || id == "swing" || id == "roll") return ui::Icon::Reset;
-    if (id == "fade_down" || id == "drop") return ui::Icon::ChevronDown;
-    if (id == "whip_left") return ui::Icon::ChevronLeft;
-    if (id == "whip_right") return ui::Icon::ChevronRight;
     if (id == "zoom_out") return ui::Icon::ZoomOut;
-    if (id == "elastic") return ui::Icon::Plus;
-    if (id == "squash") return ui::Icon::Ungroup;
-    if (id == "turn" || id == "tilt" || id == "fly") return ui::Icon::Camera;
+    if (id == "pop" || id == "elastic") return ui::Icon::Burst;
+    if (id == "stretch" || id == "squash") return ui::Icon::Ungroup;
+    if (id == "spin" || id == "swing" || id == "roll") return ui::Icon::Reset;
+    if (id == "turn" || id == "tilt" || id == "fly") return ui::Icon::Cube;
     return ui::Icon::Transition;
 }
 
@@ -77,8 +74,13 @@ void TransitionsPanel::rebuild() {
     grid->setSpacing(8);
     grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     int n = 0;
+    auto* about = new QLabel("Click one for the selected clips (in and out), or drag it onto the start or end of a clip, "
+                             "or onto the cut between two clips.");
+    about->setWordWrap(true);
+    ui::setTone(about, ui::Tone::TextFaint);
     if (category_.empty()) {
         col->addWidget(ui::sectionLabel("Transitions"));
+        col->addWidget(about);
         for (const char* c : transitionCategories()) {
             auto* t = new ui::Tile(categoryIcon(c), c);
             t->setTileSize(tile);
@@ -99,16 +101,24 @@ void TransitionsPanel::rebuild() {
             QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
         });
         head->addWidget(back);
-        head->addWidget(new QLabel(QString::fromStdString(category_)), 1);
+        head->addWidget(ui::sectionLabel(QString::fromStdString(category_)), 1);
         col->addLayout(head);
+        col->addWidget(about);
         const auto& list = transitions();
         for (int i = 0; i < static_cast<int>(list.size()); ++i) {
             if (category_ != list[i].category) continue;
             auto* t = new ui::Tile(iconOf(list[i].id), list[i].name);
             t->setTileSize(tile);
-            t->setToolTip(QString("%1\n\nDrag it onto the start or end of a clip, or onto the cut between two clips. "
-                                  "Drag its edge on the timeline to set its duration.").arg(list[i].about));
+            t->setToolTip(QString("%1\n\nClick: the selected clips, in and out. Or drag it onto the start or end of a clip, "
+                                  "or onto the cut between two clips. Drag its edge on the timeline to set its duration.")
+                              .arg(list[i].about));
             const std::string id = list[i].id;
+            connect(t, &QAbstractButton::clicked, this, [this, id] {
+                bool any = false;
+                for (Layer* l : ctx_.selectedLayers())
+                    if (canTakeTransition(*l, id)) any = applyTransition(*l, id, TransitionEdge::Both, 0.5) || any;
+                if (any) ctx_.touch();
+            });
             t->setDragData([id] { return ui::makeTextMime(ui::kTransitionMime, id); });
             grid->addWidget(t, n / columns_, n % columns_);
             tiles_.push_back(t);

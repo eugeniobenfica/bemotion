@@ -369,13 +369,6 @@ void ViewportPanel::positionHud() {
         cameraTool_ = CameraTool::None;
         for (QPushButton* b : cameraTools_) b->setChecked(false);
     }
-    int tx = 12 + (ctx_.showRulers ? static_cast<int>(kRuler) : 0);
-    for (QPushButton* b : cameraTools_) {
-        b->setVisible(tools);
-        b->adjustSize();
-        b->move(tx, 12 + (ctx_.showRulers ? static_cast<int>(kRuler) : 0));
-        tx += b->width() + 4;
-    }
     snapButton_->move(x, y);
     x += 26 + 12;
     zoomOutButton_->move(x, y);
@@ -388,6 +381,14 @@ void ViewportPanel::positionHud() {
     const int controlsY = width() >= 520 ? y : y - 32;
     qualityButton_->move(12, controlsY);
     fullscreenButton_->move(88, controlsY);
+    // Next to them, off the picture: it would hide the top of the frame.
+    int tx = 88 + 26 + 12;
+    for (QPushButton* b : cameraTools_) {
+        b->setVisible(tools);
+        b->adjustSize();
+        b->move(tx, controlsY);
+        tx += b->width() + 4;
+    }
 }
 
 // --- painting ---------------------------------------------------------------------------------
@@ -1323,6 +1324,21 @@ void ViewportPanel::mouseReleaseEvent(QMouseEvent* e) {
             ctx_.touch();
         }
         guideDrag_ = -1;
+    }
+    // A right click that did not pan: the layer under it, and its menu.
+    if (e->button() == Qt::RightButton && (drag_ == Drag::Pan || drag_ == Drag::OrbitPan) && !dragMoved_) {
+        layout();
+        const Composition& comp = ctx_.comp();
+        const Vec2 at = sceneView().toComp(mouse);
+        const uint64_t hit = ctx_.scope && !orbit_ ? render::hitTestInside(comp, ctx_.time, at, ctx_.scope, throughCamera_)
+                                                   : render::hitTest(comp, ctx_.time, at, throughCamera_, !throughCamera_ && !orbit_, g_lens);
+        if (hit) {
+            if (!ctx_.isSelected(hit)) ctx_.select(hit);
+            drag_ = Drag::None;
+            update();
+            emit layerMenuRequested(e->globalPosition().toPoint());
+            return;
+        }
     }
     // A plain click inside a multi-selection narrows it to the clicked layer.
     if (drag_ == Drag::Move && !dragMoved_ && !additive_) ctx_.select(dragLayer_);

@@ -50,7 +50,8 @@ the content: it ends with the last clip, but never passes `max_duration`.
 ## Layers
 
 **`layer.add`** → `{"layer": id, "name": name}`
-- `type`: `text`, `counter` (text that counts from 0 to 100 across its duration), `rectangle`, `ellipse`, `polygon`, `star`, `line`, `camera`,
+- `type`: `text`, `counter` (text that counts from 0 to 100 across its duration;
+  `decimals`, `prefix`, `suffix` and `separator` as in `layer.set`), `rectangle`, `ellipse`, `polygon`, `star`, `line`, `camera`,
   `media` (with `"media": id` from `media.import`), `background` (fills the
   whole frame; goes to the bottom; `fill`: `solid`, `linear`, `radial` or
   `image` with `"media": id` and `fit`: `cover`, `contain`, `stretch`) or
@@ -70,6 +71,8 @@ the content: it ends with the last clip, but never passes `max_duration`.
 `label` (0–7), `start` (moves the clip and its keyframes), `in`, `out` (trim,
 kept between neighbors on its track), and for text `text`, `font`, `style`,
 `align` (`left`, `center`, `right`), `outline`, `box` (booleans); for
+counters `decimals` (0–6), `prefix` and `suffix` (`"R$ "`, `"%"`), `separator`
+(thousands: `""`, `","`, `"."` with a decimal comma, or `" "`); for
 subtitles `captions` (`[{"start": s, "end": s, "text": "..."}]`, composition
 seconds; replaces them, sorted, overlaps cut) or `srt` (SubRip text); for shapes `shape` (kind), `fill`,
 `stroke` (booleans); for backgrounds `fill`, `media`, `fit`.

@@ -249,7 +249,9 @@ void apply(const Palette& p) {
     s += QString("QPushButton:checked { background: %1; color: %2; }\n").arg(css(accent(70)), css(kText));
     s += QString("QToolButton { background: transparent; border: none; border-radius: %2px; padding: 3px; }\n"
                  "QToolButton:hover { background: %1; }\n"
-                 "QToolButton:checked { background: %3; }\n")
+                 "QToolButton:checked { background: %3; }\n"
+                 "QToolButton[popupMode=\"2\"] { padding-right: 14px; }\n"
+                 "QToolButton::menu-indicator { subcontrol-origin: padding; subcontrol-position: center right; right: 4px; }\n")
              .arg(css(kBgHover))
              .arg(r)
              .arg(css(accent(45)));

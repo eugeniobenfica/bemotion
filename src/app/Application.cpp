@@ -323,7 +323,9 @@ void Application::openProject(const std::filesystem::path& path) {
     platform::log("opening " + platform::toUtf8(path));
     if (!loadProject(path, project, &err)) {
         platform::log("could not open it: " + err);
-        home_->setError("Could not open \"" + platform::toUtf8(path.filename()) + "\": " + err);
+        const std::string message = "Could not open \"" + platform::toUtf8(path.filename()) + "\": " + err;
+        if (editor_) QMessageBox::warning(window_, "Open Project", QString::fromStdString(message)); // from the editor's File menu
+        else home_->setError(message);
         return;
     }
     recents_.touch(path, project.name);
@@ -350,6 +352,15 @@ void Application::showEditor(Project project, const std::filesystem::path& path)
     stack_->addWidget(editor_);
     stack_->setCurrentWidget(editor_);
     connect(editor_, &EditorWindow::goHome, this, [this] { QTimer::singleShot(0, this, [this] { goHome(); }); });
+    connect(editor_, &EditorWindow::newProjectRequested, this, [this] {
+        QTimer::singleShot(0, this, [this] {
+            goHome();
+            home_->openNewProjectDialog();
+        });
+    });
+    connect(editor_, &EditorWindow::openProjectRequested, this, [this](std::filesystem::path path) {
+        QTimer::singleShot(0, this, [this, path] { openProject(path); });
+    });
     connect(editor_, &EditorWindow::quitRequested, window_, &QWidget::close);
     connect(editor_, &EditorWindow::titleChanged, this, [this] { updateTitle(); });
     updateTitle();

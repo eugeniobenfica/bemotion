@@ -12,7 +12,7 @@ namespace bemotion::ui {
 
 enum class Action {
     // Files
-    Save, SaveAs, ImportMedia, Export, CloseProject, Quit, Settings, Help,
+    NewProject, OpenProject, Save, SaveAs, ImportMedia, Export, CloseProject, Quit, Settings, Help,
     // Editing
     Undo, Redo, Cut, Copy, Paste, Duplicate, Delete, SelectAll, Deselect, CreateCompound, ReleaseCompound,
     BringForward, SendBackward, BringToFront, SendToBack,

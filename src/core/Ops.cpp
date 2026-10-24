@@ -353,6 +353,7 @@ private:
             l = makeTextLayer(has(op, "text") ? text(op["text"], "text") : "Text", position, duration);
         } else if (type == "counter") {
             l = makeCounterLayer(position, duration);
+            setCounter(l, op);
         } else if (type == "subtitle") {
             l = makeSubtitleLayer({static_cast<float>(c_.width), static_cast<float>(c_.height)},
                                   has(op, "duration") ? duration : std::max(duration, c_.duration));
@@ -411,6 +412,22 @@ private:
             index = static_cast<int>(c_.layers.size()); // a background goes under everything unless told otherwise
         const Layer& added = c_.addLayer(std::move(l), index);
         return {{"layer", added.id}, {"name", added.name}};
+    }
+
+    // A counter's look: "decimals" (0-6), "prefix", "suffix", "separator" ("", ",", "." or " ").
+    void setCounter(Layer& l, const json& op) {
+        if (has(op, "decimals")) {
+            const double v = number(op["decimals"], "decimals");
+            if (v < 0 || v > 6 || v != std::floor(v)) fail("\"decimals\" must be 0 to 6");
+            l.text.counterDecimals = static_cast<int>(v);
+        }
+        if (has(op, "prefix")) l.text.counterPrefix = text(op["prefix"], "prefix");
+        if (has(op, "suffix")) l.text.counterSuffix = text(op["suffix"], "suffix");
+        if (has(op, "separator")) {
+            const std::string sep = text(op["separator"], "separator");
+            if (!isCounterSeparator(sep)) fail("\"separator\" must be \"\", \",\", \".\" or \" \"");
+            l.text.counterSeparator = sep;
+        }
     }
 
     // A subtitle layer's captions: "captions" [{"start", "end", "text"}] or "srt" (SubRip text).
@@ -498,6 +515,10 @@ private:
             l.label = static_cast<int>(v);
         }
         if (has(op, "text")) requireType(l.type == LayerType::Text && !l.text.counter, "text", "text"), l.text.text = text(op["text"], "text");
+        if (has(op, "decimals") || has(op, "prefix") || has(op, "suffix") || has(op, "separator")) {
+            requireType(l.type == LayerType::Text && l.text.counter, has(op, "decimals") ? "decimals" : has(op, "prefix") ? "prefix" : has(op, "suffix") ? "suffix" : "separator", "counter");
+            setCounter(l, op);
+        }
         if (has(op, "outline")) requireType(l.type == LayerType::Text, "outline", "text"), l.text.outlineEnabled = boolean(op["outline"], "outline");
         if (has(op, "box")) requireType(l.type == LayerType::Text, "box", "text"), l.text.boxEnabled = boolean(op["box"], "box");
         if (has(op, "captions") || has(op, "srt")) {

@@ -2,9 +2,14 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 
 namespace bemotion {
+
+namespace {
+const char* const kDecimalFormats[7] = {"%.0f", "%.1f", "%.2f", "%.3f", "%.4f", "%.5f", "%.6f"};
+} // namespace
 
 uint32_t nextKeyframeUid() {
     static std::atomic<uint32_t> counter{1};
@@ -95,7 +100,7 @@ std::vector<PropertyRef> Layer::properties() {
     }
     if (type == LayerType::Camera) { // never drawn: no shape, text or effects
         p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
-        p.push_back({"position_z", "Transform", "Z Position", PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.0f"});
+        p.push_back({"position_z", "Transform", "Z Position", PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.1f"});
         p.push_back({"rotation_x", "Transform", "X Rotation", PropertyKind::Float, &tr.rotationX, 0.5f, 0, 0, "%.1f°"});
         p.push_back({"rotation_y", "Transform", "Y Rotation", PropertyKind::Float, &tr.rotationY, 0.5f, 0, 0, "%.1f°"});
         p.push_back({"rotation", "Transform", "Z Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
@@ -104,7 +109,7 @@ std::vector<PropertyRef> Layer::properties() {
     }
     p.push_back({"anchor", "Transform", "Anchor Point", PropertyKind::Vec2, &tr.anchor});
     p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
-    if (threeD) p.push_back({"position_z", "Transform", "Z Position", PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.0f"});
+    if (threeD) p.push_back({"position_z", "Transform", "Z Position", PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.1f"});
     p.push_back({"scale", "Transform", "Scale", PropertyKind::Vec2, &tr.scale, 0.5f, 0, 0, "%.1f%%"});
     if (threeD) {
         p.push_back({"rotation_x", "Transform", "X Rotation", PropertyKind::Float, &tr.rotationX, 0.5f, 0, 0, "%.1f°"});
@@ -148,7 +153,8 @@ std::vector<PropertyRef> Layer::properties() {
     } else {
         auto& t = text;
         if (t.counter)
-            p.push_back({"counter_value", "Counter", "Value", PropertyKind::Float, &t.counterValue, 1.0f, -1000000000, 1000000000, "%.0f"});
+            p.push_back({"counter_value", "Counter", "Value", PropertyKind::Float, &t.counterValue, 1.0f, -1000000000, 1000000000,
+                         kDecimalFormats[std::clamp(t.counterDecimals, 0, 6)]});
         p.push_back({"font_size", "Text", "Font Size", PropertyKind::Float, &t.fontSize, 0.5f, 1, 2000, "%.0f px"});
         p.push_back({"text_color", "Text", "Color", PropertyKind::Color, &t.color});
         p.push_back({"tracking", "Text", "Tracking", PropertyKind::Float, &t.tracking, 0.25f, -200, 1000});
@@ -278,8 +284,26 @@ Layer makeCameraLayer(Vec2 compSize, double duration) {
     return l;
 }
 
+std::string formatCounter(double value, int decimals, const std::string& separator) {
+    decimals = std::clamp(decimals, 0, 6);
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "%.*f", decimals, value);
+    std::string s = buf;
+    if (s.find_first_not_of("-0.") == std::string::npos && s[0] == '-') s.erase(0, 1); // no "-0"
+    const size_t dot = s.find('.');
+    std::string whole = s.substr(0, dot), out;
+    const size_t digits = whole.size() - (whole[0] == '-' ? 1 : 0);
+    for (size_t i = 0; i < whole.size(); ++i) {
+        out += whole[i];
+        const size_t left = whole.size() - 1 - i; // digits still to come
+        if (!separator.empty() && whole[i] != '-' && left > 0 && left % 3 == 0 && digits > 3) out += separator;
+    }
+    if (dot != std::string::npos) out += (separator == "." ? "," : ".") + s.substr(dot + 1);
+    return out;
+}
+
 std::string TextProps::textAt(double t) const {
-    if (counter) return std::to_string(static_cast<long long>(std::llround(counterValue.valueAt(t))));
+    if (counter) return counterPrefix + formatCounter(counterValue.valueAt(t), counterDecimals, counterSeparator) + counterSuffix;
     if (!subtitle || captions.empty()) return text;
     // The last caption starting at or before t (they are sorted), if it still covers t.
     auto it = std::upper_bound(captions.begin(), captions.end(), t, [](double v, const Caption& c) { return v < c.start; });

@@ -250,7 +250,13 @@ json encodeLayer(const Layer& constLayer) {
                      {"align", kAlignIds[static_cast<int>(layer.text.align)]},
                      {"outline", layer.text.outlineEnabled},
                      {"box", layer.text.boxEnabled}};
-        if (layer.text.counter) j["text"]["counter"] = true;
+        if (layer.text.counter) {
+            j["text"]["counter"] = true;
+            if (layer.text.counterDecimals) j["text"]["decimals"] = layer.text.counterDecimals;
+            if (!layer.text.counterPrefix.empty()) j["text"]["prefix"] = layer.text.counterPrefix;
+            if (!layer.text.counterSuffix.empty()) j["text"]["suffix"] = layer.text.counterSuffix;
+            if (!layer.text.counterSeparator.empty()) j["text"]["separator"] = layer.text.counterSeparator;
+        }
         if (layer.text.subtitle) {
             json captions = json::array();
             for (const Caption& c : layer.text.captions) captions.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
@@ -345,6 +351,10 @@ Layer decodeLayer(const json& j) {
         layer.text.boxEnabled = t.value("box", false);
         layer.text.subtitle = t.value("subtitle", false);
         layer.text.counter = t.value("counter", false);
+        layer.text.counterDecimals = t.value("decimals", 0);
+        layer.text.counterPrefix = t.value("prefix", std::string());
+        layer.text.counterSuffix = t.value("suffix", std::string());
+        layer.text.counterSeparator = t.value("separator", std::string());
         if (const auto cj = t.find("captions"); cj != t.end() && cj->is_array())
             for (const json& c : *cj)
                 if (c.is_object())

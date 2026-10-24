@@ -237,6 +237,55 @@ void PropertiesPanel::buildComposition(QVBoxLayout* col) {
 
 // --- layer -----------------------------------------------------------------------------------
 
+// A counter's look, in place of a text's content: prefix, suffix, decimals, thousands.
+void PropertiesPanel::buildCounterRows(CollapsibleSection* section, const Layer& layer) {
+    const uint64_t id = layer.id;
+    auto apply = [this](auto&& change) {
+        for (Layer* l : ctx_.selectedLayers())
+            if (l->type == LayerType::Text && l->text.counter) change(l->text);
+        ctx_.touch();
+    };
+    auto affix = [&](std::string TextProps::*field, const QString& label, const QString& hint) {
+        auto* edit = new QLineEdit(QString::fromStdString(layer.text.*field));
+        edit->setPlaceholderText(hint);
+        connect(edit, &QLineEdit::textEdited, this, [apply, field](const QString& t) {
+            apply([&](TextProps& p) { p.*field = t.toStdString(); });
+        });
+        section->addPlainRow(label, edit);
+        refreshers_.push_back([this, id, edit, field] {
+            if (const Layer* l = ctx_.comp().findLayer(id); l && !edit->hasFocus()) edit->setText(QString::fromStdString(l->text.*field));
+        });
+    };
+    affix(&TextProps::counterPrefix, "Prefix", "Before the number: R$, +...");
+    affix(&TextProps::counterSuffix, "Suffix", "After the number: %, k, pts...");
+
+    auto* decimals = new ui::DragValue;
+    decimals->setRange(0.0f, 6.0f);
+    decimals->setSpeed(0.05f);
+    decimals->setFormat("%.0f");
+    connect(decimals, &ui::DragValue::valueChanged, this, [this, apply](float v) {
+        apply([&](TextProps& p) { p.counterDecimals = static_cast<int>(std::lround(v)); });
+        key_.clear(); // the Value row shows as many decimals
+    });
+    section->addPlainRow("Decimals", decimals);
+
+    auto* separator = newCombo();
+    const char* const separators[4][2] = {{"", "1234.5"}, {",", "1,234.5"}, {".", "1.234,5"}, {" ", "1 234.5"}};
+    for (const auto& sep : separators) separator->addItem(sep[1], QString(sep[0]));
+    connect(separator, &QComboBox::activated, this, [apply, separator](int) {
+        const std::string sep = separator->currentData().toString().toStdString();
+        apply([&](TextProps& p) { p.counterSeparator = sep; });
+    });
+    section->addPlainRow("Thousands", separator);
+    refreshers_.push_back([this, id, decimals, separator] {
+        if (const Layer* l = ctx_.comp().findLayer(id)) {
+            decimals->setValue(static_cast<float>(l->text.counterDecimals));
+            const QSignalBlocker b(separator);
+            separator->setCurrentIndex(std::max(0, separator->findData(QString::fromStdString(l->text.counterSeparator))));
+        }
+    });
+}
+
 void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
     const uint64_t id = layer.id;
     // Header: type icon + editable name + delete.
@@ -495,7 +544,8 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             } else if (group == "Background" && layer.type == LayerType::Background) {
                 buildBackgroundRows(section, layer);
             } else if (group == "Text" && layer.type == LayerType::Text) {
-                if (!layer.text.counter) {
+                if (layer.text.counter) buildCounterRows(section, layer);
+                else {
                     auto* text = new QPlainTextEdit;
                     if (layer.text.subtitle) text->setPlaceholderText("Shown while there are no captions");
                     text->setFixedHeight(text->fontMetrics().height() * 4 + 12);

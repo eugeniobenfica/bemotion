@@ -104,8 +104,12 @@ does.
 <td width="50%" valign="top">
 
 ### ✦ Create
-- **Objects**: text, rectangle, ellipse, polygon, star, line, camera and plugin
-  objects — click to add, or drag onto the canvas or the timeline
+- **Objects**: text, counter, subtitles, rectangle, ellipse, polygon, star,
+  line, camera, background and plugin objects — click to add (or the *Add*
+  menu), or drag onto the canvas or the timeline; right-click one on the
+  canvas for its menu
+- **Counter**: a number that animates (0 → 100 by default), with decimals,
+  thousands separators (1,234.5 or 1.234,5), a prefix and a suffix (R$, %)
 - **Text** with an outline, a box behind it and automatic line wrapping
 - **Subtitles**: captions one after another at the bottom of the frame, on a
   box; type them, import / export `.srt`, edit them in a list, see them as
@@ -136,8 +140,9 @@ does.
   Drop, Zoom, Rise, Shake, Heartbeat, Float, Bounce, Wobble, Blink, Spin,
   Typewriter, Draw On… click one for the selection or drag it onto a clip;
   stackable, importable, savable
-- **Transitions** panel by category (Fade, Slide, Scale, Rotate, 3D): drag
-  one onto a clip's start or end, or onto the cut between two clips; drag its
+- **Transitions** panel by category (Fade, Slide, Scale, Rotate, 3D): click
+  one for the selected clips, or drag it onto a clip's start or end, or onto
+  the cut between two clips; drag its
   edge for the duration — plain keyframes you can still edit
 - Add keyframes right in the Graph Editor (right-click, double-click or *+*)
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…

@@ -14,6 +14,8 @@ using json = nlohmann::json;
 constexpr int Ctrl = static_cast<int>(Qt::ControlModifier), Shift = static_cast<int>(Qt::ShiftModifier);
 
 constexpr ActionInfo kActions[] = {
+    {"new_project", "New Project", "Files", Ctrl | Qt::Key_N},
+    {"open_project", "Open Project", "Files", Ctrl | Qt::Key_O},
     {"save", "Save", "Files", Ctrl | Qt::Key_S},
     {"save_as", "Save As", "Files", Ctrl | Shift | Qt::Key_S},
     {"import_media", "Import Media", "Files", Ctrl | Qt::Key_I},

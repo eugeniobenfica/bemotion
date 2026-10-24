@@ -101,6 +101,19 @@ enum class Icon {
     Microphone, // recording
     Subtitles,  // the subtitle object
     Map,        // map charts
+    Counter,    // the counter object: a number sign
+    // Motion (Quick Animations, transitions)
+    ArrowUp,
+    ArrowDown,
+    ArrowLeft,
+    ArrowRight,
+    Burst,     // pop: a dot with rays
+    Ripple,    // pulse: rings
+    Heartbeat, // a heart monitor line
+    Zigzag,    // shake
+    Wave,      // float
+    Bounce,    // a ball over the floor
+    Fade,      // squares fading out
 };
 
 Icon iconForLayer(const Layer& layer);

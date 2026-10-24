@@ -255,6 +255,7 @@ void EditorWindow::buildDocks() {
         saveSettings();
     });
     connect(viewport_, &ViewportPanel::viewportFullscreenRequested, this, &EditorWindow::toggleViewportFullscreen);
+    connect(viewport_, &ViewportPanel::layerMenuRequested, timeline_, &TimelinePanel::showTrackMenu);
     connect(timeline_, &TimelinePanel::toolbarMoveRequested, this, moveToolbar);
     connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] { QTimer::singleShot(0, this, [this] { placeToolbar(); }); });
     QTimer::singleShot(0, this, [this] { placeToolbar(); });
@@ -611,25 +612,88 @@ void EditorWindow::buildMenus() {
     bar->setCornerWidget(home, Qt::TopLeftCorner);
 
     QMenu* file = bar->addMenu("File");
+    file->addAction(action(Action::NewProject, "New Project...", [this] {
+        if (confirmClose()) emit newProjectRequested();
+    }));
+    file->addAction(action(Action::OpenProject, "Open Project...", [this] {
+        if (auto p = platform::openFileDialog("Open bemotion Project", "bemotion Project", kProjectExtension); p && confirmClose())
+            emit openProjectRequested(*p);
+    }));
+    QMenu* recent = file->addMenu("Open Recent");
+    connect(recent, &QMenu::aboutToShow, this, [this, recent] {
+        recent->clear();
+        int shown = 0;
+        for (const RecentProject& r : recents_.items()) {
+            std::error_code ec;
+            if (r.path == ctx_.path || !std::filesystem::exists(r.path, ec)) continue;
+            const std::filesystem::path path = r.path;
+            QAction* a = recent->addAction(QString::fromStdString(r.name.empty() ? platform::toUtf8(path.stem()) : r.name), this, [this, path] {
+                if (confirmClose()) emit openProjectRequested(path);
+            });
+            a->setToolTip(QString::fromStdString(platform::toUtf8(path)));
+            if (++shown == 10) break;
+        }
+        if (!shown) recent->addAction("No other projects yet")->setEnabled(false);
+    });
+    recent->setToolTipsVisible(true);
+    file->addSeparator();
     file->addAction(action(Action::Save, "Save", [this] { save(); }));
     file->addAction(action(Action::SaveAs, "Save As...", [this] { saveAs(); }));
-    file->addAction("Project Settings...", this, [this] {
+    // The same settings as the Properties panel with nothing selected, and the length limit.
+    file->addAction("Composition Settings...", this, [this] {
+        const Composition& c = ctx_.comp();
         QDialog dialog(this);
-        dialog.setWindowTitle("Project Settings");
+        dialog.setWindowTitle("Composition Settings");
         auto* form = new QFormLayout;
-        double limit = ctx_.comp().maxDuration;
+        form->setHorizontalSpacing(16);
+        form->setVerticalSpacing(8);
+        auto* sizeRow = new QHBoxLayout;
+        auto* w = new ui::DragValue;
+        auto* h = new ui::DragValue;
+        for (ui::DragValue* v : {w, h}) {
+            v->setRange(16.0f, 16384.0f);
+            v->setSpeed(1.0f);
+            v->setFormat("%.0f px");
+            v->setMinimumWidth(110);
+        }
+        w->setValue(static_cast<float>(c.width));
+        h->setValue(static_cast<float>(c.height));
+        sizeRow->addWidget(w);
+        sizeRow->addWidget(new QLabel("×"));
+        sizeRow->addWidget(h);
+        form->addRow("Size", sizeRow);
+        auto* fps = new ui::DragValue;
+        fps->setRange(1.0f, 240.0f);
+        fps->setSpeed(0.1f);
+        fps->setFormat("%.2f fps");
+        fps->setValue(static_cast<float>(c.fps));
+        form->addRow("Frame rate", fps);
+        auto* bg = new ui::ColorButton;
+        bg->setAlphaEnabled(false);
+        bg->setColor(c.background);
+        form->addRow("Background", bg);
+        double limit = c.maxDuration;
         form->addRow("Length", ui::lengthLimitRow(limit, [&limit](double value) { limit = value; }));
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
         auto* layout = new QVBoxLayout(&dialog);
+        layout->setContentsMargins(24, 22, 24, 18);
         layout->addLayout(form);
+        layout->addSpacing(10);
         layout->addWidget(buttons);
-        if (dialog.exec() == QDialog::Accepted && ctx_.comp().maxDuration != limit) {
-            ctx_.comp().maxDuration = limit;
-            ctx_.comp().fitDuration();
-            ctx_.touch();
-        }
+        if (dialog.exec() != QDialog::Accepted) return;
+        Composition& comp = ctx_.comp();
+        comp.width = static_cast<int>(std::lround(w->value()));
+        comp.height = static_cast<int>(std::lround(h->value()));
+        comp.fps = fps->value();
+        const Color b = bg->color();
+        comp.background = {b.r, b.g, b.b, 1.0f};
+        comp.maxDuration = limit;
+        comp.syncCameras();
+        comp.fitDuration();
+        ctx_.setTime(ctx_.time);
+        ctx_.touch();
     });
     file->addSeparator();
     file->addAction(action(Action::ImportMedia, "Import Media...", [this] { media_->openImportDialog(); }));
@@ -668,7 +732,6 @@ void EditorWindow::buildMenus() {
     }));
     edit->addSeparator();
     edit->addAction(action(Action::Settings, "Settings...", [] { ui::openSettings(); }));
-    edit->addAction("Plugins...", this, [] { ui::openSettings(ui::SettingsTab::Plugins); });
 
     QMenu* layer = bar->addMenu("Layer");
     layer->addAction(action(Action::Split, "Split at Playhead", [this] { ctx_.splitSelectedAtPlayhead(); }));
@@ -680,6 +743,7 @@ void EditorWindow::buildMenus() {
         fx->clear();
         fillEffectMenu(fx, ctx_);
     });
+    layer->addSeparator();
     layer->addAction(action(Action::CutTool, "Cut Tool", [this] { ctx_.tool = Tool::Razor; }));
     layer->addAction(action(Action::SelectTool, "Selection Tool", [this] { ctx_.tool = Tool::Select; }));
     layer->addSeparator();
@@ -710,14 +774,39 @@ void EditorWindow::buildMenus() {
         for (auto& [a, act] : actions_) act->setEnabled(true); // shortcuts stay usable (they check themselves)
     });
 
+    // The same objects as the Objects panel, in its order.
     QMenu* add = bar->addMenu("Add");
     add->addAction(action(Action::AddText, "Text", [this] { ctx_.addText(); }));
+    add->addAction("Counter", this, [this] { ctx_.addCounter(); });
     add->addAction("Subtitles", this, [this] { ctx_.addSubtitles(); });
-    add->addAction("Camera", this, [this] { ctx_.addCamera(); });
     add->addSeparator();
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i)
         add->addAction(shapeKindLabel(static_cast<ShapeKind>(i)), this, [this, i] { ctx_.addShape(static_cast<ShapeKind>(i)); });
     add->addSeparator();
+    add->addAction("Camera", this, [this] { ctx_.addCamera(); });
+    add->addAction("Background", this, [this] { ctx_.addBackground(); });
+    add->addSeparator();
+    // Plugin objects, a submenu per plugin (rebuilt as plugins change).
+    QAction* pluginsMark = add->addSeparator();
+    connect(add, &QMenu::aboutToShow, this, [this, add, pluginsMark] {
+        for (QAction* a : add->actions())
+            if (a->property("pluginMenu").toBool()) add->removeAction(a), a->deleteLater();
+        std::string lastPlugin;
+        QMenu* sub = nullptr;
+        for (const PluginObjectType* type : PluginHost::get().objectTypes()) {
+            if (type->pluginId != lastPlugin || !sub) {
+                lastPlugin = type->pluginId;
+                const Plugin* plugin = PluginHost::get().findPlugin(type->pluginId);
+                sub = new QMenu(QString::fromStdString(plugin ? plugin->name : type->pluginId), add);
+                sub->menuAction()->setProperty("pluginMenu", true);
+                add->insertMenu(pluginsMark, sub);
+            }
+            const std::string id = type->id;
+            sub->addAction(QString::fromStdString(type->name), this, [this, id] {
+                if (const PluginObjectType* t = PluginHost::get().findType(id)) ctx_.addPluginObject(*t);
+            });
+        }
+    });
     QMenu* mediaMenu = add->addMenu("Media");
     connect(mediaMenu, &QMenu::aboutToShow, this, [this, mediaMenu] {
         mediaMenu->clear();

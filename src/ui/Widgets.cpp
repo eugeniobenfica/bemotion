@@ -36,6 +36,7 @@ Icon iconForPlugin(const std::string& name) {
     if (name == "cube" || name == "model") return Icon::Cube;
     if (name == "mic" || name == "microphone") return Icon::Microphone;
     if (name == "text") return Icon::Text;
+    if (name == "counter" || name == "number") return Icon::Counter;
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) {
         std::string shape = shapeKindLabel(static_cast<ShapeKind>(i));
         for (char& ch : shape) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
@@ -73,7 +74,7 @@ Icon iconForLayer(const Layer& layer) {
         const PluginObjectType* type = PluginHost::get().findType(layer.plugin.objectType);
         return type ? iconForPlugin(type->icon) : Icon::Plugin;
     }
-    if (layer.type == LayerType::Text) return layer.text.subtitle ? Icon::Subtitles : Icon::Text;
+    if (layer.type == LayerType::Text) return layer.text.subtitle ? Icon::Subtitles : layer.text.counter ? Icon::Counter : Icon::Text;
     return iconForShape(layer.shape.kind);
 }
 
@@ -260,6 +261,73 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.polyline(pts, 8, col, true, th);
         dl.line(Pt(c.x - h * 0.3f, c.y - h * 0.75f), Pt(c.x - h * 0.3f, c.y + h * 0.55f), col, th);
         dl.line(Pt(c.x + h * 0.3f, c.y - h * 0.55f), Pt(c.x + h * 0.3f, c.y + h * 0.75f), col, th);
+        break;
+    }
+    case Icon::Counter: { // a number sign
+        dl.line(Pt(c.x - h * 0.15f, c.y - h * 0.75f), Pt(c.x - h * 0.4f, c.y + h * 0.75f), col, th);
+        dl.line(Pt(c.x + h * 0.4f, c.y - h * 0.75f), Pt(c.x + h * 0.15f, c.y + h * 0.75f), col, th);
+        dl.line(Pt(c.x - h * 0.75f, c.y - h * 0.28f), Pt(c.x + h * 0.8f, c.y - h * 0.28f), col, th);
+        dl.line(Pt(c.x - h * 0.8f, c.y + h * 0.28f), Pt(c.x + h * 0.75f, c.y + h * 0.28f), col, th);
+        break;
+    }
+    case Icon::ArrowUp:
+    case Icon::ArrowDown:
+    case Icon::ArrowLeft:
+    case Icon::ArrowRight: { // a shaft and an open head, drawn pointing right then turned
+        const float ang = icon == Icon::ArrowRight ? 0.0f : icon == Icon::ArrowDown ? kPi * 0.5f : icon == Icon::ArrowLeft ? kPi : -kPi * 0.5f;
+        const float cs = std::cos(ang), sn = std::sin(ang);
+        auto at = [&](float x, float y) { return Pt(c.x + (x * cs - y * sn) * h, c.y + (x * sn + y * cs) * h); };
+        dl.line(at(-0.75f, 0.0f), at(0.7f, 0.0f), col, th);
+        const Pt head[3] = {at(0.2f, -0.5f), at(0.72f, 0.0f), at(0.2f, 0.5f)};
+        dl.polyline(head, 3, col, false, th);
+        break;
+    }
+    case Icon::Burst: { // a dot with eight rays
+        dl.circleFilled(c, h * 0.22f, col);
+        for (int i = 0; i < 8; ++i) {
+            const float a = kPi * 0.25f * i, cs = std::cos(a), sn = std::sin(a);
+            dl.line(Pt(c.x + cs * h * 0.48f, c.y + sn * h * 0.48f), Pt(c.x + cs * h * 0.82f, c.y + sn * h * 0.82f), col, th);
+        }
+        break;
+    }
+    case Icon::Ripple: // a dot and two rings
+        dl.circleFilled(c, h * 0.2f, col);
+        dl.circle(c, h * 0.5f, col, th);
+        dl.circle(c, h * 0.82f, theme::withAlpha(col, 140), th);
+        break;
+    case Icon::Heartbeat: { // a heart monitor line
+        const Pt pts[7] = {Pt(c.x - h * 0.85f, c.y), Pt(c.x - h * 0.35f, c.y), Pt(c.x - h * 0.15f, c.y - h * 0.7f),
+                           Pt(c.x + h * 0.12f, c.y + h * 0.7f), Pt(c.x + h * 0.32f, c.y - h * 0.25f), Pt(c.x + h * 0.45f, c.y),
+                           Pt(c.x + h * 0.85f, c.y)};
+        dl.polyline(pts, 7, col, false, th);
+        break;
+    }
+    case Icon::Zigzag: { // shaking side to side
+        const Pt pts[6] = {Pt(c.x - h * 0.85f, c.y), Pt(c.x - h * 0.55f, c.y - h * 0.5f), Pt(c.x - h * 0.2f, c.y + h * 0.5f),
+                           Pt(c.x + h * 0.2f, c.y - h * 0.5f), Pt(c.x + h * 0.55f, c.y + h * 0.5f), Pt(c.x + h * 0.85f, c.y)};
+        dl.polyline(pts, 6, col, false, th);
+        break;
+    }
+    case Icon::Wave: { // floating: one slow wave
+        Pt pts[17];
+        for (int i = 0; i < 17; ++i) {
+            const float u = i / 16.0f;
+            pts[i] = Pt(c.x + (u * 1.7f - 0.85f) * h, c.y - std::sin(u * 2.0f * kPi) * h * 0.4f);
+        }
+        dl.polyline(pts, 17, col, false, th);
+        break;
+    }
+    case Icon::Bounce: // a ball above the floor, with its path
+        dl.circleFilled(Pt(c.x, c.y - h * 0.4f), h * 0.28f, col);
+        dl.line(Pt(c.x - h * 0.8f, c.y + h * 0.7f), Pt(c.x + h * 0.8f, c.y + h * 0.7f), col, th);
+        dl.line(Pt(c.x, c.y + h * 0.02f), Pt(c.x, c.y + h * 0.4f), theme::withAlpha(col, 120), th);
+        break;
+    case Icon::Fade: { // four squares, fainter and fainter
+        const float s = h * 0.36f;
+        for (int i = 0; i < 4; ++i) {
+            const float x = c.x - h * 0.85f + i * h * 0.45f;
+            dl.rectFilled(Pt(x, c.y - s), Pt(x + s, c.y + s), theme::withAlpha(col, 255 - i * 65), 1.5f);
+        }
         break;
     }
     case Icon::Subtitles: { // a frame with two lines of text at its bottom

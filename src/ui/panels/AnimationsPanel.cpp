@@ -29,11 +29,18 @@ ui::Icon iconOf(const std::string& name) {
     if (has("Type")) return ui::Icon::Text;
     if (has("Draw")) return ui::Icon::Line;
     if (has("Spin") || has("Wobble")) return ui::Icon::Reset;
-    if (has("Pop") || has("Pulse") || has("Heartbeat")) return ui::Icon::Plus;
-    if (has("Drop") || has("Sink")) return ui::Icon::ChevronDown;
-    if (has("Up") || has("Float") || has("Bounce")) return ui::Icon::ChevronUp;
-    if (has("Slide") || has("Shake")) return ui::Icon::ChevronRight;
-    if (has("Blink") || has("Fade")) return ui::Icon::Transition;
+    if (has("Pop")) return ui::Icon::Burst;
+    if (has("Pulse")) return ui::Icon::Ripple;
+    if (has("Heartbeat")) return ui::Icon::Heartbeat;
+    if (has("Shake")) return ui::Icon::Zigzag;
+    if (has("Float")) return ui::Icon::Wave;
+    if (has("Bounce")) return ui::Icon::Bounce;
+    if (has("Zoom")) return ui::Icon::ZoomIn;
+    if (has("Drop") || has("Sink")) return ui::Icon::ArrowDown;
+    if (has("Up") || has("Rise")) return ui::Icon::ArrowUp;
+    if (has("Slide")) return ui::Icon::ArrowRight;
+    if (has("Blink")) return ui::Icon::Eye;
+    if (has("Fade")) return ui::Icon::Fade;
     return ui::Icon::Ease;
 }
 
@@ -62,8 +69,7 @@ void AnimationsPanel::rebuild() {
     col->setContentsMargins(8, 8, 8, 8);
     col->setSpacing(6);
     tiles_.clear();
-    col->addWidget(ui::sectionLabel("Quick Animations"));
-    auto* about = new QLabel("Click one for the selected layers (from the playhead), or drag it onto a clip.");
+    auto* about = new QLabel("Quick Animations: click one for the selected layers (it starts at the playhead), or drag it onto a clip.");
     about->setWordWrap(true);
     ui::setTone(about, ui::Tone::TextFaint);
     col->addWidget(about);
@@ -78,9 +84,8 @@ void AnimationsPanel::rebuild() {
         for (const auto& lp : PresetLibrary::all()) {
             if (lp.preset.category != category) continue;
             if (!grid) {
-                auto* head = new QLabel(QString::fromStdString(category));
-                ui::setTone(head, ui::Tone::TextDim);
-                col->addWidget(head);
+                col->addSpacing(4);
+                col->addWidget(ui::sectionLabel(QString::fromStdString(category)));
                 grid = new QGridLayout;
                 grid->setSpacing(8);
                 grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);

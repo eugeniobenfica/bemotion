@@ -114,8 +114,13 @@ struct TextProps {
     // captions; `text` while there are none). Captions are sorted and do not overlap.
     bool subtitle = false;
     std::vector<Caption> captions;
+    // A counter shows `counterValue` as a number: `counterDecimals` digits after the decimal
+    // mark (0 to 6), thousands grouped by `counterSeparator` ("", ",", "." or " "; with "." the
+    // decimal mark is ","), between `counterPrefix` and `counterSuffix` ("R$ ", "%").
     bool counter = false;
     AnimFloat counterValue{0.0f};
+    int counterDecimals = 0;
+    std::string counterPrefix, counterSuffix, counterSeparator;
 
     // What the layer shows at `t`.
     std::string textAt(double t) const;
@@ -270,6 +275,9 @@ struct Layer {
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
 Layer makeCounterLayer(Vec2 position, double duration);
+// A counter's number: "1,234.5" (separator ","), "1.234,5" ("."), "1234.5" ("").
+std::string formatCounter(double value, int decimals, const std::string& separator);
+inline bool isCounterSeparator(const std::string& s) { return s.empty() || s == "," || s == "." || s == " "; }
 // Subtitles: captions at the bottom of a `compSize` frame, white on a dark box.
 Layer makeSubtitleLayer(Vec2 compSize, double duration);
 Layer makeBackgroundLayer(double duration); // fills the frame, from 0 for `duration`

@@ -39,6 +39,7 @@ private:
     // A plugin object's file parameter: the chosen file's name; click to choose another.
     QWidget* filePicker(uint64_t layerId, const std::string& paramId);
     void buildBackgroundRows(CollapsibleSection* section, Layer& layer); // fill, picture, fit
+    void buildCounterRows(CollapsibleSection* section, const Layer& layer); // prefix, suffix, decimals
 
     EditorContext& ctx_;
     std::string key_;

@@ -37,6 +37,8 @@ class TimelinePanel : public QWidget {
 public:
     explicit TimelinePanel(EditorContext& ctx, QWidget* parent = nullptr);
     void sync(); // from the editor's tick
+    // The selected layers' menu (also the viewport's right click).
+    void showTrackMenu(QPoint global);
     void setRecordingPreview(double start, uint64_t scope, media::RecordingPreview preview);
     void clearRecordingPreview();
 
@@ -169,7 +171,6 @@ private:
     TransitionHit transitionHit(const Item& track, float x) const;
     void clickLayer(uint64_t id);
     void clickTrack(const Item& track);
-    void showTrackMenu(QPoint global);
     void showKeyMenu(QPoint global);
     void startRename(const Item& track);
 

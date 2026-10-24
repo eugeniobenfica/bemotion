@@ -145,6 +145,14 @@ private:
                 report(where, "text cannot be both a counter and subtitles (kept subtitles)");
                 l.text.counter = false;
             }
+            if (l.type == LayerType::Text && (l.text.counterDecimals < 0 || l.text.counterDecimals > 6)) {
+                report(where, "counter decimals must be 0 to 6");
+                l.text.counterDecimals = std::clamp(l.text.counterDecimals, 0, 6);
+            }
+            if (l.type == LayerType::Text && !isCounterSeparator(l.text.counterSeparator)) {
+                report(where, "counter separator must be \"\", \",\", \".\" or \" \" (none kept)");
+                l.text.counterSeparator.clear();
+            }
             if (static_cast<int>(l.type) < 0 || static_cast<int>(l.type) > static_cast<int>(LayerType::Background)) {
                 report(where, "unknown layer type");
                 l.type = LayerType::Shape;

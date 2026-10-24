@@ -66,6 +66,8 @@ public:
 
 signals:
     void goHome();
+    void newProjectRequested();                            // after the user agreed to close this one
+    void openProjectRequested(std::filesystem::path path); // likewise
     void quitRequested();
     void titleChanged();
 
