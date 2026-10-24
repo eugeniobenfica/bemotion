@@ -330,7 +330,7 @@ protected:
             const int i = indexAt(he->pos());
             const auto ts = tools();
             if (i >= 0) QToolTip::showText(he->globalPos(), QString::fromStdString(ui::toolTooltip(ui::toolCatalog()[ts[i]])), this);
-            else if (i == -3) QToolTip::showText(he->globalPos(), "Drag to move the toolbar: into the viewport, or back to the timeline", this);
+            else if (i == -3) QToolTip::showText(he->globalPos(), "Drag to a window edge or back to the timeline; right-click for positions", this);
             else if (i == -2) QToolTip::showText(he->globalPos(), "All tools: click to open them, then drag the ones you want here", this);
             else QToolTip::hideText();
             return true;
@@ -345,6 +345,11 @@ protected:
             const bool floating = parentWidget() != panel_;
             menu.addAction(floating ? "Back to the Timeline" : "Move to the Viewport",
                            [this, floating] { emit panel_->toolbarMoveRequested(!floating, QPoint(-1, -1)); });
+            menu.addSeparator();
+            const char* labels[] = {"Float at top", "Float at bottom", "Float at left", "Float at right"};
+            const QPointF positions[] = {{0.5, 0}, {0.5, 1}, {0, 0.5}, {1, 0.5}};
+            for (int i = 0; i < 4; ++i)
+                menu.addAction(labels[i], [this, position = positions[i]] { emit panel_->toolbarDockRequested(position); });
             menu.exec(e->globalPosition().toPoint());
             pressed_ = -1;
         }
@@ -366,7 +371,9 @@ protected:
             drag->setMimeData(mime);
             drag->setPixmap(grab());
             drag->setHotSpot(pressPos_.toPoint());
+            emit panel_->toolbarDragActive(true);
             drag->exec(Qt::MoveAction);
+            emit panel_->toolbarDragActive(false);
             return;
         }
         if ((e->buttons() & Qt::LeftButton) && pressed_ >= 0 && (e->position() - pressPos_).manhattanLength() > 6) {

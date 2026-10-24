@@ -10,6 +10,7 @@
 #include <QElapsedTimer>
 #include <QMainWindow>
 #include <QPointer>
+#include <QPointF>
 
 #include <filesystem>
 #include <map>
@@ -19,6 +20,7 @@
 class QAction;
 class QLabel;
 class QMenu;
+class QPushButton;
 class QTimer;
 namespace ads {
 class CDockAreaWidget;
@@ -88,7 +90,12 @@ private:
     void minimizeArea(ads::CDockAreaWidget* area);
     void restoreMinimized(size_t index);
     void showTools();
-    void placeToolbar(); // in the timeline, or floating over the viewport (Settings::toolbarInViewport)
+    void placeToolbar(); // timeline, free viewport position, or a window edge
+    QRect toolbarBounds() const;
+    void dockToolbar(QPointF position);
+    void showToolbarTargets(bool visible);
+    void positionToolbarTargets();
+    QPushButton* toolbarTargets_[4]{};
     void placeRestoreHandles();
     void updateMinimizeHandles();
     int edgeOf(ads::CDockAreaWidget* area, float* along) const; // 0 left, 1 right, 2 top, 3 bottom

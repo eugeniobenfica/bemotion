@@ -15,6 +15,7 @@
 #include "ui/AppSignals.h"
 #include "ui/Dialogs.h"
 #include "ui/Keymap.h"
+#include "ui/Mime.h"
 #include "ui/Theme.h"
 #include "ui/Tools.h"
 #include "ui/Widgets.h"
@@ -37,6 +38,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
+#include <QDragEnterEvent>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -64,6 +66,30 @@ using ui::Action;
 namespace {
 
 std::filesystem::path layoutFile() { return platform::appDataDir() / "layout.ads"; }
+
+// Real drop targets stay above the floating toolbar while its grip is dragged.
+class ToolbarTarget : public QPushButton {
+public:
+    ToolbarTarget(const char* label, QWidget* parent) : QPushButton(label, parent) { setAcceptDrops(true); }
+
+protected:
+    void dragEnterEvent(QDragEnterEvent* e) override {
+        if (!e->mimeData()->hasFormat(ui::kToolbarMime)) return e->ignore();
+        setDown(true);
+        e->acceptProposedAction();
+    }
+    void dragMoveEvent(QDragMoveEvent* e) override {
+        if (e->mimeData()->hasFormat(ui::kToolbarMime)) e->acceptProposedAction();
+        else e->ignore();
+    }
+    void dragLeaveEvent(QDragLeaveEvent*) override { setDown(false); }
+    void dropEvent(QDropEvent* e) override {
+        if (!e->mimeData()->hasFormat(ui::kToolbarMime)) return e->ignore();
+        setDown(false);
+        e->acceptProposedAction();
+        click();
+    }
+};
 
 // Layers on the system clipboard: our own type, plus the same text for other apps.
 constexpr const char* kLayersMime = "application/x-bemotion-layers";
@@ -183,11 +209,12 @@ void EditorWindow::buildDocks() {
     timeline_ = new TimelinePanel(ctx_);
     toolsPopover_ = new ToolsPopover(tools_, this);
     connect(timeline_, &TimelinePanel::pluginButtonClicked, this, [this](const std::string& id, bool pressed) { runPluginCommand(id, pressed); });
-    // The toolbar goes where its grip is dropped: over the viewport, or back in the timeline.
+    // The grip can drop on a window edge, freely over the viewport, or back in the timeline.
     viewport_->installEventFilter(this);
     auto moveToolbar = [this](bool toViewport, QPoint at) {
         Settings& s = settings();
         s.toolbarInViewport = toViewport;
+        s.toolbarInWindow = false;
         if (toViewport) {
             QWidget* pill = timeline_->toolPill();
             const QSize free = viewport_->size() - pill->sizeHint();
@@ -198,6 +225,8 @@ void EditorWindow::buildDocks() {
         saveSettings();
         placeToolbar();
     };
+    connect(timeline_, &TimelinePanel::toolbarDragActive, this, &EditorWindow::showToolbarTargets);
+    connect(timeline_, &TimelinePanel::toolbarDockRequested, this, &EditorWindow::dockToolbar);
     connect(viewport_, &ViewportPanel::toolbarDropped, this, [moveToolbar](QPoint at) { moveToolbar(true, at); });
     connect(timeline_, &TimelinePanel::toolbarMoveRequested, this, moveToolbar);
     connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] { QTimer::singleShot(0, this, [this] { placeToolbar(); }); });
@@ -250,28 +279,78 @@ void EditorWindow::buildDocks() {
     });
 }
 
+void EditorWindow::dockToolbar(QPointF position) {
+    settings().toolbarInViewport = true;
+    settings().toolbarInWindow = true;
+    settings().toolbarX = static_cast<float>(position.x());
+    settings().toolbarY = static_cast<float>(position.y());
+    saveSettings();
+    placeToolbar();
+}
+
+QRect EditorWindow::toolbarBounds() const {
+    // The dock workspace spans the window below its main header.
+    return QRect(docks_->mapTo(this, QPoint()), docks_->size()).adjusted(8, 8, -8, -8);
+}
+
+void EditorWindow::showToolbarTargets(bool visible) {
+    const char* labels[] = {"Top", "Bottom", "Left", "Right"};
+    const QPointF positions[] = {{0.5, 0}, {0.5, 1}, {0, 0.5}, {1, 0.5}};
+    for (int i = 0; i < 4; ++i) {
+        if (!toolbarTargets_[i]) {
+            auto* target = new ToolbarTarget(labels[i], this);
+            target->setToolTip("Drop the toolbar here");
+            connect(target, &QPushButton::clicked, this, [this, position = positions[i]] {
+                dockToolbar(position);
+                showToolbarTargets(false);
+            });
+            toolbarTargets_[i] = target;
+        }
+    }
+    positionToolbarTargets();
+    for (auto* target : toolbarTargets_) {
+        target->setVisible(visible);
+        if (visible) target->raise();
+    }
+}
+
+void EditorWindow::positionToolbarTargets() {
+    const QRect bounds = toolbarBounds();
+    const QPointF positions[] = {{0.5, 0}, {0.5, 1}, {0, 0.5}, {1, 0.5}};
+    for (int i = 0; i < 4; ++i) {
+        auto* target = toolbarTargets_[i];
+        if (!target) continue;
+        target->resize(target->sizeHint().expandedTo(QSize(76, 32)));
+        target->move(bounds.topLeft() + QPoint(
+            static_cast<int>(positions[i].x() * std::max(0, bounds.width() - target->width())),
+            static_cast<int>(positions[i].y() * std::max(0, bounds.height() - target->height()))));
+    }
+}
+
 void EditorWindow::placeToolbar() {
     QWidget* pill = timeline_->toolPill();
     if (!settings().toolbarInViewport) {
         timeline_->dockToolPill();
         return;
     }
-    if (pill->parentWidget() != viewport_) {
+    QWidget* host = settings().toolbarInWindow ? static_cast<QWidget*>(this) : viewport_;
+    if (pill->parentWidget() != host) {
         timeline_->releaseToolPill();
-        pill->setParent(viewport_);
+        pill->setParent(host);
     }
     pill->resize(pill->sizeHint());
-    const QSize free = viewport_->size() - pill->size();
-    const int margin = 6;
-    pill->move(std::clamp(static_cast<int>(settings().toolbarX * free.width()), margin, std::max(margin, free.width() - margin)),
-               std::clamp(static_cast<int>(settings().toolbarY * free.height()), margin, std::max(margin, free.height() - margin)));
+    const QRect bounds = settings().toolbarInWindow ? toolbarBounds() : viewport_->rect().adjusted(6, 6, -6, -6);
+    pill->move(bounds.topLeft() + QPoint(
+        static_cast<int>(settings().toolbarX * std::max(0, bounds.width() - pill->width())),
+        static_cast<int>(settings().toolbarY * std::max(0, bounds.height() - pill->height()))));
     pill->show();
     pill->raise();
 }
 
 void EditorWindow::showTools() {
-    // Over the timeline's toolbar, where its tiles get dragged to.
-    const QPoint anchor = timeline_->isVisible() ? timeline_->mapTo(this, QPoint(4, 0)) : QPoint(width() / 2 - 210, height() / 2 + 200);
+    // Follow the toolbar, including when it floats at a window edge.
+    QWidget* pill = timeline_->toolPill();
+    const QPoint anchor = pill->isVisible() ? pill->mapTo(this, QPoint()) : QPoint(width() / 2 - 210, height() / 2 + 200);
     toolsPopover_->popup(anchor);
 }
 
@@ -685,7 +764,11 @@ void EditorWindow::buildMenus() {
 
 bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
     if (event->type() == QEvent::MouseMove) pointer_ = static_cast<QMouseEvent*>(event)->globalPosition().toPoint();
-    if (watched == docks_ && event->type() == QEvent::Resize) placeRestoreHandles();
+    if (watched == docks_ && event->type() == QEvent::Resize) {
+        placeRestoreHandles();
+        positionToolbarTargets();
+        if (timeline_ && settings().toolbarInViewport && settings().toolbarInWindow) placeToolbar();
+    }
     if (watched == viewport_ && event->type() == QEvent::Resize && settings().toolbarInViewport) placeToolbar();
     // Double-click a panel tab: maximize it (or bring the layout back).
     if (event->type() == QEvent::MouseButtonDblClick)

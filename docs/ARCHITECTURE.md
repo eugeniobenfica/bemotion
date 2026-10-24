@@ -273,6 +273,12 @@ Rules:
     when it floats over the viewport) are child widgets of the window, not
     separate windows, so drag and drop keeps working. The toolbar moves by its
     grip (a drag with its own MIME type); its tools move by themselves.
+    Dragging the toolbar grip reveals drop targets at the window's top,
+    bottom, left and right edges, with an 8 px margin below the main header
+    and inside the other edges. The toolbar floats above all panels; the grip's
+    context menu offers the same positions. Normalized coordinates preserve
+    the position when resizing. The optional `toolbar_in_window` setting
+    defaults to false so older free viewport positions keep their meaning.
   - Panels minimize from a handle that appears, on hover, where the restore
     handle will be. No focus highlight on panels.
   - Never `show()` / `setVisible(true)` a widget before it has a parent: for

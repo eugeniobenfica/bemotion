@@ -36,7 +36,8 @@ struct Settings {
     bool showRulers = false;           // the viewport's rulers (View > Rulers)
     bool welcomeAdded = false;         // the Welcome project was put in the projects list once
     std::vector<std::string> toolbar = ui::defaultToolbar(); // tool ids in the timeline's toolbar (ui/Tools.h)
-    bool toolbarInViewport = false;      // the toolbar floats over the viewport ...
+    bool toolbarInViewport = false;      // the toolbar floats outside the timeline ...
+    bool toolbarInWindow = false;        // window-relative floating position; older viewport positions stay unchanged
     float toolbarX = 0.5f, toolbarY = 0.0f; // ... with its top-left here (fractions of the free space)
     std::vector<std::string> disabledPlugins; // plugin ids
 };

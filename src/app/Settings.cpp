@@ -83,6 +83,7 @@ void loadSettings() {
         s.showRulers = j.value("show_rulers", s.showRulers);
         s.welcomeAdded = j.value("welcome_added", s.welcomeAdded);
         s.toolbarInViewport = j.value("toolbar_in_viewport", s.toolbarInViewport);
+        s.toolbarInWindow = j.value("toolbar_in_window", s.toolbarInWindow);
         s.toolbarX = std::clamp(j.value("toolbar_x", s.toolbarX), 0.0f, 1.0f);
         s.toolbarY = std::clamp(j.value("toolbar_y", s.toolbarY), 0.0f, 1.0f);
         if (j.contains("toolbar")) {
@@ -105,7 +106,7 @@ void saveSettings() {
               {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}, {"ui_font", s.uiFont},
               {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames},
               {"max_duration", s.maxDuration}, {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"show_rulers", s.showRulers}, {"welcome_added", s.welcomeAdded}, {"toolbar", s.toolbar},
-              {"toolbar_in_viewport", s.toolbarInViewport}, {"toolbar_x", s.toolbarX}, {"toolbar_y", s.toolbarY},
+              {"toolbar_in_viewport", s.toolbarInViewport}, {"toolbar_in_window", s.toolbarInWindow}, {"toolbar_x", s.toolbarX}, {"toolbar_y", s.toolbarY},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);

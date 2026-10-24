@@ -45,6 +45,8 @@ signals:
     // The toolbar was dragged (or sent) to the viewport (at `at`, viewport coordinates; (-1, -1):
     // its default place) or back to the timeline.
     void toolbarMoveRequested(bool toViewport, QPoint at);
+    void toolbarDragActive(bool active);
+    void toolbarDockRequested(QPointF position);
     // A plugin command's button (API 5) was clicked; `pressed`: its state for toggle buttons.
     void pluginButtonClicked(const std::string& commandId, bool pressed);
 
