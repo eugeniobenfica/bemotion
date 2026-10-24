@@ -5,6 +5,7 @@
 #include "core/Clipboard.h"
 #include "core/Data.h"
 #include "core/Describe.h"
+#include "core/Expressions.h"
 #include "core/Ops.h"
 #include "core/Validate.h"
 #include "core/Geometry.h"
@@ -992,6 +993,48 @@ void testLens() {
     CHECK(order.size() == 2 && order.front()->name == "Flat"); // farthest from that eye first
 }
 
+void testExpressions() {
+    Project p;
+    CHECK(run(p, R"([{"op": "layer.add", "type": "ellipse", "name": "Ball", "position": [100, 200]},
+                     {"op": "layer.add", "type": "rectangle", "name": "Box", "start": 1, "duration": 4},
+                     {"op": "expression.set", "layer": "Box", "prop": "rotation", "expression": "time * 90"},
+                     {"op": "expression.set", "layer": "Box", "prop": "position", "expression": "layer(\"Ball\").position + [0, -50]"},
+                     {"op": "expression.set", "layer": "Box", "prop": "opacity", "expression": "progress < 0.5 ? 20 : 100"}])").ok);
+    CHECK(!run(p, R"({"op": "expression.set", "layer": "Box", "prop": "scale", "expression": "time * (2"})").ok); // does not read
+    Composition& c = p.comp;
+    const ExpressionScope scope(c);
+    Layer* box = nullptr;
+    for (Layer& l : c.layers)
+        if (l.name == "Box") box = &l;
+    CHECK(box && near(box->transform.rotation.valueAt(2.0), 180.0f));
+    CHECK(box && near(box->transform.position.valueAt(2.0).x, 100.0f) && near(box->transform.position.valueAt(2.0).y, 150.0f));
+    CHECK(box && near(box->transform.opacity.valueAt(1.5), 20.0f) && near(box->transform.opacity.valueAt(4.5), 100.0f));
+    CHECK(box && near(box->transform.rotation.keyedAt(2.0), 0.0f)); // the keyframes are untouched
+    // value, wiggle (smooth, bounded, the same each time), loop, math on vectors.
+    AnimFloat f(10.0f);
+    f.expression = "wiggle(3, 5)"; // like After Effects: the value, shaken
+    const float w1 = f.valueAt(1.234f), w2 = f.valueAt(1.234f);
+    CHECK(near(w1, w2) && w1 >= 5.0f && w1 <= 15.0f);
+    AnimFloat looped;
+    looped.setKey(0, 0, Easing::Linear); // the segment's easing is on the key it starts at
+    looped.setKey(1, 100);
+    looped.expression = "loop()";
+    CHECK(near(looped.valueAt(1.5), 50.0f) && near(looped.valueAt(2.25), 25.0f));
+    AnimVec2 v(Vec2{1, 2});
+    v.expression = "value * 2 + [10, 20]";
+    CHECK(near(v.valueAt(0).x, 12.0f) && near(v.valueAt(0).y, 24.0f));
+    // A broken one falls back to the keyframes and says why.
+    AnimFloat broken(7.0f);
+    broken.expression = "layer(\"Nobody\").opacity";
+    CHECK(near(broken.valueAt(0), 7.0f) && !expressionError(broken).empty());
+    CHECK(checkExpression("clamp(sin(time) * 2, -1, 1)").empty() && !checkExpression("1 +").empty());
+    // Saved with the project.
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    for (const Layer& l : back.comp.layers)
+        if (l.name == "Box") CHECK(l.transform.rotation.expression == "time * 90");
+}
+
 } // namespace
 
 int main() {
@@ -1041,6 +1084,7 @@ int main() {
         {"cut transitions", testCutTransitions},
         {"subtitles", testSubtitles},
         {"lens", testLens},
+        {"expressions", testExpressions},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

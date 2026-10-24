@@ -50,12 +50,14 @@ json encodeAnimated(const Animated<T>& a) {
         }
         j["keys"] = std::move(keys);
     }
+    if (a.hasExpression()) j["expression"] = a.expression;
     return j;
 }
 
 template <typename T>
 void decodeAnimated(const json& j, Animated<T>& a) {
     if (j.contains("value")) decode(j["value"], a.base);
+    a.expression = j.value("expression", std::string());
     a.keys.clear();
     if (j.contains("keys") && j["keys"].is_array()) {
         for (const auto& kj : j["keys"]) {

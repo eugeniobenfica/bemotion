@@ -199,6 +199,15 @@ operations. Effect ids (`effectId`) are stable strings.
   project is pushed (limit 200). Editing code does not do undo bookkeeping; it
   changes the project and lets the editor commit (§7).
 - **`Describe`** — a compact text summary (for terminals and AIs).
+- **`Expressions`** — a formula per property (`AnimatedBase::expression`),
+  in a small language of its own (`docs/EXPRESSIONS.md`): parsed once per text
+  and cached, run by `Animated<T>::valueAt` (`keyedAt` is the keyframes'
+  value, which `value` reads). What it may read is the composition of the
+  current `ExpressionScope` (thread-local: rendering opens one, the editor sets
+  its own with `setExpressionComposition`); which layer a property belongs to
+  is found by address and cached. A failing expression falls back to the
+  keyframes and leaves `expressionError`. Saved beside the keys
+  (`"expression"`), set with `expression.set`.
 - **`Presets`** — Quick Animations: they write ordinary keyframes. The
   *Animate* panel (`ui/panels/AnimationsPanel`) lists them; dragged onto a
   clip (`kAnimationMime`, the preset as JSON) one plays from the drop point.

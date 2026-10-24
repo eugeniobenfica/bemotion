@@ -1,5 +1,7 @@
 #include "ui/EditorWindow.h"
 
+#include "core/Expressions.h"
+
 #include "app/Automation.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
@@ -790,6 +792,40 @@ void EditorWindow::buildMenus() {
         }
         if (commands.empty()) plugins->addAction("No plugin commands installed")->setEnabled(false);
         plugins->addSeparator();
+        // Scripts, like After Effects' File > Scripts: Lua files with the plugin `doc` API, the
+        // bundled ones and the user's own (app data / scripts).
+        QMenu* scripts = plugins->addMenu("Scripts");
+        scripts->setToolTipsVisible(true);
+        const std::filesystem::path userScripts = platform::appDataDir() / "scripts";
+        int listed = 0;
+        for (const auto& folder : {platform::assetsDir() / "scripts", userScripts}) {
+            std::error_code ec;
+            if (!std::filesystem::is_directory(folder, ec)) continue;
+            std::vector<std::filesystem::path> files;
+            for (const auto& e : std::filesystem::directory_iterator(folder, ec))
+                if (e.path().extension() == ".lua") files.push_back(e.path());
+            std::sort(files.begin(), files.end());
+            if (listed && !files.empty()) scripts->addSeparator();
+            for (const auto& file : files) {
+                QAction* a = scripts->addAction(QString::fromStdString(platform::toUtf8(file.stem())), this, [this, file] { runScriptFile(file); });
+                // Its first comment line says what it does.
+                std::ifstream in(file);
+                std::string first;
+                std::getline(in, first);
+                if (first.rfind("--", 0) == 0) a->setToolTip(QString::fromStdString(first.substr(first.find_first_not_of("- "))));
+                ++listed;
+            }
+        }
+        if (listed) scripts->addSeparator();
+        scripts->addAction("Run Script File...", this, [this] {
+            if (auto file = platform::openFileDialog("Run Script", "Lua script", ".lua")) runScriptFile(*file);
+        });
+        scripts->addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Open Scripts Folder", this, [userScripts] {
+            std::error_code ec;
+            std::filesystem::create_directories(userScripts, ec); // asked for: the folder is made then
+            platform::revealInFileManager(userScripts);
+        });
+        plugins->addSeparator();
         plugins->addAction("Manage Plugins...", this, [] { ui::openSettings(ui::SettingsTab::Plugins); });
     };
     fillPlugins();
@@ -882,6 +918,7 @@ bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
 
 void EditorWindow::tick() {
     const double dt = std::min(0.25, clock_.restart() / 1000.0);
+    setExpressionComposition(&ctx_.comp()); // what expressions read in panels, handles and the timeline
     auto& recorder = media::Recorder::get();
     if (recorder.recording() && recordingStart_ >= 0.0) {
         auto preview = recorder.preview();
@@ -1095,6 +1132,35 @@ void EditorWindow::runPluginCommand(const std::string& id, bool pressed) {
     }
     if (outcome.play >= 0) ctx_.playing = outcome.play == 1;
     setStatus({});
+}
+
+void EditorWindow::runScriptFile(const std::filesystem::path& file) {
+    std::ifstream in(file, std::ios::binary);
+    std::stringstream code;
+    code << in.rdbuf();
+    if (!in) {
+        setStatus("Could not read the script");
+        return;
+    }
+    ctx_.playing = false;
+    // On a copy: a script that fails half-way leaves the project as it was.
+    Project copy = ctx_.project;
+    std::vector<std::string> log;
+    std::string error;
+    const std::string name = platform::toUtf8(file.filename());
+    platform::log("running script " + name);
+    if (!PluginHost::runScript(code.str(), name, copy, ctx_.time, automationEnvironment(), log, error, ctx_.selection)) {
+        QMessageBox::warning(this, "Script", QString::fromStdString(name + ":\n" + error));
+        return;
+    }
+    if (serializeProject(copy) != serializeProject(ctx_.project)) {
+        ctx_.project.comp = std::move(copy.comp);
+        ctx_.pruneSelection();
+        ctx_.touch(); // one undo step
+    }
+    std::string said;
+    for (const std::string& line : log) said += (said.empty() ? "" : "  ·  ") + line;
+    setStatus(QString::fromStdString(said.empty() ? "Ran " + platform::toUtf8(file.stem()) : said)); // what it print()ed, if anything
 }
 
 void EditorWindow::dropFiles(const std::vector<std::filesystem::path>& files, bool onMediaPanel) {

@@ -198,6 +198,11 @@ does.
 <td valign="top">
 
 ### ✦ Extend
+- **Expressions**, like After Effects', in a small safe language: `wiggle(2,
+  30)`, `time * 90`, `loop()`, `layer("Ball").position(time - 0.2)`… on any
+  property ([docs/EXPRESSIONS.md](docs/EXPRESSIONS.md))
+- **Scripts** in Lua (*Plugins › Scripts*): bundled ones (Stagger, Wiggle,
+  Grid of Copies, Random Colors) and your own, one undo step each
 - **Plugins** are sandboxed Lua scripts that add new kinds of objects
 - The bundled **Charts** plugin draws animated column / bar, line / area and
   donut charts and **tables**, from data you paste from a spreadsheet or

@@ -80,6 +80,8 @@ private:
     void saveAs();
     void jumpToKeyframe(int direction);
     void runPluginCommand(const std::string& id, bool pressed = false);
+    // A Lua script (the plugin `doc` API) on the open project, as one undo step.
+    void runScriptFile(const std::filesystem::path& file);
     void arrange(bool stagger, bool vertical = false);
     void setStatus(const QString& text); // errors and notes next to the menus (empty clears)
     bool copyToClipboard();

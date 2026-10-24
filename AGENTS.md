@@ -13,13 +13,13 @@ capability). This file is the short, practical version.
 
 | Area | Files |
 | --- | --- |
-| Document model, rules, operations | `src/core` (`Project`, `Layer`, `Validate`, `Ops`, `Serialization`, `Clipboard`, `Data`, `Arrange`, `Transitions`, `Presets`) — no Qt, no Skia |
+| Document model, rules, operations | `src/core` (`Project`, `Layer`, `Validate`, `Ops`, `Serialization`, `Clipboard`, `Data`, `Arrange`, `Transitions`, `Presets`, `Expressions`) — no Qt, no Skia |
 | Drawing | `src/render` (`SceneRenderer`, `Text`, `PluginCanvas`, `Mesh3D`) |
 | Media, audio, recording, export | `src/media`, `src/export` |
 | Interface | `src/ui` (`EditorWindow`, `EditorContext`, `Theme`, `Style`, `Widgets`, `panels/*`) |
 | App, platform, plugins, automation | `src/app` (`Application`, `Platform`, `Settings`, `PluginHost`, `Automation`, `McpServer`, `Recovery`, `DevScript`) |
 | Bundled plugins | `assets/plugins` (charts, models3d, recorder) |
-| Contracts in prose | `docs/OPERATIONS.md`, `docs/PLUGINS.md`, `docs/AUTOMATION.md` |
+| Contracts in prose | `docs/OPERATIONS.md`, `docs/PLUGINS.md`, `docs/AUTOMATION.md`, `docs/EXPRESSIONS.md` |
 
 ## Rules
 

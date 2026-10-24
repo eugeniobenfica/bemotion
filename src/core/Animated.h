@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <string>
+#include <type_traits>
 #include <vector>
 
 namespace bemotion {
@@ -62,9 +64,20 @@ PathSegment pathSegment(const std::vector<Keyframe<Vec2>>& keys, size_t i);
 // Effective tangents of keys[i] (what Auto / Linear resolve to), relative to its value.
 void pathTangents(const std::vector<Keyframe<Vec2>>& keys, size_t i, Vec2& in, Vec2& out);
 
+class AnimatedBase;
+// The property's expression at `t` (core/Expressions.h), as 1, 2 or 4 floats in `out`; false
+// when it has none or it fails (then the keyframed value is used).
+bool evaluateExpression(const AnimatedBase& property, double t, float out[4]);
+
 class AnimatedBase {
 public:
     virtual ~AnimatedBase() = default;
+
+    // A formula computing the value every frame (core/Expressions.h); empty: none.
+    std::string expression;
+    bool hasExpression() const { return !expression.empty(); }
+    virtual int components() const = 0;                         // 1, 2 or 4
+    virtual void keyedValue(double t, float out[4]) const = 0; // what the keyframes say (no expression)
 
     virtual int keyCount() const = 0;
     virtual double keyTime(int i) const = 0;
@@ -106,7 +119,15 @@ public:
     Animated() = default;
     Animated(T value) : base(value) {} // NOLINT(google-explicit-constructor)
 
+    // The value at `t`: the expression's when it has one, else the keyframes'.
     T valueAt(double t) const {
+        if (!expression.empty())
+            if (float v[4]; evaluateExpression(*this, t, v)) return fromFloats(v);
+        return keyedAt(t);
+    }
+
+    // What the keyframes (or the static value) say at `t`, whatever the expression.
+    T keyedAt(double t) const {
         if (keys.empty()) return base;
         if (t <= keys.front().time) return keys.front().value;
         if (t >= keys.back().time) return keys.back().value;
@@ -167,11 +188,28 @@ public:
         }
     }
 
-    void addKeyAt(double t) override { setKey(t, valueAt(t)); }
+    void addKeyAt(double t) override { setKey(t, keyedAt(t)); }
 
     void clearKeys(double t) override {
-        base = valueAt(t);
+        base = keyedAt(t);
         keys.clear();
+    }
+
+    int components() const override {
+        if constexpr (std::is_same_v<T, float>) return 1;
+        else if constexpr (std::is_same_v<T, Vec2>) return 2;
+        else return 4;
+    }
+    void keyedValue(double t, float out[4]) const override { toFloats(keyedAt(t), out); }
+
+private:
+    static void toFloats(float v, float* out) { out[0] = v; }
+    static void toFloats(Vec2 v, float* out) { out[0] = v.x, out[1] = v.y; }
+    static void toFloats(Color v, float* out) { out[0] = v.r, out[1] = v.g, out[2] = v.b, out[3] = v.a; }
+    static T fromFloats(const float* v) {
+        if constexpr (std::is_same_v<T, float>) return v[0];
+        else if constexpr (std::is_same_v<T, Vec2>) return Vec2{v[0], v[1]};
+        else return Color{v[0], v[1], v[2], v[3]};
     }
 };
 

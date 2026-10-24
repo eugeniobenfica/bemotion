@@ -105,6 +105,10 @@ Removes every keyframe.
 **`key.easing`** — `layer`, `prop`, `easing`, and `time` (one key) or
 `"all": true`.
 
+**`expression.set`** — `layer`, `prop`, `expression` (`""` removes it): a
+formula worked out every frame (`docs/EXPRESSIONS.md`), e.g. `"wiggle(2, 30)"`
+or `"layer(\"Ball\").position + [0, -120]"`. One that does not read fails.
+
 ## Effects
 
 **`effect.add`** → `{"index": i, "params": [...]}` — `layer`, `effect`

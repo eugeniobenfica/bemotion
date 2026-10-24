@@ -1301,7 +1301,8 @@ bool PluginHost::runCommand(const std::string& commandId, Project& project, doub
 }
 
 bool PluginHost::runScript(const std::string& source, const std::string& chunkName, Project& project, double time,
-                           const OpEnvironment& env, std::vector<std::string>& log, std::string& error) {
+                           const OpEnvironment& env, std::vector<std::string>& log, std::string& error,
+                           const std::vector<uint64_t>& selection) {
     const std::string code = withoutBom(source);
     // A throwaway sandbox with its own (fake) plugin entry, so print() has somewhere to go.
     const std::string id = "script";
@@ -1320,7 +1321,7 @@ bool PluginHost::runScript(const std::string& source, const std::string& chunkNa
     if (luaL_loadbufferx(L, code.data(), code.size(), ("@" + chunkName).c_str(), "t") != LUA_OK) {
         error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "syntax error";
     } else {
-        ok = runWithDoc(L, project, time, {}, env, true, error);
+        ok = runWithDoc(L, project, time, selection, env, true, error);
     }
     log = host.plugins_.back().log;
     lua_close(L);

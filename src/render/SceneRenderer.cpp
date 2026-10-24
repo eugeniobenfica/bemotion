@@ -1,5 +1,6 @@
 #include "render/SceneRenderer.h"
 
+#include "core/Expressions.h"
 #include "core/Geometry.h"
 #include "render/PluginCanvas.h"
 #include "render/Text.h"
@@ -527,6 +528,7 @@ void drawComposition(SkCanvas* canvas, const Composition& comp, double time, con
     const Vec2 a = view.toScreen({0, 0});
     const Vec2 b = view.toScreen({static_cast<float>(comp.width), static_cast<float>(comp.height)});
     const SkRect frame = SkRect::MakeLTRB(a.x, a.y, b.x, b.y);
+    const ExpressionScope expressions(comp); // what expressions read while drawing
     if (background && !lens) {
         const Color bg = comp.background;
         canvas->drawRect(frame, SkPaint(SkColor4f{bg.r, bg.g, bg.b, 1.0f}));

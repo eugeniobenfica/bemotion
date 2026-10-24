@@ -2,6 +2,7 @@
 add_library(bemotion_core STATIC
     core/Easing.cpp
     core/Effects.cpp
+    core/Expressions.cpp
     core/Geometry.cpp
     core/History.cpp
     core/Animated.cpp

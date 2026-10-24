@@ -124,7 +124,8 @@ public:
     // Runs a standalone script (a "main" with the same `doc` API, permission "edit"):
     // `bemotion script <project> <file.lua>`. Its print() output goes to `log`.
     static bool runScript(const std::string& code, const std::string& chunkName, Project& project, double time,
-                          const OpEnvironment& env, std::vector<std::string>& log, std::string& error);
+                          const OpEnvironment& env, std::vector<std::string>& log, std::string& error,
+                          const std::vector<uint64_t>& selection = {});
 
 private:
     void loadPlugin(const std::filesystem::path& dir, bool builtin);

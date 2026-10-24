@@ -16,6 +16,7 @@
 
 class QGridLayout;
 class QLabel;
+class QLineEdit;
 class QToolButton;
 class QVBoxLayout;
 
@@ -69,6 +70,8 @@ private:
     std::optional<PropertyRef> prop();
     void setValue(const std::vector<float>& v);
     void showMenu(QPoint at);
+    void openExpression(const QString& text); // shows the editor with `text` (applied when it reads)
+    void applyExpression(const QString& text);
 
     EditorContext& ctx_;
     uint64_t layerId_;
@@ -83,6 +86,12 @@ private:
     QLabel* hex_ = nullptr;
     ui::IconButton* reset_ = nullptr;
     QWidget* container_ = nullptr;
+    QString labelText_;
+    // The expression (core/Expressions.h): a line under the row in Properties.
+    QWidget* exprBox_ = nullptr;
+    QLineEdit* expr_ = nullptr;
+    QLabel* exprError_ = nullptr;
+    bool exprOpen_ = false;
 };
 
 } // namespace bemotion

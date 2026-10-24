@@ -45,7 +45,7 @@ constexpr const char* kUsage =
     "  bemotion apply <project> <ops.json | -> [--out <file>] [--dry-run] [--describe]\n"
     "  bemotion apply <project> --ops '<json>' [...]\n"
     "  bemotion render <project> [--at t1,t2,...] [--count N] [--width W] [--each] --out <file.png>\n"
-    "  bemotion script <project> <file.lua | -> [--time T] [--out <file>] [--dry-run] [--describe]\n"
+    "  bemotion script <project> <file.lua | -> [--time T] [--select id,id] [--out <file>] [--dry-run] [--describe]\n"
     "  bemotion new <project> [--width W] [--height H] [--fps F]\n"
     "  bemotion transcribe <audio or video> [--language auto|en|pt|...] [--from s] [--to s] [--cpu] [--out <file.srt>]\n"
     "  bemotion mcp                    (MCP server for AI assistants: JSON-RPC on stdin / stdout)\n"
@@ -249,8 +249,14 @@ int script(const Args& a) {
     std::vector<std::string> log;
     std::string error;
     const double time = std::atof(a.value("time", "0").c_str());
+    std::vector<uint64_t> selection; // --select 3,7: what doc.selection holds
+    for (std::stringstream ids(a.value("select")); ids.good();) {
+        std::string id;
+        std::getline(ids, id, ',');
+        if (!id.empty()) selection.push_back(std::strtoull(id.c_str(), nullptr, 10));
+    }
     const bool ok = PluginHost::runScript(code, platform::toUtf8(platform::fromUtf8(a.positional[1]).filename()), p, time,
-                                          automationEnvironment(), log, error);
+                                          automationEnvironment(), log, error, selection);
     json out = {{"ok", ok}, {"log", log}};
     if (!ok) {
         out["error"] = error;

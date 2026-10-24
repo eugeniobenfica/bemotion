@@ -2,6 +2,7 @@
 
 #include "core/Arrange.h"
 #include "core/Data.h"
+#include "core/Expressions.h"
 #include "core/Transitions.h"
 #include "core/Validate.h"
 
@@ -219,6 +220,7 @@ public:
             {"ungroup", &Applier::ungroup},
             {"property.set", &Applier::propertySet},
             {"key.add", &Applier::keyAdd},
+            {"expression.set", &Applier::expressionSet},
             {"key.remove", &Applier::keyRemove},
             {"key.clear", &Applier::keyClear},
             {"key.easing", &Applier::keyEasing},
@@ -627,6 +629,17 @@ private:
         case PropertyKind::Vec2: addKey<Vec2>(p, t, v, e); break;
         case PropertyKind::Color: addKey<Color>(p, t, v, e); break;
         }
+        return json::object();
+    }
+
+    // A formula for the property, every frame (core/Expressions.h); "" removes it.
+    json expressionSet(const json& op) {
+        Layer& l = layer(op);
+        const PropertyRef p = property(l, op);
+        const std::string e = text(field(op, "expression"), "expression");
+        if (const std::string problem = e.empty() ? std::string() : checkExpression(e); !problem.empty())
+            fail("the expression does not read: " + problem);
+        p.anim->expression = e;
         return json::object();
     }
 
