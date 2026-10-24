@@ -1355,9 +1355,27 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
         }
         d.rectFilled({bx1 + 3, y + 9}, {bx1 + 5, y + h - 9}, toRgba(lc, 0.8f), 1.0f);
         d.rectFilled({bx2 - 5, y + 9}, {bx2 - 3, y + h - 9}, toRgba(lc, 0.8f), 1.0f);
-        d.pushClip({std::max(bx1, x0), y}, {std::min(bx2, x1), y + h});
-        d.text({std::max(bx1, x0) + 10, y + (h - d.textHeight()) * 0.5f}, theme::ink(150), layer.name);
-        d.popClip();
+        if (layer.type == LayerType::Text && layer.text.subtitle && !layer.text.captions.empty()) {
+            // Subtitles: each caption a block along the clip, with its words.
+            d.pushClip({std::max(bx1, x0), y}, {std::min(bx2, x1), y + h});
+            for (const Caption& c : layer.text.captions) {
+                const float cx0 = timeToX(std::max(c.start, layer.inPoint)), cx1 = timeToX(std::min(c.end, layer.outPoint));
+                if (cx1 < x0 || cx0 > x1 || cx1 - cx0 < 1.0f) continue;
+                d.rectFilled({cx0 + 1, y + 7}, {cx1 - 1, y + h - 7}, toRgba(lc, 0.45f), 3.0f);
+                if (cx1 - cx0 > 24) {
+                    d.pushClip({cx0 + 4, y}, {cx1 - 4, y + h});
+                    QString words = QString::fromStdString(c.text);
+                    words.replace(QChar('\n'), QChar(' '));
+                    d.text({cx0 + 6, y + (h - d.textHeight()) * 0.5f}, theme::ink(210), words);
+                    d.popClip();
+                }
+            }
+            d.popClip();
+        } else {
+            d.pushClip({std::max(bx1, x0), y}, {std::min(bx2, x1), y + h});
+            d.text({std::max(bx1, x0) + 10, y + (h - d.textHeight()) * 0.5f}, theme::ink(150), layer.name);
+            d.popClip();
+        }
         // Summary of the clip's keyframes (within the clip only, e.g. after a cut).
         if (!expanded)
             for (const PropertyRef& pr : layer.properties())

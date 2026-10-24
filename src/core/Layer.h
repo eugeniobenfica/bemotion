@@ -84,6 +84,14 @@ struct CameraProps {
     Vec2 frameSize{1920.0f, 1080.0f}; // composition size, kept in sync (not saved)
 };
 
+// One line of a subtitle layer: shown from `start` to `end` (composition seconds).
+struct Caption {
+    double start = 0.0;
+    double end = 0.0;
+    std::string text;
+    bool operator==(const Caption&) const = default;
+};
+
 struct TextProps {
     std::string text = "Text";
     std::string fontFamily = "Inter"; // any installed family; Inter ships with the app
@@ -94,6 +102,21 @@ struct TextProps {
     AnimFloat tracking{0.0f};    // extra letter spacing, px
     AnimFloat lineHeight{120.0f}; // percent of font size
     AnimFloat reveal{100.0f};    // percent of characters shown (typewriter)
+    AnimFloat wrapWidth{0.0f};   // px: lines also break at spaces past this width (0: only at line breaks)
+    bool outlineEnabled = false; // an outline around the letters
+    AnimColor outlineColor{Color::fromHex(0x000000)};
+    AnimFloat outlineWidth{6.0f};
+    bool boxEnabled = false;     // a box behind the text
+    AnimColor boxColor{Color::fromHex(0x000000, 0.6f)};
+    AnimFloat boxPadding{20.0f};
+    AnimFloat boxRoundness{12.0f};
+    // A subtitle layer shows, at each moment, the caption that covers it (nothing between
+    // captions; `text` while there are none). Captions are sorted and do not overlap.
+    bool subtitle = false;
+    std::vector<Caption> captions;
+
+    // What the layer shows at `t`.
+    const std::string& textAt(double t) const;
 };
 
 // --- plugin objects ---------------------------------------------------------------
@@ -244,6 +267,8 @@ struct Layer {
 
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
+// Subtitles: captions at the bottom of a `compSize` frame, white on a dark box.
+Layer makeSubtitleLayer(Vec2 compSize, double duration);
 Layer makeBackgroundLayer(double duration); // fills the frame, from 0 for `duration`
 Layer makeCameraLayer(Vec2 compSize, double duration);
 Layer makeCompoundLayer(Vec2 position, double duration);

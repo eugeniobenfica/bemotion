@@ -99,6 +99,7 @@ enum class Icon {
     Background, // the background object
     Coffee,     // support (Buy Me a Coffee)
     Microphone, // recording
+    Subtitles,  // the subtitle object
 };
 
 Icon iconForLayer(const Layer& layer);

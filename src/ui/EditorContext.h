@@ -89,6 +89,7 @@ public:
     // New objects are centered unless a composition position is given.
     Layer& addShape(ShapeKind kind, std::optional<Vec2> position = std::nullopt);
     Layer& addText(std::optional<Vec2> position = std::nullopt);
+    Layer& addSubtitles(); // at the bottom of the frame, over the whole composition
     Layer& addCamera();
     Layer& addBackground(); // under everything, over the whole composition
     Layer& addPluginObject(const struct PluginObjectType& type, std::optional<Vec2> position = {});

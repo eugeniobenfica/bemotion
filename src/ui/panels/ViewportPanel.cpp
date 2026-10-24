@@ -502,6 +502,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
         Layer ghost = item                         ? makeMediaLayer(*item, scenePos, 0.0, kDefaultLayerLength)
                       : dropKind_ == ui::kDropCamera ? makeCameraLayer(compSize_, comp.duration)
                       : dropKind_ == ui::kDropBackground ? makeBackgroundLayer(comp.duration)
+                      : dropKind_ == ui::kDropSubtitles ? makeSubtitleLayer(compSize_, comp.duration)
                       : type                       ? makePluginLayer(type->name, type->prototype, scenePos, comp.duration)
                       : dropKind_ < 0              ? makeTextLayer("Your text", scenePos, comp.duration)
                                                    : makeShapeLayer(static_cast<ShapeKind>(dropKind_), scenePos, comp.duration);
@@ -1053,6 +1054,7 @@ void ViewportPanel::dropEvent(QDropEvent* e) {
     if (dropMedia_) ctx_.addMedia(dropMedia_, scenePos);
     else if (dropKind_ == ui::kDropCamera) ctx_.addCamera();
     else if (dropKind_ == ui::kDropBackground) ctx_.addBackground();
+    else if (dropKind_ == ui::kDropSubtitles) ctx_.addSubtitles();
     else if (const PluginObjectType* type = droppedPluginType()) ctx_.addPluginObject(*type, scenePos);
     else if (dropKind_ < 0) ctx_.addText(scenePos);
     else ctx_.addShape(static_cast<ShapeKind>(dropKind_), scenePos);

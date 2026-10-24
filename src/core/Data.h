@@ -28,4 +28,11 @@ DataTable tableFromCells(const Cells& cells);
 Cells cellsOf(const DataTable& table); // header first
 Cells cellsOf(const std::vector<DataRow>& rows);
 
+// Subtitles in SubRip (.srt) text: numbered blocks of "00:00:01,500 --> 00:00:03,000" and
+// text lines (also "." separators and WebVTT-style headers). Out of order input is kept as read.
+std::vector<Caption> parseSrt(const std::string& text);
+// A time as people write it: "1.5", "0:01.5", "00:00:01,500" (seconds; false if not a time).
+bool parseCaptionTime(const std::string& text, double& seconds);
+std::string toSrt(const std::vector<Caption>& captions);
+
 } // namespace bemotion

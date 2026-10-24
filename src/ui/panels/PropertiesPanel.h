@@ -32,6 +32,7 @@ private:
     void buildComposition(QVBoxLayout* col);
     void buildLayer(QVBoxLayout* col, Layer& layer);
     void buildMediaSource(QVBoxLayout* col, Layer& layer);
+    void buildCaptions(QVBoxLayout* col, Layer& layer); // subtitle layers
     void buildPluginData(QVBoxLayout* col, Layer& layer);
     void buildPluginTable(QVBoxLayout* col, Layer& layer);
     void importCsv(uint64_t layerId); // asks for a file, fills the object's data

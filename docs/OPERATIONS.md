@@ -33,7 +33,7 @@ layer and then animate it.
 | --- | --- |
 | every layer | `anchor`, `position`, `scale`, `rotation`, `opacity`; 3D layers `position_z`, `rotation_x` (the top tips away), `rotation_y` (the right side turns away) |
 | shapes | `size`, `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end` |
-| text | `font_size`, `text_color`, `tracking`, `line_height`, `reveal` |
+| text, subtitle | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness` |
 | camera | `position`, `position_z`, `rotation_x` (looks down), `rotation_y` (looks left), `rotation`, `camera_zoom` |
 | media with sound | `volume` |
 | plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
@@ -54,7 +54,9 @@ the content: it ends with the last clip, but never passes `max_duration`.
   `media` (with `"media": id` from `media.import`), `background` (fills the
   whole frame; goes to the bottom; `fill`: `solid`, `linear`, `radial` or
   `image` with `"media": id` and `fit`: `cover`, `contain`, `stretch`) or
-  `plugin` (with `"object": "charts.bar"`). Background properties:
+  `plugin` (with `"object": "charts.bar"`), or `subtitle` (captions at the
+  bottom of the frame, over the whole composition; `captions` or `srt` as in
+  `layer.set`). Background properties:
   `bg_color`, `bg_color2`, `bg_angle`, `bg_zoom`, `bg_offset`, `bg_darken`.
 - `name`, `text` (text layers), `position` (default: the center), `start`
   (seconds, default 0), `duration` (default 5; media: their own length),
@@ -67,7 +69,9 @@ the content: it ends with the last clip, but never passes `max_duration`.
 `three_d` (not cameras or backgrounds),
 `label` (0–7), `start` (moves the clip and its keyframes), `in`, `out` (trim,
 kept between neighbors on its track), and for text `text`, `font`, `style`,
-`align` (`left`, `center`, `right`); for shapes `shape` (kind), `fill`,
+`align` (`left`, `center`, `right`), `outline`, `box` (booleans); for
+subtitles `captions` (`[{"start": s, "end": s, "text": "..."}]`, composition
+seconds; replaces them, sorted, overlaps cut) or `srt` (SubRip text); for shapes `shape` (kind), `fill`,
 `stroke` (booleans); for backgrounds `fill`, `media`, `fit`.
 
 **`layer.remove`** — `layer` (a compound takes its contents along).

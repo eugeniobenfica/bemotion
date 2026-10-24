@@ -178,6 +178,15 @@ private:
                     l.parent = 0;
                 }
             }
+            if (l.type == LayerType::Text && !l.text.captions.empty()) { // sorted, each one after the last, lasting
+                auto& caps = l.text.captions;
+                const auto before = caps;
+                std::erase_if(caps, [](const Caption& c) { return !std::isfinite(c.start) || !std::isfinite(c.end) || c.end <= c.start; });
+                std::stable_sort(caps.begin(), caps.end(), [](const Caption& a, const Caption& b) { return a.start < b.start; });
+                for (size_t i = 1; i < caps.size(); ++i) caps[i - 1].end = std::min(caps[i - 1].end, caps[i].start);
+                std::erase_if(caps, [](const Caption& c) { return c.end <= c.start; });
+                if (caps != before) report(where, "captions out of order or overlapping (put in order)");
+            }
             if (l.threeD && (l.type == LayerType::Camera || l.type == LayerType::Background)) {
                 report(where, "cameras and backgrounds are not 3D layers (switched off)");
                 l.threeD = false;

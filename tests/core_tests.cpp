@@ -15,6 +15,8 @@
 #include "core/Snapping.h"
 #include "core/Transitions.h"
 
+#include <nlohmann/json.hpp>
+
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -913,6 +915,40 @@ void testCamera3DTilt() {
         if (l.name == "Card") CHECK(c.viewFor(l, 0, m) && m.apply({960, 540}).y < 540 - 100);
 }
 
+void testSubtitles() {
+    const std::string srt = "\xEF\xBB\xBF" "1\r\n00:00:01,000 --> 00:00:02,500\r\nHello there\r\n\r\n2\n00:00:03.000 --> 00:00:04.000 align:start\nSecond\nline\n";
+    const std::vector<Caption> caps = parseSrt(srt);
+    CHECK(caps.size() == 2 && near(static_cast<float>(caps[0].start), 1.0f) && near(static_cast<float>(caps[0].end), 2.5f));
+    CHECK(caps.size() == 2 && caps[0].text == "Hello there" && caps[1].text == "Second\nline");
+    CHECK(parseSrt(toSrt(caps)) == caps);
+    double t = 0;
+    CHECK(parseCaptionTime("0:01.50", t) && near(static_cast<float>(t), 1.5f) && !parseCaptionTime("abc", t));
+    Project p;
+    nlohmann::json op = {{"op", "layer.add"}, {"type", "subtitle"}, {"srt", toSrt(caps)}};
+    CHECK(run(p, op.dump().c_str()).ok);
+    const Layer& l = p.comp.layers.front();
+    CHECK(l.type == LayerType::Text && l.text.subtitle && l.text.captions.size() == 2 && l.text.boxEnabled);
+    CHECK(l.text.textAt(1.2) == "Hello there" && l.text.textAt(2.7).empty() && l.text.textAt(3.5) == "Second\nline");
+    CHECK(layerTypeName(l) == "subtitle");
+    CHECK(run(p, R"({"op": "layer.set", "layer": "Subtitles", "captions": [{"start": 5, "end": 6, "text": "Bye"}, {"start": 0, "end": 1, "text": "Hi"}]})").ok);
+    CHECK(p.comp.layers.front().text.captions.front().text == "Hi"); // sorted
+    CHECK(!run(p, R"({"op": "layer.set", "layer": "Subtitles", "captions": [{"start": 2, "end": 1, "text": "x"}]})").ok);
+    CHECK(run(p, R"([{"op": "layer.add", "type": "text", "name": "T"}, {"op": "layer.set", "layer": "T", "outline": true, "box": true}])").ok);
+    CHECK(!run(p, R"({"op": "layer.set", "layer": "T", "srt": ""})").ok); // only subtitles have captions
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back) && validate(back).empty());
+    const Layer* sub = nullptr;
+    for (const Layer& x : back.comp.layers)
+        if (x.text.subtitle) sub = &x;
+    CHECK(sub && sub->text.captions.size() == 2 && sub->text.captions.back().text == "Bye");
+    // Overlapping captions are put in order.
+    for (Layer& x : back.comp.layers)
+        if (x.text.subtitle) x.text.captions = {{3, 5, "b"}, {1, 4, "a"}};
+    CHECK(!validate(back).empty() && !repair(back).empty() && validate(back).empty());
+    for (const Layer& x : back.comp.layers)
+        if (x.text.subtitle) CHECK(x.text.captions.size() == 2 && x.text.captions[0].text == "a" && near(static_cast<float>(x.text.captions[0].end), 3.0f));
+}
+
 } // namespace
 
 int main() {
@@ -960,6 +996,7 @@ int main() {
         {"3d camera", testCamera3D},
         {"3d camera tilt", testCamera3DTilt},
         {"cut transitions", testCutTransitions},
+        {"subtitles", testSubtitles},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

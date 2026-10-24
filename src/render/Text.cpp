@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstdio>
 #include <list>
 #include <memory>
 #include <mutex>
@@ -248,27 +249,123 @@ void drawShaped(SkCanvas* canvas, const Shaped& s, const Placement& p, const SkP
 
 SkColor4f color4(Color c, float opacity) { return {c.r, c.g, c.b, std::clamp(c.a * opacity, 0.0f, 1.0f)}; }
 
+// `text` with line breaks put at spaces so no line is wider than `width` (a word wider than
+// that keeps its own line). Spaces become breaks one for one, so the reveal still counts right.
+std::string wrapped(const std::string& text, const std::string& family, const std::string& style, float size, float tracking,
+                    float width) {
+    if (width <= 0.0f || text.find(' ') == std::string::npos) return text;
+    static std::mutex mutex;
+    static std::unordered_map<std::string, std::string> cache;
+    char key[96];
+    std::snprintf(key, sizeof(key), "%.2f|%.2f|%.1f|", size, tracking, width);
+    const std::string k = std::string(key) + family + '\x1f' + style + '\x1f' + text;
+    {
+        std::lock_guard lock(mutex);
+        if (auto it = cache.find(k); it != cache.end()) return it->second;
+    }
+    const float scale = std::max(1.0f, size) / kRef;
+    auto measure = [&](const std::string& s) {
+        const auto sh = shape(s, family, style);
+        if (sh->lines.empty()) return 0.0f;
+        return sh->lines.front().width * scale + tracking * static_cast<float>(std::max(0, sh->lines.front().clusters - 1));
+    };
+    std::string out = text;
+    size_t lineStart = 0, lastSpace = std::string::npos;
+    for (size_t i = 0; i <= out.size(); ++i) {
+        if (i < out.size() && out[i] == '\n') {
+            lineStart = i + 1;
+            lastSpace = std::string::npos;
+            continue;
+        }
+        if (i < out.size() && out[i] != ' ') continue;
+        // A word ends at i: break at the space before it when the line got too wide.
+        if (lastSpace != std::string::npos && measure(out.substr(lineStart, i - lineStart)) > width) {
+            out[lastSpace] = '\n';
+            lineStart = lastSpace + 1;
+        }
+        lastSpace = i < out.size() ? i : lastSpace;
+    }
+    std::lock_guard lock(mutex);
+    if (cache.size() > 2048) cache.clear();
+    cache[k] = out;
+    return out;
+}
+
+struct Laid {
+    std::shared_ptr<const Shaped> shaped;
+    Placement place;
+};
+
+Laid layOut(const TextProps& text, double t) {
+    const float size = text.fontSize.valueAt(t), tracking = text.tracking.valueAt(t);
+    const std::string shown = wrapped(text.textAt(t), text.fontFamily, text.fontStyle, size, tracking, text.wrapWidth.valueAt(t));
+    Laid l;
+    l.shaped = shape(shown, text.fontFamily, text.fontStyle);
+    l.place = place(*l.shaped, size, tracking, text.lineHeight.valueAt(t), text.align);
+    if (text.subtitle) { // the last line stays put at the position: more lines grow upwards
+        const float shift = -l.place.height * 0.5f;
+        l.place.top += shift;
+        for (float& b : l.place.baseline) b += shift;
+    }
+    return l;
+}
+
+// The box the lines occupy (no padding).
+void linesBox(const TextProps& text, const Placement& p, float size, Vec2& mn, Vec2& mx) {
+    const float left = text.align == TextAlign::Left ? 0.0f : text.align == TextAlign::Center ? -p.width * 0.5f : -p.width;
+    mn = {left, p.top};
+    mx = {left + std::max(p.width, std::max(1.0f, size) * 0.25f), p.top + p.height};
+}
+
 } // namespace
 
 void textBounds(const TextProps& text, double t, Vec2& outMin, Vec2& outMax) {
-    const auto s = shape(text.text, text.fontFamily, text.fontStyle);
-    const float size = text.fontSize.valueAt(t);
-    const Placement p = place(*s, size, text.tracking.valueAt(t), text.lineHeight.valueAt(t), text.align);
-    const float left = text.align == TextAlign::Left ? 0.0f : text.align == TextAlign::Center ? -p.width * 0.5f : -p.width;
-    outMin = {left, p.top};
-    outMax = {left + std::max(p.width, std::max(1.0f, size) * 0.25f), p.top + p.height};
+    const Laid l = layOut(text, t);
+    linesBox(text, l.place, text.fontSize.valueAt(t), outMin, outMax);
+    float grow = text.outlineEnabled ? std::max(0.0f, text.outlineWidth.valueAt(t)) : 0.0f;
+    if (text.boxEnabled) grow = std::max(grow, std::max(0.0f, text.boxPadding.valueAt(t)));
+    outMin = outMin - Vec2{grow, grow};
+    outMax = outMax + Vec2{grow, grow};
 }
 
 void drawText(SkCanvas* canvas, const TextProps& text, double t, float opacity) {
-    const SkColor4f c = color4(text.color.valueAt(t), opacity);
-    if (c.fA <= 0.0f || text.text.empty()) return;
-    const auto s = shape(text.text, text.fontFamily, text.fontStyle);
-    const Placement p = place(*s, text.fontSize.valueAt(t), text.tracking.valueAt(t), text.lineHeight.valueAt(t), text.align);
+    const std::string& shownText = text.textAt(t);
+    if (shownText.empty()) return;
+    const Laid l = layOut(text, t);
+    const Shaped& s = *l.shaped;
+    const Placement& p = l.place;
     const float reveal = std::clamp(text.reveal.valueAt(t), 0.0f, 100.0f) * 0.01f;
-    const int visible = static_cast<int>(std::floor(reveal * static_cast<float>(s->charCount) + 1e-4f));
+    const int visible = static_cast<int>(std::floor(reveal * static_cast<float>(s.charCount) + 1e-4f));
+    if (text.boxEnabled) { // behind everything, around the lines
+        const SkColor4f bc = color4(text.boxColor.valueAt(t), opacity);
+        if (bc.fA > 0.0f && visible > 0) {
+            Vec2 mn, mx;
+            linesBox(text, p, text.fontSize.valueAt(t), mn, mx);
+            const float pad = std::max(0.0f, text.boxPadding.valueAt(t));
+            const SkRect r = SkRect::MakeLTRB(mn.x - pad, mn.y - pad, mx.x + pad, mx.y + pad);
+            const float round = std::clamp(text.boxRoundness.valueAt(t), 0.0f, std::min(r.width(), r.height()) * 0.5f);
+            SkPaint box(bc);
+            box.setAntiAlias(true);
+            canvas->drawRoundRect(r, round, round, box);
+        }
+    }
+    if (text.outlineEnabled) { // under the letters, so it grows outwards
+        const float w = std::max(0.0f, text.outlineWidth.valueAt(t));
+        const SkColor4f oc = color4(text.outlineColor.valueAt(t), opacity);
+        if (w > 0.0f && oc.fA > 0.0f) {
+            SkPaint stroke(oc);
+            stroke.setAntiAlias(true);
+            stroke.setStyle(SkPaint::kStroke_Style);
+            stroke.setStrokeWidth(w * 2.0f);
+            stroke.setStrokeJoin(SkPaint::kRound_Join);
+            drawShaped(canvas, s, p, stroke, visible);
+        }
+    }
+    const SkColor4f c = color4(text.color.valueAt(t), opacity);
+    if (c.fA <= 0.0f) return;
     SkPaint paint(c);
     paint.setAntiAlias(true);
-    drawShaped(canvas, *s, p, paint, visible);
+    drawShaped(canvas, s, p, paint, visible);
 }
 
 float measurePlainText(const std::string& str, float size, bool bold) {

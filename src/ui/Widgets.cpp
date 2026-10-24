@@ -72,7 +72,8 @@ Icon iconForLayer(const Layer& layer) {
         const PluginObjectType* type = PluginHost::get().findType(layer.plugin.objectType);
         return type ? iconForPlugin(type->icon) : Icon::Plugin;
     }
-    return layer.type == LayerType::Text ? Icon::Text : iconForShape(layer.shape.kind);
+    if (layer.type == LayerType::Text) return layer.text.subtitle ? Icon::Subtitles : Icon::Text;
+    return iconForShape(layer.shape.kind);
 }
 
 void drawLogoMark(QPainter& p, Pt center, float radius, Rgba color) {
@@ -249,6 +250,12 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.circle(Pt(b.x + h * 0.12f, c.y + h * 0.25f), h * 0.2f, col, th);
         dl.line(Pt(c.x - h * 0.35f, c.y - h * 0.75f), Pt(c.x - h * 0.35f, c.y - h * 0.4f), col, th);
         dl.line(Pt(c.x - h * 0.05f, c.y - h * 0.85f), Pt(c.x - h * 0.05f, c.y - h * 0.4f), col, th);
+        break;
+    }
+    case Icon::Subtitles: { // a frame with two lines of text at its bottom
+        dl.rect(Pt(c.x - h * 0.85f, c.y - h * 0.65f), Pt(c.x + h * 0.85f, c.y + h * 0.65f), col, size * 0.1f, th);
+        dl.line(Pt(c.x - h * 0.5f, c.y + h * 0.05f), Pt(c.x + h * 0.5f, c.y + h * 0.05f), col, th);
+        dl.line(Pt(c.x - h * 0.3f, c.y + h * 0.35f), Pt(c.x + h * 0.3f, c.y + h * 0.35f), col, th);
         break;
     }
     case Icon::Microphone: { // a capsule on a stand

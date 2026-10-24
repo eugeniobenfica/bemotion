@@ -95,7 +95,7 @@ std::string typeName(const Layer& l) { return layerTypeName(l); }
 std::string layerTypeName(const Layer& l) {
     switch (l.type) {
     case LayerType::Shape: return kShapeNames[static_cast<int>(l.shape.kind)];
-    case LayerType::Text: return "text";
+    case LayerType::Text: return l.text.subtitle ? "subtitle" : "text";
     case LayerType::Camera: return "camera";
     case LayerType::Compound: return "compound";
     case LayerType::Media: return "media";
@@ -349,6 +349,11 @@ private:
             l = makeShapeLayer(static_cast<ShapeKind>(kind), position, duration);
         } else if (type == "text") {
             l = makeTextLayer(has(op, "text") ? text(op["text"], "text") : "Text", position, duration);
+        } else if (type == "subtitle") {
+            l = makeSubtitleLayer({static_cast<float>(c_.width), static_cast<float>(c_.height)},
+                                  has(op, "duration") ? duration : std::max(duration, c_.duration));
+            if (has(op, "position")) l.transform.position.base = position;
+            if (has(op, "captions") || has(op, "srt")) setCaptions(l, op);
         } else if (type == "camera") {
             l = makeCameraLayer({static_cast<float>(c_.width), static_cast<float>(c_.height)},
                                 has(op, "duration") ? duration : std::max(duration, c_.duration));
@@ -373,7 +378,7 @@ private:
             l.outPoint = l.inPoint + duration;
         } else {
             fail("unknown layer type \"" + type + "\"" +
-                 suggest(type, {"text", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "background", "plugin"}));
+                 suggest(type, {"text", "subtitle", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "background", "plugin"}));
         }
         if (has(op, "name")) l.name = text(op["name"], "name");
         // A 3D layer ("three_d": true) at Z position "z" (a "z" alone makes it 3D; a camera's own Z).
@@ -402,6 +407,25 @@ private:
             index = static_cast<int>(c_.layers.size()); // a background goes under everything unless told otherwise
         const Layer& added = c_.addLayer(std::move(l), index);
         return {{"layer", added.id}, {"name", added.name}};
+    }
+
+    // A subtitle layer's captions: "captions" [{"start", "end", "text"}] or "srt" (SubRip text).
+    void setCaptions(Layer& l, const json& op) {
+        std::vector<Caption> caps;
+        if (has(op, "srt")) {
+            caps = parseSrt(text(op["srt"], "srt"));
+        } else {
+            if (!op["captions"].is_array()) fail("\"captions\" must be a list of {\"start\", \"end\", \"text\"}");
+            for (const json& c : op["captions"]) {
+                if (!c.is_object()) fail("each caption is {\"start\": s, \"end\": s, \"text\": \"...\"}");
+                Caption cap{number(field(c, "start"), "start"), number(field(c, "end"), "end"), text(field(c, "text"), "text")};
+                if (cap.end <= cap.start) fail("a caption must end after it starts (\"" + cap.text + "\")");
+                caps.push_back(std::move(cap));
+            }
+        }
+        std::stable_sort(caps.begin(), caps.end(), [](const Caption& a, const Caption& b) { return a.start < b.start; });
+        for (size_t i = 1; i < caps.size(); ++i) caps[i - 1].end = std::min(caps[i - 1].end, caps[i].start);
+        l.text.captions = std::move(caps);
     }
 
     // A background's fill ("solid", "linear", "radial", "image"), picture ("media": id) and fit.
@@ -470,6 +494,12 @@ private:
             l.label = static_cast<int>(v);
         }
         if (has(op, "text")) requireType(l.type == LayerType::Text, "text", "text"), l.text.text = text(op["text"], "text");
+        if (has(op, "outline")) requireType(l.type == LayerType::Text, "outline", "text"), l.text.outlineEnabled = boolean(op["outline"], "outline");
+        if (has(op, "box")) requireType(l.type == LayerType::Text, "box", "text"), l.text.boxEnabled = boolean(op["box"], "box");
+        if (has(op, "captions") || has(op, "srt")) {
+            requireType(l.type == LayerType::Text && l.text.subtitle, has(op, "srt") ? "srt" : "captions", "subtitle");
+            setCaptions(l, op);
+        }
         if (has(op, "font")) requireType(l.type == LayerType::Text, "font", "text"), l.text.fontFamily = text(op["font"], "font");
         if (has(op, "style")) requireType(l.type == LayerType::Text, "style", "text"), l.text.fontStyle = text(op["style"], "style");
         if (has(op, "align")) {
@@ -865,6 +895,7 @@ private:
         if (!l.visible) j["visible"] = false;
         if (l.locked) j["locked"] = true;
         if (l.threeD) j["three_d"] = true;
+        if (l.text.subtitle && l.type == LayerType::Text) j["captions"] = l.text.captions.size();
         if (!l.effects.empty()) j["effects"] = l.effects.size();
         return j;
     }
@@ -881,7 +912,12 @@ private:
         json j = layerSummary(l);
         if (l.type == LayerType::Text)
             j["text"] = {{"text", l.text.text}, {"font", l.text.fontFamily}, {"style", l.text.fontStyle},
-                         {"align", kAlignNames[static_cast<int>(l.text.align)]}};
+                         {"align", kAlignNames[static_cast<int>(l.text.align)]}, {"outline", l.text.outlineEnabled}, {"box", l.text.boxEnabled}};
+        if (l.type == LayerType::Text && l.text.subtitle) {
+            json caps = json::array();
+            for (const Caption& c : l.text.captions) caps.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
+            j["captions"] = std::move(caps);
+        }
         if (l.type == LayerType::Shape) j["shape"] = {{"fill", l.shape.fillEnabled}, {"stroke", l.shape.strokeEnabled}};
         if (l.type == LayerType::Media) j["media"] = l.media.mediaId;
         if (l.type == LayerType::Background)

@@ -703,6 +703,7 @@ void EditorWindow::buildMenus() {
 
     QMenu* add = bar->addMenu("Add");
     add->addAction(action(Action::AddText, "Text", [this] { ctx_.addText(); }));
+    add->addAction("Subtitles", this, [this] { ctx_.addSubtitles(); });
     add->addAction("Camera", this, [this] { ctx_.addCamera(); });
     add->addSeparator();
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i)

@@ -1,6 +1,7 @@
 #include "core/Data.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -205,6 +206,83 @@ Cells cellsOf(const std::vector<DataRow>& rows) {
         std::snprintf(color, sizeof color, "#%02X%02X%02X", byte(r.color.r), byte(r.color.g), byte(r.color.b));
         out.push_back({r.label, value, color});
     }
+    return out;
+}
+
+// --- subtitles --------------------------------------------------------------------
+
+namespace {
+// "01:02:03,456" / "02:03.456" / "3,5" -> seconds; false if it is not a time.
+bool parseSrtTime(std::string s, double& out) {
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+    while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(s.begin());
+    for (char& c : s)
+        if (c == ',') c = '.';
+    double parts[3] = {0, 0, 0};
+    int n = 0;
+    size_t start = 0;
+    for (;;) {
+        const size_t colon = s.find(':', start);
+        const std::string piece = s.substr(start, colon == std::string::npos ? std::string::npos : colon - start);
+        if (piece.empty() || n >= 3) return false;
+        char* end = nullptr;
+        parts[n++] = std::strtod(piece.c_str(), &end);
+        if (end == piece.c_str() || *end != '\0') return false;
+        if (colon == std::string::npos) break;
+        start = colon + 1;
+    }
+    out = n == 3 ? parts[0] * 3600 + parts[1] * 60 + parts[2] : n == 2 ? parts[0] * 60 + parts[1] : parts[0];
+    return out >= 0;
+}
+} // namespace
+
+bool parseCaptionTime(const std::string& text, double& seconds) { return parseSrtTime(text, seconds); }
+
+std::vector<Caption> parseSrt(const std::string& text) {
+    std::vector<Caption> out;
+    Caption* current = nullptr;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        size_t eol = text.find('\n', pos);
+        if (eol == std::string::npos) eol = text.size();
+        std::string line = text.substr(pos, eol - pos);
+        pos = eol + 1;
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.size() >= 3 && static_cast<unsigned char>(line[0]) == 0xEF) line.erase(0, 3); // UTF-8 BOM
+        if (const size_t arrow = line.find("-->"); arrow != std::string::npos) {
+            double a = 0, b = 0;
+            std::string right = line.substr(arrow + 3);
+            if (const size_t sp = right.find_first_not_of(' '); sp != std::string::npos) right = right.substr(sp);
+            if (const size_t sp = right.find(' '); sp != std::string::npos) right = right.substr(0, sp); // WebVTT settings
+            if (parseSrtTime(line.substr(0, arrow), a) && parseSrtTime(right, b) && b > a) {
+                out.push_back({a, b, ""});
+                current = &out.back();
+            } else {
+                current = nullptr;
+            }
+            continue;
+        }
+        if (line.empty()) {
+            current = nullptr; // the block ends
+            continue;
+        }
+        if (current) current->text += (current->text.empty() ? "" : "\n") + line;
+        if (eol == text.size()) break;
+    }
+    std::erase_if(out, [](const Caption& c) { return c.text.empty(); });
+    return out;
+}
+
+std::string toSrt(const std::vector<Caption>& captions) {
+    auto stamp = [](double t) {
+        const long long ms = static_cast<long long>(std::llround(std::max(0.0, t) * 1000.0));
+        char buf[32];
+        std::snprintf(buf, sizeof(buf), "%02lld:%02lld:%02lld,%03lld", ms / 3600000, ms / 60000 % 60, ms / 1000 % 60, ms % 1000);
+        return std::string(buf);
+    };
+    std::string out;
+    for (size_t i = 0; i < captions.size(); ++i)
+        out += std::to_string(i + 1) + "\n" + stamp(captions[i].start) + " --> " + stamp(captions[i].end) + "\n" + captions[i].text + "\n\n";
     return out;
 }
 

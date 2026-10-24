@@ -4,6 +4,7 @@
 #include "app/PluginHost.h"
 #include "app/Automation.h"
 #include "app/PresetLibrary.h"
+#include "app/Settings.h"
 #include "core/Data.h"
 #include "core/Presets.h"
 #include "media/MediaManager.h"
@@ -128,7 +129,7 @@ std::string PropertiesPanel::structureKey() {
       << layer->parent << ':'
       << layer->plugin.objectType << ':' << layer->plugin.rows.size() << ':' << layer->plugin.table.rows.size() << 'x'
       << layer->plugin.table.header.size() << ':' << layer->media.mediaId << ':' << layer->media.hasAudio
-      << ':' << PresetLibrary::all().size() << ':' << presetMessage_;
+      << ':' << PresetLibrary::all().size() << ':' << presetMessage_ << ':' << layer->text.captions.size();
     if (layer->type == LayerType::Compound)
         for (const Layer& c : ctx_.comp().layers)
             if (c.parent == layer->id) k << ',' << c.id << c.name;
@@ -294,6 +295,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         col->addWidget(section);
     }
     if (layer.type == LayerType::Media) buildMediaSource(col, layer);
+    if (layer.type == LayerType::Text && layer.text.subtitle) buildCaptions(col, layer);
 
     // Plugin groups made only of toggles / choices / text / files (no property rows): shown where the
     // plugin declares them, before the next group with properties.
@@ -458,6 +460,21 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                     }
                 });
                 section->addPlainRow("Type", kind);
+            } else if ((group == "Outline" || group == "Box") && layer.type == LayerType::Text) {
+                const bool outline = group == "Outline";
+                auto* on = new QCheckBox;
+                connect(on, &QCheckBox::toggled, this, [this, outline](bool v) {
+                    for (Layer* l : ctx_.selectedLayers())
+                        if (l->type == LayerType::Text) (outline ? l->text.outlineEnabled : l->text.boxEnabled) = v;
+                    ctx_.touch();
+                });
+                section->addPlainRow("Enabled", on);
+                refreshers_.push_back([this, id, on, outline] {
+                    if (const Layer* l = ctx_.comp().findLayer(id)) {
+                        const QSignalBlocker b(on);
+                        on->setChecked(outline ? l->text.outlineEnabled : l->text.boxEnabled);
+                    }
+                });
             } else if (group == "Fill" || group == "Stroke") {
                 const bool fill = group == "Fill";
                 auto* on = new QCheckBox;
@@ -478,6 +495,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                 buildBackgroundRows(section, layer);
             } else if (group == "Text" && layer.type == LayerType::Text) {
                 auto* text = new QPlainTextEdit;
+                if (layer.text.subtitle) text->setPlaceholderText("Shown while there are no captions");
                 text->setFixedHeight(text->fontMetrics().height() * 4 + 12);
                 text->setPlainText(QString::fromStdString(layer.text.text));
                 connect(text, &QPlainTextEdit::textChanged, this, [this, id, text] {
@@ -486,7 +504,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                         ctx_.touch();
                     }
                 });
-                section->addPlainRow("Content", text);
+                section->addPlainRow(layer.text.subtitle ? "Placeholder" : "Content", text);
                 refreshers_.push_back([this, id, text] {
                     if (const Layer* l = ctx_.comp().findLayer(id); l && !text->hasFocus() && text->toPlainText().toStdString() != l->text.text) {
                         const QSignalBlocker b(text);
@@ -682,6 +700,128 @@ void PropertiesPanel::buildMediaSource(QVBoxLayout* col, Layer& layer) {
     connect(reveal, &QPushButton::clicked, this, [file] { platform::revealInFileManager(platform::fromUtf8(file)); });
     row->addWidget(reveal);
     s->body()->addLayout(row);
+    col->addWidget(s);
+}
+
+void PropertiesPanel::buildCaptions(QVBoxLayout* col, Layer& layer) {
+    auto* s = new CollapsibleSection("Captions");
+    const uint64_t id = layer.id;
+    auto captionsOf = [this, id]() -> std::vector<Caption>* {
+        Layer* l = ctx_.comp().findLayer(id);
+        return l && l->type == LayerType::Text ? &l->text.captions : nullptr;
+    };
+    auto stamp = [](double t) {
+        const int cs = static_cast<int>(std::llround(std::max(0.0, t) * 100.0));
+        return QString("%1:%2.%3").arg(cs / 6000).arg(cs / 100 % 60, 2, 10, QChar('0')).arg(cs % 100, 2, 10, QChar('0'));
+    };
+    auto* table = new QTableWidget(static_cast<int>(layer.text.captions.size()), 3);
+    table->setHorizontalHeaderLabels({"Start", "End", "Text"});
+    table->verticalHeader()->setVisible(false);
+    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    table->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table->setWordWrap(true);
+    table->setMinimumHeight(220);
+    auto fill = [table, stamp](const std::vector<Caption>& caps) {
+        const QSignalBlocker b(table);
+        table->setRowCount(static_cast<int>(caps.size()));
+        for (int r = 0; r < static_cast<int>(caps.size()); ++r) {
+            const QString cells[3] = {stamp(caps[r].start), stamp(caps[r].end), QString::fromStdString(caps[r].text)};
+            for (int c = 0; c < 3; ++c) {
+                QTableWidgetItem* item = table->item(r, c);
+                if (!item) table->setItem(r, c, item = new QTableWidgetItem);
+                if (item->text() != cells[c]) item->setText(cells[c]);
+            }
+        }
+    };
+    fill(layer.text.captions);
+    // Typing in a cell edits the caption (times as 1.5, 0:01.50 or 00:00:01,500).
+    connect(table, &QTableWidget::cellChanged, this, [this, table, captionsOf, fill](int r, int c) {
+        std::vector<Caption>* caps = captionsOf();
+        if (!caps || r < 0 || r >= static_cast<int>(caps->size())) return;
+        Caption& cap = (*caps)[r];
+        const std::string v = table->item(r, c)->text().toStdString();
+        double t = 0;
+        if (c == 2) cap.text = v;
+        else if (parseCaptionTime(v, t)) (c == 0 ? cap.start : cap.end) = t;
+        if (cap.end <= cap.start) cap.end = cap.start + 0.5;
+        std::stable_sort(caps->begin(), caps->end(), [](const Caption& a, const Caption& b) { return a.start < b.start; });
+        ctx_.touch();
+        fill(*caps);
+    });
+    // Picking a caption shows it: the playhead goes to its start.
+    connect(table, &QTableWidget::cellClicked, this, [this, captionsOf](int r, int) {
+        if (std::vector<Caption>* caps = captionsOf(); caps && r >= 0 && r < static_cast<int>(caps->size())) {
+            ctx_.playing = false;
+            ctx_.setTime((*caps)[r].start + 1e-3);
+        }
+    });
+    refreshers_.push_back([table, captionsOf, fill] {
+        if (std::vector<Caption>* caps = captionsOf(); caps && !table->hasFocus()) fill(*caps);
+    });
+    s->body()->addWidget(table);
+
+    auto* row = new QHBoxLayout;
+    auto* add = new QPushButton("Add");
+    add->setToolTip("A caption at the playhead (2 seconds, or until the next one)");
+    connect(add, &QPushButton::clicked, this, [this, captionsOf] {
+        std::vector<Caption>* caps = captionsOf();
+        if (!caps) return;
+        const double t = ctx_.time;
+        double end = t + 2.0;
+        for (const Caption& c : *caps)
+            if (c.start > t) end = std::min(end, c.start);
+        for (Caption& c : *caps) // the one under the playhead ends there
+            if (c.start < t && c.end > t) c.end = t;
+        caps->push_back({t, std::max(end, t + 0.2), "New caption"});
+        std::stable_sort(caps->begin(), caps->end(), [](const Caption& a, const Caption& b) { return a.start < b.start; });
+        ctx_.touch();
+    });
+    auto* remove = new QPushButton("Remove");
+    remove->setToolTip("Remove the selected captions");
+    connect(remove, &QPushButton::clicked, this, [this, table, captionsOf] {
+        std::vector<Caption>* caps = captionsOf();
+        if (!caps) return;
+        std::vector<int> rows;
+        for (const QModelIndex& i : table->selectionModel()->selectedRows()) rows.push_back(i.row());
+        std::sort(rows.rbegin(), rows.rend());
+        for (int r : rows)
+            if (r < static_cast<int>(caps->size())) caps->erase(caps->begin() + r);
+        if (!rows.empty()) ctx_.touch();
+    });
+    auto* import = new QPushButton("Import .srt...");
+    connect(import, &QPushButton::clicked, this, [this, captionsOf] {
+        const auto file = platform::openFileDialog("Import Subtitles", "Subtitles", ".srt");
+        std::vector<Caption>* caps = captionsOf();
+        if (!file || !caps) return;
+        std::ifstream in(*file, std::ios::binary);
+        std::stringstream ss;
+        ss << in.rdbuf();
+        std::vector<Caption> read = parseSrt(ss.str());
+        if (read.empty()) return;
+        std::stable_sort(read.begin(), read.end(), [](const Caption& a, const Caption& b) { return a.start < b.start; });
+        *caps = std::move(read);
+        ctx_.touch();
+    });
+    auto* exportSrt = new QPushButton("Export .srt...");
+    connect(exportSrt, &QPushButton::clicked, this, [this, captionsOf] {
+        std::vector<Caption>* caps = captionsOf();
+        if (!caps) return;
+        const auto file = platform::saveFileDialog("Export Subtitles", projectsFolderOrDocuments() / platform::fromUtf8(ctx_.project.name + ".srt"), "Subtitles", ".srt");
+        if (!file) return;
+        std::ofstream out(*file, std::ios::binary);
+        out << toSrt(*caps);
+    });
+    row->addWidget(add);
+    row->addWidget(remove);
+    row->addStretch();
+    s->body()->addLayout(row);
+    auto* row2 = new QHBoxLayout;
+    row2->addWidget(import);
+    row2->addWidget(exportSrt);
+    row2->addStretch();
+    s->body()->addLayout(row2);
     col->addWidget(s);
 }
 

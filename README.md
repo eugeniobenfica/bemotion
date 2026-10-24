@@ -106,6 +106,10 @@ does.
 ### ✦ Create
 - **Objects**: text, rectangle, ellipse, polygon, star, line, camera and plugin
   objects — click to add, or drag onto the canvas or the timeline
+- **Text** with an outline, a box behind it and automatic line wrapping
+- **Subtitles**: captions one after another at the bottom of the frame, on a
+  box; type them, import / export `.srt`, edit them in a list, see them as
+  blocks on the timeline
 - **Media**: import images, video and audio (Ctrl+I or drop files on the
   window) into the *Media* panel; media layers animate like everything else
   and get an animatable *Volume*

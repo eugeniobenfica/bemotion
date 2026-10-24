@@ -151,7 +151,13 @@ std::vector<PropertyRef> Layer::properties() {
         p.push_back({"text_color", "Text", "Color", PropertyKind::Color, &t.color});
         p.push_back({"tracking", "Text", "Tracking", PropertyKind::Float, &t.tracking, 0.25f, -200, 1000});
         p.push_back({"line_height", "Text", "Line Height", PropertyKind::Float, &t.lineHeight, 0.5f, 10, 500, "%.0f%%"});
+        p.push_back({"wrap_width", "Text", "Wrap Width", PropertyKind::Float, &t.wrapWidth, 2.0f, 0, 100000, "%.0f px"});
         p.push_back({"reveal", "Text", "Reveal", PropertyKind::Float, &t.reveal, 0.5f, 0, 100, "%.0f%%"});
+        p.push_back({"outline_color", "Outline", "Color", PropertyKind::Color, &t.outlineColor});
+        p.push_back({"outline_width", "Outline", "Width", PropertyKind::Float, &t.outlineWidth, 0.25f, 0, 500});
+        p.push_back({"box_color", "Box", "Color", PropertyKind::Color, &t.boxColor});
+        p.push_back({"box_padding", "Box", "Padding", PropertyKind::Float, &t.boxPadding, 0.5f, 0, 2000});
+        p.push_back({"box_roundness", "Box", "Roundness", PropertyKind::Float, &t.boxRoundness, 0.5f, 0, 2000});
     }
 
     // Effect parameters. Ids are index based ("fx0.size") and only used at runtime;
@@ -270,6 +276,32 @@ Layer makeCameraLayer(Vec2 compSize, double duration) {
     return l;
 }
 
+const std::string& TextProps::textAt(double t) const {
+    if (!subtitle || captions.empty()) return text;
+    static const std::string none;
+    // The last caption starting at or before t (they are sorted), if it still covers t.
+    auto it = std::upper_bound(captions.begin(), captions.end(), t, [](double v, const Caption& c) { return v < c.start; });
+    if (it == captions.begin()) return none;
+    --it;
+    return t < it->end ? it->text : none;
+}
+
+Layer makeSubtitleLayer(Vec2 compSize, double duration) {
+    Layer l = makeTextLayer("Subtitles", {compSize.x * 0.5f, compSize.y * 0.9f}, duration); // the bottom of the last line
+    l.name = "Subtitles";
+    l.label = 6;
+    TextProps& t = l.text;
+    t.subtitle = true;
+    t.fontStyle = "SemiBold";
+    t.fontSize.base = std::max(16.0f, compSize.y * 0.05f);
+    t.lineHeight.base = 125.0f;
+    t.wrapWidth.base = compSize.x * 0.72f;
+    t.boxEnabled = true;
+    t.boxPadding.base = t.fontSize.base * 0.35f;
+    t.boxRoundness.base = t.fontSize.base * 0.2f;
+    return l;
+}
+
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration) {
     Layer l;
     l.type = LayerType::Text;
@@ -353,6 +385,12 @@ std::vector<float> defaultPropertyValue(const Layer& layer, const char* property
             pp.number = AnimFloat{pp.defaultNumber};
             pp.color = AnimColor{pp.defaultColor};
         }
+        auto props = fresh.properties();
+        if (const PropertyRef* p = fresh.findProperty(props, propertyId)) return propertyValue(*p, 0.0);
+        return {};
+    }
+    if (layer.type == LayerType::Text && layer.text.subtitle) {
+        Layer fresh = makeSubtitleLayer(compCenter * 2.0f, 1.0);
         auto props = fresh.properties();
         if (const PropertyRef* p = fresh.findProperty(props, propertyId)) return propertyValue(*p, 0.0);
         return {};

@@ -186,6 +186,15 @@ Layer& EditorContext::addText(std::optional<Vec2> position) {
     return insertLayer(makeTextLayer("Your text", position.value_or(comp().center()), kDefaultLayerLength));
 }
 
+Layer& EditorContext::addSubtitles() {
+    const Vec2 size{static_cast<float>(comp().width), static_cast<float>(comp().height)};
+    const double saved = time;
+    time = 0.0; // captions use composition time: the layer covers it all
+    Layer& l = insertLayer(makeSubtitleLayer(size, std::max(kDefaultLayerLength, comp().duration)));
+    time = saved;
+    return l;
+}
+
 Layer& EditorContext::addCamera() {
     const Vec2 size{static_cast<float>(comp().width), static_cast<float>(comp().height)};
     Layer& cam = insertLayer(makeCameraLayer(size, std::max(kDefaultLayerLength, comp().duration)) /* the whole composition */);
@@ -230,6 +239,7 @@ Layer* EditorContext::addObject(int kind, Vec2 position, double start) {
     Layer* added = nullptr;
     if (kind == -2) added = &addCamera(); // kDropCamera
     else if (kind == -3) added = &addBackground(); // kDropBackground
+    else if (kind == -4) added = &addSubtitles(); // kDropSubtitles
     else if (kind == -1) added = &addText(position);
     else if (kind >= 0 && kind < static_cast<int>(ShapeKind::Count)) added = &addShape(static_cast<ShapeKind>(kind), position);
     else if (kind <= -100) { // kDropPlugin - i: plugin object type i

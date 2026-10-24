@@ -245,7 +245,15 @@ json encodeLayer(const Layer& constLayer) {
         j["text"] = {{"text", layer.text.text},
                      {"font_family", layer.text.fontFamily},
                      {"font_style", layer.text.fontStyle},
-                     {"align", kAlignIds[static_cast<int>(layer.text.align)]}};
+                     {"align", kAlignIds[static_cast<int>(layer.text.align)]},
+                     {"outline", layer.text.outlineEnabled},
+                     {"box", layer.text.boxEnabled}};
+        if (layer.text.subtitle) {
+            json captions = json::array();
+            for (const Caption& c : layer.text.captions) captions.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
+            j["text"]["subtitle"] = true;
+            j["text"]["captions"] = std::move(captions);
+        }
     }
     json props = json::object();
     for (const auto& p : layer.properties())
@@ -330,6 +338,13 @@ Layer decodeLayer(const json& j) {
         else // files from before font families: Inter weights
             layer.text.fontStyle = fontWeightLabel(enumFromId(kWeightIds, t.value("weight", std::string()), FontWeight::Regular));
         layer.text.align = enumFromId(kAlignIds, t.value("align", std::string()), TextAlign::Center);
+        layer.text.outlineEnabled = t.value("outline", false);
+        layer.text.boxEnabled = t.value("box", false);
+        layer.text.subtitle = t.value("subtitle", false);
+        if (const auto cj = t.find("captions"); cj != t.end() && cj->is_array())
+            for (const json& c : *cj)
+                if (c.is_object())
+                    layer.text.captions.push_back({c.value("start", 0.0), c.value("end", 0.0), c.value("text", std::string())});
     }
     if (j.contains("properties")) {
         const auto& props = j["properties"];
