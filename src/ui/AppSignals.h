@@ -19,6 +19,7 @@ signals:
     void shortcutsChanged();  // keymap edited
     void appearanceChanged(); // theme, fonts, sizes
     void toolbarChanged();    // the timeline toolbar's tools
+    void interfaceResetRequested(); // restore the editor's dock layout
     void pluginsChanged();    // enabled / installed plugins
 };
 

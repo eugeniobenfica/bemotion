@@ -114,9 +114,11 @@ struct TextProps {
     // captions; `text` while there are none). Captions are sorted and do not overlap.
     bool subtitle = false;
     std::vector<Caption> captions;
+    bool counter = false;
+    AnimFloat counterValue{0.0f};
 
     // What the layer shows at `t`.
-    const std::string& textAt(double t) const;
+    std::string textAt(double t) const;
 };
 
 // --- plugin objects ---------------------------------------------------------------
@@ -267,6 +269,7 @@ struct Layer {
 
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration);
 Layer makeTextLayer(const std::string& text, Vec2 position, double duration);
+Layer makeCounterLayer(Vec2 position, double duration);
 // Subtitles: captions at the bottom of a `compSize` frame, white on a dark box.
 Layer makeSubtitleLayer(Vec2 compSize, double duration);
 Layer makeBackgroundLayer(double duration); // fills the frame, from 0 for `duration`

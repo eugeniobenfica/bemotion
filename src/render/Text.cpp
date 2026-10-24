@@ -329,7 +329,7 @@ void textBounds(const TextProps& text, double t, Vec2& outMin, Vec2& outMax) {
 }
 
 void drawText(SkCanvas* canvas, const TextProps& text, double t, float opacity) {
-    const std::string& shownText = text.textAt(t);
+    const std::string shownText = text.textAt(t);
     if (shownText.empty()) return;
     const Laid l = layOut(text, t);
     const Shaped& s = *l.shaped;

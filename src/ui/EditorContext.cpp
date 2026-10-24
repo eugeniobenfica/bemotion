@@ -186,6 +186,10 @@ Layer& EditorContext::addText(std::optional<Vec2> position) {
     return insertLayer(makeTextLayer("Your text", position.value_or(comp().center()), kDefaultLayerLength));
 }
 
+Layer& EditorContext::addCounter(std::optional<Vec2> position) {
+    return insertLayer(makeCounterLayer(position.value_or(comp().center()), kDefaultLayerLength));
+}
+
 Layer& EditorContext::addSubtitles() {
     const Vec2 size{static_cast<float>(comp().width), static_cast<float>(comp().height)};
     const double saved = time;
@@ -240,6 +244,7 @@ Layer* EditorContext::addObject(int kind, Vec2 position, double start) {
     if (kind == -2) added = &addCamera(); // kDropCamera
     else if (kind == -3) added = &addBackground(); // kDropBackground
     else if (kind == -4) added = &addSubtitles(); // kDropSubtitles
+    else if (kind == -5) added = &addCounter(position); // kDropCounter
     else if (kind == -1) added = &addText(position);
     else if (kind >= 0 && kind < static_cast<int>(ShapeKind::Count)) added = &addShape(static_cast<ShapeKind>(kind), position);
     else if (kind <= -100) { // kDropPlugin - i: plugin object type i

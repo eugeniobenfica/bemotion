@@ -341,8 +341,10 @@ void PropertyRow::showMenu(QPoint at) {
         ctx_.touch();
     })->setEnabled(anim.isAnimated());
     menu.addAction("Reset and Clear Animation", [&] {
+        const std::vector<float> defaults = defaultPropertyValue(*layer, p->id, ctx_.comp().center());
+        if (defaults.empty()) return;
         anim.clearKeys(t);
-        setPropertyValue(*p, t, defaultPropertyValue(*layer, p->id, ctx_.comp().center()));
+        setPropertyValue(*p, t, defaults);
         ctx_.touch();
     });
     menu.exec(at);

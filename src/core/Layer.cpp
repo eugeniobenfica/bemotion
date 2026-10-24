@@ -147,6 +147,8 @@ std::vector<PropertyRef> Layer::properties() {
         }
     } else {
         auto& t = text;
+        if (t.counter)
+            p.push_back({"counter_value", "Counter", "Value", PropertyKind::Float, &t.counterValue, 1.0f, -1000000000, 1000000000, "%.0f"});
         p.push_back({"font_size", "Text", "Font Size", PropertyKind::Float, &t.fontSize, 0.5f, 1, 2000, "%.0f px"});
         p.push_back({"text_color", "Text", "Color", PropertyKind::Color, &t.color});
         p.push_back({"tracking", "Text", "Tracking", PropertyKind::Float, &t.tracking, 0.25f, -200, 1000});
@@ -276,28 +278,39 @@ Layer makeCameraLayer(Vec2 compSize, double duration) {
     return l;
 }
 
-const std::string& TextProps::textAt(double t) const {
+std::string TextProps::textAt(double t) const {
+    if (counter) return std::to_string(static_cast<long long>(std::llround(counterValue.valueAt(t))));
     if (!subtitle || captions.empty()) return text;
-    static const std::string none;
     // The last caption starting at or before t (they are sorted), if it still covers t.
     auto it = std::upper_bound(captions.begin(), captions.end(), t, [](double v, const Caption& c) { return v < c.start; });
-    if (it == captions.begin()) return none;
+    if (it == captions.begin()) return {};
     --it;
-    return t < it->end ? it->text : none;
+    return t < it->end ? it->text : std::string();
+}
+
+Layer makeCounterLayer(Vec2 position, double duration) {
+    Layer l = makeTextLayer("Counter", position, duration);
+    l.text.counter = true;
+    l.text.counterValue.setKey(0.0, 0.0f, Easing::Linear);
+    l.text.counterValue.setKey(duration, 100.0f);
+    return l;
 }
 
 Layer makeSubtitleLayer(Vec2 compSize, double duration) {
-    Layer l = makeTextLayer("Subtitles", {compSize.x * 0.5f, compSize.y * 0.9f}, duration); // the bottom of the last line
+    Layer l = makeTextLayer("Subtitles", {compSize.x * 0.5f, compSize.y * 0.92f}, duration); // the bottom of the last line
     l.name = "Subtitles";
     l.label = 6;
     TextProps& t = l.text;
     t.subtitle = true;
     t.fontStyle = "SemiBold";
-    t.fontSize.base = std::max(16.0f, compSize.y * 0.05f);
+    t.fontSize.base = std::max(16.0f, compSize.y * 0.055f);
     t.lineHeight.base = 125.0f;
-    t.wrapWidth.base = compSize.x * 0.72f;
+    t.wrapWidth.base = compSize.x * 0.78f;
+    t.outlineEnabled = true;
+    t.outlineWidth.base = std::max(2.0f, t.fontSize.base * 0.045f);
     t.boxEnabled = true;
-    t.boxPadding.base = t.fontSize.base * 0.35f;
+    t.boxColor.base = Color::fromHex(0x000000, 0.74f);
+    t.boxPadding.base = t.fontSize.base * 0.4f;
     t.boxRoundness.base = t.fontSize.base * 0.2f;
     return l;
 }
@@ -371,6 +384,7 @@ Layer makeBackgroundLayer(double duration) {
 }
 
 std::vector<float> defaultPropertyValue(const Layer& layer, const char* propertyId, Vec2 compCenter) {
+    if (layer.type == LayerType::Media && std::strcmp(propertyId, "volume") == 0) return {100.0f};
     if (layer.type == LayerType::Background) {
         Layer fresh = makeBackgroundLayer(1.0);
         fresh.background.fill = layer.background.fill;
@@ -385,6 +399,12 @@ std::vector<float> defaultPropertyValue(const Layer& layer, const char* property
             pp.number = AnimFloat{pp.defaultNumber};
             pp.color = AnimColor{pp.defaultColor};
         }
+        auto props = fresh.properties();
+        if (const PropertyRef* p = fresh.findProperty(props, propertyId)) return propertyValue(*p, 0.0);
+        return {};
+    }
+    if (layer.type == LayerType::Text && layer.text.counter) {
+        Layer fresh = makeCounterLayer(compCenter, 1.0);
         auto props = fresh.properties();
         if (const PropertyRef* p = fresh.findProperty(props, propertyId)) return propertyValue(*p, 0.0);
         return {};

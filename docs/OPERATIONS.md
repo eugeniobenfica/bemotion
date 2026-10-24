@@ -33,7 +33,7 @@ layer and then animate it.
 | --- | --- |
 | every layer | `anchor`, `position`, `scale`, `rotation`, `opacity`; 3D layers `position_z`, `rotation_x` (the top tips away), `rotation_y` (the right side turns away) |
 | shapes | `size`, `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end` |
-| text, subtitle | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness` |
+| text, subtitle, counter | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness`; counter also has `counter_value` |
 | camera | `position`, `position_z`, `rotation_x` (looks down), `rotation_y` (looks left), `rotation`, `camera_zoom` |
 | media with sound | `volume` |
 | plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
@@ -50,7 +50,7 @@ the content: it ends with the last clip, but never passes `max_duration`.
 ## Layers
 
 **`layer.add`** → `{"layer": id, "name": name}`
-- `type`: `text`, `rectangle`, `ellipse`, `polygon`, `star`, `line`, `camera`,
+- `type`: `text`, `counter` (text that counts from 0 to 100 across its duration), `rectangle`, `ellipse`, `polygon`, `star`, `line`, `camera`,
   `media` (with `"media": id` from `media.import`), `background` (fills the
   whole frame; goes to the bottom; `fill`: `solid`, `linear`, `radial` or
   `image` with `"media": id` and `fit`: `cover`, `contain`, `stretch`) or

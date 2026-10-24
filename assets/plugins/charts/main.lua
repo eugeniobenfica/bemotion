@@ -907,12 +907,24 @@ bemotion.register_object {
         local region, r = m.regions[entry.region], entry.row
         local e, t = item_progress(o, order[entry.region], #matched)
         local x, y = at(region.lx, region.ly)
+        local visible = x >= x0 and x <= x1 and y >= y0 and y <= y0 + bh
         local both = o.show_labels and o.show_values
         local half_w = math.max(o.show_labels and g.measure(r.label, fs * 0.75, true) or 0,
                                 o.show_values and g.measure(value_text(o, r.value), fs * 0.75) or 0) / 2 + fs * 0.2
         local half_h = (both and fs * 1.1 or fs * 0.55)
-        if t > 0 and free(x - half_w, y - half_h, x + half_w, y + half_h) then
+        -- Keep complete labels inside the map and give them a stable dark backing over
+        -- both pale and dark regions. Dense labels still yield to higher values.
+        local margin = fs * 0.2
+        if half_w * 2 + margin * 2 <= bw and half_h * 2 + margin * 2 <= bh then
+          x = clamp(x, x0 + half_w + margin, x1 - half_w - margin)
+          y = clamp(y, y0 + half_h + margin, y0 + bh - half_h - margin)
+        end
+        if visible and t > 0 and half_w * 2 + margin * 2 <= bw and half_h * 2 + margin * 2 <= bh
+            and free(x - half_w, y - half_h, x + half_w, y + half_h) then
           local tc = bemotion.with_alpha(o.text_color, clamp(t * 3, 0, 1) * emphasis(o, r))
+          local dark_text = 0.2126 * o.text_color.r + 0.7152 * o.text_color.g + 0.0722 * o.text_color.b < 0.5
+          g.rect(x - half_w, y - half_h, half_w * 2, half_h * 2,
+                 bemotion.with_alpha(dark_text and "#FFFFFF" or "#10151D", clamp(t * 2, 0, 0.8)), fs * 0.2)
           if o.show_labels and o.show_values then
             g.text(r.label, x, y - fs * 0.55, fs * 0.75, tc, "center", true)
             g.text(value_text(o, r.value * e), x, y + fs * 0.45, fs * 0.75, tc, "center")

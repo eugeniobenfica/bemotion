@@ -157,6 +157,7 @@ void testMedia() {
     l.shiftTime(2.0);
     CHECK(near(static_cast<float>(l.media.start), 3.0f) && near(static_cast<float>(l.inPoint), 3.0f));
     l.media.volume.setKey(3.0, 50.0f);
+    CHECK(defaultPropertyValue(l, "volume", p.comp.center()) == std::vector<float>{100.0f});
     const uint64_t layerId = l.id; // `l` does not survive adding more layers
 
     // Trimming stops at the source's ends; stills can be stretched freely.
@@ -933,6 +934,7 @@ void testSubtitles() {
     CHECK(run(p, op.dump().c_str()).ok);
     const Layer& l = p.comp.layers.front();
     CHECK(l.type == LayerType::Text && l.text.subtitle && l.text.captions.size() == 2 && l.text.boxEnabled);
+    CHECK(l.text.outlineEnabled && l.text.boxColor.base.a > 0.7f && l.text.wrapWidth.base > p.comp.width * 0.75f);
     CHECK(l.text.textAt(1.2) == "Hello there" && l.text.textAt(2.7).empty() && l.text.textAt(3.5) == "Second\nline");
     CHECK(layerTypeName(l) == "subtitle");
     CHECK(run(p, R"({"op": "layer.set", "layer": "Subtitles", "captions": [{"start": 5, "end": 6, "text": "Bye"}, {"start": 0, "end": 1, "text": "Hi"}]})").ok);
@@ -952,6 +954,23 @@ void testSubtitles() {
     CHECK(!validate(back).empty() && !repair(back).empty() && validate(back).empty());
     for (const Layer& x : back.comp.layers)
         if (x.text.subtitle) CHECK(x.text.captions.size() == 2 && x.text.captions[0].text == "a" && near(static_cast<float>(x.text.captions[0].end), 3.0f));
+}
+
+void testCounter() {
+    Project p;
+    CHECK(run(p, R"({"op":"layer.add","type":"counter","duration":4})").ok);
+    const Layer& l = p.comp.layers.front();
+    CHECK(layerTypeName(l) == "counter" && l.text.counter && !l.text.subtitle);
+    CHECK(l.text.textAt(0) == "0" && l.text.textAt(2) == "50" && l.text.textAt(4) == "100");
+    CHECK(l.text.counterValue.keyCount() == 2);
+    CHECK(run(p, R"({"op":"property.set","layer":"Counter","prop":"counter_value","time":4,"value":250})").ok);
+    CHECK(p.comp.layers.front().text.textAt(4) == "250");
+    Project loaded;
+    CHECK(deserializeProject(serializeProject(p), loaded) && validate(loaded).empty());
+    CHECK(loaded.comp.layers.front().text.counter && loaded.comp.layers.front().text.textAt(4) == "250");
+    loaded.comp.layers.front().text.subtitle = true;
+    CHECK(!validate(loaded).empty() && !repair(loaded).empty());
+    CHECK(loaded.comp.layers.front().text.subtitle && !loaded.comp.layers.front().text.counter);
 }
 
 void testLens() {
@@ -1083,6 +1102,7 @@ int main() {
         {"3d camera tilt", testCamera3DTilt},
         {"cut transitions", testCutTransitions},
         {"subtitles", testSubtitles},
+        {"counter", testCounter},
         {"lens", testLens},
         {"expressions", testExpressions},
     };

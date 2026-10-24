@@ -250,6 +250,7 @@ json encodeLayer(const Layer& constLayer) {
                      {"align", kAlignIds[static_cast<int>(layer.text.align)]},
                      {"outline", layer.text.outlineEnabled},
                      {"box", layer.text.boxEnabled}};
+        if (layer.text.counter) j["text"]["counter"] = true;
         if (layer.text.subtitle) {
             json captions = json::array();
             for (const Caption& c : layer.text.captions) captions.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
@@ -343,6 +344,7 @@ Layer decodeLayer(const json& j) {
         layer.text.outlineEnabled = t.value("outline", false);
         layer.text.boxEnabled = t.value("box", false);
         layer.text.subtitle = t.value("subtitle", false);
+        layer.text.counter = t.value("counter", false);
         if (const auto cj = t.find("captions"); cj != t.end() && cj->is_array())
             for (const json& c : *cj)
                 if (c.is_object())

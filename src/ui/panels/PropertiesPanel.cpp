@@ -495,23 +495,25 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             } else if (group == "Background" && layer.type == LayerType::Background) {
                 buildBackgroundRows(section, layer);
             } else if (group == "Text" && layer.type == LayerType::Text) {
-                auto* text = new QPlainTextEdit;
-                if (layer.text.subtitle) text->setPlaceholderText("Shown while there are no captions");
-                text->setFixedHeight(text->fontMetrics().height() * 4 + 12);
-                text->setPlainText(QString::fromStdString(layer.text.text));
-                connect(text, &QPlainTextEdit::textChanged, this, [this, id, text] {
-                    if (Layer* l = ctx_.comp().findLayer(id)) {
-                        l->text.text = text->toPlainText().toStdString();
-                        ctx_.touch();
-                    }
-                });
-                section->addPlainRow(layer.text.subtitle ? "Placeholder" : "Content", text);
-                refreshers_.push_back([this, id, text] {
-                    if (const Layer* l = ctx_.comp().findLayer(id); l && !text->hasFocus() && text->toPlainText().toStdString() != l->text.text) {
-                        const QSignalBlocker b(text);
-                        text->setPlainText(QString::fromStdString(l->text.text));
-                    }
-                });
+                if (!layer.text.counter) {
+                    auto* text = new QPlainTextEdit;
+                    if (layer.text.subtitle) text->setPlaceholderText("Shown while there are no captions");
+                    text->setFixedHeight(text->fontMetrics().height() * 4 + 12);
+                    text->setPlainText(QString::fromStdString(layer.text.text));
+                    connect(text, &QPlainTextEdit::textChanged, this, [this, id, text] {
+                        if (Layer* l = ctx_.comp().findLayer(id)) {
+                            l->text.text = text->toPlainText().toStdString();
+                            ctx_.touch();
+                        }
+                    });
+                    section->addPlainRow(layer.text.subtitle ? "Placeholder" : "Content", text);
+                    refreshers_.push_back([this, id, text] {
+                        if (const Layer* l = ctx_.comp().findLayer(id); l && !text->hasFocus() && text->toPlainText().toStdString() != l->text.text) {
+                            const QSignalBlocker b(text);
+                            text->setPlainText(QString::fromStdString(l->text.text));
+                        }
+                    });
+                }
 
                 auto* font = newCombo();
                 font->setEditable(true);

@@ -529,6 +529,49 @@ QWidget* interfacePage() {
     });
     col->addWidget(intro);
     col->addWidget(hintLabel("The bemotion logo animation shown when the app opens (a click or any key skips it)."));
+    col->addSpacing(12);
+    col->addWidget(sectionLabel("RESET INTERFACE"));
+    auto* resetInterface = new QPushButton("Reset Interface...");
+    resetInterface->setToolTip("Restore theme, toolbar, shortcuts, preview and panel layout");
+    QObject::connect(resetInterface, &QPushButton::clicked, resetInterface, [] {
+        if (QMessageBox::question(g_window, "Reset Interface", "Restore the entire interface to its defaults?") != QMessageBox::Yes) return;
+        Settings& s = settings();
+        const Settings d;
+        s.advanced = d.advanced;
+        s.theme = d.theme;
+        s.customAccent = d.customAccent;
+        s.accent = d.accent;
+        s.customPalette = d.customPalette;
+        s.palette = d.palette;
+        s.timelineLayerRow = d.timelineLayerRow;
+        s.timelinePropertyRow = d.timelinePropertyRow;
+        s.keyframeSize = d.keyframeSize;
+        s.textScale = d.textScale;
+        s.uiFont = d.uiFont;
+        s.showIntro = d.showIntro;
+        s.showRulers = d.showRulers;
+        s.previewQuality = d.previewQuality;
+        s.toolbar = d.toolbar;
+        s.toolbarInViewport = d.toolbarInViewport;
+        s.toolbarInWindow = d.toolbarInWindow;
+        s.toolbarX = d.toolbarX;
+        s.toolbarY = d.toolbarY;
+        loadKeymap("{}");
+        std::error_code ec;
+        const auto layoutFile = platform::appDataDir() / "layout.ads";
+        std::filesystem::remove(layoutFile, ec);
+        if (ec) {
+            ec.clear(); // OneDrive may hold the file briefly while syncing.
+            std::filesystem::remove(layoutFile, ec);
+        }
+        emit AppSignals::get().shortcutsChanged();
+        emit AppSignals::get().toolbarChanged();
+        emit AppSignals::get().interfaceResetRequested();
+        changed(true);
+        if (ec) QMessageBox::warning(g_window, "Reset Interface", "The saved panel layout could not be removed. Close the editor and try again.");
+    });
+    col->addWidget(resetInterface);
+    col->addWidget(hintLabel("Keeps projects, media, plugins and recent files."));
     return page;
 }
 

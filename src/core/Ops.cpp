@@ -96,7 +96,7 @@ std::string typeName(const Layer& l) { return layerTypeName(l); }
 std::string layerTypeName(const Layer& l) {
     switch (l.type) {
     case LayerType::Shape: return kShapeNames[static_cast<int>(l.shape.kind)];
-    case LayerType::Text: return l.text.subtitle ? "subtitle" : "text";
+    case LayerType::Text: return l.text.subtitle ? "subtitle" : l.text.counter ? "counter" : "text";
     case LayerType::Camera: return "camera";
     case LayerType::Compound: return "compound";
     case LayerType::Media: return "media";
@@ -351,6 +351,8 @@ private:
             l = makeShapeLayer(static_cast<ShapeKind>(kind), position, duration);
         } else if (type == "text") {
             l = makeTextLayer(has(op, "text") ? text(op["text"], "text") : "Text", position, duration);
+        } else if (type == "counter") {
+            l = makeCounterLayer(position, duration);
         } else if (type == "subtitle") {
             l = makeSubtitleLayer({static_cast<float>(c_.width), static_cast<float>(c_.height)},
                                   has(op, "duration") ? duration : std::max(duration, c_.duration));
@@ -380,7 +382,7 @@ private:
             l.outPoint = l.inPoint + duration;
         } else {
             fail("unknown layer type \"" + type + "\"" +
-                 suggest(type, {"text", "subtitle", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "background", "plugin"}));
+                 suggest(type, {"text", "counter", "subtitle", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "background", "plugin"}));
         }
         if (has(op, "name")) l.name = text(op["name"], "name");
         // A 3D layer ("three_d": true) at Z position "z" (a "z" alone makes it 3D; a camera's own Z).
@@ -495,7 +497,7 @@ private:
             if (v < 0 || v >= kLabelColorCount || v != std::floor(v)) fail("\"label\" must be 0 to 7");
             l.label = static_cast<int>(v);
         }
-        if (has(op, "text")) requireType(l.type == LayerType::Text, "text", "text"), l.text.text = text(op["text"], "text");
+        if (has(op, "text")) requireType(l.type == LayerType::Text && !l.text.counter, "text", "text"), l.text.text = text(op["text"], "text");
         if (has(op, "outline")) requireType(l.type == LayerType::Text, "outline", "text"), l.text.outlineEnabled = boolean(op["outline"], "outline");
         if (has(op, "box")) requireType(l.type == LayerType::Text, "box", "text"), l.text.boxEnabled = boolean(op["box"], "box");
         if (has(op, "captions") || has(op, "srt")) {

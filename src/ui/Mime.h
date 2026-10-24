@@ -16,6 +16,7 @@ inline constexpr const char* kObjectMime = "application/x-bemotion-object";
 inline constexpr int kDropCamera = -2;
 inline constexpr int kDropBackground = -3;
 inline constexpr int kDropSubtitles = -4;
+inline constexpr int kDropCounter = -5;
 inline constexpr int kDropPlugin = -100;
 // A Media panel item: its media id.
 inline constexpr const char* kMediaMime = "application/x-bemotion-media";

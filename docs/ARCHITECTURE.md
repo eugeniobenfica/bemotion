@@ -169,6 +169,9 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
   `PropertyRef` holds pointers into the layer: **use it immediately, never
   store it** across edits. Store the layer id + property id instead
   (`findProperty`).
+- **Counter text** is a text layer with an optional `counter` flag and an animated
+  `counter_value` property. It uses the regular text renderer and file format;
+  older text layers keep their existing behavior.
 - `propertyValue` / `setPropertyValue` / `defaultPropertyValue` read and write
   any property as 1, 2 or 4 floats.
 

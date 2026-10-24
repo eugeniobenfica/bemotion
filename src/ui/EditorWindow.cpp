@@ -211,7 +211,12 @@ void EditorWindow::buildDocks() {
     const QString adsStyle = docks_->styleSheet();
     docks_->setStyleSheet(adsStyle + theme::dockStyleSheet());
     connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, this,
-            [this, adsStyle] { docks_->setStyleSheet(adsStyle + theme::dockStyleSheet()); });
+            [this, adsStyle] {
+                docks_->setStyleSheet(adsStyle + theme::dockStyleSheet());
+                if (viewport_) viewport_->setPreviewQuality(settings().previewQuality);
+                ctx_.showRulers = settings().showRulers;
+            });
+    connect(&ui::AppSignals::get(), &ui::AppSignals::interfaceResetRequested, this, [this] { resetLayout(); });
 
     objects_ = new ObjectsPanel(ctx_);
     media_ = new MediaPanel(ctx_);
@@ -526,6 +531,8 @@ void EditorWindow::placeRestoreHandles() {
 }
 
 void EditorWindow::resetLayout() {
+    if (viewportFullscreen_) toggleViewportFullscreen();
+    while (!minimized_.empty()) restoreMinimized(0);
     if (!defaultLayout_.isEmpty()) docks_->restoreState(defaultLayout_);
     beforeMaximize_.clear();
     for (auto& [name, d] : dockWidgets_) d->toggleView(true);

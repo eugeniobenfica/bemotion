@@ -79,6 +79,8 @@ void ObjectsPanel::rebuild() {
 
     Section text = section("Text");
     text.add(makeTile(ui::Icon::Text, "Text", "Click to add at the center, or drag onto the canvas (T)", -1, [this] { ctx_.addText(); }));
+    text.add(makeTile(ui::Icon::Text, "Counter", "Animated number from 0 to 100; edit its Value keyframes in Properties or the timeline",
+                      ui::kDropCounter, [this] { ctx_.addCounter(); }));
     text.add(makeTile(ui::Icon::Subtitles, "Subtitles",
                       "Captions at the bottom of the frame, one after another: type them, import an .srt, or transcribe the speech of a clip",
                       ui::kDropSubtitles, [this] { ctx_.addSubtitles(); }));

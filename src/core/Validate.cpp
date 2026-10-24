@@ -141,6 +141,10 @@ private:
                 report(where, "empty name");
                 l.name = c.uniqueLayerName("Layer");
             }
+            if (l.type == LayerType::Text && l.text.counter && l.text.subtitle) {
+                report(where, "text cannot be both a counter and subtitles (kept subtitles)");
+                l.text.counter = false;
+            }
             if (static_cast<int>(l.type) < 0 || static_cast<int>(l.type) > static_cast<int>(LayerType::Background)) {
                 report(where, "unknown layer type");
                 l.type = LayerType::Shape;
