@@ -23,6 +23,13 @@ namespace bemotion::render {
 class PluginCanvas {
 public:
     PluginCanvas(SkCanvas* canvas, float opacity) : canvas_(canvas), opacity_(opacity) {}
+    ~PluginCanvas() { unclip(); }
+    PluginCanvas(const PluginCanvas&) = delete;
+    PluginCanvas& operator=(const PluginCanvas&) = delete;
+
+    // Later drawing only shows inside this box (a new clip replaces the last); unclip() ends it.
+    void clip(Vec2 min, Vec2 max);
+    void unclip();
 
     void rect(Vec2 min, Vec2 max, Color color, float radius = 0.0f);
     void rectOutline(Vec2 min, Vec2 max, Color color, float width, float radius = 0.0f);
@@ -43,6 +50,7 @@ private:
     Color faded(Color c) const { return {c.r, c.g, c.b, c.a * opacity_}; }
     SkCanvas* canvas_;
     float opacity_; // layer opacity, multiplied into every color
+    bool clipped_ = false;
 };
 
 // Installed by the plugin host; called for every visible plugin layer.

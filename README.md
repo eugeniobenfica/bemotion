@@ -205,8 +205,9 @@ does.
   Grid of Copies, Random Colors) and your own, one undo step each
 - **Plugins** are sandboxed Lua scripts that add new kinds of objects
 - The bundled **Charts** plugin draws animated column / bar, line / area and
-  donut charts and **tables**, from data you paste from a spreadsheet or
-  import from a **CSV** file
+  donut charts, **tables** and **maps** (world by country; Brazil, USA,
+  Canada, Australia, India, China, South Africa by state), from data you
+  paste from a spreadsheet or import from a **CSV** file
 - The bundled **3D Models** plugin brings glTF / GLB, OBJ and STL models into
   the 2D scene: turn, zoom, light and color them, all keyframable
 - The bundled **Recorder** plugin records voice-overs from the microphone,

@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Builds the Charts plugin's map data (assets/plugins/charts/maps/*.lua) from Natural Earth
+(public domain, https://www.naturalearthdata.com):
+
+    python tools/maps/make-maps.py <ne_110m_admin_0_countries.geojson> <ne_50m_admin_1_states_provinces.geojson>
+
+Each map is projected once (Equal Earth for the world, an equirectangular projection corrected
+for its latitude for a country), simplified (Douglas-Peucker), rounded to whole units of a
+1000-wide box and written as a Lua table the plugin includes: regions with their names (several
+languages, ISO codes) for matching data rows, outer rings only (a region inside another draws
+over it), and a point for its label.
+"""
+import json
+import math
+import sys
+import unicodedata
+from pathlib import Path
+
+OUT = Path(__file__).resolve().parents[2] / "assets" / "plugins" / "charts" / "maps"
+WIDTH = 1000.0
+
+
+def equal_earth(lon, lat):
+    a1, a2, a3, a4 = 1.340264, -0.081106, 0.000893, 0.003796
+    phi = math.radians(lat)
+    theta = math.asin(math.sqrt(3) / 2 * math.sin(phi))
+    t2 = theta * theta
+    t6 = t2 * t2 * t2
+    x = 2 * math.sqrt(3) * math.radians(lon) * math.cos(theta) / (3 * (9 * a4 * t6 * t2 + 7 * a3 * t6 + 3 * a2 * t2 + a1))
+    y = theta * (a4 * t6 * t2 * theta + a3 * t6 * theta + a2 * t2 * theta + a1)
+    return x, -y
+
+
+def plate(lat0):
+    k = math.cos(math.radians(lat0))
+    return lambda lon, lat: (math.radians(lon) * k, -math.radians(lat))
+
+
+def simplify(pts, tol):
+    if len(pts) < 4:
+        return pts
+    if pts[0] == pts[-1]:  # a closed ring: two open halves, split at the point farthest from the start
+        far = max(range(len(pts)), key=lambda i: math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]))
+        return simplify(pts[: far + 1], tol)[:-1] + simplify(pts[far:], tol)
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        ax, ay = pts[a]
+        bx, by = pts[b]
+        dx, dy = bx - ax, by - ay
+        norm = math.hypot(dx, dy) or 1e-9
+        best, index = 0.0, -1
+        for i in range(a + 1, b):
+            px, py = pts[i]
+            d = abs(dy * (px - ax) - dx * (py - ay)) / norm
+            if d > best:
+                best, index = d, i
+        if best > tol and index > 0:
+            keep[index] = True
+            stack += [(a, index), (index, b)]
+    return [p for p, k in zip(pts, keep) if k]
+
+
+def area(ring):
+    return 0.5 * sum(ring[i][0] * ring[i - 1][1] - ring[i - 1][0] * ring[i][1] for i in range(len(ring)))
+
+
+def centroid(ring):
+    a = 0.5 * sum(ring[i - 1][0] * ring[i][1] - ring[i][0] * ring[i - 1][1] for i in range(len(ring))) or 1e-9
+    cx = cy = 0.0
+    for i in range(len(ring)):
+        x0, y0 = ring[i - 1]
+        x1, y1 = ring[i]
+        f = x0 * y1 - x1 * y0
+        cx += (x0 + x1) * f
+        cy += (y0 + y1) * f
+    return cx / (6 * a), cy / (6 * a)
+
+
+def outer_rings(geometry):
+    if geometry["type"] == "Polygon":
+        return [geometry["coordinates"][0]]
+    if geometry["type"] == "MultiPolygon":
+        return [poly[0] for poly in geometry["coordinates"]]
+    return []
+
+
+def plain(s):
+    """Lower case, no accents: how names are compared (the plugin does the same for ASCII)."""
+    s = unicodedata.normalize("NFKD", s or "")
+    return "".join(c for c in s if not unicodedata.combining(c)).lower().strip()
+
+
+def lua_string(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def build(name, features, project, tol, names_of, moves=None, min_area=0.0):
+    regions = []
+    for f in features:
+        rings = []
+        for ring in outer_rings(f["geometry"]):
+            pts = [project(lon, lat) for lon, lat in ring]
+            if moves:
+                pts = moves(f, ring, pts)
+            rings.append(pts)
+        if rings:
+            regions.append((f, rings))
+    # Fit everything into a box 1000 wide.
+    xs = [x for _, rs in regions for r in rs for x, _ in r]
+    ys = [y for _, rs in regions for r in rs for _, y in r]
+    x0, x1, y0, y1 = min(xs), max(xs), min(ys), max(ys)
+    scale = WIDTH / (x1 - x0)
+    height = round((y1 - y0) * scale)
+    out = []
+    points = 0
+    for f, rings in regions:
+        fitted = []
+        for r in rings:
+            r = [((x - x0) * scale, (y - y0) * scale) for x, y in r]
+            if abs(area(r)) < min_area:
+                continue
+            r = simplify(r, tol)
+            r = [(round(x, 1), round(y, 1)) for x, y in r]
+            dedup = [p for i, p in enumerate(r) if i == 0 or p != r[i - 1]]
+            if len(dedup) >= 4:
+                fitted.append(dedup)
+        if not fitted:
+            continue
+        biggest = max(fitted, key=lambda r: abs(area(r)))
+        lx, ly = centroid(biggest)
+        points += sum(len(r) for r in fitted)
+        out.append((names_of(f), (round(lx, 1), round(ly, 1)), fitted))
+    out.sort(key=lambda r: r[0][0])
+    lines = [f"-- {name}: generated by tools/maps/make-maps.py from Natural Earth (public domain). Do not edit.",
+             "return {", f"  width = {int(WIDTH)}, height = {height},", "  regions = {"]
+    for names, (lx, ly), rings in out:
+        keys = sorted({plain(n) for n in names if n})
+        ring_text = ", ".join("{" + ",".join(f"{x:g},{y:g}" for x, y in r) + "}" for r in rings)
+        lines.append(f"    {{ name = {lua_string(names[0])}, keys = {{ {', '.join(lua_string(k) for k in keys)} }}, "
+                     f"lx = {lx:g}, ly = {ly:g}, rings = {{ {ring_text} }} }},")
+    lines += ["  },", "}", ""]
+    OUT.mkdir(parents=True, exist_ok=True)
+    file = OUT / f"{name}.lua"
+    file.write_text("\n".join(lines), encoding="utf-8", newline="\n")
+    print(f"{file.name}: {len(out)} regions, {points} points, {file.stat().st_size // 1024} KB")
+
+
+def main():
+    world = json.load(open(sys.argv[1], encoding="utf-8"))["features"]
+    states = json.load(open(sys.argv[2], encoding="utf-8"))["features"]
+
+    def country_names(f):
+        p = f["properties"]
+        names = [p.get("NAME_EN") or p["NAME"], p["NAME"], p.get("NAME_LONG"), p.get("NAME_PT"), p.get("NAME_ES"),
+                 p.get("NAME_FR"), p.get("NAME_DE"), p.get("NAME_IT")]
+        for code in (p.get("ISO_A2_EH"), p.get("ISO_A3_EH"), p.get("ISO_A2"), p.get("ISO_A3")):
+            if code and code != "-99":
+                names.append(code)
+        return [n for n in names if n]
+
+    build("world", [f for f in world if f["properties"]["NAME"] != "Antarctica"], equal_earth, 0.55, country_names,
+          min_area=2.0)
+
+    def state_names(f):
+        p = f["properties"]
+        names = [p.get("name_en") or p["name"], p["name"], p.get("name_pt"), p.get("name_es"), p.get("name_local"),
+                 p.get("postal"), p.get("iso_3166_2")]
+        return [n for n in names if n]
+
+    def country(admin):
+        return [f for f in states if f["properties"]["admin"] == admin]
+
+    build("brazil", country("Brazil"), plate(-15), 0.9, state_names)
+
+    # The United States: Alaska and Hawaii move to the bottom left, as on most maps.
+    def us_moves(f, ring, pts):
+        code = f["properties"].get("postal")
+        if code == "AK":
+            return [(lon * 0.35 - 0.95, lat * 0.35 + 0.08) for lon, lat in pts]
+        if code == "HI":
+            return [(lon + 0.95, lat + 0.02) for lon, lat in pts]
+        return pts
+
+    usa = [f for f in country("United States of America")]
+    build("usa", usa, plate(38), 0.9, state_names, moves=us_moves)
+    for admin, file, lat in (("Canada", "canada", 60), ("Australia", "australia", -27), ("India", "india", 22),
+                             ("China", "china", 35), ("South Africa", "south_africa", -29)):
+        build(file, country(admin), plate(lat), 0.9, state_names, min_area=1.0)
+
+
+if __name__ == "__main__":
+    main()

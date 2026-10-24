@@ -100,6 +100,7 @@ enum class Icon {
     Coffee,     // support (Buy Me a Coffee)
     Microphone, // recording
     Subtitles,  // the subtitle object
+    Map,        // map charts
 };
 
 Icon iconForLayer(const Layer& layer);

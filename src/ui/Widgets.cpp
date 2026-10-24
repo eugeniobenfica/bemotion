@@ -32,6 +32,7 @@ Icon iconForPlugin(const std::string& name) {
     if (name == "line_chart") return Icon::LineChart;
     if (name == "pie" || name == "donut") return Icon::PieChart;
     if (name == "table") return Icon::Table;
+    if (name == "map") return Icon::Map;
     if (name == "cube" || name == "model") return Icon::Cube;
     if (name == "mic" || name == "microphone") return Icon::Microphone;
     if (name == "text") return Icon::Text;
@@ -250,6 +251,15 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.circle(Pt(b.x + h * 0.12f, c.y + h * 0.25f), h * 0.2f, col, th);
         dl.line(Pt(c.x - h * 0.35f, c.y - h * 0.75f), Pt(c.x - h * 0.35f, c.y - h * 0.4f), col, th);
         dl.line(Pt(c.x - h * 0.05f, c.y - h * 0.85f), Pt(c.x - h * 0.05f, c.y - h * 0.4f), col, th);
+        break;
+    }
+    case Icon::Map: { // a folded map: three panels
+        const Pt pts[8] = {Pt(c.x - h * 0.85f, c.y - h * 0.55f), Pt(c.x - h * 0.3f, c.y - h * 0.75f), Pt(c.x + h * 0.3f, c.y - h * 0.55f),
+                           Pt(c.x + h * 0.85f, c.y - h * 0.75f), Pt(c.x + h * 0.85f, c.y + h * 0.55f), Pt(c.x + h * 0.3f, c.y + h * 0.75f),
+                           Pt(c.x - h * 0.3f, c.y + h * 0.55f), Pt(c.x - h * 0.85f, c.y + h * 0.75f)};
+        dl.polyline(pts, 8, col, true, th);
+        dl.line(Pt(c.x - h * 0.3f, c.y - h * 0.75f), Pt(c.x - h * 0.3f, c.y + h * 0.55f), col, th);
+        dl.line(Pt(c.x + h * 0.3f, c.y - h * 0.55f), Pt(c.x + h * 0.3f, c.y + h * 0.75f), col, th);
         break;
     }
     case Icon::Subtitles: { // a frame with two lines of text at its bottom

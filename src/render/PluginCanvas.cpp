@@ -60,6 +60,19 @@ void PluginCanvas::polyline(const std::vector<Vec2>& points, float width, Color 
     canvas_->drawPath(b.detach(), strokePaint(faded(color), width));
 }
 
+void PluginCanvas::clip(Vec2 min, Vec2 max) {
+    if (clipped_) canvas_->restore();
+    canvas_->save();
+    clipped_ = true;
+    canvas_->clipRect(SkRect::MakeLTRB(std::min(min.x, max.x), std::min(min.y, max.y), std::max(min.x, max.x), std::max(min.y, max.y)), true);
+}
+
+void PluginCanvas::unclip() {
+    if (!clipped_) return;
+    canvas_->restore();
+    clipped_ = false;
+}
+
 void PluginCanvas::polygon(const std::vector<Vec2>& points, Color color) {
     if (points.size() < 3) return;
     SkPathBuilder b;

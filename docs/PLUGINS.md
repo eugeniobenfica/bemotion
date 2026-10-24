@@ -60,9 +60,13 @@ Coordinates are local: the origin is the object's center and the frame spans
 `g` draws: `rect(x, y, w, h, color[, radius])`, `rect_outline(x, y, w, h,
 color, width[, radius])`, `circle(x, y, r, color)`, `line(x1, y1, x2, y2,
 width, color)`, `polyline({x1, y1, ...}, width, color[, closed])`,
-`polygon({x1, y1, ...}, color)`, `arc(cx, cy, inner, outer, fromDeg, toDeg,
+`polygon({x1, y1, ...}, color)`, `clip(x, y, w, h)` / `unclip()` (API 6: later
+drawing only inside that box), `arc(cx, cy, inner, outer, fromDeg, toDeg,
 color)`, `text(s, x, y, size, color[, "left"|"center"|"right"[, bold]])`
 (y = line center) and `measure(s, size[, bold])`.
+
+`bemotion.include("maps/world.lua")` (API 6) runs a Lua file of the plugin's
+own folder once and returns what it returns: data and code split into files.
 
 Helpers: `bemotion.ease(name, t)` (`"ease_out"`, `"back_out"`, `"bounce"`…),
 `bemotion.color(hex)`, `bemotion.mix(a, b, t)`, `bemotion.with_alpha(c, k)`,

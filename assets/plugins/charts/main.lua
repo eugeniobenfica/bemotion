@@ -1,4 +1,4 @@
--- Charts for bemotion: columns / bars, line / area, pie / donut, and tables.
+-- Charts for bemotion: columns / bars, line / area, pie / donut, tables and maps.
 --
 -- Every chart reads its data from the object's rows (label, value, color) and
 -- animates with "Progress", which gets intro keyframes when the object is
@@ -743,6 +743,200 @@ bemotion.register_object {
           x = x + widths[c]
         end
       end
+    end
+  end,
+}
+
+-- --- maps (choropleth) --------------------------------------------------------------
+
+-- Countries or states colored by their value. The outlines come from Natural Earth (public
+-- domain), made into maps/*.lua by tools/maps/make-maps.py. Rows name a region by its name
+-- (English, Portuguese, Spanish, French, German, Italian, local) or code ("BR", "BRA", "SP").
+local MAPS = { "World", "Brazil", "United States", "Canada", "Australia", "India", "China", "South Africa" }
+local MAP_FILES = {
+  ["World"] = "maps/world.lua", ["Brazil"] = "maps/brazil.lua", ["United States"] = "maps/usa.lua",
+  ["Canada"] = "maps/canada.lua", ["Australia"] = "maps/australia.lua", ["India"] = "maps/india.lua",
+  ["China"] = "maps/china.lua", ["South Africa"] = "maps/south_africa.lua",
+}
+
+local SAMPLE_MAP = { -- population, millions
+  { "China", 1410, PALETTE[1] }, { "India", 1430, PALETTE[1] }, { "United States", 335, PALETTE[1] },
+  { "Indonesia", 277, PALETTE[1] }, { "Pakistan", 240, PALETTE[1] }, { "Nigeria", 224, PALETTE[1] },
+  { "Brazil", 216, PALETTE[1] }, { "Bangladesh", 173, PALETTE[1] }, { "Russia", 144, PALETTE[1] },
+  { "Mexico", 128, PALETTE[1] }, { "Japan", 124, PALETTE[1] }, { "Ethiopia", 126, PALETTE[1] },
+  { "Egypt", 112, PALETTE[1] }, { "Germany", 84, PALETTE[1] }, { "France", 68, PALETTE[1] },
+  { "United Kingdom", 68, PALETTE[1] }, { "South Africa", 60, PALETTE[1] }, { "Argentina", 46, PALETTE[1] },
+  { "Canada", 39, PALETTE[1] }, { "Australia", 26, PALETTE[1] },
+}
+
+-- Lower case without accents, as the maps' keys are.
+local ACCENTS = {}
+for plain, chars in pairs({ a = "áàâãäåÁÀÂÃÄÅ", e = "éèêëÉÈÊË", i = "íìîïÍÌÎÏ", o = "óòôõöÓÒÔÕÖ", u = "úùûüÚÙÛÜ",
+                            c = "çÇ", n = "ñÑ", y = "ýÿÝ" }) do
+  for _, code in utf8.codes(chars) do ACCENTS[utf8.char(code)] = plain end
+end
+local function plain_name(s)
+  s = s:gsub("[\xC0-\xF4][\x80-\xBF]*", function(ch) return ACCENTS[ch] or ch end)
+  return (s:lower():gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+-- The map and an index of its region names (built once).
+local loaded = {}
+local function map_of(name)
+  local file = MAP_FILES[name] or MAP_FILES["World"]
+  if not loaded[file] then
+    local m = bemotion.include(file)
+    m.index = {}
+    for i, region in ipairs(m.regions) do
+      for _, key in ipairs(region.keys) do m.index[key] = i end
+    end
+    loaded[file] = m
+  end
+  return loaded[file]
+end
+
+bemotion.register_object {
+  id = "map",
+  import_csv = import_chart,
+  name = "Map",
+  description = "Countries or states colored by their value, coming in one after another.",
+  icon = "map",
+  size = { 1400, 760 },
+  rows = SAMPLE_MAP,
+  params = concat(
+    { { id = "map", label = "Map", type = "choice", choices = MAPS, default = "World", group = "Map" },
+      { id = "low_color", label = "Low Color", type = "color", default = "#3A4A72", group = "Map" },
+      { id = "high_color", label = "High Color", type = "color", default = "#E8B931", group = "Map" },
+      { id = "scale", label = "Color Scale", type = "choice", choices = { "Linear", "Logarithmic", "By Rank" },
+        default = "Linear", group = "Map" },
+      { id = "row_colors", label = "Use Row Colors", type = "toggle", default = false, group = "Map" },
+      { id = "empty_color", label = "No Data Color", type = "color", default = "#FFFFFF1A", group = "Map" },
+      { id = "border_color", label = "Border Color", type = "color", default = "#0E1018", group = "Map" },
+      { id = "border", label = "Border Width", type = "number", default = 0.8, min = 0, max = 10, step = 0.05,
+        format = "%.1f px", group = "Map" },
+      { id = "legend", label = "Legend", type = "toggle", default = true, group = "Map" },
+      { id = "zoom", label = "Zoom", type = "number", default = 100, min = 50, max = 2000, format = "%.0f%%", group = "View" },
+      { id = "center_x", label = "Center X", type = "number", default = 50, min = 0, max = 100, step = 0.1,
+        format = "%.1f%%", group = "View" },
+      { id = "center_y", label = "Center Y", type = "number", default = 50, min = 0, max = 100, step = 0.1,
+        format = "%.1f%%", group = "View" },
+      { id = "background", label = "Background", type = "color", default = "#00000000", group = "Map" } },
+    animation_params(), data_params(),
+    text_params()),
+  draw = function(o, g)
+    local x0, y0, x1, y1 = frame(o, g)
+    local m = map_of(o.map)
+    local fs = o.font_size
+
+    -- The rows that name a region, in display order (sorting decides which comes in first).
+    local rows = rows_of(o)
+    local of_region, matched = {}, {}
+    local lo, hi = math.huge, -math.huge
+    for _, r in ipairs(rows) do
+      local i = m.index[plain_name(r.label)]
+      if i and not of_region[i] then
+        of_region[i] = r
+        matched[#matched + 1] = { region = i, row = r }
+        lo, hi = math.min(lo, r.value), math.max(hi, r.value)
+      end
+    end
+    local legend_h = (o.legend and #matched > 0) and fs * 2.6 or 0
+
+    -- Fitted into the box, then zoomed around the chosen center.
+    local bw, bh = x1 - x0, y1 - y0 - legend_h
+    local s = math.min(bw / m.width, bh / m.height) * clamp(o.zoom, 10, 5000) / 100
+    local cx, cy = m.width * o.center_x / 100, m.height * o.center_y / 100
+    local mx, my = (x0 + x1) / 2, y0 + bh / 2
+    local function at(px, py) return mx + (px - cx) * s, my + (py - cy) * s end
+    g.clip(x0, y0, bw, bh)
+
+    local order = {}
+    for k, entry in ipairs(matched) do order[entry.region] = k end
+    -- Where a value sits on the color scale (0: low color, 1: high color).
+    local ranked = {}
+    for _, entry in ipairs(matched) do ranked[#ranked + 1] = entry.row.value end
+    table.sort(ranked)
+    local function scale(v)
+      if hi <= lo then return 1 end
+      if o.scale == "Logarithmic" and lo > 0 then return (math.log(v) - math.log(lo)) / (math.log(hi) - math.log(lo)) end
+      if o.scale == "By Rank" then
+        for k, x in ipairs(ranked) do if x >= v then return #ranked > 1 and (k - 1) / (#ranked - 1) or 1 end end
+        return 1
+      end
+      return (v - lo) / (hi - lo)
+    end
+    for i, region in ipairs(m.regions) do
+      local r = of_region[i]
+      local color = o.empty_color
+      local alpha = 1
+      if r then
+        local e = item_progress(o, order[i], #matched)
+        local t = clamp(scale(r.value), 0, 1)
+        local full = o.row_colors and r.color or bemotion.mix(o.low_color, o.high_color, t)
+        color = bemotion.mix(o.empty_color, full, clamp(e, 0, 1))
+        alpha = emphasis(o, r)
+        color = bemotion.with_alpha(color, alpha)
+      end
+      for _, ring in ipairs(region.rings) do
+        local pts = {}
+        for k = 1, #ring, 2 do
+          local x, y = at(ring[k], ring[k + 1])
+          pts[#pts + 1] = x
+          pts[#pts + 1] = y
+        end
+        g.polygon(pts, color)
+        if o.border > 0 then g.polyline(pts, o.border, o.border_color, true) end
+      end
+    end
+
+    -- Names and values on the regions with data, as they come in. The biggest values first;
+    -- a label that would cover one already placed is left out (dense areas stay readable).
+    if o.show_labels or o.show_values then
+      local placed = {}
+      local by_value = {}
+      for _, entry in ipairs(matched) do by_value[#by_value + 1] = entry end
+      table.sort(by_value, function(a, b) return a.row.value > b.row.value end)
+      local function free(bx0, by0, bx1, by1)
+        for _, p in ipairs(placed) do
+          if bx0 < p[3] and bx1 > p[1] and by0 < p[4] and by1 > p[2] then return false end
+        end
+        placed[#placed + 1] = { bx0, by0, bx1, by1 }
+        return true
+      end
+      for _, entry in ipairs(by_value) do
+        local region, r = m.regions[entry.region], entry.row
+        local e, t = item_progress(o, order[entry.region], #matched)
+        local x, y = at(region.lx, region.ly)
+        local both = o.show_labels and o.show_values
+        local half_w = math.max(o.show_labels and g.measure(r.label, fs * 0.75, true) or 0,
+                                o.show_values and g.measure(value_text(o, r.value), fs * 0.75) or 0) / 2 + fs * 0.2
+        local half_h = (both and fs * 1.1 or fs * 0.55)
+        if t > 0 and free(x - half_w, y - half_h, x + half_w, y + half_h) then
+          local tc = bemotion.with_alpha(o.text_color, clamp(t * 3, 0, 1) * emphasis(o, r))
+          if o.show_labels and o.show_values then
+            g.text(r.label, x, y - fs * 0.55, fs * 0.75, tc, "center", true)
+            g.text(value_text(o, r.value * e), x, y + fs * 0.45, fs * 0.75, tc, "center")
+          elseif o.show_labels then
+            g.text(r.label, x, y, fs * 0.75, tc, "center", true)
+          else
+            g.text(value_text(o, r.value * e), x, y, fs * 0.75, tc, "center", true)
+          end
+        end
+      end
+    end
+    g.unclip()
+
+    -- The legend: the color scale from the lowest value to the highest.
+    if legend_h > 0 and not o.row_colors then
+      local ly = y1 - legend_h * 0.45
+      local lw = math.min(bw * 0.4, fs * 14)
+      local steps = 24
+      for k = 0, steps - 1 do
+        g.rect(x0 + lw * k / steps, ly - fs * 0.25, lw / steps + 0.5, fs * 0.5, bemotion.mix(o.low_color, o.high_color, k / (steps - 1)))
+      end
+      local tc = bemotion.with_alpha(o.text_color, 0.7)
+      g.text(value_text(o, lo), x0, ly + fs * 0.85, fs * 0.7, tc, "left")
+      g.text(value_text(o, hi), x0 + lw, ly + fs * 0.85, fs * 0.7, tc, "right")
     end
   end,
 }

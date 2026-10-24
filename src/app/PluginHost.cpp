@@ -166,6 +166,15 @@ int gPolyline(lua_State* L) {
     canvas(L).polyline(readPoints(L, 1), static_cast<float>(luaL_checknumber(L, 2)), readColor(L, 3, {}), lua_toboolean(L, 4));
     return 0;
 }
+int gClip(lua_State* L) {
+    const Vec2 a = vec(L, 1, 2);
+    canvas(L).clip(a, a + Vec2{static_cast<float>(luaL_checknumber(L, 3)), static_cast<float>(luaL_checknumber(L, 4))});
+    return 0;
+}
+int gUnclip(lua_State* L) {
+    canvas(L).unclip();
+    return 0;
+}
 int gPolygon(lua_State* L) {
     canvas(L).polygon(readPoints(L, 1), readColor(L, 2, {}));
     return 0;
@@ -514,6 +523,48 @@ void pushTable(lua_State* L, const DataTable& t) {
 
 // bemotion.cached(key, fn): fn() once per key, with the command budget (parsing a file, building
 // a mesh); later calls return the same value. The plugin's cache empties when it grows large.
+// bemotion.include("maps/world.lua"): runs a Lua file of the plugin's own folder and returns
+// what it returns (once: later calls get the same value). Only files inside that folder.
+constexpr const char* kPluginDirKey = "bemotion.plugin_dir";
+constexpr const char* kIncludedKey = "bemotion.included";
+
+int bmInclude(lua_State* L) {
+    const std::string name = luaL_checkstring(L, 1);
+    if (name.empty() || name.find("..") != std::string::npos || name.find(':') != std::string::npos || name.front() == '/' ||
+        name.front() == '\\')
+        return luaL_error(L, "include: \"%s\" is not a file of this plugin", name.c_str());
+    lua_getfield(L, LUA_REGISTRYINDEX, kIncludedKey);
+    if (lua_istable(L, -1)) {
+        lua_getfield(L, -1, name.c_str());
+        if (!lua_isnil(L, -1)) return 1;
+        lua_pop(L, 2);
+    } else {
+        lua_pop(L, 1);
+    }
+    lua_getfield(L, LUA_REGISTRYINDEX, kPluginDirKey);
+    const char* dir = lua_tostring(L, -1);
+    if (!dir) return luaL_error(L, "include: only plugins can include files");
+    const std::filesystem::path file = platform::fromUtf8(dir) / platform::fromUtf8(name);
+    lua_pop(L, 1);
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec)) return luaL_error(L, "include: no file \"%s\" in this plugin", name.c_str());
+    const std::string code = withoutBom(readFile(file));
+    if (luaL_loadbufferx(L, code.data(), code.size(), ("@" + name).c_str(), "t") != LUA_OK) return lua_error(L);
+    lua_call(L, 0, 1);
+    // Kept, so a big data file is read once.
+    lua_getfield(L, LUA_REGISTRYINDEX, kIncludedKey);
+    if (!lua_istable(L, -1)) {
+        lua_pop(L, 1);
+        lua_newtable(L);
+        lua_pushvalue(L, -1);
+        lua_setfield(L, LUA_REGISTRYINDEX, kIncludedKey);
+    }
+    lua_pushvalue(L, -2);
+    lua_setfield(L, -2, name.c_str());
+    lua_pop(L, 1);
+    return 1;
+}
+
 int bmCached(lua_State* L) {
     const char* key = luaL_checkstring(L, 1);
     luaL_checktype(L, 2, LUA_TFUNCTION);
@@ -996,6 +1047,7 @@ lua_State* newSandbox(const std::string& pluginId) {
                             {"parse_csv", bmParseCsv},              {"number", bmNumber},
                             {"cached", bmCached},                   {"json", bmJson},
                             {"base64", bmBase64},                   {"mesh", bmMesh},
+                            {"include", bmInclude},
                             {nullptr, nullptr}};
     luaL_newmetatable(L, kMeshType);
     lua_pushcfunction(L, meshGc);
@@ -1004,7 +1056,7 @@ lua_State* newSandbox(const std::string& pluginId) {
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);
     luaL_newlib(L, api);
-    lua_pushinteger(L, 5); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone
+    lua_pushinteger(L, 6); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone; 6: include
     lua_setfield(L, -2, "api_version");
     const luaL_Reg mic[] = {{"start", micStart}, {"stop", micStop}, {"recording", micRecording}, {"level", micLevel},
                             {"cancel", micCancel}, {nullptr, nullptr}};
@@ -1013,6 +1065,7 @@ lua_State* newSandbox(const std::string& pluginId) {
     lua_setglobal(L, "bemotion");
 
     const luaL_Reg gfx[] = {{"rect", gRect},       {"rect_outline", gRectOutline}, {"circle", gCircle}, {"line", gLine},
+                            {"clip", gClip},         {"unclip", gUnclip},
                             {"polyline", gPolyline}, {"polygon", gPolygon},         {"arc", gArc},       {"text", gText},
                             {"measure", gMeasure}, {"mesh", gMesh},       {nullptr, nullptr}};
     luaL_newlib(L, gfx);
@@ -1214,6 +1267,8 @@ void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
 
     plugin.L = newSandbox(plugin.id);
     lua_State* L = plugin.L;
+    lua_pushstring(L, platform::toUtf8(dir).c_str()); // where bemotion.include reads
+    lua_setfield(L, LUA_REGISTRYINDEX, kPluginDirKey);
     const std::string code = withoutBom(readFile(dir / platform::fromUtf8(mainFile)));
     std::vector<PluginObjectType> registered;
     std::vector<PluginCommand> registeredCommands;

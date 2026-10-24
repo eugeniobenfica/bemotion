@@ -1,9 +1,9 @@
 {
   "id": "charts",
   "name": "Charts",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "bemotion",
-  "description": "Animated column, bar, line and donut charts and tables, with CSV import.",
+  "description": "Animated column, bar, line and donut charts, tables and maps (world, countries by state), with CSV import.",
   "main": "main.lua",
-  "api": 3
+  "api": 6
 }
