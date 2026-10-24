@@ -23,14 +23,13 @@ struct Settings {
     theme::Palette palette;
     float snapDistance = 8.0f; // screen pixels
     // Interface sizes.
-    float timelineLayerRow = 36.0f;    // clip rows
-    float timelinePropertyRow = 30.0f; // keyframe rows (group headers derive from it)
-    float keyframeSize = 5.0f;         // keyframe glyph radius
+    float timelineLayerRow = 46.0f;    // clip rows
+    float timelinePropertyRow = 38.0f; // keyframe rows (group headers derive from it)
+    float keyframeSize = 6.0f;         // keyframe glyph radius
     float textScale = 1.0f;            // UI text size multiplier
     std::string uiFont = "Inter";      // interface font family (any installed one)
     int arrowFrames = 1;               // frames stepped by the arrow keys
     int bigArrowFrames = 10;           // ... with Shift (big step)
-    double maxDuration = 0.0;          // length limit of new projects, seconds (0: none)
     int autosaveMinutes = 5;           // saves open projects this often (0: off)
     bool showIntro = true;             // the opening animation at startup
     bool showRulers = false;           // the viewport's rulers (View > Rulers)

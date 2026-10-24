@@ -632,7 +632,7 @@ void HomeScreen::openNewProjectDialog() {
     bg->setAlphaEnabled(false);
     bg->setColor(Color::fromHex(0x101012));
     form->addRow("Background", bg);
-    double limit = settings().maxDuration;
+    double limit = 0.0;
     form->addRow("Length", ui::lengthLimitRow(limit, [&limit](double v) { limit = v; }));
     // New projects go to the projects folder: asked for first if there is none yet.
     if (projectsFolder().empty() && !chooseProjectsFolder()) return;

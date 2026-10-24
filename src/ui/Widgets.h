@@ -90,6 +90,7 @@ enum class Icon {
     LayerDown,
     ChevronLeft,
     Minimize, // a panel's minimize button
+    Fullscreen,
     Copy,
     Paste,
     Transition,

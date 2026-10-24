@@ -25,6 +25,7 @@ struct Clip {
     AudioData data;
     double start = 0, in = 0, out = 0; // composition times (source starts at `start`)
     float gain = 1.0f;
+    const std::vector<AudioEffect>* effects = nullptr;
 };
 
 std::vector<Clip> clipsAt(const Composition& comp, double t, double until) {
@@ -43,7 +44,7 @@ std::vector<Clip> clipsAt(const Composition& comp, double t, double until) {
         if (hidden || out <= in) continue;
         AudioData data = MediaManager::get().audio(l.media.mediaId);
         if (!data) continue;
-        clips.push_back({std::move(data), l.media.start, in, out, std::max(0.0f, l.media.volume.valueAt(t) * 0.01f)});
+        clips.push_back({std::move(data), l.media.start, in, out, std::max(0.0f, l.media.volume.valueAt(t) * 0.01f), &l.audioEffects});
     }
     return clips;
 }
@@ -60,8 +61,15 @@ void mixInto(const std::vector<Clip>& clips, double t, size_t frames, float* out
             if (src < 0) continue;
             const size_t k = static_cast<size_t>(src);
             if (k >= total) continue;
-            out[i * 2] += s[k * 2] * c.gain;
-            out[i * 2 + 1] += s[k * 2 + 1] * c.gain;
+            float gain = c.gain;
+            for (const AudioEffect& effect : *c.effects) {
+                if (!effect.enabled) continue;
+                if (effect.type == AudioEffectType::Gain) gain *= std::pow(10.0f, effect.value / 20.0f);
+                else if (effect.type == AudioEffectType::FadeIn) gain *= std::clamp(static_cast<float>((time - c.in) / effect.value), 0.0f, 1.0f);
+                else if (effect.type == AudioEffectType::FadeOut) gain *= std::clamp(static_cast<float>((c.out - time) / effect.value), 0.0f, 1.0f);
+            }
+            out[i * 2] += s[k * 2] * gain;
+            out[i * 2 + 1] += s[k * 2 + 1] * gain;
         }
     }
 }

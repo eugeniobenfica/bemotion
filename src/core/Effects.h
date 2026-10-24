@@ -87,6 +87,20 @@ Effect makeEffect(EffectType type);
 // Extra pixels an effect can draw outside the layer's own bounds.
 float effectMargin(const Effect& e, double t);
 
+// Audio effects are separate from image effects: their values alter the
+// mixer, never the Skia render chain.
+enum class AudioEffectType { Gain, FadeIn, FadeOut, Count };
+const char* audioEffectId(AudioEffectType type);
+const char* audioEffectLabel(AudioEffectType type);
+
+struct AudioEffect {
+    AudioEffectType type = AudioEffectType::Gain;
+    bool enabled = true;
+    float value = 0.0f; // Gain: dB. Fades: seconds.
+};
+
+AudioEffect makeAudioEffect(AudioEffectType type);
+
 struct EffectPreset {
     std::string name;
     std::vector<Effect> effects;

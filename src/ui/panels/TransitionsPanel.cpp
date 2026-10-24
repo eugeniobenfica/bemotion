@@ -143,14 +143,19 @@ void TransitionsPanel::apply(int index) {
     if (index < 0 || index >= static_cast<int>(list.size())) return;
     const TransitionEdge edge = edgeChoice_ == 1 ? TransitionEdge::Out : edgeChoice_ == 2 ? TransitionEdge::Both : TransitionEdge::In;
     bool any = false;
-    for (Layer* l : ctx_.selectedLayers()) any = applyTransition(*l, list[index].id, edge, seconds_) || any;
+    for (Layer* l : ctx_.selectedLayers()) {
+        if (l->type == LayerType::Media && l->media.hasAudio && !l->media.hasVideo) continue;
+        any = applyTransition(*l, list[index].id, edge, seconds_) || any;
+    }
     if (any) ctx_.touch();
 }
 
 void TransitionsPanel::sync() {
     if (!isVisible()) return;
-    const bool any = !ctx_.selection.empty();
-    for (ui::Tile* t : tiles_) t->setDimmed(!any);
+    bool canApply = false;
+    for (Layer* l : ctx_.selectedLayers())
+        canApply = canApply || !(l->type == LayerType::Media && l->media.hasAudio && !l->media.hasVideo);
+    for (ui::Tile* t : tiles_) t->setDimmed(!canApply);
 }
 
 } // namespace bemotion

@@ -166,7 +166,7 @@ private:
     QToolButton* zoomLevel_ = nullptr;
     QPushButton* fitButton_ = nullptr;
     QToolButton* qualityButton_ = nullptr;
-    QPushButton* fullscreenButton_ = nullptr;
+    ui::IconButton* fullscreenButton_ = nullptr;
     int previewDivisor_ = 1;
 
     // What was last drawn (to redraw only on change).

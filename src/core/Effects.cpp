@@ -207,6 +207,25 @@ float effectMargin(const Effect& e, double t) {
     }
 }
 
+const char* audioEffectId(AudioEffectType type) {
+    static constexpr const char* ids[] = {"gain", "fade_in", "fade_out"};
+    const int i = static_cast<int>(type);
+    return i >= 0 && i < static_cast<int>(AudioEffectType::Count) ? ids[i] : "unknown";
+}
+
+const char* audioEffectLabel(AudioEffectType type) {
+    static constexpr const char* labels[] = {"Gain", "Fade In", "Fade Out"};
+    const int i = static_cast<int>(type);
+    return i >= 0 && i < static_cast<int>(AudioEffectType::Count) ? labels[i] : "Audio Effect";
+}
+
+AudioEffect makeAudioEffect(AudioEffectType type) {
+    AudioEffect effect;
+    effect.type = type;
+    effect.value = type == AudioEffectType::Gain ? 0.0f : 0.5f;
+    return effect;
+}
+
 std::vector<EffectPreset> builtinEffectPresets() {
     std::vector<EffectPreset> out;
     for (const char* text : kBuiltinEffectPresets) {

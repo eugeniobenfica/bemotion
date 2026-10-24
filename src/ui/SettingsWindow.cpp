@@ -105,6 +105,36 @@ private:
     bool selected_;
 };
 
+class TimelineSizeCard : public QAbstractButton {
+public:
+    TimelineSizeCard(QString label, float clip, float property, float key, bool selected)
+        : label_(std::move(label)), clip_(clip), property_(property), key_(key), selected_(selected) {
+        setFixedSize(128, 82);
+        setCursor(Qt::PointingHandCursor);
+    }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        Draw d(painter);
+        const float w = width(), h = height();
+        d.rectFilled({0, 0}, {w, h}, theme::kBgRaised, 8.0f);
+        const float top = 11.0f, row = std::clamp(clip_ * 0.42f, 12.0f, 25.0f);
+        d.rectFilled({10, top}, {w - 10, top + row}, theme::accent(70), 4.0f);
+        d.rectFilled({10, top + row + 5}, {w - 10, top + row + 5 + std::clamp(property_ * 0.25f, 7.0f, 13.0f)}, theme::shade(120), 3.0f);
+        const float y = top + row * 0.5f;
+        drawDiamond(d, {w * 0.42f, y}, key_ * 0.6f, theme::kAccent, theme::kBgRaised);
+        drawDiamond(d, {w * 0.58f, y}, key_ * 0.6f, theme::kAccent, theme::kBgRaised);
+        d.text({10, h - d.textHeight() - 8}, selected_ || underMouse() ? theme::kText : theme::kTextDim, label_);
+        if (selected_ || underMouse()) d.rect({1, 1}, {w - 1, h - 1}, selected_ ? theme::kAccent : theme::ink(80), 8.0f, selected_ ? 2.0f : 1.0f);
+    }
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+private:
+    QString label_;
+    float clip_, property_, key_;
+    bool selected_;
+};
+
 // A round color choice.
 class Swatch : public QAbstractButton {
 public:
@@ -435,7 +465,8 @@ QWidget* interfacePage() {
     }
     auto* presets = new QHBoxLayout;
     auto preset = [&](const char* label, float row, float prop, float key) {
-        auto* b = new QPushButton(label);
+        const bool selected = std::fabs(s.timelineLayerRow - row) < 0.1f && std::fabs(s.timelinePropertyRow - prop) < 0.1f;
+        auto* b = new TimelineSizeCard(label, row, prop, key, selected);
         QObject::connect(b, &QPushButton::clicked, b, [row, prop, key] {
             Settings& st = settings();
             st.timelineLayerRow = row, st.timelinePropertyRow = prop, st.keyframeSize = key;
@@ -443,9 +474,9 @@ QWidget* interfacePage() {
         });
         presets->addWidget(b);
     };
-    preset("Compact", 26, 22, 4);
-    preset("Comfortable", 36, 30, 5);
-    preset("Large", 48, 38, 6.5f);
+    preset("Compact", 34, 28, 5);
+    preset("Comfortable", 46, 38, 6);
+    preset("Large", 60, 50, 7.5f);
     presets->addStretch();
     col->addLayout(presets);
 
@@ -509,16 +540,8 @@ QWidget* editorPage() {
         Settings& st = settings();
         const Settings d;
         st.snapDistance = d.snapDistance, st.arrowFrames = d.arrowFrames, st.bigArrowFrames = d.bigArrowFrames;
-        st.maxDuration = d.maxDuration, st.autosaveMinutes = d.autosaveMinutes;
+        st.autosaveMinutes = d.autosaveMinutes;
     });
-    col->addWidget(sectionLabel("NEW PROJECTS"));
-    col->addWidget(lengthLimitRow(s.maxDuration, [](double v) {
-        settings().maxDuration = v;
-        saveSettings();
-    }));
-    col->addWidget(hintLabel("A project grows with its content. With a limit it stops there: handy for 15 s ads, "
-                             "60 s shorts and the like. Each new project can change it."));
-    col->addSpacing(8);
     col->addWidget(sectionLabel("SAVING"));
     auto* autosave = new QCheckBox("Save open projects automatically");
     autosave->setChecked(s.autosaveMinutes > 0);

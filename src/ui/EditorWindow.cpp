@@ -39,6 +39,9 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDragEnterEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QMouseEvent>
@@ -552,10 +555,11 @@ void EditorWindow::toggleViewportFullscreen() {
     windowWasFullscreen_ = window()->isFullScreen();
     windowGeometryBeforeFullscreen_ = window()->saveGeometry();
     for (auto& [name, dock] : dockWidgets_)
-        if (name != "Viewport" && !dock->isAutoHide() && !dock->isClosed()) dock->setAutoHide(true);
+        if (name != "Viewport" && !dock->isClosed()) dock->toggleView(false);
     menuBar()->setVisible(false);
     viewportFullscreen_ = true;
     viewport_->setViewportFullscreen(true);
+    viewport_->requestFit();
     window()->showFullScreen();
 }
 
@@ -597,6 +601,24 @@ void EditorWindow::buildMenus() {
     QMenu* file = bar->addMenu("File");
     file->addAction(action(Action::Save, "Save", [this] { save(); }));
     file->addAction(action(Action::SaveAs, "Save As...", [this] { saveAs(); }));
+    file->addAction("Project Settings...", this, [this] {
+        QDialog dialog(this);
+        dialog.setWindowTitle("Project Settings");
+        auto* form = new QFormLayout;
+        double limit = ctx_.comp().maxDuration;
+        form->addRow("Length", ui::lengthLimitRow(limit, [&limit](double value) { limit = value; }));
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        auto* layout = new QVBoxLayout(&dialog);
+        layout->addLayout(form);
+        layout->addWidget(buttons);
+        if (dialog.exec() == QDialog::Accepted && ctx_.comp().maxDuration != limit) {
+            ctx_.comp().maxDuration = limit;
+            ctx_.comp().fitDuration();
+            ctx_.touch();
+        }
+    });
     file->addSeparator();
     file->addAction(action(Action::ImportMedia, "Import Media...", [this] { media_->openImportDialog(); }));
     file->addAction("Show in Folder", this, [this] {

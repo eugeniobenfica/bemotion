@@ -201,6 +201,13 @@ private:
                     report(where, "motion blur samples out of range");
                     e.samples = std::clamp(e.samples, 2, 64);
                 }
+            const size_t audioEffectsBefore = l.audioEffects.size();
+            std::erase_if(l.audioEffects, [](const AudioEffect& e) {
+                return static_cast<int>(e.type) < 0 || e.type >= AudioEffectType::Count || !std::isfinite(e.value);
+            });
+            if (l.audioEffects.size() != audioEffectsBefore) report(where, "unknown or invalid audio effects (removed)");
+            for (AudioEffect& e : l.audioEffects)
+                e.value = e.type == AudioEffectType::Gain ? std::clamp(e.value, -60.0f, 24.0f) : std::clamp(e.value, 0.01f, 60.0f);
 
             const Layer pristine = l; // for default values
             for (const PropertyRef& prop : l.properties()) {

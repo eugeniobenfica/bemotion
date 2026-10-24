@@ -83,12 +83,12 @@ struct TileGrid {
     int count = 0;
     TileGrid(QVBoxLayout* into, int width) {
         grid = new QGridLayout;
-        grid->setSpacing(6);
+        grid->setSpacing(8);
         grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         into->addLayout(grid);
-        columns = std::max(1, (width + 6) / (86 + 6));
-        const int w = std::max(56, (width - 6 * (columns - 1)) / columns);
-        size = QSize(w, std::clamp(static_cast<int>(w * 0.8f), 64, 88));
+        columns = std::max(2, (width + 8) / (80 + 8));
+        const int w = std::max(56, (width - 8 * (columns - 1)) / columns);
+        size = QSize(w, std::clamp(static_cast<int>(w * 0.78f), 50, 66));
     }
     ui::Tile* add(ui::Icon icon, const QString& label) {
         auto* t = new ui::Tile(icon, label);
@@ -163,12 +163,15 @@ std::string EffectsPanel::stackKey() {
     if (!layer) return "none";
     k << layer->id << ':' << static_cast<int>(layer->type) << ':' << layer->name << ':';
     for (const Effect& e : layer->effects) k << static_cast<int>(e.type) << ',';
+    k << '|';
+    for (const AudioEffect& e : layer->audioEffects) k << static_cast<int>(e.type) << ':' << e.enabled << ':' << e.value << ',';
     return k.str();
 }
 
 std::string EffectsPanel::browserKey() {
     std::ostringstream k;
     k << search_->text().toStdString() << '|' << category_ << '|' << ctx_.selection.empty() << '|' << message_ << '|';
+    for (const Layer* layer : ctx_.selectedLayers()) k << layer->id << ':' << static_cast<int>(layer->type) << ':' << layer->media.hasAudio << ':' << layer->media.hasVideo << ',';
     for (const auto& lp : EffectLibrary::all()) k << lp.preset.name << ',';
     return k.str();
 }
@@ -202,6 +205,43 @@ void EffectsPanel::rebuildStack() {
     if (!layer || layer->type == LayerType::Camera) {
         col->addWidget(new QLabel("Effect Controls"));
         col->addWidget(faint(layer ? "Cameras have no effects." : "Select a layer to see and edit its effects."));
+        return;
+    }
+    const bool audioOnly = layer->type == LayerType::Media && layer->media.hasAudio && !layer->media.hasVideo;
+    if (audioOnly) {
+        col->addWidget(new QLabel(QString("Audio Effects  ·  %1").arg(QString::fromStdString(layer->name))));
+        const uint64_t id = layer->id;
+        for (int i = 0; i < static_cast<int>(layer->audioEffects.size()); ++i) {
+            const AudioEffect effect = layer->audioEffects[i];
+            auto* row = new QWidget;
+            auto* controls = new QHBoxLayout(row);
+            controls->setContentsMargins(0, 0, 0, 0);
+            auto* enabled = new QCheckBox;
+            enabled->setChecked(effect.enabled);
+            controls->addWidget(enabled);
+            controls->addWidget(new QLabel(audioEffectLabel(effect.type)), 1);
+            auto* value = new ui::DragValue;
+            const bool gain = effect.type == AudioEffectType::Gain;
+            value->setRange(gain ? -60.0f : 0.01f, gain ? 24.0f : 60.0f);
+            value->setSpeed(gain ? 0.25f : 0.01f);
+            value->setFormat(gain ? "%.1f dB" : "%.2f s");
+            value->setValue(effect.value);
+            controls->addWidget(value);
+            auto* remove = new ui::IconButton(ui::Icon::Trash, "Remove audio effect", 24);
+            controls->addWidget(remove);
+            connect(enabled, &QCheckBox::toggled, this, [this, id, i](bool on) {
+                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size())) l->audioEffects[i].enabled = on, ctx_.touch();
+            });
+            connect(value, &ui::DragValue::valueChanged, this, [this, id, i](float v) {
+                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size())) l->audioEffects[i].value = v, ctx_.touch();
+            });
+            connect(remove, &QAbstractButton::clicked, this, [this, id, i] {
+                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size()))
+                    l->audioEffects.erase(l->audioEffects.begin() + i), ctx_.touch();
+            });
+            col->addWidget(row);
+        }
+        col->addWidget(faint(layer->audioEffects.empty() ? "No audio effects yet. Pick one below." : "Audio effects are applied during playback and export."));
         return;
     }
     const uint64_t id = layer->id;
@@ -317,6 +357,23 @@ void EffectsPanel::rebuildBrowser() {
     browserHost_->addWidget(browser_);
     const int width = std::max(120, viewport()->width() - 16);
     const bool canApply = !ctx_.selection.empty();
+    const auto selectedLayers = ctx_.selectedLayers();
+    const bool audioOnly = canApply && std::all_of(selectedLayers.begin(), selectedLayers.end(), [](const Layer* l) {
+        return l->type == LayerType::Media && l->media.hasAudio && !l->media.hasVideo;
+    });
+    if (audioOnly) {
+        col->addWidget(ui::sectionLabel("Audio Effects"));
+        TileGrid grid(col, width);
+        for (int i = 0; i < static_cast<int>(AudioEffectType::Count); ++i) {
+            const auto type = static_cast<AudioEffectType>(i);
+            ui::Tile* tile = grid.add(ui::Icon::Audio, audioEffectLabel(type));
+            connect(tile, &QAbstractButton::clicked, this, [this, type] {
+                for (Layer* l : ctx_.selectedLayers()) l->audioEffects.push_back(makeAudioEffect(type));
+                ctx_.touch();
+            });
+        }
+        return;
+    }
     if (!canApply) col->addWidget(faint("Select layers, then click an effect to apply it."));
 
     auto effectTile = [&](EffectType type, TileGrid& grid) {

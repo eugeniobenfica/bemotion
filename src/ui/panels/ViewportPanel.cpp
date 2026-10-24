@@ -189,8 +189,7 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
         connect(action, &QAction::triggered, this, [this, divisor] { setPreviewQuality(divisor); });
     }
     qualityButton_->setMenu(qualityMenu);
-    fullscreenButton_ = new QPushButton("Fullscreen", this);
-    fullscreenButton_->setFixedSize(86, 26);
+    fullscreenButton_ = new ui::IconButton(ui::Icon::Fullscreen, "Show only the viewport in fullscreen (Esc to return)", 26, this);
     fullscreenButton_->setToolTip("Show only the viewport in fullscreen (Esc to return)");
     connect(fullscreenButton_, &QPushButton::clicked, this, &ViewportPanel::viewportFullscreenRequested);
     connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
@@ -241,8 +240,8 @@ void ViewportPanel::setPreviewQuality(int divisor) {
 }
 
 void ViewportPanel::setViewportFullscreen(bool fullscreen) {
-    fullscreenButton_->setText(fullscreen ? "Exit fullscreen" : "Fullscreen");
-    fullscreenButton_->setFixedWidth(fullscreen ? 110 : 86);
+    fullscreenButton_->setActive(fullscreen);
+    fullscreenButton_->setToolTip(fullscreen ? "Exit fullscreen (Esc)" : "Show only the viewport in fullscreen (Esc to return)");
     positionHud();
 }
 

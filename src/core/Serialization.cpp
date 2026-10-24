@@ -267,6 +267,12 @@ json encodeLayer(const Layer& constLayer) {
                                  {"v3", encodeAnimated(e.value3)}}}});
         j["effects"] = std::move(effects);
     }
+    if (!layer.audioEffects.empty()) {
+        json effects = json::array();
+        for (const AudioEffect& e : layer.audioEffects)
+            effects.push_back({{"type", audioEffectId(e.type)}, {"enabled", e.enabled}, {"value", e.value}});
+        j["audio_effects"] = std::move(effects);
+    }
     return j;
 }
 
@@ -341,6 +347,18 @@ Layer decodeLayer(const json& j) {
         if (params.contains("v2")) decodeAnimated(params["v2"], e.value2);
         if (params.contains("v3")) decodeAnimated(params["v3"], e.value3);
         layer.effects.push_back(std::move(e));
+    }
+    for (const auto& ej : j.value("audio_effects", json::array())) {
+        const std::string type = ej.value("type", std::string());
+        for (int i = 0; i < static_cast<int>(AudioEffectType::Count); ++i) {
+            const auto candidate = static_cast<AudioEffectType>(i);
+            if (type != audioEffectId(candidate)) continue;
+            AudioEffect e = makeAudioEffect(candidate);
+            e.enabled = ej.value("enabled", true);
+            e.value = ej.value("value", e.value);
+            layer.audioEffects.push_back(e);
+            break;
+        }
     }
     return layer;
 }

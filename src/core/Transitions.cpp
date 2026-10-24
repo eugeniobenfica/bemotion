@@ -116,7 +116,7 @@ const char* transitionEdgeId(TransitionEdge edge) {
 }
 
 bool applyTransition(Layer& layer, const std::string& id, TransitionEdge edge, double duration) {
-    if (layer.type == LayerType::Camera) return false;
+    if (layer.type == LayerType::Camera || (layer.type == LayerType::Media && layer.media.hasAudio && !layer.media.hasVideo)) return false;
     const Definition* def = nullptr;
     for (const Definition& d : kDefinitions)
         if (id == d.info.id) def = &d;

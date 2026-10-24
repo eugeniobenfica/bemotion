@@ -205,6 +205,7 @@ struct Layer {
     MediaProps media;
     BackgroundProps background;
     std::vector<Effect> effects; // applied in order
+    std::vector<AudioEffect> audioEffects; // mixed in order for audio media
 
     // All animatable properties that apply to this layer's type, in UI order.
     std::vector<PropertyRef> properties();

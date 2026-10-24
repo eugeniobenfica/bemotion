@@ -1160,6 +1160,7 @@ void PluginHost::shutdown() {
         if (p.L) lua_close(p.L);
     plugins_.clear();
     types_.clear();
+    commands_.clear();
     render::setPluginDrawer({});
 }
 

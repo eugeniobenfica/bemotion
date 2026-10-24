@@ -206,6 +206,18 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
     case Icon::Minimize:
         dl.line(Pt(c.x - h * 0.55f, c.y + h * 0.1f), Pt(c.x + h * 0.55f, c.y + h * 0.1f), col, th * 1.3f);
         break;
+    case Icon::Fullscreen: {
+        const float a = h * 0.78f, b = h * 0.38f;
+        dl.line({c.x - a, c.y - b}, {c.x - a, c.y - a}, col, th);
+        dl.line({c.x - a, c.y - a}, {c.x - b, c.y - a}, col, th);
+        dl.line({c.x + a, c.y - b}, {c.x + a, c.y - a}, col, th);
+        dl.line({c.x + a, c.y - a}, {c.x + b, c.y - a}, col, th);
+        dl.line({c.x - a, c.y + b}, {c.x - a, c.y + a}, col, th);
+        dl.line({c.x - a, c.y + a}, {c.x - b, c.y + a}, col, th);
+        dl.line({c.x + a, c.y + b}, {c.x + a, c.y + a}, col, th);
+        dl.line({c.x + a, c.y + a}, {c.x + b, c.y + a}, col, th);
+        break;
+    }
     case Icon::Copy:
         dl.rect(Pt(c.x - h * 0.7f, c.y - h * 0.7f), Pt(c.x + h * 0.25f, c.y + h * 0.35f), col, 2.0f, th);
         dl.rect(Pt(c.x - h * 0.25f, c.y - h * 0.25f), Pt(c.x + h * 0.7f, c.y + h * 0.8f), col, 2.0f, th);
