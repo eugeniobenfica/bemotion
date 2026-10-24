@@ -831,7 +831,7 @@ void testCamera3D() {
     Composition& c = p.comp;
     const uint64_t farId = c.layers[2].id;
     CHECK(c.layers[2].threeD && c.layers[2].name == "Far");
-    Affine m;
+    Projective m;
     // Without a camera: twice as far, half the size (around the center).
     CHECK(c.viewFor(*c.findLayer(farId), 0, m) && near(m.apply({1060, 540}).x, 1010.0f));
     CHECK(c.viewFor(c.layers[1], 0, m) && near(m.apply({1060, 540}).x, 1060.0f)); // 2D: not affected
@@ -853,6 +853,32 @@ void testCamera3D() {
         if (l.name == "Near") near3D = &l;
     CHECK(near3D && near3D->threeD && near(near3D->transform.depth.valueAt(0), 100.0f));
     CHECK(validate(back).empty());
+}
+
+void testCamera3DTilt() {
+    Project p;
+    CHECK(run(p, R"([{"op": "layer.add", "type": "rectangle", "name": "Card", "z": 0},
+                     {"op": "property.set", "layer": "Card", "prop": "rotation_y", "value": 60}])").ok);
+    Composition& c = p.comp;
+    Projective m;
+    CHECK(c.viewFor(c.layers[0], 0, m));
+    // Turned 60° around Y: the right side goes away (smaller offset), the left side comes closer.
+    const float right = m.apply({1060, 540}).x - 960, left = 960 - m.apply({860, 540}).x;
+    CHECK(right > 0 && left > right && right < 100 && left > 50);
+    CHECK(near(m.apply({960, 540}).x, 960) && near(m.apply({960, 540}).y, 540)); // turns around its position
+    // The free view: from the front, no perspective (cos 60° = half as wide).
+    CHECK(c.viewFor(c.layers[0], 0, m, false) && near(m.apply({1060, 540}).x, 1010));
+    // Unturned plane (where the position moves): as if facing the camera.
+    CHECK(c.viewFor(c.layers[0], 0, m, true, false) && near(m.apply({1060, 540}).x, 1060));
+    // Turned 90° it is seen edge-on; far enough to the side, points are behind the camera.
+    CHECK(run(p, R"({"op": "property.set", "layer": "Card", "prop": "rotation_y", "value": 90})").ok);
+    CHECK(c.viewFor(c.layers[0], 0, m) && !m.inFront({960 - 3000, 540}) && m.inFront({960 + 3000, 540}));
+    // A camera turned 10° around X looks down: what was at the center moves up on screen.
+    CHECK(run(p, R"([{"op": "property.set", "layer": "Card", "prop": "rotation_y", "value": 0},
+                     {"op": "layer.add", "type": "camera"},
+                     {"op": "property.set", "layer": "Camera", "prop": "rotation_x", "value": 10}])").ok);
+    for (const Layer& l : c.layers)
+        if (l.name == "Card") CHECK(c.viewFor(l, 0, m) && m.apply({960, 540}).y < 540 - 100);
 }
 
 } // namespace
@@ -900,6 +926,7 @@ int main() {
         {"file parameters", testFileParams},
         {"background", testBackground},
         {"3d camera", testCamera3D},
+        {"3d camera tilt", testCamera3DTilt},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

@@ -116,14 +116,20 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
   sits in composition time (`MediaProps::start`, moved by `shiftTime`).
 - **Cameras** — the top-most active camera frames the scene (`cameraAt`).
   **3D layers** (`Layer::threeD`, top level only) have a Z position
-  (`transform.depth`, `position_z`) and the camera, which has one too, sees
-  them in perspective: planes facing the camera, scaled by focal / distance
-  (`viewFor`; `focalLength` is a 50 mm lens on the width), so their transform
-  stays an `Affine` and editing, picking and effects work as for 2D layers.
-  Hidden when at or behind the camera. `drawOrder` is the stacking order with
-  each run of neighboring 3D layers sorted farthest first; rendering and
-  `hitTest` both follow it. The viewport's free view shows 3D layers flat,
-  from the front.
+  (`transform.depth`, `position_z`) and X / Y rotation (`rotation_x`,
+  `rotation_y`, around their position); the camera has them too (it tilts and
+  pans). `viewFor` gives each layer's plane as the camera sees it: a
+  `Projective` (3x3) transform whose w is the distance in near-plane units
+  (w < 1: too close or behind). `focalLength` is a 50 mm lens on the width;
+  facing the camera at its Z it equals the 2D camera, so 2D layers (which
+  follow only the camera's pan, roll and zoom) and old projects do not change.
+  The renderer draws through the perspective matrix and clips each layer to
+  the half-plane in front of the camera; `hitTest` and the viewport's handles
+  invert it. A layer's position moves in its unturned plane (`viewFor` with
+  `tilted` = false), as does its motion path. `drawOrder` is the stacking
+  order with each run of neighboring 3D layers sorted by camera distance,
+  farthest first. The free view shows 3D layers from the front, turned but
+  without perspective.
 
 ### Identity and units
 

@@ -67,17 +67,18 @@ bool g_throughCamera = true; // the view looks through the camera (else the free
 
 // The camera the layer is seen through (scene -> composition): one per layer, since 3D layers
 // are seen at their own depth. False when the camera does not see the layer (behind it).
-bool cameraOf(const Layer& layer, double t, Affine& out) {
+// `tilted` = false: the plane a 3D layer's position moves in (unturned, at its Z).
+bool cameraOf(const Layer& layer, double t, Projective& out, bool tilted = true) {
     out = {};
-    return !g_comp || !g_throughCamera || g_comp->viewFor(layer, t, out);
+    return !g_comp || g_comp->viewFor(layer, t, out, g_throughCamera, tilted);
 }
 
 // `view` with the layer's camera and enclosing compounds: maps the layer's
 // parent space (where its position lives) to the screen.
-render::View parentView(const render::View& view, const Layer& layer, double t) {
+render::View parentView(const render::View& view, const Layer& layer, double t, bool tilted = true) {
     render::View v = view;
-    Affine camera;
-    if (g_comp && cameraOf(layer, t, camera)) v.camera = camera * g_comp->parentMatrix(layer, t);
+    Projective camera;
+    if (g_comp && cameraOf(layer, t, camera, tilted)) v.camera = camera * g_comp->parentMatrix(layer, t);
     return v;
 }
 
@@ -85,7 +86,7 @@ Affine parentOf(const Layer& layer, double t) { return g_comp ? g_comp->parentMa
 
 bool computeHandles(const Layer& layer, double t, const render::View& sceneView, Handles& h) {
     if (layer.type == LayerType::Background) return false; // it is the frame: nothing to move or scale
-    Affine camera;
+    Projective camera;
     if (!cameraOf(layer, t, camera)) return false; // behind the camera: not seen
     const render::View view = parentView(sceneView, layer, t);
     Vec2 mn, mx;
@@ -94,8 +95,11 @@ bool computeHandles(const Layer& layer, double t, const render::View& sceneView,
     h.local[1] = {mx.x, mn.y};
     h.local[2] = {mx.x, mx.y};
     h.local[3] = {mn.x, mx.y};
-    const Affine m = view.matrix() * layer.matrixAt(t);
-    for (int i = 0; i < 4; ++i) h.screen[i] = m.apply(h.local[i]);
+    const Projective m = view.matrix() * layer.matrixAt(t);
+    for (int i = 0; i < 4; ++i) {
+        if (!m.inFront(h.local[i])) return false; // partly behind the camera: no box to show
+        h.screen[i] = m.apply(h.local[i]);
+    }
     h.topMid = (h.screen[0] + h.screen[1]) * 0.5f;
     const Vec2 center = (h.screen[0] + h.screen[2]) * 0.5f;
     Vec2 dir = h.topMid - center;
@@ -138,9 +142,11 @@ bool near(Vec2 a, Vec2 b, float r) { return (a - b).length() <= r; }
 // Axis-aligned bounds of a layer in composition pixels (as the view shows it).
 bool compBox(const Layer& layer, double t, Vec2& mn, Vec2& mx) {
     Vec2 lmn, lmx;
-    Affine camera;
+    Projective camera;
     if (!render::localBounds(layer, t, lmn, lmx, g_comp) || !cameraOf(layer, t, camera)) return false;
-    const Affine m = camera * parentOf(layer, t) * layer.matrixAt(t);
+    const Projective m = camera * parentOf(layer, t) * layer.matrixAt(t);
+    for (const Vec2& c : {lmn, Vec2{lmx.x, lmn.y}, lmx, Vec2{lmn.x, lmx.y}})
+        if (!m.inFront(c)) return false;
     const Vec2 corners[4] = {m.apply(lmn), m.apply({lmx.x, lmn.y}), m.apply(lmx), m.apply({lmn.x, lmx.y})};
     mn = mx = corners[0];
     for (const Vec2& c : corners) {
@@ -355,7 +361,7 @@ void ViewportPanel::drawMotionPath(QPainter& p) {
     Layer* l = pathLayer();
     if (!l) return;
     Draw d(p);
-    const render::View view = parentView(sceneView(), *l, ctx_.time);
+    const render::View view = parentView(sceneView(), *l, ctx_.time, false); // the plane the path lies in
     const Composition& comp = ctx_.comp();
     const auto& keys = l->transform.position.keys;
     const int n = static_cast<int>(keys.size());
@@ -511,7 +517,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
         ghostImg.fill(Qt::transparent);
         if (auto surface = SkSurfaces::WrapPixels(qtImageInfo(ghostImg.width(), ghostImg.height()), ghostImg.bits(),
                                                   static_cast<size_t>(ghostImg.bytesPerLine()))) {
-            const Affine m = Affine::scale(static_cast<float>(dpr)) * view.matrix() * ghost.matrixAt(t);
+            const Projective m = Affine::scale(static_cast<float>(dpr)) * view.matrix() * ghost.matrixAt(t);
             render::drawLayer(surface->getCanvas(), ghost, t, m, zoom_ * static_cast<float>(dpr),
                               item && item->kind == MediaKind::Image ? &comp : nullptr);
         }
@@ -619,7 +625,7 @@ Layer* ViewportPanel::pathLayer() const {
 bool ViewportPanel::pathHit(Vec2 screen, int& key, int& part) const {
     Layer* l = pathLayer();
     if (!l) return false;
-    const render::View view = parentView(sceneView(), *l, ctx_.time);
+    const render::View view = parentView(sceneView(), *l, ctx_.time, false);
     const auto& keys = l->transform.position.keys;
     const int n = static_cast<int>(keys.size());
     for (int i = 0; i < n; ++i) {
@@ -878,10 +884,13 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
         if (ctx_.snapping && !(mods & Qt::ControlModifier)) delta = delta + snapMove(dragBoxMin_, dragBoxMax_, delta);
         // The camera may zoom or rotate the view (3D layers: each at its depth); inside a
         // compound the position is in its (scaled, rotated) space.
+        // Where the position was on screen, moved by the mouse, back in the plane it moves in.
         for (const auto& [id, start] : dragStartPositions_) {
             Layer* l = ctx_.comp().findLayer(id);
-            Affine camera;
-            if (l && cameraOf(*l, t, camera)) l->transform.position.set(t, start + (camera * parentOf(*l, t)).inverse().applyVector(delta));
+            Projective plane;
+            if (!l || !cameraOf(*l, t, plane, false)) continue;
+            plane = plane * parentOf(*l, t);
+            l->transform.position.set(t, plane.inverse().apply(plane.apply(start) + delta));
         }
         break;
     }
@@ -919,7 +928,7 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
         if (!layer || pathKey_ < 0 || pathKey_ >= layer->transform.position.keyCount()) break;
         auto& keys = layer->transform.position.keys;
         auto& k = keys[pathKey_];
-        const Vec2 q = parentView(view, *layer, t).screenToScene(mouse);
+        const Vec2 q = parentView(view, *layer, t, false).screenToScene(mouse);
         if (drag_ == Drag::PathKey) {
             k.value = q;
         } else {

@@ -326,32 +326,102 @@ Affine Composition::cameraAt(double t) const {
     return Affine::translate(center()) * frame.inverse();
 }
 
-bool Composition::viewFor(const Layer& layer, double t, Affine& out) const {
-    const Layer* top = &layer; // what is inside a compound lies flat in it: the compound's depth counts
+namespace {
+// 3D rotations (world: x right, y down, z away from the viewer), degrees.
+struct Mat3 {
+    float m[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    Mat3 operator*(const Mat3& o) const {
+        Mat3 r;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) r.m[i][j] = m[i][0] * o.m[0][j] + m[i][1] * o.m[1][j] + m[i][2] * o.m[2][j];
+        return r;
+    }
+    Mat3 transposed() const {
+        Mat3 r;
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) r.m[i][j] = m[j][i];
+        return r;
+    }
+    void apply(const float v[3], float out[3]) const {
+        for (int i = 0; i < 3; ++i) out[i] = m[i][0] * v[0] + m[i][1] * v[1] + m[i][2] * v[2];
+    }
+};
+Mat3 rotX(float deg) { // the top tips away
+    const float c = std::cos(degToRad(deg)), s = std::sin(degToRad(deg));
+    Mat3 r;
+    r.m[1][1] = c, r.m[1][2] = s, r.m[2][1] = -s, r.m[2][2] = c;
+    return r;
+}
+Mat3 rotY(float deg) { // the right side turns away
+    const float c = std::cos(degToRad(deg)), s = std::sin(degToRad(deg));
+    Mat3 r;
+    r.m[0][0] = c, r.m[0][2] = -s, r.m[2][0] = s, r.m[2][2] = c;
+    return r;
+}
+Mat3 rotZ(float deg) { // clockwise on screen, like Affine::rotateDeg
+    const float c = std::cos(degToRad(deg)), s = std::sin(degToRad(deg));
+    Mat3 r;
+    r.m[0][0] = c, r.m[0][1] = -s, r.m[1][0] = s, r.m[1][1] = c;
+    return r;
+}
+
+const Layer* topLevel(const Composition& c, const Layer& layer) {
+    const Layer* top = &layer; // what is inside a compound lies flat in it: the compound's plane counts
     for (int guard = 0; top->parent && guard < 32; ++guard) {
-        const Layer* p = findLayer(top->parent);
+        const Layer* p = c.findLayer(top->parent);
         if (!p) break;
         top = p;
     }
+    return top;
+}
+} // namespace
+
+bool Composition::viewFor(const Layer& layer, double t, Projective& out, bool throughCamera, bool tilted) const {
+    const Layer* top = topLevel(*this, layer);
     if (!top->threeD || top->type == LayerType::Camera || top->type == LayerType::Background) {
-        out = cameraAt(t);
+        out = throughCamera && top->type != LayerType::Background ? Projective(cameraAt(t)) : Projective();
         return true;
     }
-    // Layers are planes facing the camera: seen in perspective, a layer at distance d is scaled
-    // by focal / d around the camera's axis. At the camera's own Z it matches the 2D camera.
-    Vec2 eye = center();
-    float eyeZ = 0.0f, roll = 0.0f, zoom = 1.0f;
-    if (const Layer* cam = activeCamera(*this, t)) {
-        eye = cam->transform.position.valueAt(t);
-        eyeZ = cam->transform.depth.valueAt(t);
-        roll = cam->transform.rotation.valueAt(t);
-        zoom = std::max(0.01f, cam->camera.zoom.valueAt(t) * 0.01f);
+    const Vec2 p = top->transform.position.valueAt(t);
+    const Mat3 turn = tilted ? rotX(top->transform.rotationX.valueAt(t)) * rotY(top->transform.rotationY.valueAt(t)) : Mat3{};
+    if (!throughCamera) { // from the front, without perspective: only turned around the position
+        Affine a;
+        a.a = turn.m[0][0], a.c = turn.m[0][1], a.b = turn.m[1][0], a.d = turn.m[1][1];
+        a.tx = p.x - (a.a * p.x + a.c * p.y), a.ty = p.y - (a.b * p.x + a.d * p.y);
+        out = a;
+        return true;
     }
-    const float focal = focalLength();
-    const float distance = focal + top->transform.depth.valueAt(t) - eyeZ;
-    if (!(distance > focal * 0.01f)) return false; // behind the camera, or too close to draw (100x)
-    out = Affine::translate(center()) * Affine::scale(zoom * focal / distance) * Affine::rotateDeg(-roll) *
-          Affine::translate(eye * -1.0f);
+    // The layer is a plane in the world: its point (u, v) (scene coordinates of the unturned
+    // plane) is at (p, z) + turn * (u - p.x, v - p.y, 0). The camera stands `focal` in front of
+    // its own Z position, turned by its X / Y / Z rotation, and projects with that focal length
+    // times its zoom. At the camera's Z, facing it, this is exactly the 2D camera (cameraAt).
+    Vec2 eye = center();
+    float eyeZ = 0.0f, zoom = 1.0f;
+    Mat3 lens;
+    if (const Layer* cam = activeCamera(*this, t)) {
+        const TransformProps& ct = cam->transform;
+        eye = ct.position.valueAt(t);
+        eyeZ = ct.depth.valueAt(t);
+        zoom = std::max(0.01f, cam->camera.zoom.valueAt(t) * 0.01f);
+        lens = rotY(ct.rotationY.valueAt(t)) * rotX(ct.rotationX.valueAt(t)) * rotZ(ct.rotation.valueAt(t));
+    }
+    const float focal = focalLength(), nearPlane = focal * 0.01f; // closer than that: 100x, not drawn
+    const Mat3 toCamera = lens.transposed();
+    const Mat3 a = toCamera * turn;
+    const float rel[3] = {p.x - eye.x, p.y - eye.y, top->transform.depth.valueAt(t) - eyeZ + focal};
+    float b[3];
+    toCamera.apply(rel, b);
+    for (int i = 0; i < 3; ++i) b[i] -= a.m[i][0] * p.x + a.m[i][1] * p.y; // (u, v) relative to the position
+    // Camera space of (u, v, 1): columns a0, a1, b. Facing the camera and behind it: not seen.
+    if (std::fabs(a.m[2][0]) < 1e-6f && std::fabs(a.m[2][1]) < 1e-6f && b[2] < nearPlane) return false;
+    const float k = zoom * focal;
+    const Vec2 c = center();
+    for (int j = 0; j < 3; ++j) {
+        const float cx = j < 2 ? a.m[0][j] : b[0], cy = j < 2 ? a.m[1][j] : b[1], cz = j < 2 ? a.m[2][j] : b[2];
+        out.m[0][j] = (k * cx + c.x * cz) / nearPlane;
+        out.m[1][j] = (k * cy + c.y * cz) / nearPlane;
+        out.m[2][j] = cz / nearPlane;
+    }
     return true;
 }
 
@@ -365,9 +435,17 @@ std::vector<const Layer*> Composition::drawOrder(double t, bool cameras) const {
     for (size_t i = 0; i < order.size();) { // each run of neighboring 3D layers: farthest first
         size_t j = i;
         while (j < order.size() && order[j]->threeD) ++j;
-        std::stable_sort(order.begin() + i, order.begin() + j, [t](const Layer* a, const Layer* b) {
-            return a->transform.depth.valueAt(t) > b->transform.depth.valueAt(t);
-        });
+        if (j > i + 1) {
+            // Distance from the camera to each layer's position (w), whatever the view.
+            std::vector<std::pair<float, const Layer*>> run;
+            for (size_t k = i; k < j; ++k) {
+                Projective view;
+                const float w = viewFor(*order[k], t, view) ? view.w(order[k]->transform.position.valueAt(t)) : -1e30f;
+                run.emplace_back(w, order[k]);
+            }
+            std::stable_sort(run.begin(), run.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+            for (size_t k = i; k < j; ++k) order[k] = run[k - i].second;
+        }
         i = j > i ? j : i + 1;
     }
     return order;

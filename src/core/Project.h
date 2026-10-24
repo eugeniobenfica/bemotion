@@ -62,15 +62,20 @@ struct Composition {
     // Scene -> composition transform of the top-most active camera (identity without one).
     Affine cameraAt(double t) const;
     // Scene -> composition transform for `layer` as the camera sees it: cameraAt for 2D
-    // layers; for 3D layers (and what is inside a 3D compound) the camera's perspective at
-    // the layer's Z position. False when the layer is at or behind the camera (not seen).
-    // Without a camera, 3D layers are seen by a default one (center, Z 0, zoom 100%).
-    bool viewFor(const Layer& layer, double t, Affine& out) const;
+    // layers; for 3D layers (and what is inside a 3D compound) the camera's perspective on the
+    // layer's plane: at its Z position, turned by its X / Y rotation around its position
+    // (`tilted` = false: the plane at that Z, unturned, where its position moves). `out` keeps
+    // w as the distance from the camera in near-plane units: w < 1 is too close or behind.
+    // False when the whole layer is behind the camera. Without a camera, 3D layers are seen by
+    // a default one (center, Z 0, zoom 100%). throughCamera = false: the free view, from the
+    // front without perspective (2D layers as they are, 3D layers only turned).
+    bool viewFor(const Layer& layer, double t, Projective& out, bool throughCamera = true, bool tilted = true) const;
     // How far the camera stands from the layers at its own Z position: a 50 mm lens on the
     // composition width (like After Effects' default camera).
     float focalLength() const { return static_cast<float>(width) * (50.0f / 36.0f); }
     // Top-level active layers in drawing order, bottom first: the stacking order, except that
-    // neighboring 3D layers are drawn by Z position, farthest first. Cameras only with `cameras`.
+    // neighboring 3D layers are drawn by distance from the camera, farthest first. Cameras only
+    // with `cameras`.
     std::vector<const Layer*> drawOrder(double t, bool cameras = false) const;
     // Gives every camera the current composition size as its frame.
     void syncCameras();

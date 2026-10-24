@@ -26,7 +26,33 @@ namespace bemotion::render {
 
 namespace {
 
-SkMatrix toSk(const Affine& m) { return SkMatrix::MakeAll(m.a, m.c, m.tx, m.b, m.d, m.ty, 0, 0, 1); }
+SkMatrix toSk(const Projective& p) {
+    const auto& m = p.m;
+    return SkMatrix::MakeAll(m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]);
+}
+
+// A turned 3D layer may reach behind the camera: only its part in front (w >= 1 in its own
+// space) is drawn. Call after setting `m` on the canvas; false when none of it is in front.
+bool clipToFront(SkCanvas* canvas, const Projective& m) {
+    if (!m.hasPerspective()) return true; // the whole plane at one distance (checked by viewFor)
+    constexpr float kFar = 1e5f;          // far beyond any layer, in its own pixels
+    std::vector<Vec2> poly = {{-kFar, -kFar}, {kFar, -kFar}, {kFar, kFar}, {-kFar, kFar}};
+    std::vector<Vec2> kept;
+    const auto side = [&](Vec2 p) { return m.w(p) - 1.01f; };
+    for (size_t i = 0; i < poly.size(); ++i) { // the square cut by the line w = 1 (Sutherland-Hodgman)
+        const Vec2 a = poly[i], b = poly[(i + 1) % poly.size()];
+        const float sa = side(a), sb = side(b);
+        if (sa >= 0) kept.push_back(a);
+        if ((sa >= 0) != (sb >= 0)) kept.push_back(a + (b - a) * (sa / (sa - sb)));
+    }
+    if (kept.size() < 3) return false;
+    SkPathBuilder b;
+    b.moveTo(kept[0].x, kept[0].y);
+    for (size_t i = 1; i < kept.size(); ++i) b.lineTo(kept[i].x, kept[i].y);
+    b.close();
+    canvas->clipPath(b.detach(), true);
+    return true;
+}
 
 SkColor4f color4(Color c, float opacity = 1.0f) { return {c.r, c.g, c.b, std::clamp(c.a * opacity, 0.0f, 1.0f)}; }
 
@@ -368,7 +394,7 @@ std::vector<double> momentsOf(const Layer& layer, double t, double frameDuration
 }
 
 // The layer's own content in its local space (the canvas carries its transform).
-void drawContent(SkCanvas* canvas, const Layer& layer, double t, float opacity, const Composition* comp, const Affine& toOutput,
+void drawContent(SkCanvas* canvas, const Layer& layer, double t, float opacity, const Composition* comp, const Projective& toOutput,
                  float zoom) {
     switch (layer.type) {
     case LayerType::Compound:
@@ -398,7 +424,7 @@ bool hasActiveEffects(const Layer& layer) {
     return std::any_of(layer.effects.begin(), layer.effects.end(), [](const Effect& e) { return e.enabled; });
 }
 
-void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Affine& layerToOutput, float zoom,
+void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projective& layerToOutput, float zoom,
                const Composition* comp, float opacityOverride) {
     const float opacity = opacityOverride >= 0.0f ? std::min(opacityOverride, 1.0f)
                                                   : std::clamp(layer.transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
@@ -407,14 +433,14 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Affine& 
     if (!hasActiveEffects(layer)) {
         canvas->save();
         canvas->setMatrix(toSk(layerToOutput));
-        drawContent(canvas, layer, time, opacity, comp, layerToOutput, zoom);
+        if (clipToFront(canvas, layerToOutput)) drawContent(canvas, layer, time, opacity, comp, layerToOutput, zoom);
         canvas->restore();
         return;
     }
 
     // With effects: draw into a layer filtered in output space (no transform on the filter).
     // `layerToOutput` is for `time`; other moments (motion blur) rebuild it from the parent.
-    const Affine parent = layerToOutput * layer.matrixAt(time).inverse();
+    const Projective parent = layerToOutput * layer.matrixAt(time).inverse();
     const std::vector<double> times = momentsOf(layer, time, comp ? comp->frameDuration() : 1.0 / 30.0);
     // The offscreen layer only needs to hold what the layer draws (in output pixels): image
     // filters on the CPU cost per pixel of the layer.
@@ -426,8 +452,9 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Affine& 
             bounded = false;
             break;
         }
-        const Affine m = parent * layer.matrixAt(ti);
+        const Projective m = parent * layer.matrixAt(ti);
         for (Vec2 corner : {lo, Vec2{hi.x, lo.y}, hi, Vec2{lo.x, hi.y}}) {
+            if (!m.inFront(corner)) bounded = false; // reaches behind the camera: no usable bounds
             const Vec2 q = m.apply(corner);
             x0 = std::min(x0, q.x), y0 = std::min(y0, q.y), x1 = std::max(x1, q.x), y1 = std::max(y1, q.y);
         }
@@ -448,9 +475,11 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Affine& 
             add.setAlphaf(1.0f / static_cast<float>(times.size()));
             canvas->saveLayer(hint, &add);
         }
-        const Affine m = parent * layer.matrixAt(ti);
+        const Projective m = parent * layer.matrixAt(ti);
+        canvas->save();
         canvas->setMatrix(toSk(m));
-        drawContent(canvas, layer, ti, 1.0f, comp, m, zoom);
+        if (clipToFront(canvas, m)) drawContent(canvas, layer, ti, 1.0f, comp, m, zoom);
+        canvas->restore();
         if (average) canvas->restore();
     }
     canvas->restore();
@@ -472,12 +501,13 @@ void drawComposition(SkCanvas* canvas, const Composition& comp, double time, con
     const Affine flat = throughCamera ? comp.cameraAt(time) : Affine{};
     for (const Layer* layer : comp.drawOrder(time)) {
         // Backgrounds stay on the frame whatever the camera does. 3D layers are seen in
-        // perspective through the camera (the free view shows them flat, from the front).
-        Affine camera = layer->type == LayerType::Background ? Affine{} : flat;
+        // perspective through the camera (the free view shows them from the front).
+        Projective camera;
+        if (!comp.viewFor(*layer, time, camera, throughCamera)) continue; // behind the camera
         float zoom = view.zoom;
-        if (throughCamera && layer->threeD) {
-            if (!comp.viewFor(*layer, time, camera)) continue; // behind the camera
-            zoom *= std::sqrt(std::fabs(camera.determinant() / std::max(1e-12f, std::fabs(flat.determinant())))); // effects shrink with distance
+        if (layer->threeD) { // effects shrink with distance (as the 2D camera's own zoom leaves them)
+            const float s = camera.localScale(layer->transform.position.valueAt(time));
+            zoom *= s / std::max(1e-6f, std::sqrt(std::fabs(flat.determinant())));
         }
         drawLayer(canvas, *layer, time, screen * camera * layer->matrixAt(time), zoom, &comp);
     }
@@ -545,10 +575,11 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
 namespace {
 // The composition point in the layer's own space (false: the camera does not see it).
 bool toLocal(const Composition& comp, const Layer& layer, double time, Vec2 compPoint, bool throughCamera, Vec2& out) {
-    Affine camera;
-    if (throughCamera && !comp.viewFor(layer, time, camera)) return false;
-    out = (camera * comp.worldMatrix(layer, time)).inverse().apply(compPoint);
-    return true;
+    Projective camera;
+    if (!comp.viewFor(layer, time, camera, throughCamera)) return false;
+    const Projective m = camera * comp.worldMatrix(layer, time);
+    out = m.inverse().apply(compPoint);
+    return m.inFront(out); // a point seen there, not its mirror behind the camera
 }
 } // namespace
 

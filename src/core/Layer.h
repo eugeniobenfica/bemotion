@@ -53,6 +53,10 @@ struct TransformProps {
     AnimFloat rotation{0.0f};             // degrees, clockwise
     AnimFloat opacity{100.0f};            // percent
     AnimFloat depth{0.0f};                // Z position, px (3D layers and cameras): larger is farther away
+    // 3D layers and cameras, degrees: X tips the top away, Y turns the right side away
+    // (rotation above turns around Z). A camera turned so looks down / to the left.
+    AnimFloat rotationX{0.0f};
+    AnimFloat rotationY{0.0f};
 };
 
 struct ShapeProps {

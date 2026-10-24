@@ -96,7 +96,9 @@ std::vector<PropertyRef> Layer::properties() {
     if (type == LayerType::Camera) { // never drawn: no shape, text or effects
         p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
         p.push_back({"position_z", "Transform", "Z Position", PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.0f"});
-        p.push_back({"rotation", "Transform", "Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"rotation_x", "Transform", "X Rotation", PropertyKind::Float, &tr.rotationX, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"rotation_y", "Transform", "Y Rotation", PropertyKind::Float, &tr.rotationY, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"rotation", "Transform", "Z Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
         p.push_back({"camera_zoom", "Camera", "Zoom", PropertyKind::Float, &camera.zoom, 0.5f, 1, 10000, "%.0f%%"});
         return p;
     }
@@ -104,7 +106,11 @@ std::vector<PropertyRef> Layer::properties() {
     p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
     if (threeD) p.push_back({"position_z", "Transform", "Z Position", PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.0f"});
     p.push_back({"scale", "Transform", "Scale", PropertyKind::Vec2, &tr.scale, 0.5f, 0, 0, "%.1f%%"});
-    p.push_back({"rotation", "Transform", "Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
+    if (threeD) {
+        p.push_back({"rotation_x", "Transform", "X Rotation", PropertyKind::Float, &tr.rotationX, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"rotation_y", "Transform", "Y Rotation", PropertyKind::Float, &tr.rotationY, 0.5f, 0, 0, "%.1f°"});
+    }
+    p.push_back({"rotation", "Transform", threeD ? "Z Rotation" : "Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
     p.push_back({"opacity", "Transform", "Opacity", PropertyKind::Float, &tr.opacity, 0.5f, 0, 100, "%.0f%%"});
 
     if (type == LayerType::Shape) {

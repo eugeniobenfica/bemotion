@@ -101,4 +101,55 @@ struct Affine {
     }
 };
 
+// 2D projective transform (a 3x3 matrix): what a plane seen in perspective becomes
+// on screen. Points map to (x / w, y / w); w is kept so callers can tell points in
+// front of the camera (w >= 1, see Composition::viewFor) from those behind it.
+// Affine transforms convert to it (w = 1 everywhere).
+struct Projective {
+    float m[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+
+    Projective() = default;
+    Projective(const Affine& a) : m{{a.a, a.c, a.tx}, {a.b, a.d, a.ty}, {0, 0, 1}} {}
+
+    bool hasPerspective() const { return m[2][0] != 0.0f || m[2][1] != 0.0f; }
+    float w(Vec2 p) const { return m[2][0] * p.x + m[2][1] * p.y + m[2][2]; }
+    bool inFront(Vec2 p) const { return w(p) > 0.999f; }
+    Vec2 apply(Vec2 p) const {
+        const float ww = w(p), iw = std::fabs(ww) > 1e-12f ? 1.0f / ww : 0.0f;
+        return {(m[0][0] * p.x + m[0][1] * p.y + m[0][2]) * iw, (m[1][0] * p.x + m[1][1] * p.y + m[1][2]) * iw};
+    }
+    float determinant() const {
+        return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+               m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+    }
+    // How much a small area around `p` is scaled (square root of the Jacobian's determinant).
+    float localScale(Vec2 p) const {
+        const Vec2 o = apply(p), dx = apply({p.x + 1.0f, p.y}) - o, dy = apply({p.x, p.y + 1.0f}) - o;
+        return std::sqrt(std::fabs(dx.x * dy.y - dx.y * dy.x));
+    }
+    Projective inverse() const {
+        const float det = determinant();
+        if (std::fabs(det) < 1e-20f) return {};
+        const float k = 1.0f / det;
+        Projective r;
+        r.m[0][0] = (m[1][1] * m[2][2] - m[1][2] * m[2][1]) * k;
+        r.m[0][1] = (m[0][2] * m[2][1] - m[0][1] * m[2][2]) * k;
+        r.m[0][2] = (m[0][1] * m[1][2] - m[0][2] * m[1][1]) * k;
+        r.m[1][0] = (m[1][2] * m[2][0] - m[1][0] * m[2][2]) * k;
+        r.m[1][1] = (m[0][0] * m[2][2] - m[0][2] * m[2][0]) * k;
+        r.m[1][2] = (m[0][2] * m[1][0] - m[0][0] * m[1][2]) * k;
+        r.m[2][0] = (m[1][0] * m[2][1] - m[1][1] * m[2][0]) * k;
+        r.m[2][1] = (m[0][1] * m[2][0] - m[0][0] * m[2][1]) * k;
+        r.m[2][2] = (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * k;
+        return r;
+    }
+};
+
+inline Projective operator*(const Projective& x, const Projective& y) {
+    Projective r;
+    for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) r.m[i][j] = x.m[i][0] * y.m[0][j] + x.m[i][1] * y.m[1][j] + x.m[i][2] * y.m[2][j];
+    return r;
+}
+
 } // namespace bemotion

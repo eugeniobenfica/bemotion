@@ -31,10 +31,10 @@ layer and then animate it.
 
 | Layers | Properties |
 | --- | --- |
-| every layer | `anchor`, `position`, `scale`, `rotation`, `opacity`; 3D layers `position_z` |
+| every layer | `anchor`, `position`, `scale`, `rotation`, `opacity`; 3D layers `position_z`, `rotation_x` (the top tips away), `rotation_y` (the right side turns away) |
 | shapes | `size`, `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end` |
 | text | `font_size`, `text_color`, `tracking`, `line_height`, `reveal` |
-| camera | `position`, `position_z`, `rotation`, `camera_zoom` |
+| camera | `position`, `position_z`, `rotation_x` (looks down), `rotation_y` (looks left), `rotation`, `camera_zoom` |
 | media with sound | `volume` |
 | plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
 | effects | `fx<index>.<param>` (e.g. `fx0.size`; `effect.add` lists the params) |

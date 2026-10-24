@@ -151,9 +151,9 @@ does.
   changes a crash would lose are offered back the next time
 - **Viewport** with box selection, rulers, guides and smart snapping
 - **Camera** with position, rotation and zoom — and depth: turn on **3D
-  Layer** and give layers a Z position, and the camera sees them in
-  perspective as it moves (parallax, flying through the scene, like a
-  multiplane camera or After Effects' 3D layers)
+  Layer** and give layers a Z position and X / Y rotation, and the camera
+  (which moves, tilts and pans in 3D too) sees them in perspective: parallax,
+  floors and walls, flying through the scene, like After Effects' 3D layers
 
 </td>
 <td valign="top">
