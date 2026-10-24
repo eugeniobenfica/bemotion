@@ -953,6 +953,45 @@ void testSubtitles() {
         if (x.text.subtitle) CHECK(x.text.captions.size() == 2 && x.text.captions[0].text == "a" && near(static_cast<float>(x.text.captions[0].end), 3.0f));
 }
 
+void testLens() {
+    Project p;
+    CHECK(run(p, R"([{"op": "layer.add", "type": "rectangle", "name": "Flat", "position": [1060, 540]},
+                     {"op": "layer.add", "type": "rectangle", "name": "Deep", "z": 1000, "position": [1060, 540]},
+                     {"op": "layer.add", "type": "camera", "z": 200},
+                     {"op": "property.set", "layer": "Camera", "prop": "rotation_y", "value": 10}])").ok);
+    const Composition& c = p.comp;
+    const Lens lens = c.lensAt(0);
+    CHECK(near(lens.z, 200.0f - c.focalLength()) && near(lens.ry, 10.0f));
+    // The camera's view of a 3D layer is the lens's.
+    for (const Layer& l : c.layers)
+        if (l.name == "Deep") {
+            Projective a, b;
+            CHECK(c.viewFor(l, 0, a) && c.viewThrough(lens, l, 0, b));
+            CHECK(near(a.apply({1000, 500}).x, b.apply({1000, 500}).x) && near(a.apply({1000, 500}).y, b.apply({1000, 500}).y));
+            Vec2 q;
+            CHECK(c.project(lens, 1000, 500, 1000, q) && near(q.x, a.apply({1000, 500}).x, 0.05f));
+        }
+    // Behind the eye: not projected. 2D layers are planes at Z 0 in the 3D view; backgrounds are not there.
+    Vec2 q;
+    CHECK(!c.project(lens, lens.x, lens.y, lens.z - 100, q));
+    for (const Layer& l : c.layers)
+        if (l.name == "Flat") {
+            Projective v;
+            CHECK(c.viewThrough(lens, l, 0, v, true, true));
+            Vec2 at0;
+            CHECK(c.project(lens, 1060, 540, 0, at0) && near(v.apply({1060, 540}).x, at0.x, 0.05f));
+        }
+    float r[3], d[3], f[3];
+    lensAxes(lens, r, d, f);
+    CHECK(near(r[0] * f[0] + r[1] * f[1] + r[2] * f[2], 0.0f) && near(f[0] * f[0] + f[1] * f[1] + f[2] * f[2], 1.0f));
+    CHECK(f[0] < 0.0f); // turned +10 on Y: it looks to the left
+    // From the 3D view, everything is ordered by distance and the camera is left out.
+    Lens side = lens;
+    side.z = 3000.0f, side.ry = 180.0f; // behind the scene, looking back
+    const auto order = c.drawOrder(0, false, &side);
+    CHECK(order.size() == 2 && order.front()->name == "Flat"); // farthest from that eye first
+}
+
 } // namespace
 
 int main() {
@@ -1001,6 +1040,7 @@ int main() {
         {"3d camera tilt", testCamera3DTilt},
         {"cut transitions", testCutTransitions},
         {"subtitles", testSubtitles},
+        {"lens", testLens},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

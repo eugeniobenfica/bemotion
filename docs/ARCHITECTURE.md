@@ -129,7 +129,19 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
   `tilted` = false), as does its motion path. `drawOrder` is the stacking
   order with each run of neighboring 3D layers sorted by camera distance,
   farthest first. The free view shows 3D layers from the front, turned but
-  without perspective.
+  without perspective. A `Lens` is any point of view (eye position, turn,
+  focal length): `lensAt` / `lensOf` give a camera's, `viewThrough` sees a
+  layer from one (with `all`, 2D layers too, as planes at Z 0), `project`
+  places a 3D point. The renderer sorts by `render::depthOrder`: the far end of
+  each layer's box, so a floor is drawn before what stands on it.
+- **Viewport 3D** (`ViewportPanel`): the 3D view draws the scene from an
+  orbiting `Lens` of its own (`drawComposition(..., lens)`, no frame clip, no
+  backgrounds) and overlays the Z 0 frame and each camera (body, frustum to
+  what it sees at its Z, the point it looks at). The gizmo's arrows move the
+  selected 3D layer (or a camera, in the 3D view) along a world axis, at the
+  rate its projection gives; the camera tools (Orbit around the focus point,
+  Pan, Dolly) write the camera's position, Z and X / Y rotation at the
+  playhead.
 
 ### Identity and units
 

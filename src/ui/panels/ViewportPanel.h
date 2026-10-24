@@ -35,6 +35,10 @@ class IconButton;
 //   drag a layer                  move every selected layer
 //   corner / top handle           scale (Shift: uniform) / rotate (Shift: 15° steps)
 //   double-click a text           edit it in place; a compound: enter it
+//   red / green / blue arrows      move a 3D layer (or, in the 3D view, the camera) along X / Y / Z
+// 3D view (the cube button): the layers and cameras in space, seen from an eye of its own:
+//   drag empty space               turn around      right / middle drag  pan      wheel  closer / farther
+// Camera tools (a camera selected, looking through it): Orbit, Pan, Dolly move the camera by dragging.
 class ViewportPanel : public QWidget {
     Q_OBJECT
 signals:
@@ -78,7 +82,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle, Guide };
+    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle, Guide, Axis, Orbit, OrbitPan, CameraTool };
 
     void layout(); // zoom, origin and camera for the current size and time
     void press(QMouseEvent* e, bool doubleClick);
@@ -114,6 +118,47 @@ private:
     // Camera: through it (the default) or a free view showing camera frames.
     bool throughCamera_ = true;
     Affine world_; // scene -> composition for this frame
+
+    // --- 3D -----------------------------------------------------------------------
+    // The 3D view: every layer in space and the cameras with what they see, from an eye that
+    // turns around a point (yaw / pitch in degrees, distance 0 = the default).
+    bool orbit_ = false;
+    struct Orbit {
+        float yaw = 32.0f, pitch = 16.0f, distance = 0.0f;
+        float tx = 960.0f, ty = 540.0f, tz = 0.0f; // the point it turns around
+        bool operator==(const Orbit&) const = default;
+    } orbitView_;
+    Lens orbitLens_; // for this frame (layout)
+    Lens orbitLens() const;
+    void resetOrbit();
+    void draw3D(QPainter& p); // the Z 0 frame and the cameras, in the 3D view
+    uint64_t cameraAt(Vec2 screen) const; // a camera's body under the mouse (3D view), or 0
+
+    // The arrows that move the single selected 3D layer (or a camera, in the 3D view) along
+    // the world's X, Y and Z.
+    struct Gizmo {
+        bool valid = false;
+        uint64_t layer = 0;
+        Vec2 base;          // screen
+        Vec2 tip[3];        // screen
+        Vec2 dir[3];        // screen, length 1
+        float perPx[3] = {}; // world units per screen pixel along the arrow
+    };
+    Gizmo gizmo() const;
+    int gizmoAxis(Vec2 screen) const; // the arrow under the mouse, or -1
+    void drawGizmo(QPainter& p);
+    int axis_ = -1;           // arrow being dragged
+    Gizmo axisStart_;         // the gizmo when the drag started
+    float axisStartValue_ = 0.0f;
+    int hoverAxis_ = -1;
+
+    // Camera tools: with a camera selected, looking through it, dragging moves the camera.
+    enum class CameraTool { None, Orbit, Pan, Dolly };
+    CameraTool cameraTool_ = CameraTool::None;
+    QPushButton* cameraTools_[3] = {};
+    Lens toolStartLens_;       // the camera's point of view when the drag started
+    float toolStartRx_ = 0.0f, toolStartRy_ = 0.0f;
+    void moveCamera(Vec2 mouse);
     render::View sceneView() const { return {origin_, zoom_, world_}; }
     bool autoFit_ = true;
     bool spaceHeld_ = false, spaceUsed_ = false;
@@ -160,6 +205,7 @@ private:
 
     // Heads-up controls (bottom of the canvas).
     ui::IconButton* cameraButton_ = nullptr;
+    ui::IconButton* orbitButton_ = nullptr; // the 3D view
     ui::IconButton* snapButton_ = nullptr;
     ui::IconButton* zoomOutButton_ = nullptr;
     ui::IconButton* zoomInButton_ = nullptr;
@@ -186,6 +232,8 @@ private:
         float zoom = 0.0f;
         qreal scale = 0.0;
         bool throughCamera = true;
+        bool orbit = false;
+        Orbit orbitView;
         bool operator==(const FrameKey&) const = default;
     } frameKey_;
     bool frameValid_ = false;

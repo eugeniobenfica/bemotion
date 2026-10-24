@@ -486,26 +486,64 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projecti
     canvas->restore();
 }
 
+// Drawing order in depth, refined with each layer's size: a layer is judged by its far end, so a
+// big plane (a floor, a wall) goes before what stands in front of it or on it. Sorted: each run of
+// neighboring 3D layers through the camera, everything in the 3D view. The free view keeps its order.
+std::vector<const Layer*> depthOrder(const Composition& comp, double time, bool cameras, bool throughCamera, const Lens* lens) {
+    std::vector<const Layer*> order = comp.drawOrder(time, cameras, lens);
+    if (!throughCamera && !lens) return order;
+    auto farEnd = [&](const Layer* l) {
+        Projective view;
+        if (l->type == LayerType::Camera) return -1e30f;
+        if (lens ? !comp.viewThrough(*lens, *l, time, view, true, true) : !comp.viewFor(*l, time, view, true)) return -1e30f;
+        Vec2 mn, mx;
+        const Projective m = view * comp.worldMatrix(*l, time);
+        if (!localBounds(*l, time, mn, mx, &comp)) return view.w(l->transform.position.valueAt(time));
+        float far = -1e30f;
+        for (const Vec2& c : {mn, Vec2{mx.x, mn.y}, mx, Vec2{mn.x, mx.y}}) far = std::max(far, m.w(c));
+        return far;
+    };
+    auto sortRange = [&](size_t i, size_t j) {
+        std::vector<std::pair<float, const Layer*>> keyed;
+        for (size_t k = i; k < j; ++k) keyed.emplace_back(farEnd(order[k]), order[k]);
+        std::stable_sort(keyed.begin(), keyed.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+        for (size_t k = i; k < j; ++k) order[k] = keyed[k - i].second;
+    };
+    if (lens) {
+        sortRange(0, order.size());
+        return order;
+    }
+    for (size_t i = 0; i < order.size();) {
+        size_t j = i;
+        while (j < order.size() && order[j]->threeD) ++j;
+        if (j > i + 1) sortRange(i, j);
+        i = j > i ? j : i + 1;
+    }
+    return order;
+}
+
 void drawComposition(SkCanvas* canvas, const Composition& comp, double time, const View& view, bool background,
-                     bool throughCamera) {
+                     bool throughCamera, const Lens* lens) {
     const Vec2 a = view.toScreen({0, 0});
     const Vec2 b = view.toScreen({static_cast<float>(comp.width), static_cast<float>(comp.height)});
     const SkRect frame = SkRect::MakeLTRB(a.x, a.y, b.x, b.y);
-    if (background) {
+    if (background && !lens) {
         const Color bg = comp.background;
         canvas->drawRect(frame, SkPaint(SkColor4f{bg.r, bg.g, bg.b, 1.0f}));
     }
     canvas->save();
-    canvas->clipRect(frame, true); // layers are clipped to the composition frame
+    if (!lens) canvas->clipRect(frame, true); // layers are clipped to the composition frame (not in the 3D view)
     const Affine screen = Affine::translate(view.origin) * Affine::scale(view.zoom);
-    const Affine flat = throughCamera ? comp.cameraAt(time) : Affine{};
-    for (const Layer* layer : comp.drawOrder(time)) {
+    const Affine flat = throughCamera && !lens ? comp.cameraAt(time) : Affine{};
+    for (const Layer* layer : depthOrder(comp, time, false, throughCamera, lens)) {
         // Backgrounds stay on the frame whatever the camera does. 3D layers are seen in
-        // perspective through the camera (the free view shows them from the front).
+        // perspective through the camera (the free view shows them from the front; the 3D
+        // view shows every layer in space, from its own eye).
         Projective camera;
-        if (!comp.viewFor(*layer, time, camera, throughCamera)) continue; // behind the camera
+        if (lens ? !comp.viewThrough(*lens, *layer, time, camera, true, true) : !comp.viewFor(*layer, time, camera, throughCamera))
+            continue; // behind the camera
         float zoom = view.zoom;
-        if (layer->threeD) { // effects shrink with distance (as the 2D camera's own zoom leaves them)
+        if (layer->threeD || lens) { // effects shrink with distance (as the 2D camera's own zoom leaves them)
             const float s = camera.localScale(layer->transform.position.valueAt(time));
             zoom *= s / std::max(1e-6f, std::sqrt(std::fabs(flat.determinant())));
         }
@@ -574,9 +612,10 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
 
 namespace {
 // The composition point in the layer's own space (false: the camera does not see it).
-bool toLocal(const Composition& comp, const Layer& layer, double time, Vec2 compPoint, bool throughCamera, Vec2& out) {
+bool toLocal(const Composition& comp, const Layer& layer, double time, Vec2 compPoint, bool throughCamera, Vec2& out,
+             const Lens* lens = nullptr) {
     Projective camera;
-    if (!comp.viewFor(layer, time, camera, throughCamera)) return false;
+    if (lens ? !comp.viewThrough(*lens, layer, time, camera, true, true) : !comp.viewFor(layer, time, camera, throughCamera)) return false;
     const Projective m = camera * comp.worldMatrix(layer, time);
     out = m.inverse().apply(compPoint);
     return m.inFront(out); // a point seen there, not its mirror behind the camera
@@ -595,13 +634,13 @@ uint64_t hitTestInside(const Composition& comp, double time, Vec2 compPoint, uin
     return 0;
 }
 
-uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint, bool throughCamera, bool includeCameras) {
-    const std::vector<const Layer*> order = comp.drawOrder(time, true);
+uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint, bool throughCamera, bool includeCameras, const Lens* lens) {
+    const std::vector<const Layer*> order = depthOrder(comp, time, !lens, throughCamera, lens);
     for (auto it = order.rbegin(); it != order.rend(); ++it) { // the top-most first, as drawn
         const Layer& layer = **it;
         if (layer.locked || (layer.type == LayerType::Camera && !includeCameras) || layer.type == LayerType::Background) continue;
         Vec2 mn, mx, p;
-        if (!localBounds(layer, time, mn, mx, &comp) || !toLocal(comp, layer, time, compPoint, throughCamera, p)) continue;
+        if (!localBounds(layer, time, mn, mx, &comp) || !toLocal(comp, layer, time, compPoint, throughCamera, p, lens)) continue;
         if (p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y) return layer.id;
     }
     return 0;

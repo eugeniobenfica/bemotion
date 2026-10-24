@@ -8,6 +8,19 @@
 
 namespace bemotion {
 
+// A point of view in the 3D scene: where the eye is, how it is turned and its lens. The
+// active camera gives one (Composition::lensAt); the viewport's 3D view makes its own.
+struct Lens {
+    float x = 0.0f, y = 0.0f, z = 0.0f;    // the eye (world: composition x / y, z away from the viewer)
+    float rx = 0.0f, ry = 0.0f, rz = 0.0f; // turned like a camera layer: X looks down, Y looks left, Z rolls
+    float focal = 2666.7f;                 // composition px: the size, on screen, of 1 px seen at that distance
+    Vec2 center{960.0f, 540.0f};           // where the eye's axis lands on screen (composition px)
+};
+
+// The directions a lens is turned to, in the world: its right, its down (screen y) and where
+// it looks (forward), each of length 1.
+void lensAxes(const Lens& lens, float right[3], float down[3], float forward[3]);
+
 // A ruler guide in composition pixels (vertical: x = position; else y).
 // How far past the end of the composition a clip may run (seconds).
 inline constexpr double kMaxOverhang = 3600.0;
@@ -70,13 +83,24 @@ struct Composition {
     // a default one (center, Z 0, zoom 100%). throughCamera = false: the free view, from the
     // front without perspective (2D layers as they are, 3D layers only turned).
     bool viewFor(const Layer& layer, double t, Projective& out, bool throughCamera = true, bool tilted = true) const;
+    // The active camera as a point of view (a default one without a camera).
+    Lens lensAt(double t) const;
+    Lens lensOf(const Layer& camera, double t) const; // a given camera's
+    // `layer` as seen from `lens` (as viewFor, for any point of view). `all`: 2D layers too, as
+    // planes at Z 0 (the viewport's 3D view); else they get cameraAt. Backgrounds and cameras:
+    // false with `all` (they are not in the space).
+    bool viewThrough(const Lens& lens, const Layer& layer, double t, Projective& out, bool tilted = true, bool all = false) const;
+    // A point of the 3D world (x, y as in the composition, z away from the viewer) as `lens`
+    // shows it; false when it is behind the eye.
+    bool project(const Lens& lens, float x, float y, float z, Vec2& out) const;
     // How far the camera stands from the layers at its own Z position: a 50 mm lens on the
     // composition width (like After Effects' default camera).
     float focalLength() const { return static_cast<float>(width) * (50.0f / 36.0f); }
     // Top-level active layers in drawing order, bottom first: the stacking order, except that
     // neighboring 3D layers are drawn by distance from the camera, farthest first. Cameras only
     // with `cameras`.
-    std::vector<const Layer*> drawOrder(double t, bool cameras = false) const;
+    // With `lens` (the 3D view): every layer by distance from it, backgrounds left out.
+    std::vector<const Layer*> drawOrder(double t, bool cameras = false, const Lens* lens = nullptr) const;
     // Gives every camera the current composition size as its frame.
     void syncCameras();
 

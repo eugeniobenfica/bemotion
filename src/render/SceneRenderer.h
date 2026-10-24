@@ -38,8 +38,9 @@ struct View {
 // The canvas' base transform is identity: View maps straight to output pixels.
 // `background` = false leaves the frame transparent (exports with alpha).
 // throughCamera: render the scene as the active camera sees it (the default).
+// lens: the viewport's 3D view, every layer in space seen from it (no frame, no backgrounds).
 void drawComposition(SkCanvas* canvas, const Composition& comp, double time, const View& view, bool background = true,
-                     bool throughCamera = true);
+                     bool throughCamera = true, const Lens* lens = nullptr);
 
 // One layer with its effects, `layerToOutput` being its full transform and
 // `zoom` the composition -> output scale (effect sizes are in composition
@@ -54,6 +55,10 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
 
 bool hasActiveEffects(const Layer& layer);
 
+// The order layers are drawn in (bottom first): Composition::drawOrder, with 3D layers by the
+// far end of what they show (so a floor comes before what stands on it).
+std::vector<const Layer*> depthOrder(const Composition& comp, double time, bool cameras, bool throughCamera, const Lens* lens = nullptr);
+
 // Media layers get their picture from the media module (null while not available).
 using MediaProvider = std::function<sk_sp<SkImage>(const Composition& comp, const Layer& layer, double time)>;
 void setMediaProvider(MediaProvider provider);
@@ -65,6 +70,7 @@ uint64_t hitTestInside(const Composition& comp, double time, Vec2 compPoint, uin
 
 // Top-most visible, unlocked layer under a composition point, in drawing order
 // (3D layers by depth). Cameras only count with includeCameras (their frame is their body).
-uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint, bool throughCamera, bool includeCameras = false);
+uint64_t hitTest(const Composition& comp, double time, Vec2 compPoint, bool throughCamera, bool includeCameras = false,
+                 const Lens* lens = nullptr);
 
 } // namespace bemotion::render

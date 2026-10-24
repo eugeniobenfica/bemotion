@@ -376,46 +376,81 @@ const Layer* topLevel(const Composition& c, const Layer& layer) {
 }
 } // namespace
 
+void lensAxes(const Lens& lens, float right[3], float down[3], float forward[3]) {
+    const Mat3 r = rotY(lens.ry) * rotX(lens.rx) * rotZ(lens.rz);
+    for (int i = 0; i < 3; ++i) right[i] = r.m[i][0], down[i] = r.m[i][1], forward[i] = r.m[i][2];
+}
+
+Lens Composition::lensAt(double t) const {
+    // The camera stands `focal` in front of its own Z position (where layers show at their size).
+    const float focal = focalLength();
+    Lens lens;
+    lens.x = center().x, lens.y = center().y, lens.z = -focal;
+    lens.focal = focal;
+    lens.center = center();
+    if (const Layer* cam = activeCamera(*this, t)) return lensOf(*cam, t);
+    return lens;
+}
+
+Lens Composition::lensOf(const Layer& camera, double t) const {
+    const float focal = focalLength();
+    Lens lens;
+    lens.center = center();
+    lens.focal = focal;
+    const TransformProps& ct = camera.transform;
+    const Vec2 eye = ct.position.valueAt(t);
+    lens.x = eye.x, lens.y = eye.y, lens.z = ct.depth.valueAt(t) - focal;
+    lens.rx = ct.rotationX.valueAt(t), lens.ry = ct.rotationY.valueAt(t), lens.rz = ct.rotation.valueAt(t);
+    lens.focal = focal * std::max(0.01f, camera.camera.zoom.valueAt(t) * 0.01f);
+    return lens;
+}
+
 bool Composition::viewFor(const Layer& layer, double t, Projective& out, bool throughCamera, bool tilted) const {
     const Layer* top = topLevel(*this, layer);
     if (!top->threeD || top->type == LayerType::Camera || top->type == LayerType::Background) {
         out = throughCamera && top->type != LayerType::Background ? Projective(cameraAt(t)) : Projective();
         return true;
     }
+    if (throughCamera) return viewThrough(lensAt(t), layer, t, out, tilted);
+    // From the front, without perspective: only turned around the position.
     const Vec2 p = top->transform.position.valueAt(t);
     const Mat3 turn = tilted ? rotX(top->transform.rotationX.valueAt(t)) * rotY(top->transform.rotationY.valueAt(t)) : Mat3{};
-    if (!throughCamera) { // from the front, without perspective: only turned around the position
-        Affine a;
-        a.a = turn.m[0][0], a.c = turn.m[0][1], a.b = turn.m[1][0], a.d = turn.m[1][1];
-        a.tx = p.x - (a.a * p.x + a.c * p.y), a.ty = p.y - (a.b * p.x + a.d * p.y);
-        out = a;
+    Affine a;
+    a.a = turn.m[0][0], a.c = turn.m[0][1], a.b = turn.m[1][0], a.d = turn.m[1][1];
+    a.tx = p.x - (a.a * p.x + a.c * p.y), a.ty = p.y - (a.b * p.x + a.d * p.y);
+    out = a;
+    return true;
+}
+
+bool Composition::viewThrough(const Lens& lens, const Layer& layer, double t, Projective& out, bool tilted, bool all) const {
+    const Layer* top = topLevel(*this, layer);
+    if (top->type == LayerType::Camera || top->type == LayerType::Background) {
+        if (all) return false;
+        out = top->type == LayerType::Background ? Projective() : Projective(cameraAt(t));
+        return true;
+    }
+    if (!top->threeD && !all) {
+        out = cameraAt(t);
         return true;
     }
     // The layer is a plane in the world: its point (u, v) (scene coordinates of the unturned
-    // plane) is at (p, z) + turn * (u - p.x, v - p.y, 0). The camera stands `focal` in front of
-    // its own Z position, turned by its X / Y / Z rotation, and projects with that focal length
-    // times its zoom. At the camera's Z, facing it, this is exactly the 2D camera (cameraAt).
-    Vec2 eye = center();
-    float eyeZ = 0.0f, zoom = 1.0f;
-    Mat3 lens;
-    if (const Layer* cam = activeCamera(*this, t)) {
-        const TransformProps& ct = cam->transform;
-        eye = ct.position.valueAt(t);
-        eyeZ = ct.depth.valueAt(t);
-        zoom = std::max(0.01f, cam->camera.zoom.valueAt(t) * 0.01f);
-        lens = rotY(ct.rotationY.valueAt(t)) * rotX(ct.rotationX.valueAt(t)) * rotZ(ct.rotation.valueAt(t));
-    }
-    const float focal = focalLength(), nearPlane = focal * 0.01f; // closer than that: 100x, not drawn
-    const Mat3 toCamera = lens.transposed();
+    // plane) is at (p, z) + turn * (u - p.x, v - p.y, 0); a 2D layer is the plane at Z 0. The eye
+    // sees it turned by its own rotation and projects with its focal length. A camera at its
+    // Z position, facing the layers, makes exactly the 2D camera (cameraAt).
+    const Vec2 p = top->transform.position.valueAt(t);
+    const float z = top->threeD ? top->transform.depth.valueAt(t) : 0.0f;
+    const Mat3 turn = tilted && top->threeD ? rotX(top->transform.rotationX.valueAt(t)) * rotY(top->transform.rotationY.valueAt(t)) : Mat3{};
+    const float nearPlane = focalLength() * 0.01f; // closer than that: 100x, not drawn
+    const Mat3 toCamera = (rotY(lens.ry) * rotX(lens.rx) * rotZ(lens.rz)).transposed();
     const Mat3 a = toCamera * turn;
-    const float rel[3] = {p.x - eye.x, p.y - eye.y, top->transform.depth.valueAt(t) - eyeZ + focal};
+    const float rel[3] = {p.x - lens.x, p.y - lens.y, z - lens.z};
     float b[3];
     toCamera.apply(rel, b);
     for (int i = 0; i < 3; ++i) b[i] -= a.m[i][0] * p.x + a.m[i][1] * p.y; // (u, v) relative to the position
-    // Camera space of (u, v, 1): columns a0, a1, b. Facing the camera and behind it: not seen.
+    // Camera space of (u, v, 1): columns a0, a1, b. Facing the eye and behind it: not seen.
     if (std::fabs(a.m[2][0]) < 1e-6f && std::fabs(a.m[2][1]) < 1e-6f && b[2] < nearPlane) return false;
-    const float k = zoom * focal;
-    const Vec2 c = center();
+    const float k = lens.focal;
+    const Vec2 c = lens.center;
     for (int j = 0; j < 3; ++j) {
         const float cx = j < 2 ? a.m[0][j] : b[0], cy = j < 2 ? a.m[1][j] : b[1], cz = j < 2 ? a.m[2][j] : b[2];
         out.m[0][j] = (k * cx + c.x * cz) / nearPlane;
@@ -425,12 +460,34 @@ bool Composition::viewFor(const Layer& layer, double t, Projective& out, bool th
     return true;
 }
 
-std::vector<const Layer*> Composition::drawOrder(double t, bool cameras) const {
+bool Composition::project(const Lens& lens, float x, float y, float z, Vec2& out) const {
+    const Mat3 toCamera = (rotY(lens.ry) * rotX(lens.rx) * rotZ(lens.rz)).transposed();
+    const float rel[3] = {x - lens.x, y - lens.y, z - lens.z};
+    float c[3];
+    toCamera.apply(rel, c);
+    if (c[2] < focalLength() * 0.01f) return false;
+    out = {lens.center.x + lens.focal * c[0] / c[2], lens.center.y + lens.focal * c[1] / c[2]};
+    return true;
+}
+
+std::vector<const Layer*> Composition::drawOrder(double t, bool cameras, const Lens* lens) const {
     std::vector<const Layer*> order;
     for (auto it = layers.rbegin(); it != layers.rend(); ++it) {
         if (!it->activeAt(t) || (it->type == LayerType::Camera && !cameras)) continue;
         if (it->parent && findLayer(it->parent)) continue; // drawn by its compound
+        if (lens && it->type == LayerType::Background) continue;
         order.push_back(&*it);
+    }
+    if (lens) { // the 3D view: all of them by distance from its eye (cameras are drawn by the viewport)
+        std::vector<std::pair<float, const Layer*>> byDistance;
+        for (const Layer* l : order) {
+            Projective view;
+            const bool seen = l->type != LayerType::Camera && viewThrough(*lens, *l, t, view, true, true);
+            byDistance.emplace_back(seen ? view.w(l->transform.position.valueAt(t)) : -1e30f, l);
+        }
+        std::stable_sort(byDistance.begin(), byDistance.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
+        for (size_t k = 0; k < order.size(); ++k) order[k] = byDistance[k].second;
+        return order;
     }
     for (size_t i = 0; i < order.size();) { // each run of neighboring 3D layers: farthest first
         size_t j = i;

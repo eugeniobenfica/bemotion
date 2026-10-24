@@ -161,6 +161,11 @@ does.
 - **Autosave and recovery**: projects save themselves every few minutes, and
   changes a crash would lose are offered back the next time
 - **Viewport** with box selection, rulers, guides and smart snapping
+- **3D controls like After Effects**: a *3D view* (the cube button) shows the
+  layers and the camera in space, with what the camera sees; drag to turn
+  around, right-drag to pan, wheel to get closer. Red / green / blue arrows
+  move a 3D layer (or the camera) along X / Y / Z, and *Orbit*, *Pan* and
+  *Dolly* move the camera while looking through it — all keyframable
 - **Camera** with position, rotation and zoom — and depth: turn on **3D
   Layer** and give layers a Z position and X / Y rotation, and the camera
   (which moves, tilts and pans in 3D too) sees them in perspective: parallax,

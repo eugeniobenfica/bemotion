@@ -64,14 +64,32 @@ struct Handles {
 // compound's space.
 const Composition* g_comp = nullptr;
 bool g_throughCamera = true; // the view looks through the camera (else the free view)
+const Lens* g_lens = nullptr; // the 3D view's eye (null: the camera or the free view)
 
 // The camera the layer is seen through (scene -> composition): one per layer, since 3D layers
 // are seen at their own depth. False when the camera does not see the layer (behind it).
 // `tilted` = false: the plane a 3D layer's position moves in (unturned, at its Z).
 bool cameraOf(const Layer& layer, double t, Projective& out, bool tilted = true) {
     out = {};
-    return !g_comp || g_comp->viewFor(layer, t, out, g_throughCamera, tilted);
+    if (!g_comp) return true;
+    if (g_lens) return g_comp->viewThrough(*g_lens, layer, t, out, tilted, true);
+    return g_comp->viewFor(layer, t, out, g_throughCamera, tilted);
 }
+
+// Small 3D helpers for the gizmo and the camera tools.
+struct V3 {
+    float x = 0, y = 0, z = 0;
+    V3 operator+(V3 o) const { return {x + o.x, y + o.y, z + o.z}; }
+    V3 operator-(V3 o) const { return {x - o.x, y - o.y, z - o.z}; }
+    V3 operator*(float s) const { return {x * s, y * s, z * s}; }
+};
+void axesOf(const Lens& l, V3& right, V3& down, V3& forward) {
+    float r[3], d[3], f[3];
+    lensAxes(l, r, d, f);
+    right = {r[0], r[1], r[2]}, down = {d[0], d[1], d[2]}, forward = {f[0], f[1], f[2]};
+}
+
+const Rgba kAxisColors[3] = {ui::rgba(235, 86, 86), ui::rgba(96, 200, 110), ui::rgba(92, 146, 245)}; // X, Y, Z
 
 // `view` with the layer's camera and enclosing compounds: maps the layer's
 // parent space (where its position lives) to the screen.
@@ -170,9 +188,31 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     };
     cameraButton_ = hud(ui::Icon::Camera, "");
     connect(cameraButton_, &QAbstractButton::clicked, this, [this] {
-        throughCamera_ = !throughCamera_;
+        if (orbit_) orbit_ = false, throughCamera_ = true; // from the 3D view: back through the camera
+        else throughCamera_ = !throughCamera_;
         update();
     });
+    orbitButton_ = hud(ui::Icon::Cube, "3D view: the layers and the camera in space\n"
+                                        "Drag: turn around  ·  Right drag: pan  ·  Wheel: closer / farther  ·  Fit: start over");
+    connect(orbitButton_, &QAbstractButton::clicked, this, [this] {
+        orbit_ = !orbit_;
+        update();
+    });
+    const char* toolNames[3] = {"Orbit", "Pan", "Dolly"};
+    const char* toolTips[3] = {"Drag to turn the camera around what it looks at", "Drag to move the camera sideways and up / down",
+                               "Drag up / down to move the camera forward / back"};
+    for (int i = 0; i < 3; ++i) {
+        auto* b = new QPushButton(toolNames[i], this);
+        b->setCheckable(true);
+        b->setFixedHeight(26);
+        b->setToolTip(QString("Camera tool: %1 (keyframes at the playhead when animated)").arg(toolTips[i]));
+        connect(b, &QPushButton::clicked, this, [this, i](bool on) {
+            cameraTool_ = on ? static_cast<CameraTool>(i + 1) : CameraTool::None;
+            for (int k = 0; k < 3; ++k) cameraTools_[k]->setChecked(cameraTool_ == static_cast<CameraTool>(k + 1));
+            updateCursor(mouse_, QApplication::keyboardModifiers());
+        });
+        cameraTools_[i] = b;
+    }
     snapButton_ = hud(ui::Icon::Magnet, "Snapping (S) - hold Ctrl while dragging to bypass");
     connect(snapButton_, &QAbstractButton::clicked, this, [this] { ctx_.snapping = !ctx_.snapping; });
     zoomOutButton_ = hud(ui::Icon::ZoomOut, "Zoom out (Ctrl+-)");
@@ -190,7 +230,10 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     fitButton_ = new QPushButton("Fit", this);
     fitButton_->setFixedSize(46, 26);
     fitButton_->setToolTip("Fit composition to view (Ctrl+0)\nWheel: zoom  ·  Middle/right drag or Space+drag: pan");
-    connect(fitButton_, &QPushButton::clicked, this, [this] { requestFit(); });
+    connect(fitButton_, &QPushButton::clicked, this, [this] {
+        if (orbit_) resetOrbit();
+        requestFit();
+    });
     qualityButton_ = new QToolButton(this);
     qualityButton_->setPopupMode(QToolButton::InstantPopup);
     qualityButton_->setFixedSize(70, 26);
@@ -228,8 +271,36 @@ void ViewportPanel::layout() {
         pan_ = {0.0f, 0.0f};
     }
     origin_ = Vec2{w * 0.5f, h * 0.5f} + pan_ - compSize_ * (zoom_ * 0.5f);
-    world_ = throughCamera_ ? c.cameraAt(ctx_.time) : Affine{};
+    world_ = throughCamera_ && !orbit_ ? c.cameraAt(ctx_.time) : Affine{};
     g_throughCamera = throughCamera_;
+    if (orbitView_.distance <= 0.0f && orbitView_.tx == 960.0f && orbitView_.ty == 540.0f) resetOrbit(); // first time
+    orbitLens_ = orbitLens();
+    g_lens = orbit_ ? &orbitLens_ : nullptr;
+}
+
+Lens ViewportPanel::orbitLens() const {
+    const Composition& c = ctx_.comp();
+    Lens l;
+    l.rx = orbitView_.pitch;
+    l.ry = orbitView_.yaw;
+    l.focal = c.focalLength();
+    l.center = c.center();
+    V3 right, down, forward;
+    axesOf(l, right, down, forward);
+    const float dist = orbitView_.distance > 0.0f ? orbitView_.distance : c.focalLength() * 3.2f;
+    const V3 eye = V3{orbitView_.tx, orbitView_.ty, orbitView_.tz} - forward * dist;
+    l.x = eye.x, l.y = eye.y, l.z = eye.z;
+    return l;
+}
+
+void ViewportPanel::resetOrbit() {
+    const Composition& c = ctx_.comp();
+    // From the front, a little to the right and above, back far enough to see the camera too.
+    orbitView_ = {};
+    orbitView_.tx = c.center().x;
+    orbitView_.ty = c.center().y;
+    orbitView_.tz = -c.focalLength() * 0.35f;
+    orbitView_.distance = c.focalLength() * 3.2f;
 }
 
 void ViewportPanel::zoomAround(Vec2 screenPoint, float newZoom) {
@@ -286,8 +357,25 @@ void ViewportPanel::positionHud() {
     const int y = height() - 26 - 10;
     int x = width() - 12 - (26 * 3 + 70 + 46 + 4 * 3 + 12);
     const bool hasCamera = std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.type == LayerType::Camera; });
+    const bool has3D = hasCamera || std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.threeD; });
     cameraButton_->setVisible(hasCamera);
     cameraButton_->move(x - 26 - 6, y);
+    orbitButton_->setVisible(has3D);
+    orbitButton_->move(x - (26 + 6) * (hasCamera ? 2 : 1), y);
+    // Camera tools: a camera selected, looking through it.
+    const Layer* sel = ctx_.selection.size() == 1 ? const_cast<EditorContext&>(ctx_).selected() : nullptr;
+    const bool tools = sel && sel->type == LayerType::Camera && throughCamera_ && !orbit_;
+    if (!tools && cameraTool_ != CameraTool::None) {
+        cameraTool_ = CameraTool::None;
+        for (QPushButton* b : cameraTools_) b->setChecked(false);
+    }
+    int tx = 12 + (ctx_.showRulers ? static_cast<int>(kRuler) : 0);
+    for (QPushButton* b : cameraTools_) {
+        b->setVisible(tools);
+        b->adjustSize();
+        b->move(tx, 12 + (ctx_.showRulers ? static_cast<int>(kRuler) : 0));
+        tx += b->width() + 4;
+    }
     snapButton_->move(x, y);
     x += 26 + 12;
     zoomOutButton_->move(x, y);
@@ -318,7 +406,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     const qreal rasterScale = devicePixelRatioF() / previewDivisor_;
     const QSize px(std::max(1, static_cast<int>(std::ceil(width() * rasterScale))),
                    std::max(1, static_cast<int>(std::ceil(height() * rasterScale))));
-    const FrameKey key{ctx_.revision(), t, px, origin_, zoom_, rasterScale, throughCamera_};
+    const FrameKey key{ctx_.revision(), t, px, origin_, zoom_, rasterScale, throughCamera_, orbit_, orbitView_};
     if (!frameValid_ || key != frameKey_ || !c.media.empty()) {
         if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
         frame_.fill(Qt::transparent);
@@ -327,17 +415,19 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
         frameValid_ = static_cast<bool>(surface);
         if (surface) {
             const float z = static_cast<float>(rasterScale);
-            render::drawComposition(surface->getCanvas(), c, t, render::View{origin_ * z, zoom_ * z, world_}, true, throughCamera_);
+            render::drawComposition(surface->getCanvas(), c, t, render::View{origin_ * z, zoom_ * z, world_}, true, throughCamera_,
+                                    orbit_ ? &orbitLens_ : nullptr);
             frameKey_ = key;
         }
     }
     const Vec2 compMax = sceneView().toScreen(compSize_);
-    d.rectFilled(Pt(origin_.x + 4, origin_.y + 6), Pt(compMax.x + 4, compMax.y + 6), theme::shade(90), 2.0f);
+    if (!orbit_) d.rectFilled(Pt(origin_.x + 4, origin_.y + 6), Pt(compMax.x + 4, compMax.y + 6), theme::shade(90), 2.0f);
     // Upscale only the scene; handles, rulers, guides and HUD retain native resolution.
     p.setRenderHint(QPainter::SmoothPixmapTransform, previewDivisor_ > 1);
     p.drawImage(rect(), frame_);
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
-    d.rect(pt(origin_), pt(compMax), theme::kBorder);
+    if (orbit_) draw3D(p);
+    else d.rect(pt(origin_), pt(compMax), theme::kBorder);
     drawGuides(p);
     drawOverlay(p);
     drawRulers(p);
@@ -347,10 +437,202 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     std::snprintf(label, sizeof(label), "%.0f%%", zoom_ * 100.0f);
     zoomLevel_->setText(label);
     snapButton_->setActive(ctx_.snapping);
-    cameraButton_->setActive(throughCamera_);
+    cameraButton_->setActive(throughCamera_ && !orbit_);
+    orbitButton_->setActive(orbit_);
     cameraButton_->setToolTip(throughCamera_ ? "Looking through the camera (click for the free view)"
                                              : "Free view: camera frames shown (click to look through the camera)");
     if (textEdit_) placeTextEditor();
+}
+
+void ViewportPanel::draw3D(QPainter& p) {
+    Draw d(p);
+    const Composition& c = ctx_.comp();
+    const double t = ctx_.time;
+    const render::View view = sceneView();
+    auto onScreen = [&](V3 w, Vec2& out) {
+        Vec2 q;
+        if (!c.project(orbitLens_, w.x, w.y, w.z, q)) return false;
+        out = view.toScreen(q);
+        return true;
+    };
+    auto polygon = [&](const V3* pts, int n, Rgba col, float width) {
+        for (int i = 0; i < n; ++i) {
+            Vec2 a, b;
+            if (onScreen(pts[i], a) && onScreen(pts[(i + 1) % n], b)) d.line(pt(a), pt(b), col, width);
+        }
+    };
+    // The composition frame where 2D layers live (Z 0).
+    const float W = compSize_.x, H = compSize_.y;
+    const V3 frame[4] = {{0, 0, 0}, {W, 0, 0}, {W, H, 0}, {0, H, 0}};
+    polygon(frame, 4, theme::kBorder, 1.0f);
+    // Each camera: its body, and what it sees at its Z position (where layers show at their size).
+    for (const Layer& cam : c.layers) {
+        if (cam.type != LayerType::Camera || !cam.activeAt(t)) continue;
+        const Lens l = c.lensOf(cam, t);
+        V3 right, down, forward;
+        axesOf(l, right, down, forward);
+        const V3 body{l.x, l.y, l.z};
+        const float dist = c.focalLength();
+        V3 corners[4];
+        for (int i = 0; i < 4; ++i) {
+            const float sx = (frame[i].x - l.center.x) / l.focal * dist, sy = (frame[i].y - l.center.y) / l.focal * dist;
+            corners[i] = body + right * sx + down * sy + forward * dist;
+        }
+        const bool selected = ctx_.isSelected(cam.id);
+        const Rgba col = selected ? theme::kAccent : theme::withAlpha(theme::kGuide, 230);
+        polygon(corners, 4, col, selected ? 1.6f : 1.2f);
+        Vec2 b;
+        if (!onScreen(body, b)) continue;
+        for (const V3& corner : corners)
+            if (Vec2 q; onScreen(corner, q)) d.line(pt(b), pt(q), theme::withAlpha(col, 150), 1.0f);
+        // The point it looks at, and the body.
+        if (Vec2 q; onScreen(body + forward * dist, q)) {
+            d.line(pt(b), pt(q), theme::withAlpha(col, 90), 1.0f);
+            d.circle(pt(q), 4.0f, col, 1.2f);
+        }
+        d.rectFilled(Pt(b.x - 7, b.y - 5), Pt(b.x + 7, b.y + 5), theme::withAlpha(theme::kBgDeep, 230), 2.0f);
+        d.rect(Pt(b.x - 7, b.y - 5), Pt(b.x + 7, b.y + 5), col, 2.0f, 1.5f);
+        d.text(Pt(b.x + 12, b.y - d.textHeight() * 0.5f), col, cam.name);
+    }
+}
+
+uint64_t ViewportPanel::cameraAt(Vec2 screen) const {
+    if (!orbit_) return 0;
+    const Composition& c = ctx_.comp();
+    for (const Layer& cam : c.layers) {
+        if (cam.type != LayerType::Camera || !cam.activeAt(ctx_.time) || cam.locked) continue;
+        const Lens l = c.lensOf(cam, ctx_.time);
+        Vec2 q;
+        if (c.project(orbitLens_, l.x, l.y, l.z, q) && near(screen, sceneView().toScreen(q), 12.0f)) return cam.id;
+    }
+    return 0;
+}
+
+ViewportPanel::Gizmo ViewportPanel::gizmo() const {
+    Gizmo g;
+    const double t = ctx_.time;
+    const Layer* l = ctx_.selection.size() == 1 ? const_cast<EditorContext&>(ctx_).selected() : nullptr;
+    if (!l || l->locked || !l->activeAt(t) || l->parent) return g;
+    const bool cam = l->type == LayerType::Camera;
+    // A 3D layer, through the camera or in the 3D view; a camera, in the 3D view.
+    if (cam ? !orbit_ : (!l->threeD || !(throughCamera_ || orbit_))) return g;
+    const Composition& c = ctx_.comp();
+    const Lens lens = orbit_ ? orbitLens_ : c.lensAt(t);
+    V3 origin;
+    if (cam) {
+        const Lens own = c.lensOf(*l, t);
+        origin = {own.x, own.y, own.z};
+    } else {
+        const Vec2 p = l->transform.position.valueAt(t);
+        origin = {p.x, p.y, l->transform.depth.valueAt(t)};
+    }
+    const render::View view = sceneView();
+    Vec2 base;
+    if (!c.project(lens, origin.x, origin.y, origin.z, base)) return g;
+    g.base = view.toScreen(base);
+    constexpr float kLength = 70.0f, kStep = 10.0f;
+    const V3 units[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    for (int i = 0; i < 3; ++i) {
+        const V3 w = origin + units[i] * kStep;
+        Vec2 q;
+        float pxPerUnit = 0.0f;
+        Vec2 dir{0.7071f, 0.7071f};
+        if (c.project(lens, w.x, w.y, w.z, q)) {
+            const Vec2 v = (view.toScreen(q) - g.base);
+            pxPerUnit = v.length() / kStep;
+            if (pxPerUnit > 0.03f) dir = v / v.length();
+        }
+        if (pxPerUnit <= 0.03f) { // pointing at the eye (Z, looking straight): drag along a diagonal instead
+            dir = i == 2 ? Vec2{0.7071f, -0.7071f} : Vec2{0.7071f, 0.7071f};
+            pxPerUnit = 0.5f;
+            if (i == 2) dir = dir * -1.0f; // down-left: up-right pushes it away
+        }
+        g.dir[i] = dir;
+        g.tip[i] = g.base + dir * kLength;
+        g.perPx[i] = 1.0f / pxPerUnit;
+    }
+    // Pushed away along Z when the mouse goes along its arrow (it points to larger Z).
+    g.valid = true;
+    g.layer = l->id;
+    return g;
+}
+
+int ViewportPanel::gizmoAxis(Vec2 screen) const {
+    const Gizmo g = gizmo();
+    if (!g.valid) return -1;
+    int best = -1;
+    float bestDist = 7.0f;
+    for (int i = 0; i < 3; ++i) {
+        const Vec2 a = g.base + g.dir[i] * 12.0f, b = g.tip[i]; // not the very center: that moves the layer
+        const Vec2 ab = b - a, ap = screen - a;
+        const float len2 = ab.x * ab.x + ab.y * ab.y;
+        const float u = len2 > 0 ? std::clamp((ap.x * ab.x + ap.y * ab.y) / len2, 0.0f, 1.0f) : 0.0f;
+        const float dist = (screen - (a + ab * u)).length();
+        if (dist < bestDist) bestDist = dist, best = i;
+    }
+    return best;
+}
+
+void ViewportPanel::drawGizmo(QPainter& p) {
+    const Gizmo g = gizmo();
+    if (!g.valid) return;
+    Draw d(p);
+    const char* names[3] = {"X", "Y", "Z"};
+    for (int i = 0; i < 3; ++i) {
+        const bool hot = axis_ == i || (drag_ == Drag::None && hoverAxis_ == i);
+        const Rgba col = hot ? ui::rgba(255, 255, 255) : kAxisColors[i];
+        d.line(pt(g.base), pt(g.tip[i]), col, hot ? 3.0f : 2.2f);
+        // The head: a small triangle.
+        const Vec2 dir = g.dir[i], side{-dir.y, dir.x};
+        const Vec2 tip = g.tip[i] + dir * 8.0f;
+        const Pt head[3] = {pt(tip), pt(g.tip[i] + side * 5.0f), pt(g.tip[i] - side * 5.0f)};
+        d.polyline(head, 3, col, true, 2.0f);
+        d.text(Pt(tip.x + dir.x * 6 - 4, tip.y + dir.y * 6 - d.textHeight() * 0.5f), col, QString(names[i]));
+    }
+    d.circleFilled(pt(g.base), 3.5f, ui::rgba(255, 255, 255, 220));
+    if (axis_ >= 0 && drag_ == Drag::Axis)
+        if (const Layer* l = ctx_.comp().findLayer(g.layer)) {
+            const Vec2 pos = l->transform.position.valueAt(ctx_.time);
+            char buf[96];
+            std::snprintf(buf, sizeof(buf), "X %.0f   Y %.0f   Z %.0f", pos.x, pos.y, l->transform.depth.valueAt(ctx_.time));
+            const QString s = QString::fromUtf8(buf);
+            const Pt at(mouse_.x + 16, mouse_.y + 18);
+            d.rectFilled(Pt(at.x - 6, at.y - 3), Pt(at.x + d.textWidth(s) + 6, at.y + d.textHeight() + 3), theme::withAlpha(theme::kBgDeep, 220), 4);
+            d.text(at, theme::kText, s);
+        }
+}
+
+// The camera tools: orbit around the point it looks at, pan across, dolly along its axis.
+void ViewportPanel::moveCamera(Vec2 mouse) {
+    Layer* cam = ctx_.comp().findLayer(dragLayer_);
+    if (!cam) return;
+    const double t = ctx_.time;
+    const Composition& c = ctx_.comp();
+    const float focus = c.focalLength(); // the camera stands this far in front of its Z position
+    const Vec2 d = mouse - dragStartScreen_;
+    const Lens& l0 = toolStartLens_;
+    V3 right, down, forward;
+    axesOf(l0, right, down, forward);
+    V3 body{l0.x, l0.y, l0.z};
+    if (cameraTool_ == CameraTool::Orbit) {
+        // Keeps looking at the same point while going around it.
+        const V3 target = body + forward * focus;
+        const float rx = std::clamp(toolStartRx_ - d.y * 0.25f, -89.0f, 89.0f), ry = toolStartRy_ + d.x * 0.25f;
+        Lens turned = l0;
+        turned.rx = rx, turned.ry = ry;
+        axesOf(turned, right, down, forward);
+        body = target - forward * focus;
+        cam->transform.rotationX.set(t, rx);
+        cam->transform.rotationY.set(t, ry);
+    } else if (cameraTool_ == CameraTool::Pan) {
+        // The scene follows the mouse at the camera's focus distance.
+        const float perPx = focus / l0.focal / zoom_;
+        body = body - right * (d.x * perPx) - down * (d.y * perPx);
+    } else if (cameraTool_ == CameraTool::Dolly) {
+        body = body + forward * (-d.y / zoom_ * 4.0f); // up: forward
+    }
+    cam->transform.position.set(t, {body.x, body.y});
+    cam->transform.depth.set(t, body.z + focus);
 }
 
 void ViewportPanel::drawHudBackground(QPainter&) {
@@ -408,13 +690,13 @@ void ViewportPanel::drawOverlay(QPainter& p) {
     // Hover outline for the layer under the cursor.
     int pathKey = -1, pathPart = 0;
     if (drag_ == Drag::None && hovered_ && !spaceHeld_ && !dropHover_ && !pathHit(mouse_, pathKey, pathPart)) {
-        const uint64_t hover = render::hitTest(comp, t, view.toComp(mouse_), throughCamera_, !throughCamera_);
+        const uint64_t hover = render::hitTest(comp, t, view.toComp(mouse_), throughCamera_, !throughCamera_ && !orbit_, g_lens);
         Handles h{};
         if (hover && !ctx_.isSelected(hover) && computeHandles(*comp.findLayer(hover), t, view, h)) outline(d, h, theme::accent(110), 1.0f);
     }
 
     // Free view: show what each camera sees.
-    if (!throughCamera_)
+    if (!throughCamera_ && !orbit_)
         for (const Layer& l : comp.layers) {
             Handles h{};
             if (l.type != LayerType::Camera || !l.activeAt(t) || !computeHandles(l, t, view, h)) continue;
@@ -442,7 +724,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
     if (visibleSelected > 1) d.rect(Pt(groupMin.x - 4, groupMin.y - 4), Pt(groupMax.x + 4, groupMax.y + 4), theme::accent(90), 2.0f, 1.0f);
 
     // Handles for a single selection.
-    const bool cameraView = selected.size() == 1 && selected[0]->type == LayerType::Camera && throughCamera_;
+    const bool cameraView = selected.size() == 1 && selected[0]->type == LayerType::Camera && (throughCamera_ || orbit_);
     if (selected.size() == 1 && selected[0]->activeAt(t) && !cameraView) {
         const Layer* sel = selected[0];
         Handles h{};
@@ -463,6 +745,8 @@ void ViewportPanel::drawOverlay(QPainter& p) {
             }
         }
     }
+
+    drawGizmo(p);
 
     // Box selection.
     if (drag_ == Drag::Marquee && dragMoved_) {
@@ -534,7 +818,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
 }
 
 void ViewportPanel::drawGuides(QPainter& p) {
-    if (!ctx_.showGuides) return;
+    if (!ctx_.showGuides || orbit_) return; // guides are on the frame, not in space
     Draw d(p);
     const render::View view = sceneView();
     const auto& guides = ctx_.comp().guides;
@@ -555,7 +839,7 @@ void ViewportPanel::drawGuides(QPainter& p) {
 }
 
 void ViewportPanel::drawRulers(QPainter& p) {
-    if (!ctx_.showRulers) return;
+    if (!ctx_.showRulers || orbit_) return;
     Draw d(p);
     const render::View view = sceneView();
     const float W = static_cast<float>(width()), H = static_cast<float>(height());
@@ -649,7 +933,7 @@ void ViewportPanel::updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods) {
     Qt::CursorShape shape = Qt::ArrowCursor;
     const bool overRulerTop = ctx_.showRulers && mouse.y < kRuler && mouse.x > kRuler;
     const bool overRulerLeft = ctx_.showRulers && mouse.x < kRuler && mouse.y > kRuler;
-    if (drag_ == Drag::Pan) shape = Qt::ClosedHandCursor;
+    if (drag_ == Drag::Pan || drag_ == Drag::OrbitPan || drag_ == Drag::Orbit || drag_ == Drag::CameraTool) shape = Qt::ClosedHandCursor;
     else if (drag_ == Drag::Guide && guideDrag_ >= 0 && guideDrag_ < static_cast<int>(ctx_.comp().guides.size()))
         shape = ctx_.comp().guides[guideDrag_].vertical ? Qt::SizeHorCursor : Qt::SizeVerCursor;
     else if (drag_ == Drag::None) {
@@ -671,6 +955,10 @@ void ViewportPanel::updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods) {
             }
             int key = -1, part = 0;
             if (pathHit(mouse, key, part)) shape = Qt::PointingHandCursor;
+            hoverAxis_ = gizmoAxis(mouse);
+            if (hoverAxis_ >= 0) shape = Qt::SizeAllCursor;
+            if (cameraTool_ != CameraTool::None) shape = Qt::OpenHandCursor;
+            if (orbit_ && cameraAt(mouse)) shape = Qt::PointingHandCursor;
         }
     }
     setCursor(shape);
@@ -702,11 +990,41 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
     snapLinesY_.clear();
     if (textEdit_) endTextEdit(true);
 
-    if (e->button() == Qt::MiddleButton || e->button() == Qt::RightButton) { // pan
-        drag_ = Drag::Pan;
+    if (e->button() == Qt::MiddleButton || e->button() == Qt::RightButton) { // pan (the 3D view: its eye)
+        drag_ = orbit_ ? Drag::OrbitPan : Drag::Pan;
         return;
     }
     if (e->button() != Qt::LeftButton) return;
+
+    // The 3D arrows win over what is underneath them.
+    if (const int axis = additive ? -1 : gizmoAxis(mouse); axis >= 0) {
+        const Gizmo g = gizmo();
+        if (Layer* l = ctx_.comp().findLayer(g.layer)) {
+            drag_ = Drag::Axis;
+            axis_ = axis;
+            axisStart_ = g;
+            dragLayer_ = l->id;
+            axisStartValue_ = axis == 2 ? l->transform.depth.valueAt(t) : axis == 0 ? l->transform.position.valueAt(t).x : l->transform.position.valueAt(t).y;
+            return;
+        }
+    }
+    // Camera tools move the selected camera.
+    if (Layer* cam = ctx_.selection.size() == 1 ? ctx_.selected() : nullptr;
+        cameraTool_ != CameraTool::None && cam && cam->type == LayerType::Camera && !cam->locked && throughCamera_ && !orbit_) {
+        drag_ = Drag::CameraTool;
+        dragLayer_ = cam->id;
+        toolStartLens_ = comp.lensOf(*cam, t);
+        toolStartRx_ = cam->transform.rotationX.valueAt(t);
+        toolStartRy_ = cam->transform.rotationY.valueAt(t);
+        return;
+    }
+    // The 3D view: a click on a camera picks it.
+    if (orbit_ && !additive)
+        if (const uint64_t cam = cameraAt(mouse)) {
+            ctx_.select(cam);
+            update();
+            return;
+        }
 
     // Drag a guide out of a ruler.
     auto& guides = ctx_.comp().guides;
@@ -766,8 +1084,8 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
             const Vec2 compPoint = view.toComp(mouse);
             // With a compound open (timeline), clicks pick among its contents.
             if (ctx_.scope && !comp.findLayer(ctx_.scope)) ctx_.scope = 0;
-            uint64_t hit = ctx_.scope ? render::hitTestInside(comp, t, compPoint, ctx_.scope, throughCamera_)
-                                      : render::hitTest(comp, t, compPoint, throughCamera_, !throughCamera_);
+            uint64_t hit = ctx_.scope && !orbit_ ? render::hitTestInside(comp, t, compPoint, ctx_.scope, throughCamera_)
+                                                 : render::hitTest(comp, t, compPoint, throughCamera_, !throughCamera_ && !orbit_, g_lens);
             // Inside a compound, clicks pick among its layers; a double-click on a
             // compound goes one level in (like After Effects / Figma groups).
             if (const Layer* cur = ctx_.selected(); cur && !additive) {
@@ -810,6 +1128,8 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
                     }
                     collectSnapTargets(moving);
                 }
+            } else if (orbit_ && !additive) { // empty space in the 3D view: turn around
+                drag_ = Drag::Orbit;
             } else {
                 drag_ = Drag::Marquee;
                 marqueeBase_ = additive ? ctx_.selection : std::vector<uint64_t>{};
@@ -849,6 +1169,22 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
         autoFit_ = false;
         updateCursor(mouse, mods);
         return;
+    case Drag::Orbit: { // turn around the point the 3D view looks at
+        const Vec2 d = mouse - lastMouse_;
+        orbitView_.yaw += d.x * 0.3f;
+        orbitView_.pitch = std::clamp(orbitView_.pitch - d.y * 0.3f, -89.0f, 89.0f);
+        return;
+    }
+    case Drag::OrbitPan: { // move that point with the mouse
+        const Vec2 d = (mouse - lastMouse_) / zoom_;
+        V3 right, down, forward;
+        axesOf(orbitLens_, right, down, forward);
+        const float dist = orbitView_.distance > 0.0f ? orbitView_.distance : ctx_.comp().focalLength() * 3.2f;
+        const float perPx = dist / orbitLens_.focal;
+        const V3 target = V3{orbitView_.tx, orbitView_.ty, orbitView_.tz} - right * (d.x * perPx) - down * (d.y * perPx);
+        orbitView_.tx = target.x, orbitView_.ty = target.y, orbitView_.tz = target.z;
+        return;
+    }
     case Drag::Guide: {
         auto& guides = ctx_.comp().guides;
         if (guideDrag_ < 0 || guideDrag_ >= static_cast<int>(guides.size())) return;
@@ -879,10 +1215,27 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
 
     if (!dragMoved_) return;
     switch (drag_) {
+    case Drag::Axis: { // along one world axis, as far as the mouse went along its arrow
+        Layer* l = ctx_.comp().findLayer(dragLayer_);
+        if (!l || axis_ < 0) break;
+        const Vec2 moved = mouse - dragStartScreen_;
+        const float along = moved.x * axisStart_.dir[axis_].x + moved.y * axisStart_.dir[axis_].y;
+        float v = axisStartValue_ + along * axisStart_.perPx[axis_];
+        if (mods & Qt::ShiftModifier) v = std::round(v / 10.0f) * 10.0f; // steps of 10 px
+        if (axis_ == 2) {
+            l->transform.depth.set(t, v);
+        } else {
+            Vec2 p = l->transform.position.valueAt(t);
+            (axis_ == 0 ? p.x : p.y) = v;
+            l->transform.position.set(t, p);
+        }
+        break;
+    }
+    case Drag::CameraTool: moveCamera(mouse); break;
     case Drag::Move: {
         Vec2 delta = mouseComp - dragStartMouse_;
         if (mods & Qt::ShiftModifier) (std::fabs(delta.x) > std::fabs(delta.y) ? delta.y : delta.x) = 0.0f;
-        if (ctx_.snapping && !(mods & Qt::ControlModifier)) delta = delta + snapMove(dragBoxMin_, dragBoxMax_, delta);
+        if (ctx_.snapping && !(mods & Qt::ControlModifier) && !orbit_) delta = delta + snapMove(dragBoxMin_, dragBoxMax_, delta);
         // The camera may zoom or rotate the view (3D layers: each at its depth); inside a
         // compound the position is in its (scaled, rotated) space.
         // Where the position was on screen, moved by the mouse, back in the plane it moves in.
@@ -974,6 +1327,7 @@ void ViewportPanel::mouseReleaseEvent(QMouseEvent* e) {
     // A plain click inside a multi-selection narrows it to the clicked layer.
     if (drag_ == Drag::Move && !dragMoved_ && !additive_) ctx_.select(dragLayer_);
     drag_ = Drag::None;
+    axis_ = -1;
     snapLinesX_.clear();
     snapLinesY_.clear();
     updateCursor(mouse, e->modifiers());
@@ -982,7 +1336,13 @@ void ViewportPanel::mouseReleaseEvent(QMouseEvent* e) {
 
 void ViewportPanel::wheelEvent(QWheelEvent* e) {
     const float steps = e->angleDelta().y() / 120.0f;
-    if (steps != 0.0f) zoomAround(vec(e->position()), zoom_ * std::pow(1.15f, steps));
+    if (orbit_ && steps != 0.0f) { // the 3D view: its eye goes closer / farther
+        const float dist = orbitView_.distance > 0.0f ? orbitView_.distance : ctx_.comp().focalLength() * 3.2f;
+        orbitView_.distance = std::clamp(dist * std::pow(1.15f, -steps), ctx_.comp().focalLength() * 0.05f, ctx_.comp().focalLength() * 40.0f);
+        update();
+    } else if (steps != 0.0f) {
+        zoomAround(vec(e->position()), zoom_ * std::pow(1.15f, steps));
+    }
     e->accept();
 }
 
