@@ -3,6 +3,7 @@
 #include "app/PluginHost.h"
 #include "app/Settings.h"
 #include "core/Snapping.h"
+#include "core/Presets.h"
 #include "core/Transitions.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
@@ -274,7 +275,8 @@ protected:
         update();
     }
     void dragEnterEvent(QDragEnterEvent* e) override {
-        if (e->mimeData()->hasFormat(ui::kObjectMime) || e->mimeData()->hasFormat(ui::kMediaMime) || e->mimeData()->hasFormat(ui::kTransitionMime))
+        if (e->mimeData()->hasFormat(ui::kObjectMime) || e->mimeData()->hasFormat(ui::kMediaMime) || e->mimeData()->hasFormat(ui::kTransitionMime) ||
+            e->mimeData()->hasFormat(ui::kAnimationMime))
             e->acceptProposedAction();
     }
     void dragMoveEvent(QDragMoveEvent* e) override {
@@ -283,6 +285,14 @@ protected:
             // Shows where it goes; a clip that cannot take it refuses the drop.
             panel_->transitionDrop_ = panel_->transitionDropAt(e->position(), transition);
             if (panel_->transitionDrop_.ok) e->acceptProposedAction();
+            else e->ignore();
+            update();
+            return;
+        }
+        std::string preset;
+        if (ui::readTextMime(e->mimeData(), ui::kAnimationMime, preset)) {
+            panel_->presetDrop_ = panel_->presetDropAt(e->position(), preset);
+            if (panel_->presetDrop_.ok) e->acceptProposedAction();
             else e->ignore();
             update();
             return;
@@ -301,6 +311,7 @@ protected:
     void dragLeaveEvent(QDragLeaveEvent*) override {
         panel_->dropActive_ = false;
         panel_->transitionDrop_ = {};
+        panel_->presetDrop_ = {};
         panel_->snapLineTime_ = -1.0;
         update();
     }
@@ -311,6 +322,20 @@ protected:
         panel_->dropActive_ = false;
         panel_->snapLineTime_ = -1.0;
         std::string transition;
+        std::string presetJson;
+        AnimationPreset preset;
+        if (ui::readTextMime(e->mimeData(), ui::kAnimationMime, presetJson) && parsePreset(presetJson, preset)) {
+            const TimelinePanel::PresetDrop drop = panel_->presetDropAt(e->position(), presetJson);
+            panel_->presetDrop_ = {};
+            if (Layer* layer = drop.ok ? ctx.comp().findLayer(drop.layer) : nullptr) {
+                applyPreset(preset, *layer, drop.time);
+                ctx.select(layer->id);
+                ctx.touch();
+                e->acceptProposedAction();
+            }
+            panel_->relayout();
+            return;
+        }
         if (ui::readTextMime(e->mimeData(), ui::kTransitionMime, transition)) {
             using Spot = TimelinePanel::TransitionDrop::Spot;
             const TimelinePanel::TransitionDrop drop = panel_->transitionDropAt(e->position(), transition);
@@ -1464,7 +1489,34 @@ TimelinePanel::TransitionDrop TimelinePanel::transitionDropAt(QPointF pos, const
     return {l.id, atStart ? TransitionDrop::Spot::In : TransitionDrop::Spot::Out, canTakeTransition(l, transition)};
 }
 
+TimelinePanel::PresetDrop TimelinePanel::presetDropAt(QPointF pos, const std::string& presetJson) const {
+    AnimationPreset preset;
+    const Item* item = itemAt(static_cast<float>(pos.y()));
+    if (!item || item->kind != Item::Track || !parsePreset(presetJson, preset)) return {};
+    Drag mode;
+    const int index = clipHit(*item, static_cast<float>(pos.x()), mode);
+    if (index < 0 || index >= static_cast<int>(ctx_.comp().layers.size())) return {};
+    const Layer& l = ctx_.comp().layers[index];
+    const double length = presetDuration(preset, l);
+    // From the mouse, kept inside the clip (an exit lands on its end, an entrance on its start).
+    double t = ctx_.comp().snapToFrame(xToTime(static_cast<float>(pos.x())));
+    t = std::clamp(t, l.inPoint, std::max(l.inPoint, l.outPoint - length));
+    if (std::fabs(timeToX(t) - timeToX(l.inPoint)) < 12) t = l.inPoint;
+    return {l.id, t, length, l.type != LayerType::Camera && presetAppliesTo(preset, l)};
+}
+
 void TimelinePanel::paintTransitionDrop(ui::Draw& d) {
+    if (const Layer* layer = presetDrop_.layer ? ctx_.comp().findLayer(presetDrop_.layer) : nullptr)
+        for (const Item& r : items_) {
+            if (r.kind != Item::Track || r.track != layer->track) continue;
+            const float x0 = timeToX(presetDrop_.time), x1 = std::max(timeToX(presetDrop_.time + presetDrop_.length), x0 + 12.0f);
+            const Rgba line = presetDrop_.ok ? theme::kAccent : theme::kDanger;
+            d.rectFilled({x0, r.top + 3}, {x1, r.top + r.h - 3}, presetDrop_.ok ? theme::accent(110) : theme::withAlpha(theme::kDanger, 60), 5.0f);
+            d.rect({x0, r.top + 3}, {x1, r.top + r.h - 3}, line, 5.0f, 2.0f);
+            if (!presetDrop_.ok)
+                d.text({x1 + 8, r.top + (r.h - d.textHeight()) * 0.5f}, theme::kDanger, QStringLiteral("This animation is not for this kind of layer"));
+            break;
+        }
     const TransitionDrop& drop = transitionDrop_;
     const Layer* layer = drop.layer ? ctx_.comp().findLayer(drop.layer) : nullptr;
     if (!layer) return;

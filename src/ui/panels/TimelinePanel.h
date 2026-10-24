@@ -158,6 +158,13 @@ private:
     const Item* itemAt(float y) const;
     int clipHit(const Item& track, float x, Drag& mode) const;
     TransitionDrop transitionDropAt(QPointF pos, const std::string& transition) const;
+    // Where a Quick Animation dragged in would play: on the clip under `pos`, from there.
+    struct PresetDrop {
+        uint64_t layer = 0;
+        double time = 0.0, length = 0.0;
+        bool ok = false; // the clip can take it (text-only presets on text...)
+    };
+    PresetDrop presetDropAt(QPointF pos, const std::string& presetJson) const;
     void paintTransitionDrop(ui::Draw& d);
     TransitionHit transitionHit(const Item& track, float x) const;
     void clickLayer(uint64_t id);
@@ -282,6 +289,7 @@ private:
     std::vector<double> timeTargets_;
     double snapLineTime_ = -1.0;
     TransitionDrop transitionDrop_; // while a transition is dragged over the rows
+    PresetDrop presetDrop_;         // while a Quick Animation is
     uint64_t selectedTransitionLayer_ = 0;
     bool selectedTransitionIncoming_ = true;
     // Box selection by dragging on empty timeline space.

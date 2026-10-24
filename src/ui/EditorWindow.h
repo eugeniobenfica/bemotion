@@ -35,6 +35,7 @@ class ObjectsPanel;
 class MediaPanel;
 class ToolsPanel;
 class TransitionsPanel;
+class AnimationsPanel;
 class ToolsPopover;
 class ViewportPanel;
 class PropertiesPanel;
@@ -121,6 +122,7 @@ private:
     PropertiesPanel* properties_ = nullptr;
     EffectsPanel* effects_ = nullptr;
     TransitionsPanel* transitions_ = nullptr;
+    AnimationsPanel* animations_ = nullptr;
     TimelinePanel* timeline_ = nullptr;
     std::map<std::string, ads::CDockWidget*> dockWidgets_;
     // Minimized panels: hidden, with a handle on the window edge that brings them back.

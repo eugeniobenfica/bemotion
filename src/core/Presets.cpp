@@ -34,12 +34,41 @@ constexpr const char* kBuiltinPresets[] = {
         {"property":"trim_end","keys":[{"t":0,"v":0,"ease":"ease_in_out"},{"t":1,"v":100}]}]})",
     R"({"name":"Pulse","category":"Emphasis","duration":0.5,"tracks":[
         {"property":"scale","keys":[{"t":0,"v":"rest","ease":"ease_in_out"},{"t":0.5,"v":{"mul":1.15},"ease":"ease_in_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Zoom In","category":"Entrance","duration":0.6,"tracks":[
+        {"property":"scale","keys":[{"t":0,"v":{"mul":1.6},"ease":"ease_out"},{"t":1,"v":"rest"}]},
+        {"property":"opacity","keys":[{"t":0,"v":0,"ease":"ease_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Rise","category":"Entrance","duration":0.7,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":{"offset":[0,90]},"ease":"back_out"},{"t":1,"v":"rest"}]},
+        {"property":"opacity","keys":[{"t":0,"v":0,"ease":"ease_out"},{"t":0.5,"v":"rest"}]}]})",
+    R"({"name":"Shake","category":"Emphasis","duration":0.5,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":"rest","ease":"ease_in_out"},{"t":0.15,"v":{"offset":[-14,0]},"ease":"ease_in_out"},
+            {"t":0.35,"v":{"offset":[14,0]},"ease":"ease_in_out"},{"t":0.55,"v":{"offset":[-10,0]},"ease":"ease_in_out"},
+            {"t":0.75,"v":{"offset":[8,0]},"ease":"ease_in_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Heartbeat","category":"Emphasis","duration":0.8,"tracks":[
+        {"property":"scale","keys":[{"t":0,"v":"rest","ease":"ease_out"},{"t":0.15,"v":{"mul":1.15},"ease":"ease_in_out"},
+            {"t":0.35,"v":"rest","ease":"ease_out"},{"t":0.5,"v":{"mul":1.1},"ease":"ease_in_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Float","category":"Emphasis","duration":2.0,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":"rest","ease":"ease_in_out"},{"t":0.5,"v":{"offset":[0,-24]},"ease":"ease_in_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Bounce","category":"Emphasis","duration":0.8,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":"rest","ease":"ease_out"},{"t":0.4,"v":{"offset":[0,-70]},"ease":"bounce"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Wobble","category":"Emphasis","duration":0.8,"tracks":[
+        {"property":"rotation","keys":[{"t":0,"v":"rest","ease":"ease_in_out"},{"t":0.2,"v":{"offset":-10},"ease":"ease_in_out"},
+            {"t":0.45,"v":{"offset":8},"ease":"ease_in_out"},{"t":0.7,"v":{"offset":-4},"ease":"ease_in_out"},{"t":1,"v":"rest"}]}]})",
+    R"({"name":"Blink","category":"Emphasis","duration":0.6,"tracks":[
+        {"property":"opacity","keys":[{"t":0,"v":"rest","ease":"hold"},{"t":0.25,"v":0,"ease":"hold"},{"t":0.5,"v":"rest","ease":"hold"},
+            {"t":0.75,"v":0,"ease":"hold"},{"t":1,"v":"rest"}]}]})",
     R"({"name":"Spin","category":"Emphasis","duration":1.2,"tracks":[
         {"property":"rotation","keys":[{"t":0,"v":"rest","ease":"ease_in_out"},{"t":1,"v":{"offset":360}}]}]})",
     R"({"name":"Fade Out","category":"Exit","duration":0.6,"tracks":[
         {"property":"opacity","keys":[{"t":0,"v":"rest","ease":"ease_in"},{"t":1,"v":0}]}]})",
     R"({"name":"Pop Out","category":"Exit","duration":0.5,"tracks":[
         {"property":"scale","keys":[{"t":0,"v":"rest","ease":"back_in"},{"t":1,"v":{"mul":0}}]}]})",
+    R"({"name":"Drop Out","category":"Exit","duration":0.7,"tracks":[
+        {"property":"position","keys":[{"t":0,"v":"rest","ease":"back_in"},{"t":1,"v":{"offset":[0,260]}}]},
+        {"property":"opacity","keys":[{"t":0.5,"v":"rest","ease":"ease_in"},{"t":1,"v":0}]}]})",
+    R"({"name":"Spin Out","category":"Exit","duration":0.7,"tracks":[
+        {"property":"rotation","keys":[{"t":0,"v":"rest","ease":"ease_in"},{"t":1,"v":{"offset":180}}]},
+        {"property":"scale","keys":[{"t":0,"v":"rest","ease":"ease_in"},{"t":1,"v":{"mul":0}}]}]})",
     R"({"name":"Slide Out","category":"Exit","duration":0.6,"tracks":[
         {"property":"position","keys":[{"t":0,"v":"rest","ease":"ease_in"},{"t":1,"v":{"offset":[240,0]}}]},
         {"property":"opacity","keys":[{"t":0,"v":"rest","ease":"ease_in"},{"t":1,"v":0}]}]})",

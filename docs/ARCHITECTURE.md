@@ -187,7 +187,9 @@ operations. Effect ids (`effectId`) are stable strings.
   project is pushed (limit 200). Editing code does not do undo bookkeeping; it
   changes the project and lets the editor commit (§7).
 - **`Describe`** — a compact text summary (for terminals and AIs).
-- **`Presets`** — Quick Animations: they write ordinary keyframes.
+- **`Presets`** — Quick Animations: they write ordinary keyframes. The
+  *Animate* panel (`ui/panels/AnimationsPanel`) lists them; dragged onto a
+  clip (`kAnimationMime`, the preset as JSON) one plays from the drop point.
 - **`Transitions`** — a clip's way in and out (fade, slides, zoom, pop, spin),
   written as keyframes at its edges with the preset engine.
 - **`Arrange`** — distribute layers evenly, stagger start times.

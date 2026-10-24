@@ -263,7 +263,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         auto* n = new QLabel(QString("%1 layers selected").arg(ctx_.selection.size()));
         ui::setTone(n, ui::Tone::Accent);
         col->addWidget(n);
-        col->addWidget(faint("Properties below belong to this layer. Quick animations apply to all selected layers."));
+        col->addWidget(faint("Properties below belong to this layer."));
     }
     // Compounds: where this layer lives, and what a compound contains.
     if (const Layer* parent = layer.parent ? ctx_.comp().findLayer(layer.parent) : nullptr) {
@@ -630,7 +630,6 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         });
     }
 
-    if (layer.type != LayerType::Camera) buildPresets(col, layer); // cameras are not drawn: no animation presets
     for (auto& f : refreshers_) f();
 }
 
@@ -1051,80 +1050,6 @@ void PropertiesPanel::buildPluginTable(QVBoxLayout* col, Layer& layer) {
     more->addWidget(copy);
     more->addStretch();
     s->body()->addLayout(more);
-    col->addWidget(s);
-}
-
-void PropertiesPanel::buildPresets(QVBoxLayout* col, Layer& layer) {
-    auto* s = new CollapsibleSection("Quick Animations");
-    s->body()->addWidget(faint("Adds keyframes at the playhead (replacing overlapping ones)."));
-    // Built-in categories first, then whatever imported presets use.
-    std::vector<std::string> categories = {"Entrance", "Emphasis", "Exit"};
-    for (const auto& lp : PresetLibrary::all())
-        if (std::find(categories.begin(), categories.end(), lp.preset.category) == categories.end()) categories.push_back(lp.preset.category);
-    for (const std::string& category : categories) {
-        QGridLayout* grid = nullptr;
-        int n = 0;
-        for (const auto& lp : PresetLibrary::all()) {
-            if (lp.preset.category != category || !presetAppliesTo(lp.preset, layer)) continue;
-            if (!grid) {
-                s->body()->addWidget(ui::sectionLabel(QString::fromStdString(category)));
-                grid = new QGridLayout;
-                grid->setSpacing(4);
-                s->body()->addLayout(grid);
-            }
-            auto* b = new QPushButton(QString::fromStdString(lp.preset.name));
-            const AnimationPreset preset = lp.preset;
-            connect(b, &QPushButton::clicked, this, [this, preset] {
-                for (Layer* l : ctx_.selectedLayers())
-                    if (presetAppliesTo(preset, *l)) applyPreset(preset, *l, ctx_.time);
-                ctx_.touch();
-            });
-            if (!lp.file.empty()) {
-                const std::filesystem::path file = lp.file;
-                b->setContextMenuPolicy(Qt::CustomContextMenu);
-                connect(b, &QWidget::customContextMenuRequested, this, [this, b, file](QPoint p) {
-                    QMenu menu;
-                    menu.addAction("Show File", [file] { platform::revealInFileManager(file); });
-                    menu.addAction("Delete Preset", [this, file] {
-                        PresetLibrary::remove(file);
-                        key_.clear();
-                    });
-                    menu.exec(b->mapToGlobal(p));
-                });
-            }
-            grid->addWidget(b, n / 2, n % 2);
-            ++n;
-        }
-    }
-    auto* row = new QHBoxLayout;
-    auto* import = new QPushButton("Import...");
-    import->setToolTip("Add a Quick Animation from a .json preset file");
-    connect(import, &QPushButton::clicked, this, [this] {
-        if (auto file = platform::openFileDialog("Import Quick Animation", "Quick Animation preset", ".json")) {
-            std::string err;
-            presetMessage_ = PresetLibrary::importFile(*file, &err) ? "" : "Import failed: " + err;
-        }
-    });
-    auto* save = new QPushButton("Save as Preset...");
-    save->setToolTip("Turn this layer's keyframes into a reusable Quick Animation");
-    const uint64_t id = layer.id;
-    connect(save, &QPushButton::clicked, this, [this, id] {
-        Layer* l = ctx_.comp().findLayer(id);
-        if (!l) return;
-        bool ok = false;
-        const QString name = QInputDialog::getText(this, "Save Quick Animation", "Preset name", QLineEdit::Normal,
-                                                   QString::fromStdString(l->name + " animation"), &ok);
-        if (!ok || name.trimmed().isEmpty()) return;
-        AnimationPreset preset = presetFromLayer(*l, l->inPoint, l->outPoint, name.toStdString());
-        std::string err;
-        if (preset.tracks.empty()) presetMessage_ = "This layer has no keyframes to save.";
-        else if (PresetLibrary::save(preset, &err)) presetMessage_ = "Saved \"" + name.toStdString() + "\" to Quick Animations (Custom).";
-        else presetMessage_ = err;
-    });
-    row->addWidget(import);
-    row->addWidget(save);
-    s->body()->addLayout(row);
-    if (!presetMessage_.empty()) s->body()->addWidget(dim(QString::fromStdString(presetMessage_)));
     col->addWidget(s);
 }
 

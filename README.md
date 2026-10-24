@@ -124,8 +124,10 @@ does.
 - Every property keyframable, with a reset button and live values
 - **Graph Editor**, motion paths with bezier handles, easing presets and a
   custom cubic-bezier curve editor; Easy Ease with F9
-- **Quick Animations**: Fade, Pop, Slide, Drop, Spin, Pulse, Typewriter,
-  Draw On… stackable, importable, savable
+- **Quick Animations** in their own panel (*Animate*): Fade, Pop, Slide,
+  Drop, Zoom, Rise, Shake, Heartbeat, Float, Bounce, Wobble, Blink, Spin,
+  Typewriter, Draw On… click one for the selection or drag it onto a clip;
+  stackable, importable, savable
 - **Transitions** panel by category (Fade, Slide, Scale, Rotate, 3D): drag
   one onto a clip's start or end, or onto the cut between two clips; drag its
   edge for the duration — plain keyframes you can still edit

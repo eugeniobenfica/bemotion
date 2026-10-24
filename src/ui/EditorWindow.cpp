@@ -26,6 +26,7 @@
 #include "ui/panels/TimelinePanel.h"
 #include "ui/panels/ToolsPanel.h"
 #include "ui/panels/TransitionsPanel.h"
+#include "ui/panels/AnimationsPanel.h"
 #include "ui/panels/ViewportPanel.h"
 
 #include <AutoHideDockContainer.h>
@@ -218,6 +219,7 @@ void EditorWindow::buildDocks() {
     properties_ = new PropertiesPanel(ctx_);
     effects_ = new EffectsPanel(ctx_);
     transitions_ = new TransitionsPanel(ctx_);
+    animations_ = new AnimationsPanel(ctx_);
     timeline_ = new TimelinePanel(ctx_);
     toolsPopover_ = new ToolsPopover(tools_, this);
     connect(timeline_, &TimelinePanel::pluginButtonClicked, this, [this](const std::string& id, bool pressed) { runPluginCommand(id, pressed); });
@@ -273,6 +275,7 @@ void EditorWindow::buildDocks() {
     auto* center = docks_->setCentralWidget(vp);
     auto* left = docks_->addDockWidget(ads::LeftDockWidgetArea, dock("Objects", objects_));
     docks_->addDockWidgetTabToArea(dock("Media", media_), left);
+    docks_->addDockWidgetTabToArea(dock("Animate", animations_), left); // Quick Animations: dragged onto clips, like objects
     left->setCurrentIndex(0);
     auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock("Properties", properties_));
     docks_->addDockWidgetTabToArea(dock("Effects", effects_), right);
@@ -281,7 +284,7 @@ void EditorWindow::buildDocks() {
     auto* bottom = docks_->addDockWidget(ads::BottomDockWidgetArea, dock("Timeline", timeline_));
     (void)center;
     QTimer::singleShot(0, this, [this, left, right, bottom] {
-        docks_->setSplitterSizes(left, {width() * 15 / 100, width() * 59 / 100, width() * 26 / 100});
+        docks_->setSplitterSizes(left, {width() * 17 / 100, width() * 57 / 100, width() * 26 / 100});
         docks_->setSplitterSizes(bottom, {height() * 64 / 100, height() * 36 / 100});
         (void)right;
         defaultLayout_ = docks_->saveState();
@@ -761,7 +764,7 @@ void EditorWindow::buildMenus() {
     view->addSeparator();
     QMenu* panels = view->addMenu("Panels");
     view->addAction("Tools...", this, [this] { showTools(); });
-    for (const char* name : {"Objects", "Media", "Properties", "Effects", "Transitions", "Timeline"})
+    for (const char* name : {"Objects", "Media", "Properties", "Effects", "Transitions", "Animate", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction("Reset Layout", this, [this] { resetLayout(); });
     view->addSeparator();
@@ -899,6 +902,7 @@ void EditorWindow::tick() {
     properties_->sync();
     effects_->sync();
     transitions_->sync();
+    animations_->sync();
     timeline_->sync();
 
     ctx_.commitIfIdle(interacting());
