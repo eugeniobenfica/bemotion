@@ -24,6 +24,9 @@ fs::path executableDir();
 fs::path appDataDir();         // per-user settings, created on demand (BEMOTION_APPDATA overrides it)
 fs::path documentsDir(); // the user's Documents (where dialogs start when there is no projects folder yet)
 fs::path assetsDir();
+// The Welcome project the home screen always lists: bemotion's own copy in the app data
+// folder (made from the bundled one when missing), so edits to it are kept. Empty on failure.
+fs::path welcomeProject();
 
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const char* extension);
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions);

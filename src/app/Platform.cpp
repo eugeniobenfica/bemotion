@@ -103,6 +103,15 @@ fs::path documentsDir() {
     return fromQ(docs);
 }
 
+fs::path welcomeProject() {
+    const fs::path copy = appDataDir() / "Welcome" / "Welcome to bemotion.bemotion";
+    std::error_code ec;
+    if (fs::exists(copy, ec)) return copy;
+    fs::create_directories(copy.parent_path(), ec);
+    fs::copy_file(assetsDir() / "welcome" / "Welcome.bemotion", copy, ec);
+    return ec ? fs::path() : copy;
+}
+
 fs::path assetsDir() {
     std::error_code ec;
     fs::path nextToExe = executableDir() / "assets";

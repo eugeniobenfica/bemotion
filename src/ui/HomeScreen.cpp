@@ -410,6 +410,10 @@ void HomeScreen::refresh() {
             continue;
         entries_.push_back({path, platform::toUtf8(path.stem()), modified(path)});
     }
+    // The Welcome project is always there, whatever folder is chosen.
+    if (const fs::path welcome = platform::welcomeProject(); !welcome.empty() &&
+        std::none_of(entries_.begin(), entries_.end(), [&](const RecentProject& e) { std::error_code fe; return fs::equivalent(e.path, welcome, fe); }))
+        entries_.push_back({welcome, "Welcome to bemotion", modified(welcome)});
     std::stable_sort(entries_.begin(), entries_.end(),
                      [](const RecentProject& a, const RecentProject& b) { return a.lastOpened > b.lastOpened; });
 
@@ -463,27 +467,20 @@ void HomeScreen::rebuildGrid() {
     grid_ = new QWidget;
     auto* col = new QVBoxLayout(grid_);
     col->setContentsMargins(0, 0, 0, 24);
-    if (projectsFolder().empty()) { // first: where projects live (nothing is created on its own)
-        auto* card = new QFrame;
-        card->setObjectName("folderCard");
-        card->setStyleSheet(QString("#folderCard { background: %1; border: 1px solid %2; border-radius: 10px; }")
-                                .arg(theme::q(theme::kBgPanel).name(), theme::q(theme::kBorder).name()));
-        auto* cc = new QVBoxLayout(card);
-        cc->setContentsMargins(22, 18, 22, 18);
-        cc->setSpacing(6);
-        cc->addWidget(styled("Choose a folder for your projects", theme::kText, 1.2f, true));
-        // The sidebar's Projects Folder button picks it (one way to do it, not two).
-        auto* why = styled("bemotion lists every project in it, and saves new ones there. "
-                           "Pick any folder with Projects Folder, at the bottom left.", theme::kTextDim);
-        why->setWordWrap(true);
-        cc->addWidget(why);
-        col->addWidget(card);
-        col->addSpacing(18);
-        if (items.empty()) {
-            col->addStretch(1);
-            scroll_->setWidget(grid_);
-            return;
-        }
+    // No projects folder yet: a faint line in the empty space says how to pick one (with the
+    // sidebar's Projects Folder button); it goes as soon as there is a folder.
+    auto folderHint = [&] {
+        if (!projectsFolder().empty()) return;
+        col->addStretch(1);
+        auto* hint = styled("Choose a folder for your projects with Projects Folder, at the bottom left.", theme::kTextFaint);
+        hint->setAlignment(Qt::AlignCenter);
+        col->addWidget(hint);
+        col->addStretch(2);
+    };
+    if (items.empty() && projectsFolder().empty()) {
+        folderHint();
+        scroll_->setWidget(grid_);
+        return;
     }
     if (items.empty()) {
         col->addStretch(1);
@@ -535,9 +532,12 @@ void HomeScreen::rebuildGrid() {
                 });
                 menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Show in Folder",
                                [copy] { platform::revealInFileManager(copy.path); });
-                menu.addSeparator();
-                menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), "Delete Project...",
-                               [this, copy] { confirmDelete(copy); });
+                std::error_code fe;
+                if (!std::filesystem::equivalent(copy.path, platform::welcomeProject(), fe)) { // the Welcome project stays
+                    menu.addSeparator();
+                    menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), "Delete Project...",
+                                   [this, copy] { confirmDelete(copy); });
+                }
                 menu.exec(at);
             });
         card->setCardWidth(cardW);
@@ -545,7 +545,8 @@ void HomeScreen::rebuildGrid() {
         ++shown;
     }
     if (shown == 0) col->addWidget(styled(QString("No projects match \"%1\".").arg(search_->text()), theme::kTextDim));
-    col->addStretch(1);
+    if (projectsFolder().empty()) folderHint();
+    else col->addStretch(1);
     scroll_->setWidget(grid_);
 }
 
@@ -554,13 +555,6 @@ bool HomeScreen::chooseProjectsFolder() {
     const auto folder = platform::chooseFolderDialog("Choose a Folder for Your Projects", current.empty() ? platform::documentsDir() : current);
     if (!folder) return false;
     settings().projectsFolder = platform::toUtf8(*folder);
-    // The first folder gets the Welcome project, to take apart.
-    if (!settings().welcomeAdded) {
-        const auto copy = *folder / "Welcome to bemotion.bemotion";
-        std::error_code ec;
-        if (!std::filesystem::exists(copy, ec)) std::filesystem::copy_file(platform::assetsDir() / "welcome" / "Welcome.bemotion", copy, ec);
-        settings().welcomeAdded = !ec;
-    }
     saveSettings();
     if (!watcher_->directories().isEmpty()) watcher_->removePaths(watcher_->directories());
     watcher_->addPath(QString::fromStdString(platform::toUtf8(*folder)));
