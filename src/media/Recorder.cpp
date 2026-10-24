@@ -7,11 +7,13 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 namespace bemotion::media {
@@ -21,11 +23,22 @@ namespace {
 constexpr ma_uint32 kRate = 48000;
 constexpr ma_uint32 kChannels = 1; // a voice: mono
 
+// The capture callback runs on the audio thread and must never wait: it only copies into a
+// fixed ring (no lock, no allocation); a drain thread moves the samples into the buffer the
+// rest of the app reads. (Locking and growing the buffer in the callback dropped samples when
+// the vector reallocated or the interface held the lock: audible pops.)
+constexpr size_t kRingSize = kRate * 8; // 8 s of slack if the drain is ever slow
+
 struct State {
     std::unique_ptr<ma_device> device;
-    std::mutex mutex;
+    std::mutex mutex; // guards `buffer`
     RecordingBuffer buffer;
     std::atomic<float> peak{0.0f};
+    std::vector<float> ring = std::vector<float>(kRingSize);
+    std::atomic<size_t> written{0}, read{0}; // monotonic counts (single producer, single consumer)
+    std::atomic<bool> draining{false};
+    std::thread drain;
+    std::atomic<size_t> dropped{0};
 };
 
 State& state() {
@@ -40,14 +53,35 @@ void onCapture(ma_device*, void*, const void* input, ma_uint32 frames) {
     float peak = 0.0f;
     for (ma_uint32 i = 0; i < frames * kChannels; ++i) peak = std::max(peak, std::fabs(in[i]));
     s.peak = std::max(peak, s.peak.load() * 0.9f);
+    const size_t n = frames * kChannels;
+    const size_t w = s.written.load(std::memory_order_relaxed), r = s.read.load(std::memory_order_acquire);
+    if (kRingSize - (w - r) < n) { // the drain fell 8 s behind: keep time, lose this block
+        s.dropped += n;
+        return;
+    }
+    for (size_t i = 0; i < n; ++i) s.ring[(w + i) % kRingSize] = in[i];
+    s.written.store(w + n, std::memory_order_release);
+}
+
+// Moves what the callback wrote into the buffer.
+void drainRing() {
+    State& s = state();
+    const size_t w = s.written.load(std::memory_order_acquire), r = s.read.load(std::memory_order_relaxed);
+    if (w == r) return;
+    std::vector<float> chunk(w - r);
+    for (size_t i = 0; i < chunk.size(); ++i) chunk[i] = s.ring[(r + i) % kRingSize];
+    s.read.store(w, std::memory_order_release);
     std::lock_guard lock(s.mutex);
-    s.buffer.append(std::span<const float>(in, frames * kChannels));
+    s.buffer.append(chunk);
 }
 
 void closeDevice() {
     State& s = state();
     if (!s.device) return;
-    ma_device_uninit(s.device.get());
+    ma_device_uninit(s.device.get()); // no more callbacks after this
+    s.draining = false;
+    if (s.drain.joinable()) s.drain.join();
+    drainRing(); // the last samples
     s.device.reset();
 }
 
@@ -74,11 +108,17 @@ bool Recorder::start(std::string* error) {
         s.buffer.clear();
     }
     s.peak = 0.0f;
+    s.written = 0;
+    s.read = 0;
+    s.dropped = 0;
     ma_device_config config = ma_device_config_init(ma_device_type_capture);
     config.capture.format = ma_format_f32;
     config.capture.channels = kChannels;
     config.sampleRate = kRate;
     config.dataCallback = onCapture;
+    // Recording is not interactive: longer periods ride over the moments the system is busy.
+    config.performanceProfile = ma_performance_profile_conservative;
+    config.periodSizeInMilliseconds = 30;
     auto device = std::make_unique<ma_device>();
     if (ma_device_init(nullptr, &config, device.get()) != MA_SUCCESS) {
         if (error) *error = "no microphone could be opened";
@@ -90,6 +130,14 @@ bool Recorder::start(std::string* error) {
         return false;
     }
     s.device = std::move(device);
+    s.draining = true;
+    s.drain = std::thread([] {
+        State& st = state();
+        while (st.draining) {
+            drainRing();
+            std::this_thread::sleep_for(std::chrono::milliseconds(15));
+        }
+    });
     return true;
 }
 

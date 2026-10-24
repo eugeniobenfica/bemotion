@@ -892,6 +892,10 @@ void EditorWindow::tick() {
         recordingStart_ = -1.0;
         timeline_->clearRecordingPreview();
         ctx_.tick(dt);
+        // The picture follows the sound's clock (no drift, no audible resync), unless the
+        // playhead really jumped (a loop).
+        if (double audio = 0.0; ctx_.playing && media::AudioEngine::get().clock(audio) && std::fabs(audio - ctx_.time) < 0.5)
+            ctx_.time = audio;
     }
     media::MediaManager::get().update(ctx_.comp());
     media::AudioEngine::get().update(ctx_.comp(), ctx_.time, ctx_.playing);

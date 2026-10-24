@@ -135,9 +135,20 @@ void AudioEngine::update(const Composition& comp, double time, bool playing) {
     std::vector<Clip> clips = playing ? clipsAt(comp, time, time + 1.0) : std::vector<Clip>{};
     std::lock_guard lock(d.mutex);
     // Follow the timeline: start where the playhead is, and resync when it jumps (loops, scrubs).
-    if (playing && (!d.playing || std::fabs(d.clock - time) > 0.12)) d.clock = time;
+    // Small differences are not jumps: the timeline follows this clock (see clock()), and
+    // skipping the sound for them would click.
+    if (playing && (!d.playing || std::fabs(d.clock - time) > 0.5)) d.clock = time;
     d.playing = playing;
     d.clips = std::move(clips);
+}
+
+bool AudioEngine::clock(double& time) const {
+    Device& d = device();
+    if (!d.open) return false;
+    std::lock_guard lock(d.mutex);
+    if (!d.playing) return false;
+    time = d.clock;
+    return true;
 }
 
 std::vector<float> AudioEngine::mix(const Composition& comp, double start, double end) {

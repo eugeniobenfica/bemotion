@@ -18,6 +18,9 @@ public:
 
     // Call once per frame from the main thread: what plays now and from where.
     void update(const Composition& comp, double time, bool playing);
+    // While playing: the composition time the sound has reached (false: no device, or stopped).
+    // The timeline follows it, so picture and sound never drift apart.
+    bool clock(double& time) const;
 
     // The composition's audio between `start` and `end` (seconds), stereo at kAudioRate.
     // Empty when no audio layer is heard in that range.
