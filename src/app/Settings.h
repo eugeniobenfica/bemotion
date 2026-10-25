@@ -45,9 +45,19 @@ struct Settings {
     std::vector<std::string> disabledPlugins; // plugin ids
     std::vector<std::string> recentColors;    // the color picker's last colors, "#RRGGBBAA", newest first
     bool showMeters = true;                   // the left / right audio level meters beside the timeline
+    // How much the interface shows: "friendly" (the essentials), "balanced" or "expert" (all of
+    // it). Chosen on the first start (ui/ExperienceScreen), changed in Settings › Interface.
+    std::string experience = "balanced";
+    bool essentialsOnly = false; // plugins off (no charts, maps, 3D models, recorder): the core alone
+    bool firstRun = false;       // no settings file yet: this is bemotion's first start (not saved)
 };
 
 Settings& settings();
+// The experience's presets: the toolbar, the extras (rulers, audio meters), the advanced
+// options. The rest of the interface asks friendlyMode() / expertMode().
+void applyExperience(const std::string& experience);
+bool friendlyMode();
+bool expertMode();
 // The projects folder the user chose, if it still exists (else empty).
 std::filesystem::path projectsFolder();
 // Where file dialogs start: the projects folder, else Documents.

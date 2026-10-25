@@ -254,6 +254,14 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.circleFilled(Pt(c.x + h * 0.45f, c.y - h * 0.45f), h * 0.3f, col);
         break;
     }
+    case Icon::Snapshot: { // a photo camera: body, lens, the bump on top
+        dl.rect(Pt(c.x - h * 0.8f, c.y - h * 0.4f), Pt(c.x + h * 0.8f, c.y + h * 0.65f), col, 2.5f, th);
+        dl.line(Pt(c.x - h * 0.3f, c.y - h * 0.4f), Pt(c.x - h * 0.15f, c.y - h * 0.65f), col, th);
+        dl.line(Pt(c.x - h * 0.15f, c.y - h * 0.65f), Pt(c.x + h * 0.25f, c.y - h * 0.65f), col, th);
+        dl.line(Pt(c.x + h * 0.25f, c.y - h * 0.65f), Pt(c.x + h * 0.4f, c.y - h * 0.4f), col, th);
+        dl.circle(Pt(c.x, c.y + h * 0.12f), h * 0.3f, col, th);
+        break;
+    }
     case Icon::Meter:
         dl.rectFilled(Pt(c.x - h * 0.6f, c.y - h * 0.2f), Pt(c.x - h * 0.1f, c.y + h * 0.75f), col, 1.0f);
         dl.rectFilled(Pt(c.x + h * 0.1f, c.y - h * 0.7f), Pt(c.x + h * 0.6f, c.y + h * 0.75f), col, 1.0f);

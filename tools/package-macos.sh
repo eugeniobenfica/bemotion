@@ -20,6 +20,16 @@ rm -rf "$app" "$out/bemotion.dmg"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$exe" "$app/Contents/MacOS/bemotion"
 cp -R "$(dirname "$exe")/assets" "$app/Contents/Resources/assets"
+# Official plugins a release leaves out (they stay downloadable from Settings › Plugins):
+#   BEMOTION_LEAVE_OUT_PLUGINS="models3d recorder" tools/package-....sh ...
+for id in ${BEMOTION_LEAVE_OUT_PLUGINS:-}; do rm -rf "$app/Contents/Resources/assets/plugins/$id"; done
+# The speech models (tools/fetch-speech-model.sh), when they were fetched: transcription works
+# out of the box. Without them bemotion offers to download them when first needed.
+models="${BEMOTION_MODELS:-$HOME/bemotion-deps/models}"
+if ls "$models"/ggml-*.bin >/dev/null 2>&1; then
+    mkdir -p "$app/Contents/Resources/assets/models"
+    cp "$models"/ggml-*.bin "$app/Contents/Resources/assets/models/"
+fi
 
 # Icon: every size iconutil wants, from the 1024 px brand PNG.
 iconset="$out/bemotion.iconset"

@@ -1,0 +1,113 @@
+{
+  "catalog": 1,
+  "plugins": [
+    {
+      "id": "charts",
+      "name": "Charts",
+      "version": "1.3.0",
+      "author": "bemotion",
+      "description": "Animated column, bar, line and donut charts, tables and maps (world, countries by state), with CSV import.",
+      "api": 7,
+      "files": [
+        {
+          "path": "main.lua",
+          "size": 43719,
+          "sha256": "bfb2ce4180b4d92e4a17696d9e61588662a46dfb6053c6661435e4fd662b6248"
+        },
+        {
+          "path": "maps/australia.lua",
+          "size": 12644,
+          "sha256": "2a95fa5d996aa38b1d11b8246e63ba29415c074e8f04a98c18f2d0a6c6c4172f"
+        },
+        {
+          "path": "maps/brazil.lua",
+          "size": 32104,
+          "sha256": "ba8c00933831689da65a4a893ecfd534b8877f92d7b2f517e7d5c9de8a3055a0"
+        },
+        {
+          "path": "maps/canada.lua",
+          "size": 47438,
+          "sha256": "f33e60f218b24ddd470630d9940b55f19c898cfde99f0c96e9d1f39aef1e5e27"
+        },
+        {
+          "path": "maps/china.lua",
+          "size": 42553,
+          "sha256": "4991ddf07af2ffb7e07134c4d9bfe108374e6c8c10f876bf1ceeb48d1e94f499"
+        },
+        {
+          "path": "maps/india.lua",
+          "size": 41777,
+          "sha256": "7f404d1d604c069187327f47f4c4762ca99030fbaf4cf8011b22b176d0a8703f"
+        },
+        {
+          "path": "maps/south_africa.lua",
+          "size": 12564,
+          "sha256": "84feac2e37b1a2ef819dc5c3f81cd1ea64318ae09fa98c52686e71eba8b256e3"
+        },
+        {
+          "path": "maps/usa.lua",
+          "size": 30896,
+          "sha256": "973848c47768b5da472e7e6db5d068ed7fc471421bda2bf1600f4cee6d248462"
+        },
+        {
+          "path": "maps/world.lua",
+          "size": 92317,
+          "sha256": "317fdef2e7490a56be07bd05babfdffe70609fd34751a29ba72589095e6a2945"
+        },
+        {
+          "path": "plugin.json",
+          "size": 248,
+          "sha256": "c7dbc445ff0f1378f404f32108cc164fbb53cf191b2162bbbed6ecc6b124743c"
+        }
+      ]
+    },
+    {
+      "id": "models3d",
+      "name": "3D Models",
+      "version": "1.0.0",
+      "author": "bemotion",
+      "description": "Imported 3D models (glTF / GLB, OBJ, STL) as objects of the 2D scene: turn, light and animate them like anything else.",
+      "api": 4,
+      "permissions": [
+        "files"
+      ],
+      "files": [
+        {
+          "path": "main.lua",
+          "size": 16485,
+          "sha256": "f4a2b0e3c8ccbbf54ea1b3106bc207b39c050b6f50f6032e2bc3c4be499fdb1b"
+        },
+        {
+          "path": "plugin.json",
+          "size": 293,
+          "sha256": "d3e07c1443eb0069674f45e0da748381330f7fc413b7999fb2b18de68404a8f6"
+        }
+      ]
+    },
+    {
+      "id": "recorder",
+      "name": "Recorder",
+      "version": "1.0.0",
+      "author": "bemotion",
+      "description": "Record a voice-over from the microphone, right in the timeline: the timeline plays while you speak, and the recording lands at the playhead.",
+      "api": 5,
+      "permissions": [
+        "edit",
+        "media",
+        "microphone"
+      ],
+      "files": [
+        {
+          "path": "main.lua",
+          "size": 988,
+          "sha256": "29fe231f36000f8ff8bafe3ab01f28ec2704731f3558b54a015b1be776bf405d"
+        },
+        {
+          "path": "plugin.json",
+          "size": 336,
+          "sha256": "d036444e0d03c68a1d706912476519c7ce63ac14f6b44cbf07b74c27968dccea"
+        }
+      ]
+    }
+  ]
+}

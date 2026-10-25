@@ -309,6 +309,7 @@ void EditorWindow::buildDocks() {
         else openPreview();
     });
     connect(viewport_, &ViewportPanel::layerMenuRequested, timeline_, &TimelinePanel::showTrackMenu);
+    connect(viewport_, &ViewportPanel::snapshotRequested, this, [this] { exportFrame(); });
     connect(properties_, &PropertiesPanel::panelRequested, this, [this](const QString& name) {
         auto it = dockWidgets_.find(name.toStdString());
         if (it == dockWidgets_.end()) return;
@@ -886,6 +887,8 @@ void EditorWindow::buildMenus() {
     });
     file->addSeparator();
     file->addAction(action(Action::Export, "Export Video...", [this] { ui::showExportDialog(ctx_, this); }));
+    file->addAction(action(Action::ExportFrame, "Export Frame...", [this] { exportFrame(); }));
+    file->addAction("Copy Frame", this, [this] { exportFrame(true); });
     file->addSeparator();
     file->addAction(action(Action::CloseProject, "Close Project", [this] {
         if (confirmClose()) emit goHome();
@@ -1151,10 +1154,6 @@ void EditorWindow::buildMenus() {
     status_ = new QLabel;
     ui::setTone(status_, ui::Tone::Danger);
     row->addWidget(status_);
-    // The whole app full screen (F11): menus and panels stay, only the system's frame goes.
-    fullScreenButton_ = new ui::IconButton(ui::Icon::Fullscreen, "Full screen (F11)", 28);
-    connect(fullScreenButton_, &QAbstractButton::clicked, this, [this] { ui::toggleFullScreen(window()); });
-    row->addWidget(fullScreenButton_);
     auto* gear = new ui::IconButton(ui::Icon::Gear, "Settings", 28);
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
     row->addWidget(gear);
@@ -1242,11 +1241,6 @@ void EditorWindow::tick() {
     if (meters_ && meters_->isVisible()) {
         const auto levels = media::AudioEngine::get().takeLevels();
         meters_->feed(levels.left, levels.right, levels.clipped, static_cast<float>(dt));
-    }
-    if (const bool full = window()->isFullScreen(); fullScreenButton_ && full != fullScreenButton_->active()) {
-        fullScreenButton_->setActive(full);
-        fullScreenButton_->setIcon(full ? ui::Icon::ExitFullscreen : ui::Icon::Fullscreen);
-        fullScreenButton_->setToolTip(full ? "Leave full screen (F11)" : "Full screen (F11)");
     }
 
     ctx_.commitIfIdle(interacting());
@@ -1417,6 +1411,32 @@ void EditorWindow::openPreview() {
     preview_->activateWindow();
     preview_->setFocus();
     ctx_.playing = true;
+}
+
+void EditorWindow::exportFrame(bool toClipboard) {
+    // The frame at the playhead as it exports (full size, through the camera, no guides).
+    const Composition& c = ctx_.comp();
+    const double t = c.snapToFrame(ctx_.time);
+    std::vector<uint8_t> png;
+    std::string error;
+    if (!renderFramesPng(c, {t}, c.width, png, error)) {
+        setStatus(QString::fromStdString("Could not render the frame: " + error));
+        return;
+    }
+    if (toClipboard) {
+        QImage image;
+        image.loadFromData(png.data(), static_cast<int>(png.size()), "PNG");
+        QApplication::clipboard()->setImage(image);
+        setStatus(QString("Frame %1 copied").arg(c.frameAt(t)));
+        return;
+    }
+    const std::string stem = (ctx_.project.name.empty() ? std::string("Frame") : ctx_.project.name) + " - frame " + std::to_string(c.frameAt(t));
+    const std::filesystem::path folder = ctx_.path.empty() ? projectsFolderOrDocuments() : ctx_.path.parent_path();
+    const auto file = platform::saveFileDialog("Export Frame", folder / platform::fromUtf8(stem + ".png"), "PNG Image", "png");
+    if (!file) return;
+    std::ofstream out(*file, std::ios::binary | std::ios::trunc);
+    if (!out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size())))
+        setStatus(QString::fromStdString("Could not save " + platform::toUtf8(*file)));
 }
 
 void EditorWindow::markRecovered() {

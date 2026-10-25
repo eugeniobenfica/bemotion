@@ -9,6 +9,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#elif defined(BEMOTION_WHISPER)
+#include <dlfcn.h>
 #endif
 
 #include <algorithm>
@@ -25,9 +27,10 @@ std::string utf8(const std::filesystem::path& p) {
 }
 
 #ifdef BEMOTION_WHISPER
-// whisper.cpp's compute backends (the CPU variants, Vulkan for the GPU) are DLLs ggml looks
-// for next to the executable. A development build runs from elsewhere: then they are loaded
-// from where ggml itself lives. Without any, whisper would abort: false instead.
+// whisper.cpp's compute backends (the CPU variants, Vulkan or Metal for the GPU) can be
+// libraries ggml loads at run time (MSYS2, Homebrew): looked for next to the executable, and
+// then where ggml itself lives. Built in (BEMOTION_FETCH_WHISPER), there is nothing to load.
+// Without any, whisper would abort: false instead.
 bool computeBackendsReady() {
 #ifdef _WIN32
     static const bool ready = [] {
@@ -48,7 +51,16 @@ bool computeBackendsReady() {
     }();
     return ready;
 #else
-    return true;
+    static const bool ready = [] {
+        using Count = size_t (*)();
+        using LoadAll = void (*)();
+        const auto count = reinterpret_cast<Count>(dlsym(RTLD_DEFAULT, "ggml_backend_dev_count"));
+        const auto load = reinterpret_cast<LoadAll>(dlsym(RTLD_DEFAULT, "ggml_backend_load_all"));
+        if (!count) return true; // linked in: its backends are there
+        if (count() == 0 && load) load();
+        return count() > 0;
+    }();
+    return ready;
 #endif
 }
 

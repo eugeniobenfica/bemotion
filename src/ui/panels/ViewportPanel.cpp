@@ -254,6 +254,8 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     fullscreenButton_ = new ui::IconButton(ui::Icon::Fullscreen, "", 26, this);
     fullscreenButton_->setToolTip("Full screen preview: only the picture, playing (Esc to return)");
     connect(fullscreenButton_, &QPushButton::clicked, this, &ViewportPanel::viewportFullscreenRequested);
+    snapshotButton_ = new ui::IconButton(ui::Icon::Snapshot, "Export Frame: this frame as a picture, at full size (Shift+E)", 26, this);
+    connect(snapshotButton_, &QPushButton::clicked, this, &ViewportPanel::snapshotRequested);
     connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
         frameValid_ = false;
         update();
@@ -388,8 +390,9 @@ void ViewportPanel::positionHud() {
     const int controlsY = width() >= 520 ? y : y - 32;
     qualityButton_->move(12, controlsY);
     fullscreenButton_->move(88, controlsY);
+    snapshotButton_->move(88 + 26 + 4, controlsY);
     // Next to them, off the picture: it would hide the top of the frame.
-    int tx = 88 + 26 + 12;
+    int tx = 88 + 2 * 26 + 4 + 12;
     for (QPushButton* b : cameraTools_) {
         b->setVisible(tools);
         b->adjustSize();

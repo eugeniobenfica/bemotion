@@ -80,6 +80,7 @@ struct Plugin {
 
 class PluginHost {
 public:
+    static constexpr int kApiVersion = 7; // bemotion.api_version (docs/PLUGINS.md)
     static PluginHost& get();
 
     void load(); // (re)loads every plugin and installs the scene drawer

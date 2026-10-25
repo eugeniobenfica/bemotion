@@ -6,6 +6,19 @@ plugins in `<app data>/bemotion/plugins` (*Plugins → Install Plugin…* copies
 folder there). The bundled [Charts plugin](../assets/plugins/charts/main.lua)
 is a complete example.
 
+**Official plugins** are the folders in `assets/plugins`. A release can leave
+some out (`BEMOTION_LEAVE_OUT_PLUGINS="models3d recorder"` for the package
+scripts); users get them from *Settings › Plugins › Show Official Plugins*,
+which reads `assets/plugins/index.json` from the repository's main branch on
+GitHub (only when clicked), downloads the plugin's files, checks each one's
+SHA-256 against the catalog, then installs it like *Install Plugin…* (a
+downloaded one replaces a bundled one of the same id, so this also updates).
+Plugins needing a newer `api` than the app are not offered. After changing an
+official plugin, run `tools/plugin-index.py` (a test fails while the catalog
+is out of date). `BEMOTION_PLUGIN_CATALOG` points the app at another catalog:
+a mirror, or a local folder (`file:///.../plugins/`) for testing offline.
+*Essentials only* (Settings › Interface) loads no plugin at all.
+
 Settings > Plugins displays cards for installed and bundled plugins, with
 installation and enable controls. Remove moves an installed plugin folder to
 Trash; bundled plugins stay installed and can be disabled.

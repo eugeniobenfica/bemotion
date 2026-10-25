@@ -41,7 +41,7 @@ jobs:
         run: bash -x tools/skia/build-skia.sh
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBEMOTION_FETCH_WHISPER=ON
 
       - name: Build
         run: cmake --build build
@@ -159,7 +159,7 @@ jobs:
         run: bash -x tools/skia/build-skia.sh
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)" -DBEMOTION_FETCH_WHISPER=ON
 
       - name: Build
         run: cmake --build build

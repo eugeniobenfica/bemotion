@@ -73,6 +73,8 @@ std::filesystem::path projectsFolderOrDocuments() {
 
 void loadSettings() {
     Settings& s = settings();
+    std::error_code fe;
+    s.firstRun = !std::filesystem::exists(settingsFile(), fe);
     try {
         const json j = json::parse(readFile(settingsFile()));
         if (!j.is_object()) return;
@@ -110,6 +112,9 @@ void loadSettings() {
         s.recentColors = j.value("recent_colors", std::vector<std::string>{});
         if (s.recentColors.size() > 16) s.recentColors.resize(16);
         s.showMeters = j.value("show_meters", s.showMeters);
+        s.experience = j.value("experience", s.experience);
+        if (s.experience != "friendly" && s.experience != "expert") s.experience = "balanced";
+        s.essentialsOnly = j.value("essentials_only", s.essentialsOnly);
         ui::loadKeymap(j.contains("shortcuts") ? j["shortcuts"].dump() : "{}");
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
     } catch (const std::exception&) {
@@ -127,10 +132,35 @@ void saveSettings() {
               {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"show_rulers", s.showRulers}, {"preview_quality", s.previewQuality}, {"welcome_added", s.welcomeAdded}, {"welcome_removed", s.welcomeRemoved}, {"projects_folder", s.projectsFolder}, {"speech_language", s.speechLanguage}, {"toolbar", s.toolbar},
               {"toolbar_in_viewport", s.toolbarInViewport}, {"toolbar_in_window", s.toolbarInWindow}, {"toolbar_x", s.toolbarX}, {"toolbar_y", s.toolbarY},
               {"recent_colors", s.recentColors}, {"show_meters", s.showMeters},
+              {"experience", s.experience}, {"essentials_only", s.essentialsOnly},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);
 }
+
+void applyExperience(const std::string& experience) {
+    Settings& s = settings();
+    s.experience = experience == "friendly" || experience == "expert" ? experience : "balanced";
+    if (s.experience == "friendly") {
+        s.toolbar = {"select", "razor", "delete"};
+        s.showMeters = false;
+        s.showRulers = false;
+        s.advanced = false;
+    } else if (s.experience == "expert") {
+        s.toolbar = {"select", "razor", "crop", "split", "compound", "duplicate", "easy_ease", "forward", "backward", "delete"};
+        s.showMeters = true;
+        s.showRulers = true;
+        s.advanced = true;
+    } else {
+        s.toolbar = ui::defaultToolbar();
+        s.showMeters = true;
+        s.showRulers = false;
+        s.advanced = false;
+    }
+}
+
+bool friendlyMode() { return settings().experience == "friendly"; }
+bool expertMode() { return settings().experience == "expert"; }
 
 theme::Palette effectivePalette() {
     const Settings& s = settings();

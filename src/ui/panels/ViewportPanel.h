@@ -45,6 +45,7 @@ class ViewportPanel : public QWidget {
     Q_OBJECT
 signals:
     void viewportFullscreenRequested();
+    void snapshotRequested(); // its snapshot button: the frame as a picture
     void previewQualityChanged(int divisor);
     void layerMenuRequested(QPoint global); // right click on a layer (now selected)
 
@@ -225,6 +226,7 @@ private:
     QPushButton* fitButton_ = nullptr;
     QToolButton* qualityButton_ = nullptr;
     ui::IconButton* fullscreenButton_ = nullptr;
+    ui::IconButton* snapshotButton_ = nullptr;
     int previewDivisor_ = 1;
 
     // What was last drawn (to redraw only on change).

@@ -1059,7 +1059,7 @@ lua_State* newSandbox(const std::string& pluginId) {
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);
     luaL_newlib(L, api);
-    lua_pushinteger(L, 7); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone; 6: include; 7: row_labels
+    lua_pushinteger(L, PluginHost::kApiVersion); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone; 6: include; 7: row_labels
     lua_setfield(L, -2, "api_version");
     const luaL_Reg mic[] = {{"start", micStart}, {"stop", micStop}, {"recording", micRecording}, {"level", micLevel},
                             {"cancel", micCancel}, {nullptr, nullptr}};
@@ -1223,7 +1223,9 @@ void PluginHost::shutdown() {
 void PluginHost::load() {
     shutdown();
     std::error_code ec;
-    for (const fs::path& root : {platform::assetsDir() / "plugins", userDir()}) {
+    // Essentials only: the core alone, no plugin at all (their layers draw nothing meanwhile).
+    const std::vector<fs::path> roots = settings().essentialsOnly ? std::vector<fs::path>{} : std::vector<fs::path>{platform::assetsDir() / "plugins", userDir()};
+    for (const fs::path& root : roots) {
         const bool builtin = root != userDir();
         std::vector<fs::path> dirs;
         for (const auto& entry : fs::directory_iterator(root, ec))

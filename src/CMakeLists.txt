@@ -17,7 +17,8 @@ add_library(bemotion_core STATIC
     core/Project.cpp
     core/Serialization.cpp
     core/Snapping.cpp
-    core/Transitions.cpp)
+    core/Transitions.cpp
+    core/PluginCatalog.cpp)
 target_include_directories(bemotion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion_core PUBLIC nlohmann_json::nlohmann_json)
 
@@ -35,6 +36,7 @@ add_executable(bemotion WIN32
     app/McpServer.cpp
     ${CMAKE_CURRENT_BINARY_DIR}/generated/OperationsReference.cpp
     app/DevScript.cpp
+    app/Downloads.cpp
     app/EffectLibrary.cpp
     app/Platform.cpp
     app/PluginHost.cpp
@@ -75,6 +77,7 @@ add_executable(bemotion WIN32
     ui/ExpressionEditor.cpp
     ui/PreviewWindow.cpp
     ui/ColorPicker.cpp
+    ui/ExperienceScreen.cpp
     ui/SettingsWindow.cpp
     ui/Theme.cpp
     ui/Tools.cpp
@@ -94,13 +97,13 @@ set_target_properties(bemotion PROPERTIES AUTOMOC ON)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion PRIVATE
     bemotion_core
-    Qt6::Widgets Qt6::Svg Qt6::Test
+    Qt6::Widgets Qt6::Svg Qt6::Network Qt6::Test
     qtadvanceddocking-qt6
     skia
     PkgConfig::FFMPEG
     stb lua miniaudio)
 if(WHISPER_FOUND)
-    target_link_libraries(bemotion PRIVATE PkgConfig::WHISPER)
+    target_link_libraries(bemotion PRIVATE ${BEMOTION_WHISPER_TARGET})
     target_compile_definitions(bemotion PRIVATE BEMOTION_WHISPER=1)
 endif()
 target_compile_definitions(bemotion PRIVATE

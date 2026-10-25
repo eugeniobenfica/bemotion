@@ -94,6 +94,7 @@ private:
     void keepRecoveryCopy();
     void autosave();
     void openPreview(); // full screen, only the picture, playing
+    void exportFrame(bool toClipboard = false); // the frame at the playhead, as a PNG
     void resetLayout();
     void maximizeDock(ads::CDockWidget* dock);
     void toggleViewportFullscreen();
@@ -153,7 +154,6 @@ private:
     QPointer<ui::PreviewWindow> preview_; // the full screen preview, while open
     QElapsedTimer sinceChange_;    // autosave: a moment after the last change
     uint64_t seenRevision_ = 0, triedRevision_ = ~0ull; // once per change, even when saving fails
-    ui::IconButton* fullScreenButton_ = nullptr;
     ui::AudioMeter* meters_ = nullptr; // beside the timeline (View › Audio Meters)
     QLabel* status_ = nullptr; // errors next to the menus
     QString lastTitle_;

@@ -21,6 +21,16 @@ exe="$(find "$build" -maxdepth 3 -type f -name bemotion -perm -u+x | head -1)"
 mkdir -p "$appdir/usr/bin" "$appdir/usr/share/applications" "$appdir/usr/share/icons/hicolor/scalable/apps"
 cp "$exe" "$appdir/usr/bin/bemotion"
 cp -r "$(dirname "$exe")/assets" "$appdir/usr/bin/assets" # found next to the executable
+# Official plugins a release leaves out (they stay downloadable from Settings › Plugins):
+#   BEMOTION_LEAVE_OUT_PLUGINS="models3d recorder" tools/package-....sh ...
+for id in ${BEMOTION_LEAVE_OUT_PLUGINS:-}; do rm -rf "$appdir/usr/bin/assets/plugins/$id"; done
+# The speech models (tools/fetch-speech-model.sh), when they were fetched: transcription works
+# out of the box. Without them bemotion offers to download them when first needed.
+models="${BEMOTION_MODELS:-$HOME/bemotion-deps/models}"
+if ls "$models"/ggml-*.bin >/dev/null 2>&1; then
+    mkdir -p "$appdir/usr/bin/assets/models"
+    cp "$models"/ggml-*.bin "$appdir/usr/bin/assets/models/"
+fi
 cp "$root/assets/branding/icon.svg" "$appdir/usr/share/icons/hicolor/scalable/apps/bemotion.svg"
 cat > "$appdir/usr/share/applications/bemotion.desktop" <<DESKTOP
 [Desktop Entry]

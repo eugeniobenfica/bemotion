@@ -15,11 +15,14 @@ mkdir -p "$out"
 cp "$build/bemotion.exe" "$out/"
 rm -rf "$out/assets"
 cp -r "$(dirname "$build/bemotion.exe")/assets" "$out/assets"
+# Official plugins a release leaves out (they stay downloadable from Settings › Plugins):
+#   BEMOTION_LEAVE_OUT_PLUGINS="models3d recorder" tools/package-....sh ...
+for id in ${BEMOTION_LEAVE_OUT_PLUGINS:-}; do rm -rf "$out/assets/plugins/$id"; done
 
-# Qt libraries and plugins (platform, styles, image formats, ...). No network, TLS or touch
-# plugins: bemotion never goes online.
+# Qt libraries and plugins (platform, styles, image formats, TLS for the downloads the user asks
+# for: official plugins, the speech model). No network-information or touch plugins.
 "$prefix/bin/windeployqt6.exe" --no-translations --no-system-d3d-compiler --no-opengl-sw \
-    --skip-plugin-types tls,networkinformation,generic \
+    --skip-plugin-types networkinformation,generic \
     --dir "$(cygpath -w "$out")" "$(cygpath -w "$out/bemotion.exe")" >/dev/null
 # The "offscreen" platform too (about 1 MB): tools/smoke-test.sh runs the package without a screen.
 cp "$prefix/share/qt6/plugins/platforms/qoffscreen.dll" "$out/platforms/"

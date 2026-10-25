@@ -117,8 +117,10 @@ does.
   blocks on the timeline
 - **Speech to text**: right-click a clip with speech, *Transcribe to
   Subtitles*: the words land as captions at their time. Accurate (Whisper
-  large-v3-turbo) and fast on the GPU, offline, the model built in — nothing
-  to download or set up
+  large-v3-turbo) and fast on the GPU (Vulkan on Windows, Metal on macOS),
+  offline. Windows packages carry the model; elsewhere bemotion offers to
+  download it (about 550 MB) the first time, once
+  ([on Linux and macOS](#speech-to-text-on-linux-and-macos))
 - **Media**: import images, video and audio (Ctrl+I or drop files on the
   window) into the *Media* panel; media layers animate like everything else;
   the **Crop** tool (Shift+C) drags a video's or image's edges (four
@@ -198,6 +200,8 @@ does.
 - **Export** to MP4 / H.264, MOV ProRes 4444, WebM VP9, GIF and PNG sequences
   with transparency — [FFmpeg](https://ffmpeg.org) is built in
 - Audio is mixed in: AAC in MP4, PCM in MOV, Opus in WebM, a `.wav` beside PNGs
+- **Export Frame** (Shift+E, the viewport's camera button, or *File › Copy
+  Frame*): the frame at the playhead as a full-size PNG
 - Render, export and edit from the command line or an AI assistant
 
 </td>
@@ -206,6 +210,10 @@ does.
 <td valign="top">
 
 ### ✦ Make it yours
+- **Friendly, Balanced or Expert**, chosen on the first start (and in
+  *Settings › Interface*): from the essentials (a short toolbar, no
+  expressions or curves) to everything at hand (every option, rulers, audio
+  meters, a fuller toolbar); **Essentials only** turns every plugin off
 - Dark, Light and Midnight themes, any accent color; *Advanced Options* show
   every color (surfaces, fields, buttons, focus, selection, menus, status,
   playhead, keyframes...), corner rounding, outline width and control height;
@@ -217,8 +225,8 @@ does.
   densities, frames per arrow press
 - Dockable panels: drag tabs anywhere; each header has **minimize** (the
   panel becomes a named tab on the window edge) and **maximize** (or
-  double-click a tab); **full screen** for the whole app with F11 or the
-  button by Settings; *Maximize Viewport* (Ctrl+F11, Esc returns)
+  double-click a tab); **full screen** for the whole app with F11 (*View ›
+  Full Screen*); *Maximize Viewport* (Ctrl+F11, Esc returns)
 - **Full Screen Preview** (Ctrl+Shift+F, or the viewport's full screen
   button): only the picture, playing, on the whole screen, with step, play,
   seek, loop and exit buttons; Esc returns
@@ -249,6 +257,10 @@ does.
   the 2D scene: turn, zoom, light and color them, all keyframable
 - The bundled **Recorder** plugin records voice-overs from the microphone,
   straight into the timeline
+- **Official plugins** a release leaves out are a click away: *Settings ›
+  Plugins › Show Official Plugins* lists them from bemotion's repository on
+  GitHub (only when you click), and each file is checked (SHA-256) before it
+  is installed
 - Plugin **commands** edit the project through the same operations as
   scripts and AI tools — see [docs/PLUGINS.md](docs/PLUGINS.md)
 - **Robot-friendly**: scripts and AI assistants create and edit projects from
@@ -374,6 +386,26 @@ tools/skia/build-skia.sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 cmake --build build && ./build/bemotion
 ```
+
+### Speech to text on Linux and macOS
+
+Speech recognition is [whisper.cpp](https://github.com/ggml-org/whisper.cpp)
+linked into bemotion. MSYS2 has a package for it (Windows, above); Ubuntu has
+none, so bemotion can build the same pinned version (1.9.5) itself — linked in,
+nothing to install, the CPU code built for any x86-64 with AVX2, Metal on Apple
+silicon:
+
+```bash
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBEMOTION_FETCH_WHISPER=ON   # (+ -DCMAKE_PREFIX_PATH=... on macOS)
+cmake --build build
+```
+
+On the GPU on Linux, add `-DGGML_VULKAN=ON` (needs the Vulkan SDK). On macOS,
+`brew install whisper.cpp` works too (found through pkg-config, no option
+needed). The CI builds Linux and macOS this way. The model: run
+`tools/fetch-speech-model.sh` once (the packages then carry it, or point
+`BEMOTION_MODELS` at the folder), or let bemotion download it into its app data
+the first time you transcribe.
 
 Run the unit tests with `ctest --test-dir build`. A Skia built elsewhere can be
 used with `-DSKIA_ROOT=<dir>`.

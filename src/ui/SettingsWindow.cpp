@@ -3,6 +3,7 @@
 
 #include "ui/Dialogs.h"
 
+#include "app/Downloads.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "media/Recorder.h"
@@ -499,6 +500,25 @@ QWidget* interfacePage() {
         st.keyframeSize = d.keyframeSize, st.textScale = d.textScale, st.uiFont = d.uiFont;
         st.showIntro = d.showIntro;
     });
+    SettingsCard* experience = addSection(col, "Experience");
+    const int which = s.experience == "friendly" ? 0 : s.experience == "expert" ? 2 : 1;
+    experience->addRow("How much the interface shows",
+                       which == 0   ? "Friendly: the essentials, calm. Fewer tools, no expressions or graph editor"
+                       : which == 2 ? "Expert: everything at hand. Every option, rulers, audio meters, a fuller toolbar"
+                                    : "Balanced: the usual tools, the rest when you look for it",
+                       segmented({"Friendly", "Balanced", "Expert"}, which, [](int i) {
+                           applyExperience(i == 0 ? "friendly" : i == 2 ? "expert" : "balanced");
+                           emit AppSignals::get().toolbarChanged();
+                           changed(true);
+                       }));
+    experience->addRow("Essentials only", "Plugins off: no charts, maps, 3D models or voice recording. The simplest bemotion",
+                       switchControl(s.essentialsOnly, [](bool on) {
+                           settings().essentialsOnly = on;
+                           saveSettings();
+                           PluginHost::get().requestReload();
+                           emit AppSignals::get().pluginsChanged();
+                       }));
+
     SettingsCard* timeline = addSection(col, "Timeline");
     auto* presets = new QHBoxLayout;
     auto preset = [&](const char* label, float row, float prop, float key) {
@@ -982,6 +1002,101 @@ QWidget* pluginRow(const Plugin& p) {
     return row;
 }
 
+// The official plugins from bemotion's repository: listed only after the user asks (it is the
+// only time the page goes online), then each one a click away.
+struct OfficialPlugins {
+    enum State { Idle, Loading, Ready, Failed } state = Idle;
+    std::vector<CatalogPlugin> plugins;
+    QString error;
+    std::string installing; // the id being downloaded
+    int percent = 0;
+};
+OfficialPlugins& official() {
+    static OfficialPlugins o;
+    return o;
+}
+
+void rebuildSoon() {
+    if (g_window) QTimer::singleShot(0, g_window, [] { if (g_window) g_window->rebuild(); });
+}
+
+QString sizeText(int64_t bytes) {
+    return bytes >= 1024 * 1024 ? QString("%1 MB").arg(bytes / (1024.0 * 1024.0), 0, 'f', 1) : QString("%1 KB").arg(std::max<int64_t>(1, bytes / 1024));
+}
+
+void addOfficialPlugins(QVBoxLayout* col) {
+    OfficialPlugins& o = official();
+    SettingsCard* card = addSection(col, "Official plugins", "Made by bemotion, kept in its repository on GitHub. Each file is "
+                                                            "checked before the plugin is installed.");
+    if (o.state == OfficialPlugins::Idle || o.state == OfficialPlugins::Failed) {
+        auto* show = new QPushButton(o.state == OfficialPlugins::Failed ? "Try Again" : "Show Official Plugins");
+        QObject::connect(show, &QPushButton::clicked, show, [] {
+            official().state = OfficialPlugins::Loading;
+            rebuildSoon();
+            net::fetchPluginCatalog(g_window, [](bool ok, std::vector<CatalogPlugin> plugins, QString error) {
+                OfficialPlugins& o = official();
+                o.state = ok ? OfficialPlugins::Ready : OfficialPlugins::Failed;
+                o.plugins = std::move(plugins);
+                o.error = error;
+                rebuildSoon();
+            });
+        });
+        card->addRow("Get more plugins",
+                     o.state == OfficialPlugins::Failed ? "Could not reach them: " + o.error
+                                                        : "bemotion connects to GitHub only when you click, to list them",
+                     show);
+        return;
+    }
+    if (o.state == OfficialPlugins::Loading) {
+        card->addRow("Looking for official plugins...", "", nullptr);
+        return;
+    }
+    if (o.plugins.empty()) card->addRow("No official plugins for this version", "", nullptr);
+    for (const CatalogPlugin& c : o.plugins) {
+        const Plugin* have = PluginHost::get().findPlugin(c.id);
+        const bool newer = have && compareVersions(c.version, have->version) > 0;
+        QString about = QString::fromStdString(c.description);
+        about += QString("\n%1  ·  %2").arg(QString::fromStdString(c.version), sizeText(c.size()));
+        if (!c.permissions.empty()) {
+            QStringList perms;
+            for (const std::string& p : c.permissions) perms << QString::fromStdString(p);
+            about += "  ·  may: " + perms.join(", ");
+        }
+        QPushButton* button = nullptr;
+        if (o.installing == c.id) {
+            button = new QPushButton(QString("Downloading %1%").arg(o.percent));
+            button->setEnabled(false);
+        } else if (have && !newer) {
+            button = new QPushButton(have->builtin ? "Included" : "Installed");
+            button->setProperty("flat", true);
+            button->setEnabled(false);
+        } else {
+            button = accentButton(newer ? "Update" : "Get");
+            button->setEnabled(o.installing.empty());
+            const CatalogPlugin plugin = c;
+            QObject::connect(button, &QPushButton::clicked, button, [plugin] {
+                official().installing = plugin.id;
+                official().percent = 0;
+                rebuildSoon();
+                net::installCatalogPlugin(
+                    plugin, g_window,
+                    [plugin](bool ok, QString error) {
+                        official().installing.clear();
+                        g_message = ok ? "\"" + plugin.name + "\" installed." : "Could not install \"" + plugin.name + "\": " + error.toStdString();
+                        emit AppSignals::get().pluginsChanged(); // (rebuilds the page after the reload)
+                    },
+                    [plugin](int64_t received, int64_t total) {
+                        const int percent = total > 0 ? static_cast<int>(received * 100 / total) : 0;
+                        if (percent / 10 == official().percent / 10) return;
+                        official().percent = percent;
+                        rebuildSoon();
+                    });
+            });
+        }
+        card->addRow(QString::fromStdString(c.name), about, button);
+    }
+}
+
 QWidget* pluginsPage() {
     PluginHost& host = PluginHost::get();
     QVBoxLayout* col;
@@ -1023,6 +1138,17 @@ QWidget* pluginsPage() {
     col->addSpacing(4);
     col->addLayout(bar);
     if (!g_message.empty()) col->addWidget(pluginText(QString::fromStdString(g_message)));
+    if (settings().essentialsOnly) {
+        SettingsCard* off = addSection(col, "Essentials only");
+        auto* on = accentButton("Turn Plugins On");
+        QObject::connect(on, &QPushButton::clicked, on, [] {
+            settings().essentialsOnly = false;
+            saveSettings();
+            PluginHost::get().requestReload();
+            emit AppSignals::get().pluginsChanged();
+        });
+        off->addRow("Plugins are off", "Essentials only (Settings › Interface) keeps bemotion to its core: none of these load", on);
+    }
 
     // What comes with bemotion first; then what was installed (or how to).
     SettingsCard* builtin = nullptr;
@@ -1040,6 +1166,7 @@ QWidget* pluginsPage() {
     }
     if (!anyInstalled)
         installed->addContent(pluginText("None yet. Install Plugin adds one from its folder (its plugin.json file).", Tone::TextFaint));
+    addOfficialPlugins(col);
     return page;
 }
 

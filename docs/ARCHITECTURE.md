@@ -300,15 +300,19 @@ Rules:
   composition end. This preview stays outside the document: stopping the
   Recorder plugin creates the saved media layer once, as one undoable edit.
 - `media/Transcriber` turns speech into captions with whisper.cpp (linked when
-  found, `BEMOTION_WHISPER`; MSYS2's FFmpeg depends on it anyway): the clip's
+  found through pkg-config — MSYS2, Homebrew — or built with bemotion,
+  `-DBEMOTION_FETCH_WHISPER=ON`, pinned to 1.9.5 like the packages;
+  `BEMOTION_WHISPER`): the clip's
   audio at 16 kHz mono, greedy decoding with a few candidates, the
   voice-activity model to skip silence, the GPU when there is one (flash
   attention off: it gives garbage on some AMD / Vulkan drivers), long
-  segments split for reading (`splitLongCaptions`). On Windows the ggml
-  backends are DLLs loaded at run time; a development build loads them from
-  where ggml lives. Models: `platform::speechModelFolders()`
-  (`$BEMOTION_MODELS`, `assets/models`, app data); `tools/fetch-speech-model.sh`
-  downloads them once, `deploy-windows.sh` ships them. `ui/Transcribe` runs it
+  segments split for reading (`splitLongCaptions`). Packaged ggml builds
+  load their backends at run time (DLLs on Windows, from where ggml lives;
+  `ggml_backend_load_all` on Homebrew); built in, there is nothing to load.
+  Models: `platform::speechModelFolders()` (`$BEMOTION_MODELS`,
+  `assets/models`, app data); `tools/fetch-speech-model.sh` downloads them
+  once and the package scripts ship them; without them `ui/Transcribe` offers
+  to download them into app data (`app/Downloads`). `ui/Transcribe` runs it
   on a thread with progress and Stop and fills a Subtitles layer.
 - `export/ExportJob` snapshots the project and feeds an `Encoder` frame by
   frame from the calling thread (`step()`), so the UI stays responsive and
@@ -385,6 +389,22 @@ Rules:
 - **`AudioMeter`** (`ui/Widgets.h`) — fed each tick by
   `AudioEngine::takeLevels()` (the loudest samples the output callback
   played since the last look); `show_meters` turns it off.
+- **`app/Downloads`** — the only network code, and only for what the user
+  asks: the official plugin catalog and its files (`core/PluginCatalog`:
+  parsing, safe paths, versions; every file checked against its SHA-256,
+  staged in app data, then `PluginHost::install`) and the speech model. Qt
+  Network, redirects only to as-safe URLs, a minute without data fails.
+  `BEMOTION_PLUGIN_CATALOG` replaces the GitHub address (file:// works, for
+  tests). Nothing goes online at start or in the background.
+- **Experience** (`settings().experience`: friendly, balanced, expert;
+  `applyExperience` sets the toolbar, rulers, meters, advanced options) is
+  asked by `ui/ExperienceScreen` on the first start (no settings file yet);
+  the interface asks `friendlyMode()` where it shows less (the ƒ expression
+  button unless one is set, the graph editor button). `essentials_only`
+  makes `PluginHost::load` load no plugin.
+- **Export Frame** renders the frame at the playhead through
+  `renderFramesPng` (the same as `bemotion render`), to a file or the
+  clipboard.
 - Expressions read the editor's composition between scopes
   (`setExpressionComposition`); a closed editor sets it to null, and a new
   one replaces it, so nothing reads a composition that is gone.

@@ -126,6 +126,7 @@ enum class Icon {
     Restore,        // a maximized panel's button: two squares
     Eyedropper,     // picks a color from the screen
     Meter,          // audio meters: two level bars
+    Snapshot,       // a photo camera: save the frame as a picture
 };
 
 Icon iconForLayer(const Layer& layer);

@@ -55,6 +55,7 @@ private:
     void buildWindow();
     void frame(); // developer aids, once per ~16 ms
     void scriptStep();
+    void showFirstRun(); // the experience choice, over the window
 
     void openProject(const std::filesystem::path& path);
     void createProject(Project project, const std::filesystem::path& path);

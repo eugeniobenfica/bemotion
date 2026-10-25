@@ -2,12 +2,14 @@
 #
 # Installed on the system (MSYS2 UCRT64 on Windows, the package manager
 # elsewhere; see README):
-#   Qt 6        - user interface (Widgets), file dialogs, fonts, input
+#   Qt 6        - user interface (Widgets), file dialogs, fonts, input; Network only for what
+#                 the user asks to download (official plugins, the speech model)
 #   FFmpeg      - libavformat / libavcodec / libavfilter / libswscale / libswresample:
 #                 reading video and audio, writing MP4 / MOV / WebM / GIF
 #   HarfBuzz, ICU, libpng, libjpeg, libwebp, expat, zlib - used by Skia
-#   whisper.cpp - speech to text (optional: MSYS2's FFmpeg already depends on it; without it
-#                 transcription is not offered)
+#   whisper.cpp - speech to text (optional: MSYS2's FFmpeg already depends on it, Homebrew has
+#                 "whisper.cpp"; where no package has it, -DBEMOTION_FETCH_WHISPER=ON builds
+#                 the same pinned version with bemotion; without it transcription is not offered)
 #
 # Built once with tools/skia/build-skia.sh (pinned revision):
 #   Skia        - 2D rendering of compositions, text shaping, image filters
@@ -23,7 +25,7 @@ include(FetchContent)
 set(FETCHCONTENT_QUIET OFF)
 
 # --- Qt ------------------------------------------------------------------------
-find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Svg Test)
+find_package(Qt6 6.4 REQUIRED COMPONENTS Core Gui Widgets Svg Network Test)
 qt_standard_project_setup()
 
 # --- pkg-config packages ---------------------------------------------------------
@@ -33,10 +35,36 @@ pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
 pkg_check_modules(SKIA_DEPS REQUIRED IMPORTED_TARGET
     harfbuzz icu-uc icu-i18n libpng libjpeg libwebp libwebpmux libwebpdemux expat zlib)
 pkg_check_modules(WHISPER IMPORTED_TARGET whisper)
+option(BEMOTION_FETCH_WHISPER "Build whisper.cpp (speech to text) with bemotion when no package provides it" OFF)
 if(WHISPER_FOUND)
+    set(BEMOTION_WHISPER_TARGET PkgConfig::WHISPER)
     message(STATUS "whisper.cpp ${WHISPER_VERSION}: speech to text on")
+elseif(BEMOTION_FETCH_WHISPER)
+    # Linked in, so a package carries it with nothing to install. The CPU code is built for any
+    # x86-64 from 2013 on (AVX2), not just the build machine; Metal on macOS; Vulkan on request
+    # (-DGGML_VULKAN=ON, needs the Vulkan SDK).
+    set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
+        foreach(flag GGML_AVX GGML_AVX2 GGML_FMA GGML_F16C)
+            set(${flag} ON CACHE BOOL "" FORCE)
+        endforeach()
+    endif()
+    foreach(flag WHISPER_BUILD_TESTS WHISPER_BUILD_EXAMPLES WHISPER_BUILD_SERVER WHISPER_SDL2 WHISPER_CURL)
+        set(${flag} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    set(bemotion_shared_libs ${BUILD_SHARED_LIBS})
+    set(BUILD_SHARED_LIBS OFF)
+    FetchContent_Declare(whisper
+        URL      https://github.com/ggml-org/whisper.cpp/archive/refs/tags/v1.9.5.tar.gz
+        URL_HASH SHA256=ff1a9053feb509ff9d7729703355541ae9690073a6b1c40eb692c962e0dc1720
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    FetchContent_MakeAvailable(whisper)
+    set(BUILD_SHARED_LIBS ${bemotion_shared_libs})
+    set(WHISPER_FOUND TRUE)
+    set(BEMOTION_WHISPER_TARGET whisper)
+    message(STATUS "whisper.cpp 1.9.5 (built with bemotion): speech to text on")
 else()
-    message(STATUS "whisper.cpp not found: speech to text off")
+    message(STATUS "whisper.cpp not found: speech to text off (see -DBEMOTION_FETCH_WHISPER)")
 endif()
 if(UNIX AND NOT APPLE)
     pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig freetype2)

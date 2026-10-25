@@ -24,6 +24,7 @@ enum class Action {
     EasyEase, EaseIn, EaseOut,
     // View
     FitView, ActualSize, ZoomIn, ZoomOut, FullScreen, ViewportFullscreen, FullScreenPreview,
+    ExportFrame,
     Count
 };
 

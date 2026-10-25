@@ -1,5 +1,6 @@
 #include "ui/Transcribe.h"
 
+#include "app/Downloads.h"
 #include "app/Platform.h"
 #include "app/Settings.h"
 #include "media/Transcriber.h"
@@ -8,6 +9,8 @@
 #include "ui/Widgets.h"
 
 #include <QComboBox>
+#include <QHBoxLayout>
+#include <QPointer>
 #include <QDialog>
 #include <QLabel>
 #include <QMessageBox>
@@ -58,6 +61,68 @@ struct Job {
 
 } // namespace
 
+// The speech model did not come with this installation (Linux and macOS builds may leave it out):
+// offered for download, once; `then` runs when it is there.
+void offerSpeechModel(QWidget* parent, std::function<void()> then) {
+    QMessageBox ask(parent);
+    ask.setWindowTitle("Transcribe Speech");
+    ask.setText("Speech recognition needs its model, which is not on this computer yet.");
+    ask.setInformativeText(QString("Download it now? About %1 MB, from whisper.cpp's models on Hugging Face. It is kept in "
+                                   "bemotion's folder and works offline from then on.")
+                               .arg(net::kSpeechModelBytes / 1000000));
+    QPushButton* download = ask.addButton("Download", QMessageBox::AcceptRole);
+    download->setProperty("accent", true);
+    ask.addButton("Not Now", QMessageBox::RejectRole);
+    ask.setDefaultButton(download);
+    ask.exec();
+    if (ask.clickedButton() != download) return;
+
+    auto* dialog = new QDialog(parent);
+    dialog->setWindowTitle("Downloading the Speech Model");
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setMinimumWidth(420);
+    auto* col = new QVBoxLayout(dialog);
+    col->setContentsMargins(24, 20, 24, 18);
+    col->setSpacing(8);
+    auto* stage = new QLabel("Starting...");
+    col->addWidget(stage);
+    auto* bar = new QProgressBar;
+    bar->setRange(0, 1000);
+    bar->setTextVisible(false);
+    bar->setFixedHeight(8);
+    col->addWidget(bar);
+    auto* row = new QHBoxLayout;
+    row->addStretch();
+    auto* cancel = new QPushButton("Cancel");
+    row->addWidget(cancel);
+    col->addLayout(row);
+    auto finished = std::make_shared<bool>(false);
+    const auto stop = net::downloadSpeechModels(
+        dialog,
+        [dialog, parent, then, finished](bool ok, QString error) {
+            *finished = true;
+            dialog->close();
+            if (!ok) {
+                if (!error.isEmpty()) QMessageBox::warning(parent, "Transcribe Speech", "The speech model could not be downloaded: " + error);
+                return;
+            }
+            then();
+        },
+        [stage, bar](int64_t received, int64_t total) {
+            if (total <= 0) total = net::kSpeechModelBytes;
+            bar->setValue(static_cast<int>(received * 1000 / std::max<int64_t>(1, total)));
+            stage->setText(QString("%1 of %2 MB").arg(received / 1000000).arg(total / 1000000));
+        });
+    QObject::connect(cancel, &QPushButton::clicked, dialog, [stop, dialog] {
+        stop();
+        dialog->close();
+    });
+    QObject::connect(dialog, &QDialog::rejected, dialog, [stop, finished] {
+        if (!*finished) stop();
+    });
+    dialog->show();
+}
+
 bool canTranscribe(const EditorContext& ctx, uint64_t clipId) { return soundOf(ctx, clipId, nullptr) != nullptr; }
 
 void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, QWidget* parent) {
@@ -65,10 +130,15 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
     const MediaItem* item = soundOf(ctx, clipId, &clip);
     if (!item) return;
     media::TranscribeOptions options;
-    if (!media::speechToTextAvailable() || !media::findSpeechModels(platform::speechModelFolders(), options)) {
-        QMessageBox::information(parent, "Transcribe", media::speechToTextAvailable()
-                                                           ? "The speech model is missing from this installation (assets/models)."
-                                                           : "This build of bemotion has no speech recognition.");
+    if (!media::speechToTextAvailable()) {
+        QMessageBox::information(parent, "Transcribe", "This build of bemotion has no speech recognition (it was built without whisper.cpp).");
+        return;
+    }
+    if (!media::findSpeechModels(platform::speechModelFolders(), options)) {
+        QPointer<QWidget> guard(parent);
+        offerSpeechModel(parent, [&ctx, clipId, subtitlesId, guard] {
+            if (guard) transcribeClip(ctx, clipId, subtitlesId, guard);
+        });
         return;
     }
 

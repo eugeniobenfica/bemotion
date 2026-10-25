@@ -1,5 +1,7 @@
 #include "ui/PropertyRow.h"
 
+#include "app/Settings.h"
+
 #include "core/Expressions.h"
 #include "ui/ExpressionEditor.h"
 #include "ui/EditorContext.h"
@@ -289,6 +291,7 @@ void PropertyRow::refresh() {
     // Driven by an expression: "= Label" in the accent, the expression's value shown.
     const bool driven = anim.hasExpression();
     fx_->setActive(driven);
+    fx_->setVisible(driven || !friendlyMode()); // Friendly: formulas stay out of the way
     fx_->setToolTip(driven ? QString(exprOpen_ ? "Close the expression" : "Show the expression") + "\n" + QString::fromStdString(anim.expression)
                            : "Add an expression: a formula worked out every frame");
     label_->setText(driven ? "= " + labelText_ : labelText_);

@@ -14,6 +14,7 @@
 #include "ui/AppSignals.h"
 #include "ui/Dialogs.h"
 #include "ui/EditorWindow.h"
+#include "ui/ExperienceScreen.h"
 #include "ui/HomeScreen.h"
 #include "ui/IntroScreen.h"
 #include "ui/Keymap.h"
@@ -169,6 +170,11 @@ int Application::run(int argc, char** argv) {
 
     if (!projectArg.empty()) openProject(projectArg);
     else if (settings().showIntro) intro_->start(platform::assetsDir() / "welcome" / "Welcome.bemotion");
+    // The first start: how much the interface shows, asked once the intro is done.
+    if (projectArg.empty() && settings().firstRun) {
+        if (intro_->isVisible()) connect(intro_, &IntroScreen::finished, this, [this] { showFirstRun(); });
+        else QTimer::singleShot(0, this, [this] { showFirstRun(); });
+    }
     // Changes a crash left unsaved: offered once the window (and the intro) is out of the way.
     if (intro_->isVisible()) connect(intro_, &IntroScreen::finished, this, [this] { QTimer::singleShot(0, this, [this] { offerRecovery(); }); });
     else QTimer::singleShot(300, this, [this] { offerRecovery(); });
@@ -385,6 +391,21 @@ void Application::goHome() {
     stack_->setCurrentWidget(home_);
     home_->refresh();
     updateTitle();
+}
+
+void Application::showFirstRun() {
+    auto* screen = new ui::ExperienceScreen(window_);
+    window_->overlay = screen;
+    screen->setGeometry(window_->rect());
+    screen->show();
+    screen->raise();
+    screen->setFocus();
+    connect(screen, &ui::ExperienceScreen::finished, this, [this, screen] {
+        window_->overlay = intro_;
+        screen->deleteLater();
+        if (editor_) editor_->setFocus();
+        else home_->setFocus();
+    });
 }
 
 void Application::offerRecovery() {

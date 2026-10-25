@@ -7,6 +7,7 @@
 #include "core/Describe.h"
 #include "core/Expressions.h"
 #include "core/Ops.h"
+#include "core/PluginCatalog.h"
 #include "core/Validate.h"
 #include "core/Geometry.h"
 #include "core/History.h"
@@ -1162,6 +1163,28 @@ void testExpressions() {
         if (l.name == "Box") CHECK(l.transform.rotation.expression == "time * 90");
 }
 
+// The official plugin catalog: only plugins whose every file has a safe path and a hash.
+void testPluginCatalog() {
+    const std::string hash(64, 'a');
+    const std::string text = R"({"catalog": 1, "plugins": [
+        {"id": "good", "name": "Good", "version": "1.2.0", "api": 7, "permissions": ["edit"],
+         "files": [{"path": "plugin.json", "size": 10, "sha256": ")" + hash + R"("},
+                   {"path": "maps/world.lua", "size": 5, "sha256": ")" + hash + R"("}]},
+        {"id": "escape", "files": [{"path": "plugin.json", "size": 1, "sha256": ")" + hash + R"("},
+                                   {"path": "../../evil.lua", "size": 1, "sha256": ")" + hash + R"("}]},
+        {"id": "nohash", "files": [{"path": "plugin.json", "size": 1, "sha256": "xyz"}]},
+        {"id": "no/slash", "files": [{"path": "plugin.json", "size": 1, "sha256": ")" + hash + R"("}]},
+        {"id": "nomanifest", "files": [{"path": "main.lua", "size": 1, "sha256": ")" + hash + R"("}]}]})";
+    std::vector<CatalogPlugin> plugins;
+    std::string error;
+    CHECK(parsePluginCatalog(text, plugins, &error));
+    CHECK(plugins.size() == 1 && plugins[0].id == "good" && plugins[0].size() == 15 && plugins[0].api == 7 && !error.empty());
+    CHECK(!parsePluginCatalog("[1, 2]", plugins) && !parsePluginCatalog("not json", plugins));
+    CHECK(safeCatalogPath("main.lua") && safeCatalogPath("maps/world.lua"));
+    CHECK(!safeCatalogPath("/etc/x") && !safeCatalogPath("a/../b") && !safeCatalogPath("C:/x") && !safeCatalogPath("a\\b") && !safeCatalogPath("a//b"));
+    CHECK(compareVersions("1.10.0", "1.9") > 0 && compareVersions("1.0", "1.0.0") == 0 && compareVersions("0.9.1", "1.0") < 0);
+}
+
 // A project closed and another opened: expressions read the new one (the closed one is gone,
 // reading it crashed when a project was opened again).
 void testExpressionsAcrossProjects() {
@@ -1242,6 +1265,7 @@ int main() {
         {"lens", testLens},
         {"expressions", testExpressions},
         {"expressions across projects", testExpressionsAcrossProjects},
+        {"plugin catalog", testPluginCatalog},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

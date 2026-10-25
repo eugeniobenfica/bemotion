@@ -105,7 +105,8 @@ cmake --build build && ctest --test-dir build && tools/smoke-test.sh build smoke
   always a scratch `BEMOTION_APPDATA`. Never delete user files. bemotion never
   creates folders on its own: the user picks where projects live.
 - Never record from the microphone, open the camera, or reach the network in
-  tests.
+  tests. The downloads (official plugins, speech model) are user-initiated
+  only; test them offline with `BEMOTION_PLUGIN_CATALOG=file:///<folder>/`.
 - Ask before adding dependencies, breaking a contract, or anything
   irreversible. Commits: short imperative subject, body with what and why, a
   `Co-Authored-By:` trailer for AI-assisted work; docs and tests in the same

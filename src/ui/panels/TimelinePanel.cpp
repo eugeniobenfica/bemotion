@@ -1080,6 +1080,7 @@ void TimelinePanel::sync() {
     snap_->setActive(ctx_.snapping);
     loop_->setActive(ctx_.loop);
     graph_->setActive(graphMode_);
+    graph_->setVisible(graphMode_ || !friendlyMode()); // Friendly: keyframes, without their curves
     addKeys_->setVisible(graphMode_);
     addKeys_->setEnabled(ctx_.selected() != nullptr);
     animOnly_->setActive(animatedOnly_);
