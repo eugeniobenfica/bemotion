@@ -15,7 +15,7 @@ A free, open source video editor that stays calm, fast, and friendly to people a
 
 <img src="docs/media/intro.gif" width="720" alt="The bemotion intro animation">
 
-<sub>The intro above is an ordinary bemotion project, built from four shapes and two texts —<br>
+<sub>The intro above is an ordinary bemotion project — shapes, two texts and a few expressions —<br>
 open <b>Welcome to bemotion</b> from the home screen and take it apart.</sub>
 
 [The idea](#the-idea) · [Features](#features) · [Download](#download-windows) · [Getting started](#getting-started) · [Shortcuts](#keyboard-shortcuts) · [Plugins](docs/PLUGINS.md) · [Contributing](CONTRIBUTING.md) · [Support ☕](#support-bemotion)

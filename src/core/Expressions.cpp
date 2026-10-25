@@ -193,9 +193,29 @@ private:
         expect(close);
         return out;
     }
+    // A line break before what comes next ("[x, y]" on the next line starts the result, it
+    // does not index the line before).
+    bool lineBreakAhead() const {
+        for (size_t j = i_; j < s_.size(); ++j) {
+            if (s_[j] == '\n') return true;
+            if (j + 1 < s_.size() && s_[j] == '/' && s_[j + 1] == '/') {
+                while (j < s_.size() && s_[j] != '\n') ++j;
+                return j < s_.size();
+            }
+            if (!std::isspace(static_cast<unsigned char>(s_[j]))) return false;
+        }
+        return false;
+    }
     NodeP postfix() {
         NodeP a = primary();
         for (;;) {
+            if (lineBreakAhead()) {
+                const size_t at = i_;
+                skip();
+                const bool opens = i_ < s_.size() && (s_[i_] == '[' || s_[i_] == '(');
+                i_ = at;
+                if (opens) return a;
+            }
             if (eat(".")) {
                 skip();
                 const std::string name = ident();

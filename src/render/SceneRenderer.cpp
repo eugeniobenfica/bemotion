@@ -475,6 +475,9 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projecti
     filtered.setImageFilter(effectChain(layer, time, zoom));
     filtered.setAlphaf(opacity);
     canvas->saveLayer(hint, &filtered);
+    // Motion blur sums its moments, each a 1/n share: in 8 bits every share rounds, and a dark
+    // color comes out lighter. The sum goes into a layer of half floats.
+    if (times.size() > 1) canvas->saveLayer(SkCanvas::SaveLayerRec(hint, nullptr, SkCanvas::kF16ColorType));
     for (double ti : times) {
         const bool average = times.size() > 1;
         if (average) {
@@ -490,6 +493,7 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projecti
         canvas->restore();
         if (average) canvas->restore();
     }
+    if (times.size() > 1) canvas->restore();
     canvas->restore();
     canvas->restore();
 }

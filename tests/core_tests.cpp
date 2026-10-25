@@ -1153,6 +1153,10 @@ void testExpressions() {
     // A word on its way to a call is not an expression yet; names from earlier lines are.
     CHECK(!checkExpression("wiggle").empty() && !checkExpression("turns * 2").empty());
     CHECK(checkExpression("var speed = 90\nspeed * time").empty());
+    // A vector on its own line is the result, not an index into the line before.
+    AnimVec2 next(Vec2{0, 0});
+    next.expression = "var a = 2 * 3\n[a, a + 1]";
+    CHECK(checkExpression(next.expression).empty() && near(next.valueAt(0).x, 6.0f) && near(next.valueAt(0).y, 7.0f));
     // A broken one falls back to the keyframes and says why.
     AnimFloat broken(7.0f);
     broken.expression = "layer(\"Nobody\").opacity";
@@ -1205,6 +1209,14 @@ void testExpressionsThroughOperations() {
         CHECK(near(r.results[0]["value"][0].get<float>(), 100.0f) && near(r.results[0]["value"][1].get<float>(), 0.0f));
         CHECK(near(r.results[1]["value"].get<float>(), 100.0f)); // rotation has no keys: speed 0
         CHECK(near(r.results[2]["value"][0].get<float>(), 100.0f));
+    }
+    // Keyframes are listed with what they hold, the value with what the expression makes of it.
+    r = run(p, R"j([{"op": "expression.set", "layer": "Box", "prop": "position", "expression": "value + [1000, 0]"},
+                    {"op": "query.layer", "layer": "Box", "time": 2}])j");
+    CHECK(r.ok);
+    if (r.ok) {
+        const nlohmann::json& pos = r.results[1]["props"]["position"];
+        CHECK(pos["value"][0] == 1200.0 && pos["keys"][0]["value"][0] == 0.0 && pos["keys"][1]["value"][0] == 200.0);
     }
     // Baked: keyframes a frame (or `step` frames) apart, the same values, no expression.
     CHECK(run(p, R"j({"op": "expression.set", "layer": "Box", "prop": "rotation", "expression": "time * 90"})j").ok);

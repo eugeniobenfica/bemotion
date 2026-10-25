@@ -1081,7 +1081,10 @@ private:
                 json keys = json::array();
                 for (int k = 0; k < p.anim->keyCount(); ++k) {
                     const double kt = p.anim->keyTime(k);
-                    keys.push_back({{"time", kt}, {"value", valueJson(p.kind, propertyValue(p, kt))}, {"easing", easingId(p.anim->keyEasing(k))}});
+                    float kv[4] = {0, 0, 0, 0}; // what the key holds, whatever an expression makes of it
+                    p.anim->keyedValue(kt, kv);
+                    keys.push_back({{"time", kt}, {"value", valueJson(p.kind, std::vector<float>(kv, kv + p.anim->components()))},
+                                    {"easing", easingId(p.anim->keyEasing(k))}});
                 }
                 pj["keys"] = keys;
             }
