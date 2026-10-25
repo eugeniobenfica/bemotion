@@ -2,6 +2,7 @@
 
 #include "app/PluginHost.h"
 #include "app/Settings.h"
+#include "core/Editing.h"
 #include "core/Snapping.h"
 #include "core/Presets.h"
 #include "core/Transitions.h"
@@ -10,6 +11,7 @@
 #include "media/MediaManager.h"
 #include "ui/AppSignals.h"
 #include "ui/Draw.h"
+#include "ui/LayerMenus.h"
 #include "ui/Mime.h"
 #include "ui/PropertyRow.h"
 #include "ui/Theme.h"
@@ -22,6 +24,7 @@
 #include <QFrame>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -57,7 +60,7 @@ constexpr float kEdgeGrab = 6.0f;
 float keyRadius() { return settings().keyframeSize; }
 // Left column of a track row.
 constexpr float kButton = 20.0f;
-constexpr float kExpandX = 6.0f, kVisX = 30.0f, kLockX = 54.0f, kChipX = 78.0f, kNameX = 110.0f;
+constexpr float kExpandX = 6.0f, kVisX = 30.0f, kLockX = 54.0f, kSoloX = 78.0f, kMuteX = 100.0f, kChipX = 124.0f, kNameX = 156.0f;
 
 Qt::KeyboardModifiers mods() { return QGuiApplication::keyboardModifiers(); }
 bool ctrlHeld() { return mods() & Qt::ControlModifier; }
@@ -89,6 +92,29 @@ std::vector<uint64_t> clipsOfTrack(const Composition& comp, uint64_t track) {
     for (const Layer& l : comp.layers)
         if (l.track == track) ids.push_back(l.id);
     return ids;
+}
+
+bool trackHasSound(const Composition& comp, uint64_t track) {
+    return std::any_of(comp.layers.begin(), comp.layers.end(),
+                       [&](const Layer& l) { return l.track == track && l.type == LayerType::Media && l.media.hasAudio; });
+}
+
+// What a clip bar says after its name: how it plays and how it is composited.
+std::string clipNotes(const Composition& comp, const Layer& l) {
+    std::string s;
+    auto add = [&](const std::string& note) { s += "  ·  " + note; };
+    if (l.type == LayerType::Media && l.media.timeRemap) add(l.media.remap.isAnimated() ? "Time Remap" : "Frozen");
+    else if (l.type == LayerType::Media && (l.media.speed != 1.0 || l.media.reversed)) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.4g%%", l.media.speed * 100.0);
+        add(std::string(l.media.reversed ? "Reversed " : "") + (l.media.speed != 1.0 ? buf : ""));
+    }
+    if (comp.isMatte(l.id)) add("Matte");
+    if (l.matte != MatteMode::None)
+        if (const Layer* m = comp.findLayer(l.matteLayer)) add("Matte: " + m->name);
+    if (l.blend != BlendMode::Normal) add(kBlendModeLabels[static_cast<int>(l.blend)]);
+    if (!l.masks.empty()) add(l.masks.size() == 1 ? "1 mask" : std::to_string(l.masks.size()) + " masks");
+    return s;
 }
 
 std::string rowKey(uint64_t layer, const PropertyRef& p) {
@@ -185,19 +211,51 @@ protected:
         panel_->paintRuler(p, width());
     }
     void mousePressEvent(QMouseEvent* e) override {
-        if (e->button() != Qt::LeftButton || e->position().x() < panel_->trackX0()) return;
+        if (e->position().x() < panel_->trackX0()) return;
+        const float mx = static_cast<float>(e->position().x()), my = static_cast<float>(e->position().y());
+        const int marker = panel_->markerAt(mx, my);
+        if (e->button() == Qt::RightButton) {
+            panel_->showMarkerMenu(e->globalPosition().toPoint(), marker, panel_->xToTime(mx));
+            return;
+        }
+        if (e->button() != Qt::LeftButton) return;
         EditorContext& ctx = panel_->ctx_;
+        if (marker >= 0) { // a marker's flag: drag it along (it snaps like everything else)
+            panel_->collectTimeSnapTargets({}, false);
+            panel_->drag_ = TimelinePanel::Drag::Marker;
+            panel_->dragMarker_ = marker;
+            panel_->dragStart_ = e->position();
+            panel_->dragOrigIn_ = ctx.comp().markers[marker].time;
+            return;
+        }
         panel_->collectTimeSnapTargets({}, false);
         panel_->timeTargets_.erase(panel_->timeTargets_.begin() + 2); // the playhead itself (see collectTimeSnapTargets)
         // Grabbing the playhead keeps the grab point: it moves with the mouse instead of
         // jumping to it, and snapping tests where the playhead is, not the cursor.
-        const float mx = static_cast<float>(e->position().x());
         panel_->playheadGrab_ = std::fabs(mx - panel_->timeToX(ctx.time)) <= 8.0f ? ctx.time - panel_->xToTime(mx) : 0.0;
         panel_->drag_ = TimelinePanel::Drag::Playhead;
         mouseMoveEvent(e);
     }
+    void mouseDoubleClickEvent(QMouseEvent* e) override {
+        const int marker = panel_->markerAt(static_cast<float>(e->position().x()), static_cast<float>(e->position().y()));
+        if (marker >= 0) panel_->renameMarker(marker);
+        else mousePressEvent(e);
+    }
     void mouseMoveEvent(QMouseEvent* e) override {
-        setCursor(e->position().x() >= panel_->trackX0() ? Qt::SizeHorCursor : Qt::ArrowCursor);
+        const float mx = static_cast<float>(e->position().x()), my = static_cast<float>(e->position().y());
+        if (panel_->drag_ == TimelinePanel::Drag::Marker) {
+            panel_->dragMarkerTo(mx);
+            return;
+        }
+        const int marker = panel_->drag_ == TimelinePanel::Drag::None ? panel_->markerAt(mx, my) : -1;
+        setCursor(marker >= 0 ? Qt::PointingHandCursor : mx >= panel_->trackX0() ? Qt::SizeHorCursor : Qt::ArrowCursor);
+        if (marker >= 0) {
+            const Marker& m = panel_->ctx_.comp().markers[marker];
+            const QString tip = (m.name.empty() ? QString("Marker") : QString::fromStdString(m.name)) + "  ·  " +
+                                QString::fromStdString(ui::formatTimecode(m.time, panel_->ctx_.comp().fps)) +
+                                "\nDrag to move  ·  Double-click to rename  ·  Right-click for more";
+            QToolTip::showText(e->globalPosition().toPoint(), tip, this);
+        }
         if (panel_->drag_ != TimelinePanel::Drag::Playhead) return;
         mouseX_ = static_cast<float>(e->position().x());
         dragTo(mouseX_);
@@ -206,6 +264,7 @@ protected:
     }
     void mouseReleaseEvent(QMouseEvent*) override {
         edgeTimer_.stop();
+        if (panel_->drag_ == TimelinePanel::Drag::Marker) panel_->dragMarker_ = -1;
         panel_->drag_ = TimelinePanel::Drag::None;
         panel_->snapLineTime_ = -1.0;
         panel_->relayout();
@@ -1263,6 +1322,28 @@ void TimelinePanel::paintRuler(QPainter& p, int width) {
     // Past the end of the composition (nothing to mark while it is empty: it grows with its content).
     const float endX = timeToX(visibleEnd());
     if (!comp.layers.empty() || hasRecordingPreview()) d.rectFilled({endX, 0}, {x1, h}, theme::shade(90));
+    // Markers: a flag in their color, the name beside it when there is room.
+    for (size_t i = 0; i < comp.markers.size(); ++i) {
+        const Marker& m = comp.markers[i];
+        const float mx = timeToX(m.time);
+        if (mx < x0 - 80 || mx > x1 + 8) continue;
+        const Rgba col = toRgba(labelColor(m.color));
+        const Pt flag[5] = {{mx - 5, 1}, {mx + 5, 1}, {mx + 5, 8}, {mx, 12}, {mx - 5, 8}};
+        d.polyFilled(flag, 5, col);
+        if (static_cast<int>(i) == dragMarker_) d.polyline(flag, 5, theme::kText, true, 1.2f);
+        d.line({mx, 12}, {mx, h}, theme::withAlpha(col, 160), 1.0f);
+        const float next = i + 1 < comp.markers.size() ? timeToX(comp.markers[i + 1].time) : x1;
+        if (!m.name.empty() && next - mx > 40) {
+            QFont small = p.font();
+            small.setPointSizeF(ticks.pointSizeF() * 0.85);
+            p.setFont(small);
+            d.pushClip({mx + 6, 0}, {std::min(next - 4, x1), 13});
+            d.rectFilled({mx + 6, 0}, {mx + 10 + d.textWidth(QString::fromStdString(m.name)), 13}, theme::kBgDeep, 3.0f);
+            d.text({mx + 8, 0}, col, m.name);
+            d.popClip();
+            p.setFont(ticks);
+        }
+    }
     // Playhead handle.
     const float ph = timeToX(ctx_.time);
     const Pt head[5] = {{ph - 6, 3}, {ph + 6, 3}, {ph + 6, 14}, {ph, 20}, {ph - 6, 14}};
@@ -1299,6 +1380,10 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
     d.pushClip({x0, 0}, {x1, bottom});
     const float endX = timeToX(visibleEnd());
     if (endX < x1 && (!ctx_.comp().layers.empty() || hasRecordingPreview())) d.rectFilled({endX, 0}, {x1, bottom}, theme::shade(80));
+    for (const Marker& m : ctx_.comp().markers) { // a faint line down from each marker
+        const float mx = timeToX(m.time);
+        if (mx >= x0 && mx <= x1) d.line({mx, 0}, {mx, bottom}, toRgba(labelColor(m.color), 0.35f), 1.0f);
+    }
     const float ph = timeToX(ctx_.time);
     d.line({ph, 0}, {ph, bottom}, theme::kPlayhead, 1.5f);
     if (snapLineTime_ >= 0.0) { // what the dragged item snapped to
@@ -1422,11 +1507,16 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
                  focus->visible ? theme::kTextDim : theme::kTextFaint);
     ui::drawIcon(d, focus->locked ? ui::Icon::Lock : ui::Icon::Unlock, {kLockX + kButton * 0.5f, cy}, kButton * 0.65f,
                  focus->locked ? theme::kAccent : theme::kTextFaint);
+    ui::drawIcon(d, ui::Icon::Solo, {kSoloX + kButton * 0.5f, cy}, kButton * 0.62f, focus->solo ? theme::kAccent : theme::kTextFaint);
+    if (trackHasSound(ctx_.comp(), item.track))
+        ui::drawIcon(d, focus->muted ? ui::Icon::SpeakerMuted : ui::Icon::Speaker, {kMuteX + kButton * 0.5f, cy}, kButton * 0.62f,
+                     focus->muted ? theme::kDanger : theme::kTextFaint);
+    const bool silenced = ctx_.comp().soloedOut(*focus); // another track is solo
     d.rectFilled({kChipX + 2, y + 8}, {kChipX + 5, y + h - 8}, toRgba(labelColor(focus->label)), 2.0f);
     ui::drawIcon(d, ui::iconForLayer(*focus), {kChipX + 18, cy}, 14.0f, anySelected ? theme::kAccent : theme::kTextDim);
     const float nameW = std::max(10.0f, leftWidth_ - kNameX - 8);
     if (renaming_ != focus->id) {
-        const Rgba col = focus->visible ? (anySelected ? theme::kText : theme::kTextDim) : theme::kTextFaint;
+        const Rgba col = focus->visible && !silenced ? (anySelected ? theme::kText : theme::kTextDim) : theme::kTextFaint;
         d.pushClip({kNameX, y}, {kNameX + nameW, y + h});
         const float textY = y + (h - d.textHeight()) * 0.5f;
         d.text({kNameX, textY}, col, focus->name);
@@ -1491,7 +1581,7 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
             d.popClip();
         } else {
             d.pushClip({std::max(bx1, x0), y}, {std::min(bx2, x1), y + h});
-            d.text({std::max(bx1, x0) + 10, y + (h - d.textHeight()) * 0.5f}, theme::ink(150), layer.name);
+            d.text({std::max(bx1, x0) + 10, y + (h - d.textHeight()) * 0.5f}, theme::ink(150), layer.name + clipNotes(ctx_.comp(), layer));
             d.popClip();
         }
         // Summary of the clip's keyframes (within the clip only, e.g. after a cut).
@@ -1568,11 +1658,12 @@ void TimelinePanel::paintWaveform(QPainter& p, const Layer& layer, QPointF a, QP
     QPainterPath path;
     for (float x = x1; x < x2; x += kStep) {
         // Peak of the source samples under this column (sparsely sampled: enough for a sketch).
-        const double t0 = layer.media.sourceTime(xToTime(x)), t1 = layer.media.sourceTime(xToTime(x + kStep));
+        double t0 = layer.media.sourceTime(xToTime(x)), t1 = layer.media.sourceTime(xToTime(x + kStep));
+        if (t1 < t0) std::swap(t0, t1); // played backwards
         if (t1 <= 0) continue;
         const size_t i0 = static_cast<size_t>(std::max(0.0, t0) * media::kAudioRate);
         const size_t i1 = std::min(frames, static_cast<size_t>(std::max(0.0, t1) * media::kAudioRate) + 1);
-        if (i0 >= frames) break;
+        if (i0 >= frames) continue;
         const size_t stride = std::max<size_t>(1, (i1 - i0) / 48);
         float peak = 0.0f;
         for (size_t i = i0; i < i1; i += stride) peak = std::max({peak, std::fabs(s[i * 2]), std::fabs(s[i * 2 + 1])});
@@ -1592,16 +1683,24 @@ const TimelinePanel::Item* TimelinePanel::itemAt(float y) const {
 }
 
 int TimelinePanel::clipHit(const Item& track, float mx, Drag& mode) const {
-    // Edges win over bodies so adjacent clips can be trimmed.
+    // Edges win over bodies so adjacent clips can be trimmed; at a cut, the edge of the clip the
+    // mouse is over (left of the cut: the first clip's end; right of it: the next one's start).
     const auto& layers = ctx_.comp().layers;
-    int hit = -1;
+    int hit = -1, body = -1;
+    float best = 1e9f;
     mode = Drag::None;
     for (int i = track.first; i < track.first + track.count && i < static_cast<int>(layers.size()); ++i) {
         const float bx1 = timeToX(layers[i].inPoint), bx2 = timeToX(layers[i].outPoint);
-        if (std::fabs(mx - bx1) < kEdgeGrab) hit = i, mode = Drag::LayerIn;
-        else if (std::fabs(mx - bx2) < kEdgeGrab && mode != Drag::LayerIn) hit = i, mode = Drag::LayerOut;
-        else if (mx > bx1 && mx < bx2 && hit < 0) hit = i, mode = Drag::LayerMove;
+        auto edge = [&](float x, bool over, Drag m) {
+            const float d = std::fabs(mx - x);
+            if (d >= kEdgeGrab) return;
+            if (const float score = d + (over ? 0.0f : kEdgeGrab); score < best) best = score, hit = i, mode = m;
+        };
+        edge(bx1, mx >= bx1, Drag::LayerIn);
+        edge(bx2, mx <= bx2, Drag::LayerOut);
+        if (mx > bx1 && mx < bx2) body = i;
     }
+    if (hit < 0 && body >= 0) hit = body, mode = Drag::LayerMove;
     return hit;
 }
 
@@ -1750,6 +1849,8 @@ void TimelinePanel::showTrackMenu(QPoint global) {
     });
     menu.addAction("Duplicate\tCtrl+D", [this] { ctx_.duplicateSelected(); });
     menu.addAction("Split at Playhead\tCtrl+K", [this] { ctx_.splitSelectedAtPlayhead(); });
+    menu.addAction("Ripple Delete\tShift+Del", [this] { ctx_.rippleDeleteSelected(); })->setToolTip("Delete and close the gap: the clips after it move back");
+    ui::fillTimeMenu(menu.addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), "Time"), ctx_, this);
     if (ui::canTranscribe(ctx_, focus)) {
         QAction* t = menu.addAction(ui::menuIcon(ui::Icon::Subtitles, theme::kTextDim), "Transcribe to Subtitles...",
                                     [this, focus] { ui::transcribeClip(ctx_, focus, 0, this); });
@@ -1770,6 +1871,17 @@ void TimelinePanel::showTrackMenu(QPoint global) {
         threeD->setChecked(all);
         threeD->setToolTip("Seen in perspective by the camera at its Z position");
     }
+    // How it is composited: blending, a track matte, masks.
+    menu.addSeparator();
+    ui::fillBlendMenu(menu.addMenu("Blending Mode"), ctx_);
+    ui::fillMatteMenu(menu.addMenu("Track Matte"), ctx_);
+    ui::fillMaskMenu(menu.addMenu(ui::menuIcon(ui::Icon::Mask, theme::kTextDim), "Mask"), ctx_);
+    {
+        const auto sel = ctx_.selectedLayers();
+        if (std::any_of(sel.begin(), sel.end(), [](const Layer* l) { return l->type == LayerType::Shape && l->shape.kind != ShapeKind::Path; }))
+            menu.addAction(ui::menuIcon(ui::Icon::PathShape, theme::kTextDim), "Convert to Bézier Path", [this] { ui::convertSelectedToPaths(ctx_); })
+                ->setToolTip("Its outline becomes points and handles to edit with the Pen");
+    }
     menu.addSeparator();
     menu.addAction("Create Compound\tCtrl+G", [this] { ctx_.createCompound(); });
     menu.addAction("Release Compound\tCtrl+Shift+G", [this] { ctx_.releaseSelectedCompounds(); })->setEnabled(ctx_.selectionHasCompound());
@@ -1782,6 +1894,140 @@ void TimelinePanel::showTrackMenu(QPoint global) {
     menu.addSeparator();
     menu.addAction("Delete\tDel", [this] { ctx_.deleteSelected(); });
     menu.exec(global);
+    relayout();
+}
+
+// --- markers and gaps -----------------------------------------------------------------------
+
+int TimelinePanel::markerAt(float x, float y) const {
+    if (y > 14.0f) return -1; // the flags are along the top of the ruler
+    const auto& markers = ctx_.comp().markers;
+    int best = -1;
+    float distance = 7.0f;
+    for (size_t i = 0; i < markers.size(); ++i)
+        if (const float dx = std::fabs(x - timeToX(markers[i].time)); dx <= distance) best = static_cast<int>(i), distance = dx;
+    return best;
+}
+
+void TimelinePanel::dragMarkerTo(float x) {
+    Composition& comp = ctx_.comp();
+    if (dragMarker_ < 0 || dragMarker_ >= static_cast<int>(comp.markers.size())) return;
+    const double raw = (x - dragStart_.x()) / pxPerSec_;
+    const double t = std::max(0.0, dragOrigIn_ + snappedDelta({dragOrigIn_}, raw));
+    if (std::fabs(comp.markers[dragMarker_].time - t) < 1e-9) return;
+    dragMarker_ = moveMarker(comp, dragMarker_, t);
+    ctx_.touch();
+    relayout();
+}
+
+void TimelinePanel::renameMarker(int index) {
+    Composition& comp = ctx_.comp();
+    if (index < 0 || index >= static_cast<int>(comp.markers.size())) return;
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, "Marker", "Name:", QLineEdit::Normal, QString::fromStdString(comp.markers[index].name), &ok);
+    if (!ok || index >= static_cast<int>(ctx_.comp().markers.size())) return;
+    ctx_.comp().markers[index].name = name.trimmed().toStdString();
+    ctx_.touch();
+    relayout();
+}
+
+void TimelinePanel::showMarkerMenu(QPoint global, int index, double t) {
+    QMenu menu;
+    if (index < 0) {
+        menu.addAction(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), "Add Marker Here", [this, t] {
+            addMarker(ctx_.comp(), t, "");
+            ctx_.touch();
+        });
+        if (!ctx_.comp().markers.empty())
+            menu.addAction("Remove All Markers", [this] {
+                ctx_.comp().markers.clear();
+                ctx_.touch();
+            });
+    } else {
+        menu.addAction("Rename...", [this, index] { renameMarker(index); });
+        menu.addAction("Go to Marker", [this, index] { ctx_.setTime(ctx_.comp().markers[index].time); });
+        QMenu* colors = menu.addMenu("Color");
+        for (int i = 0; i < kLabelColorCount; ++i) {
+            QPixmap swatch(14, 14);
+            swatch.fill(Qt::transparent);
+            QPainter sp(&swatch);
+            sp.setRenderHint(QPainter::Antialiasing);
+            const Color c = labelColor(i);
+            sp.setBrush(QColor::fromRgbF(c.r, c.g, c.b));
+            sp.setPen(Qt::NoPen);
+            sp.drawRoundedRect(QRectF(1, 1, 12, 12), 3, 3);
+            sp.end();
+            QAction* a = colors->addAction(QIcon(swatch), QString("Color %1").arg(i + 1), [this, index, i] {
+                ctx_.comp().markers[index].color = i;
+                ctx_.touch();
+            });
+            a->setCheckable(true);
+            a->setChecked(ctx_.comp().markers[index].color == i);
+        }
+        menu.addSeparator();
+        menu.addAction("Delete Marker", [this, index] {
+            ctx_.comp().markers.erase(ctx_.comp().markers.begin() + index);
+            ctx_.touch();
+        });
+    }
+    menu.exec(global);
+    relayout();
+}
+
+void TimelinePanel::showGapMenu(QPoint global, uint64_t track, double t) {
+    QMenu menu;
+    menu.setToolTipsVisible(true);
+    Composition probe = ctx_.comp(); // whether there is a gap to close here
+    QAction* close = menu.addAction("Close Gap", [this, track, t] {
+        if (closeGap(ctx_.comp(), track, t)) ctx_.touch();
+    });
+    close->setEnabled(closeGap(probe, track, t));
+    close->setToolTip("The clips after this gap move back to close it (Premiere's Ripple Delete on a gap)");
+    menu.addAction(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), "Add Marker Here", [this, t] {
+        addMarker(ctx_.comp(), t, "");
+        ctx_.touch();
+    });
+    menu.exec(global);
+    relayout();
+}
+
+// The cut under x between a clip of the row and the one right after it: the first clip's id.
+uint64_t TimelinePanel::cutAt(const Item& row, float x) const {
+    const auto& layers = ctx_.comp().layers;
+    const int end = std::min(row.first + row.count, static_cast<int>(layers.size()));
+    for (int i = row.first; i < end; ++i)
+        if (std::fabs(x - timeToX(layers[i].outPoint)) < kEdgeGrab && clipAfterCut(ctx_.comp(), layers[i].id)) return layers[i].id;
+    return 0;
+}
+
+// Ripple, roll and slip drags redo their edit from where the drag started, each move.
+void TimelinePanel::beginEditDrag(Drag mode, uint64_t id, QPointF pos) {
+    const Layer* layer = ctx_.comp().findLayer(id);
+    if (!layer) return;
+    drag_ = mode;
+    dragLayer_ = id;
+    dragStart_ = pos;
+    dragOrigIn_ = layer->inPoint;
+    dragOrigOut_ = layer->outPoint;
+    dragBase_ = ctx_.comp();
+    std::vector<uint64_t> moving{id};
+    if (const uint64_t next = clipAfterCut(ctx_.comp(), id); mode == Drag::Roll && next) moving.push_back(next);
+    collectTimeSnapTargets(moving, false);
+}
+
+void TimelinePanel::updateEditDrag(QPointF pos) {
+    Composition& comp = ctx_.comp();
+    const double raw = (pos.x() - dragStart_.x()) / pxPerSec_;
+    comp = dragBase_;
+    switch (drag_) {
+    case Drag::RippleIn: rippleTrim(comp, dragLayer_, ClipEdge::In, dragOrigIn_ + snappedDelta({dragOrigIn_}, raw)); break;
+    case Drag::RippleOut: rippleTrim(comp, dragLayer_, ClipEdge::Out, dragOrigOut_ + snappedDelta({dragOrigOut_}, raw)); break;
+    case Drag::Roll: rollEdit(comp, dragLayer_, dragOrigOut_ + snappedDelta({dragOrigOut_}, raw)); break;
+    case Drag::Slip: slipClip(comp, dragLayer_, snapDelta(raw, comp.fps)); break;
+    default: break;
+    }
+    rows_->setCursor(drag_ == Drag::Roll ? Qt::SplitHCursor : Qt::SizeHorCursor);
+    ctx_.touch();
     relayout();
 }
 
@@ -1920,6 +2166,14 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
                 const bool locked = !focus->locked;
                 for (int i = row.first; i < row.first + row.count; ++i) layers[i].locked = locked;
                 ctx_.touch();
+            } else if (inButton(kSoloX)) { // solo and mute act on the whole track too
+                const bool solo = !focus->solo;
+                for (int i = row.first; i < row.first + row.count; ++i) layers[i].solo = solo;
+                ctx_.touch();
+            } else if (inButton(kMuteX) && trackHasSound(ctx_.comp(), row.track)) {
+                const bool muted = !focus->muted;
+                for (int i = row.first; i < row.first + row.count; ++i) layers[i].muted = muted;
+                ctx_.touch();
             } else if (right) {
                 bool anySelected = false;
                 for (int i = row.first; i < row.first + row.count; ++i) anySelected |= ctx_.isSelected(layers[i].id);
@@ -1946,12 +2200,21 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
         }
         Drag mode = Drag::None;
         const int hit = clipHit(row, x, mode);
+        const uint64_t cut = ctx_.tool == Tool::Roll ? cutAt(row, x) : 0;
         if (ctx_.tool == Tool::Razor) {
             if (left && hit >= 0) ctx_.splitLayerAt(layers[hit].id, xToTime(x));
         } else if (right) {
             if (hit >= 0 && !ctx_.isSelected(layers[hit].id)) ctx_.select(layers[hit].id);
             if (hit >= 0) showTrackMenu(e->globalPosition().toPoint());
+            else showGapMenu(e->globalPosition().toPoint(), row.track, xToTime(x));
             return;
+        } else if (left && cut) { // Rolling Edit: the cut between two clips
+            ctx_.select(cut);
+            beginEditDrag(Drag::Roll, cut, pos);
+        } else if (left && hit >= 0 && ((ctx_.tool == Tool::Ripple && mode != Drag::LayerMove) || (ctx_.tool == Tool::Slip && mode == Drag::LayerMove))) {
+            const uint64_t id = layers[hit].id;
+            ctx_.select(id);
+            beginEditDrag(ctx_.tool == Tool::Slip ? Drag::Slip : mode == Drag::LayerIn ? Drag::RippleIn : Drag::RippleOut, id, pos);
         } else if (left) {
             if (hit >= 0) {
                 const uint64_t id = layers[hit].id;
@@ -2049,6 +2312,10 @@ void TimelinePanel::rowsMove(QMouseEvent* e) {
         updateLayerDrag(pos);
         return;
     }
+    if (drag_ == Drag::RippleIn || drag_ == Drag::RippleOut || drag_ == Drag::Roll || drag_ == Drag::Slip) {
+        updateEditDrag(pos);
+        return;
+    }
     if (marquee_) {
         updateMarquee(pos);
         return;
@@ -2061,6 +2328,8 @@ void TimelinePanel::rowsMove(QMouseEvent* e) {
         Drag mode;
         clipHit(*item, static_cast<float>(pos.x()), mode);
         if (ctx_.tool == Tool::Razor) cursor = Qt::PointingHandCursor;
+        else if (ctx_.tool == Tool::Roll && cutAt(*item, static_cast<float>(pos.x()))) cursor = Qt::SplitHCursor;
+        else if (ctx_.tool == Tool::Slip && mode == Drag::LayerMove) cursor = Qt::SizeHorCursor;
         else if (transitionHit(*item, static_cast<float>(pos.x())).resize || mode == Drag::LayerIn || mode == Drag::LayerOut)
             cursor = Qt::SizeHorCursor;
     }
@@ -2084,6 +2353,10 @@ void TimelinePanel::rowsRelease(QMouseEvent* e) {
     else if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName ||
              drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut)
         endLayerDrag(pos);
+    else if (drag_ == Drag::RippleIn || drag_ == Drag::RippleOut || drag_ == Drag::Roll || drag_ == Drag::Slip) {
+        drag_ = Drag::None;
+        dragBase_ = Composition{}; // (the copy is only needed while dragging)
+    }
     if (marquee_) marquee_ = false;
     snapLineTime_ = -1.0;
     relayout();
@@ -2113,6 +2386,7 @@ void TimelinePanel::beginLayerDrag(Drag mode, uint64_t id, QPointF pos) {
 void TimelinePanel::collectTimeSnapTargets(const std::vector<uint64_t>& movingClips, bool movingKeys) {
     const Composition& comp = ctx_.comp();
     timeTargets_ = {0.0, comp.duration, ctx_.time}; // composition ends and the playhead
+    for (const Marker& m : comp.markers) timeTargets_.push_back(m.time);
     auto isDraggedKey = [&](uint64_t layerId, const char* prop, uint32_t uid) {
         if (!movingKeys) return false;
         for (const auto& [sel, orig] : dragKeys_)

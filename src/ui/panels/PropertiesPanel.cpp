@@ -7,10 +7,13 @@
 #include "core/Transitions.h"
 #include "app/Settings.h"
 #include "core/Data.h"
+#include "core/Editing.h"
+#include "core/Geometry.h"
 #include "core/Presets.h"
 #include "media/MediaManager.h"
 #include "render/Fonts.h"
 #include "ui/EditorContext.h"
+#include "ui/LayerMenus.h"
 #include "ui/PropertyRow.h"
 #include "ui/Transcribe.h"
 #include "ui/Theme.h"
@@ -135,6 +138,10 @@ std::string PropertiesPanel::structureKey() {
     if (layer->type == LayerType::Compound)
         for (const Layer& c : ctx_.comp().layers)
             if (c.parent == layer->id) k << ',' << c.id << c.name;
+    for (const Mask& m : layer->masks) k << '|' << m.name; // each mask's header
+    k << ':' << hasTimeline(ctx_.comp(), *layer);
+    for (const Layer& other : ctx_.comp().layers) // the track matte's choices: the layers beside it
+        if (other.parent == layer->parent) k << '/' << other.id << other.name;
     for (const PropertyRef& p : layer->properties())
         if (p.effectIndex < 0) k << p.id << ';';
     return k.str();
@@ -544,6 +551,13 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             group = prop.group;
             section = new CollapsibleSection(QString::fromUtf8(prop.group));
             col->addWidget(section);
+            if (prop.maskIndex >= 0) buildMaskRows(section, layer, prop.maskIndex);
+            // A path shape has no "Shape" property of its own: its section comes before its fill.
+            if (group == "Fill" && layer.type == LayerType::Shape && layer.shape.kind == ShapeKind::Path) {
+                auto* shape = new CollapsibleSection("Shape");
+                col->insertWidget(col->indexOf(section), shape);
+                buildShapeRows(shape, layer);
+            }
             if (group == "Transform" && layer.type != LayerType::Camera && layer.type != LayerType::Background && !layer.parent) {
                 // A 3D layer gets a Z position: the camera sees it in perspective (parallax).
                 auto* on = new ui::Switch;
@@ -641,16 +655,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             } else if (group == "Counter" && layer.type == LayerType::Text && layer.text.counter) {
                 buildCountRows(section, layer);
             } else if (group == "Shape") {
-                auto* kind = newCombo();
-                for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) kind->addItem(shapeKindLabel(static_cast<ShapeKind>(i)));
-                kind->setCurrentIndex(static_cast<int>(layer.shape.kind));
-                connect(kind, &QComboBox::currentIndexChanged, this, [this, id](int i) {
-                    if (Layer* l = ctx_.comp().findLayer(id); l && i >= 0) {
-                        l->shape.kind = static_cast<ShapeKind>(i);
-                        ctx_.touch();
-                    }
-                });
-                section->addPlainRow("Type", kind);
+                buildShapeRows(section, layer);
             } else if ((group == "Outline" || group == "Box") && layer.type == LayerType::Text) {
                 const bool outline = group == "Outline";
                 auto* on = new ui::Switch;
@@ -682,6 +687,13 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                         on->setChecked(fill ? l->shape.fillEnabled : l->shape.strokeEnabled);
                     }
                 });
+                if (fill) { // a color, or a gradient to a second one
+                    section->addPlainRow("Type", choiceCombo(kShapeFillLabels, static_cast<int>(layer.shape.fill), [this](int i) {
+                        for (Layer* l : ctx_.selectedLayers())
+                            if (l->type == LayerType::Shape) l->shape.fill = static_cast<ShapeFill>(i);
+                        ctx_.touch();
+                    }));
+                }
             } else if (group == "Background" && layer.type == LayerType::Background) {
                 buildBackgroundRows(section, layer);
             } else if (group == "Text" && layer.type == LayerType::Text) {
@@ -797,6 +809,8 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         }
     }
 
+    if (layer.type != LayerType::Camera && !(layer.type == LayerType::Media && !layer.media.hasVideo)) buildBlending(col, layer);
+
     // In / out and the label color.
     {
         auto* s = new CollapsibleSection("Layer");
@@ -911,6 +925,269 @@ void PropertiesPanel::buildMediaSource(QVBoxLayout* col, Layer& layer) {
     row->addWidget(reveal);
     s->body()->addLayout(row);
     col->addWidget(s);
+    if (hasTimeline(ctx_.comp(), layer)) buildMediaTime(col, layer);
+}
+
+// A shape's kind (a path keeps the outline it had), its path's points, the repeater.
+void PropertiesPanel::buildShapeRows(CollapsibleSection* section, Layer& layer) {
+    const uint64_t id = layer.id;
+    auto* kind = newCombo();
+    for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) kind->addItem(shapeKindLabel(static_cast<ShapeKind>(i)));
+    kind->setCurrentIndex(static_cast<int>(layer.shape.kind));
+    connect(kind, &QComboBox::currentIndexChanged, this, [this, id](int i) {
+        if (Layer* l = ctx_.comp().findLayer(id); l && i >= 0) {
+            // A shape becoming a path keeps its outline, as points to edit.
+            if (static_cast<ShapeKind>(i) == ShapeKind::Path && l->shape.kind != ShapeKind::Path) {
+                l->shape.path = shapeToBezier(l->shape, ctx_.time);
+                if (l->shape.kind == ShapeKind::Line) l->shape.path.closed = false;
+            }
+            l->shape.kind = static_cast<ShapeKind>(i);
+            ctx_.touch();
+        }
+    });
+    section->addPlainRow("Type", kind);
+    if (layer.shape.kind == ShapeKind::Path) {
+        auto* edit = new QPushButton(ui::makeIcon(ui::Icon::Pen, theme::kTextDim, 16), "Edit Points");
+        edit->setCheckable(true);
+        edit->setToolTip("The Pen (G): drag points and handles; click the outline to add a point, "
+                         "Ctrl+click a point to remove it, Alt+click to make it a corner or smooth");
+        connect(edit, &QPushButton::clicked, this, [this](bool on) { ctx_.tool = on ? Tool::Pen : Tool::Select; });
+        section->addPlainRow("Path", edit);
+        refreshers_.push_back([this, edit] {
+            const QSignalBlocker b(edit);
+            edit->setChecked(ctx_.tool == Tool::Pen);
+        });
+        auto* closed = new ui::Switch;
+        closed->setToolTip("The last point joins the first");
+        connect(closed, &QAbstractButton::toggled, this, [this, id](bool v) {
+            if (Layer* l = ctx_.comp().findLayer(id)) {
+                l->shape.path.closed = v;
+                ctx_.touch();
+            }
+        });
+        section->addPlainRow("Closed", closed);
+        refreshers_.push_back([this, id, closed] {
+            if (const Layer* l = ctx_.comp().findLayer(id)) {
+                const QSignalBlocker b(closed);
+                closed->setChecked(l->shape.path.closed);
+            }
+        });
+    }
+    auto* repeater = new ui::Switch;
+    repeater->setToolTip("Copies of the shape, each moved, turned and scaled from the last (After Effects' Repeater)");
+    connect(repeater, &QAbstractButton::toggled, this, [this](bool v) {
+        for (Layer* l : ctx_.selectedLayers())
+            if (l->type == LayerType::Shape) l->shape.repeater = v;
+        ctx_.touch(); // its rows come and go (the panel rebuilds)
+    });
+    section->addPlainRow("Repeater", repeater);
+    refreshers_.push_back([this, id, repeater] {
+        if (const Layer* l = ctx_.comp().findLayer(id)) {
+            const QSignalBlocker b(repeater);
+            repeater->setChecked(l->shape.repeater);
+        }
+    });
+}
+
+// A clip's time: its speed, direction, time remap, a frozen frame.
+void PropertiesPanel::buildMediaTime(QVBoxLayout* col, Layer& layer) {
+    auto* s = new CollapsibleSection("Speed");
+    const uint64_t id = layer.id;
+    auto* speed = new ui::DragValue;
+    speed->setRange(1.0f, 10000.0f);
+    speed->setSpeed(1.0f);
+    speed->setFormat("%.0f%%");
+    speed->setToolTip("100%: as recorded; 200%: twice as fast (half as long). The first frame stays where it is");
+    connect(speed, &ui::DragValue::valueChanged, this, [this, id](float v) {
+        if (const Layer* l = ctx_.comp().findLayer(id)) {
+            ctx_.comp().duration += kMaxOverhang; // room to grow (fitted again when the edit is done)
+            setClipSpeed(ctx_.comp(), id, v * 0.01, l->media.reversed);
+            ctx_.comp().duration -= kMaxOverhang;
+            ctx_.touch();
+        }
+    });
+    s->addPlainRow("Speed", speed);
+    auto* reverse = new ui::Switch;
+    reverse->setToolTip("Plays the same footage backwards");
+    connect(reverse, &QAbstractButton::toggled, this, [this, id](bool v) {
+        if (const Layer* l = ctx_.comp().findLayer(id)) {
+            setClipSpeed(ctx_.comp(), id, l->media.speed, v);
+            ctx_.touch();
+        }
+    });
+    s->addPlainRow("Reverse", reverse);
+    auto* remap = new ui::Switch;
+    remap->setToolTip("Keyframe which moment of the footage shows at each moment (Time Remap): slow motion, ramps, holds");
+    connect(remap, &QAbstractButton::toggled, this, [this, id](bool v) {
+        if (setTimeRemap(ctx_.comp(), id, v)) ctx_.touch(); // its row comes and goes (the panel rebuilds)
+    });
+    s->addPlainRow("Time Remap", remap);
+    auto* buttons = new QHBoxLayout;
+    auto* freeze = new QPushButton("Freeze Frame");
+    freeze->setToolTip("The whole clip holds the frame under the playhead");
+    connect(freeze, &QPushButton::clicked, this, [this, id] {
+        if (freezeFrame(ctx_.comp(), id, ctx_.time)) ctx_.touch();
+    });
+    buttons->addWidget(freeze);
+    auto* more = new QPushButton("Speed / Duration...");
+    connect(more, &QPushButton::clicked, this, [this, id] {
+        ctx_.select(id);
+        ui::showSpeedDialog(ctx_, this);
+    });
+    buttons->addWidget(more);
+    buttons->addStretch();
+    s->body()->addLayout(buttons);
+    col->addWidget(s);
+    refreshers_.push_back([this, id, speed, reverse, remap] {
+        const Layer* l = ctx_.comp().findLayer(id);
+        if (!l) return;
+        speed->setValue(static_cast<float>(l->media.speed * 100.0));
+        speed->setEnabled(!l->media.timeRemap);
+        const QSignalBlocker a(reverse), b(remap);
+        reverse->setChecked(l->media.reversed);
+        reverse->setEnabled(!l->media.timeRemap);
+        remap->setChecked(l->media.timeRemap);
+    });
+}
+
+// How the layer mixes with what is under it, and its track matte.
+void PropertiesPanel::buildBlending(QVBoxLayout* col, Layer& layer) {
+    auto* s = new CollapsibleSection("Blending");
+    const uint64_t id = layer.id;
+    auto* mode = choiceCombo(kBlendModeLabels, static_cast<int>(layer.blend), [this](int i) {
+        for (Layer* l : ctx_.selectedLayers())
+            if (l->type != LayerType::Camera) l->blend = static_cast<BlendMode>(i);
+        ctx_.touch();
+    });
+    mode->setToolTip("How its colors mix with the layers under it");
+    s->addPlainRow("Mode", mode);
+    // The track matte: a mode, and the layer beside it whose picture decides.
+    std::vector<uint64_t> candidates;
+    for (int i = 0; i < static_cast<int>(ctx_.comp().layers.size()); ++i) {
+        const Layer& other = ctx_.comp().layers[i];
+        if (other.id != id && other.parent == layer.parent && other.type != LayerType::Camera) candidates.push_back(other.id);
+    }
+    auto* matte = choiceCombo(kMatteModeLabels, static_cast<int>(layer.matte), [this, id, candidates](int i) {
+        Layer* l = ctx_.comp().findLayer(id);
+        if (!l) return;
+        if (i == 0 || candidates.empty()) {
+            l->matte = MatteMode::None;
+            l->matteLayer = 0;
+        } else {
+            if (!l->matteLayer) { // the layer right above it, as After Effects does
+                const int at = ctx_.comp().indexOf(id);
+                uint64_t above = candidates.front();
+                for (uint64_t c : candidates)
+                    if (ctx_.comp().indexOf(c) < at) above = c;
+                l->matteLayer = above;
+            }
+            l->matte = static_cast<MatteMode>(i);
+        }
+        ctx_.touch();
+    });
+    matte->setToolTip("Shows this layer only where another one is opaque (Alpha) or bright (Luma); that one is then not drawn");
+    matte->setEnabled(!candidates.empty());
+    s->addPlainRow("Track Matte", matte);
+    auto* source = newCombo();
+    for (uint64_t c : candidates)
+        if (const Layer* other = ctx_.comp().findLayer(c))
+            source->addItem(ui::makeIcon(ui::iconForLayer(*other), theme::kTextDim, 16), QString::fromStdString(other->name), QVariant::fromValue<qulonglong>(c));
+    connect(source, &QComboBox::activated, this, [this, id, source](int i) {
+        Layer* l = ctx_.comp().findLayer(id);
+        if (!l || i < 0) return;
+        l->matteLayer = source->itemData(i).toULongLong();
+        if (l->matte == MatteMode::None) l->matte = MatteMode::Alpha;
+        ctx_.touch();
+    });
+    s->addPlainRow("Matte Layer", source);
+    // Masks: added here (fitted to it, or drawn with the Pen); each gets a section above.
+    auto* masks = new QPushButton(ui::makeIcon(ui::Icon::Mask, theme::kTextDim, 16), "Add Mask");
+    masks->setToolTip("Cut the layer to a shape: a rectangle or an ellipse over it, or one drawn with the Pen (G)");
+    connect(masks, &QPushButton::clicked, this, [this, masks] {
+        QMenu menu;
+        ui::fillMaskMenu(&menu, ctx_);
+        menu.exec(masks->mapToGlobal(QPoint(0, masks->height())));
+    });
+    s->addPlainRow("Masks", masks);
+    col->addWidget(s);
+    refreshers_.push_back([this, id, mode, matte, source] {
+        const Layer* l = ctx_.comp().findLayer(id);
+        if (!l) return;
+        const QSignalBlocker a(mode), b(matte), c(source);
+        if (!mode->view()->isVisible()) mode->setCurrentIndex(static_cast<int>(l->blend));
+        if (!matte->view()->isVisible()) matte->setCurrentIndex(static_cast<int>(l->matte));
+        source->setEnabled(l->matte != MatteMode::None);
+        if (!source->view()->isVisible()) source->setCurrentIndex(l->matte == MatteMode::None ? -1 : source->findData(QVariant::fromValue<qulonglong>(l->matteLayer)));
+    });
+}
+
+// A mask's settings above its feather, opacity and expansion: how it combines, inverted, on.
+void PropertiesPanel::buildMaskRows(CollapsibleSection* section, Layer& layer, int index) {
+    const uint64_t id = layer.id;
+    auto mask = [this, id, index]() -> Mask* {
+        Layer* l = ctx_.comp().findLayer(id);
+        return l && index < static_cast<int>(l->masks.size()) ? &l->masks[index] : nullptr;
+    };
+    auto* mode = choiceCombo(kMaskModeLabels, static_cast<int>(layer.masks[index].mode), [this, mask](int i) {
+        if (Mask* m = mask()) {
+            m->mode = static_cast<MaskMode>(i);
+            ctx_.touch();
+        }
+    });
+    mode->setToolTip("Add: shows its inside; Subtract: takes it away; Intersect: only where it overlaps the masks above; Difference: where only one is");
+    section->addPlainRow("Mode", mode);
+    auto* inverted = new ui::Switch;
+    connect(inverted, &QAbstractButton::toggled, this, [this, mask](bool v) {
+        if (Mask* m = mask()) {
+            m->inverted = v;
+            ctx_.touch();
+        }
+    });
+    section->addPlainRow("Inverted", inverted);
+    auto* enabled = new ui::Switch;
+    enabled->setToolTip("Turn the mask off without losing it");
+    connect(enabled, &QAbstractButton::toggled, this, [this, mask](bool v) {
+        if (Mask* m = mask()) {
+            m->enabled = v;
+            ctx_.touch();
+        }
+    });
+    section->addPlainRow("Enabled", enabled);
+    // Its points (the Pen), its name, removing it: small buttons on the right.
+    auto* row = new QHBoxLayout;
+    row->addStretch();
+    auto* edit = new ui::IconButton(ui::Icon::Pen, "Edit its points with the Pen (G): drag points and handles in the viewport", 26);
+    connect(edit, &QAbstractButton::clicked, this, [this] { ctx_.tool = Tool::Pen; });
+    row->addWidget(edit);
+    auto* rename = new ui::IconButton(ui::Icon::Edit, "Rename this mask", 26);
+    connect(rename, &QAbstractButton::clicked, this, [this, mask] {
+        Mask* m = mask();
+        if (!m) return;
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, "Mask", "Name:", QLineEdit::Normal, QString::fromStdString(m->name), &ok);
+        if (ok && !name.trimmed().isEmpty() && (m = mask())) {
+            m->name = name.trimmed().toStdString();
+            ctx_.touch();
+        }
+    });
+    row->addWidget(rename);
+    auto* remove = new ui::IconButton(ui::Icon::Trash, "Delete this mask", 26);
+    connect(remove, &QAbstractButton::clicked, this, [this, id, index] {
+        Layer* l = ctx_.comp().findLayer(id);
+        if (!l || index >= static_cast<int>(l->masks.size())) return;
+        l->masks.erase(l->masks.begin() + index);
+        ctx_.touch();
+    });
+    row->addWidget(remove);
+    section->body()->addLayout(row);
+    refreshers_.push_back([mask, mode, inverted, enabled] {
+        const Mask* m = mask();
+        if (!m) return;
+        const QSignalBlocker a(mode), b(inverted), c(enabled);
+        if (!mode->view()->isVisible()) mode->setCurrentIndex(static_cast<int>(m->mode));
+        inverted->setChecked(m->inverted);
+        enabled->setChecked(m->enabled);
+    });
 }
 
 void PropertiesPanel::buildCaptions(QVBoxLayout* col, Layer& layer) {

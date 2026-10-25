@@ -236,11 +236,29 @@ operations. Effect ids (`effectId`) are stable strings.
 - **`Transitions`** — a clip's way in and out (fade, slides, zoom, pop, spin),
   written as keyframes at its edges with the preset engine.
 - **`Arrange`** — distribute layers evenly, stagger start times.
+- **`Editing`** — the timeline edits the editor and operations share:
+  ripple delete, close gap, ripple trim, rolling edit, slip, a clip's speed and
+  direction (`setClipSpeed`), Time Remap and Freeze Frame (`setTimeRemap`,
+  `freezeFrame`), markers (`Composition::markers`, sorted, one per moment).
+  Footage's source time is `MediaProps::sourceTime` (speed, reverse, remap);
+  `Composition::sourceSpan` is where a clip has source frames (its trims stop
+  there).
 - **`Clipboard`** — copy / paste of layers as text (compounds with their
   contents, media items along), pasted at a time with fresh ids.
 - **`Data`** — CSV in and out, people's numbers (`1.234,5`, `R$ 12`), and the
   two data shapes of plugin objects: chart rows and `DataTable`s.
-- **`Geometry`**, **`Snapping`** — shape outlines and trim paths; 1-D snapping.
+- **`Geometry`**, **`Snapping`** — shape outlines and trim paths; Bézier
+  paths (`BezierPath`: points with relative handles; shapes converted to them,
+  flattened, split at a point); 1-D snapping.
+- **Paths, masks, mattes, blending** (`Layer.h`): `ShapeKind::Path` holds a
+  `BezierPath` (the Pen draws it); `Layer::masks` cut a layer before its
+  effects (each a path, a mode, inverted, and feather / opacity / expansion
+  as properties `mask<i>.*`, saved with the mask); `Layer::blend` and the track
+  matte (`matte` + `matteLayer`, a layer beside it, which is then not drawn:
+  `Composition::isMatte`). `Validate` keeps mattes beside their layer, never
+  themselves nor in a loop; removing or grouping a layer drops mattes that no
+  longer hold. Solo (`Layer::solo`, `Composition::soloedOut`) and mute act per
+  level (the timeline toggles a whole track).
 
 ## 4. Changing a project: the three paths
 
@@ -282,6 +300,15 @@ Rules:
   Blur).
 - Effects become an `SkImageFilter` chain applied in output pixels; Motion Blur
   averages moments inside the shutter.
+- Around that, per layer: masks (a layer of the content, cut `kDstIn` by the
+  masks' coverage, each composed by its mode; feather is a blur mask filter in
+  layer space), then the blending mode and the track matte (`drawLayerIn`: the
+  layer in a layer of its own, restored with its `SkBlendMode`; the matte drawn
+  into it `kDstIn` / `kDstOut`, through a luma color filter for luma mattes).
+  A `Place` says where the layers beside one land (a frame's camera at the
+  top, a compound's transform inside it), so the matte is drawn where it is.
+  Shapes add gradients, dashes (composed with the trim) and the repeater's
+  copies.
 - **Text** (`Text.cpp`): SkShaper (HarfBuzz + ICU) with font fallback, shaped
   lines cached. **Fonts** (`Fonts.cpp`): the platform font manager plus the
   bundled Inter (`assets/fonts`).
@@ -416,6 +443,15 @@ Rules:
 - **Media folders** (`Composition::mediaFolders`, `MediaItem::folder`) are
   names only, for the Media panel; changed through `folder.*` and
   `media.move`; `Validate` keeps every item's folder in the list.
+- **Pen and paths** (`ViewportPanel`): `Tool::Pen` draws a new path shape,
+  or a mask on a selected layer that is not a shape; the selected layer's path
+  and masks show their points and handles (dragged with any tool). The
+  timeline's Ripple / Roll / Slip tools (`Tool::Ripple`…) redo their edit from
+  a copy of the composition taken when the drag started (`dragBase_`), and
+  markers live on its ruler. J / K / L set `EditorContext::playRate` (sound
+  only at 1x). `ui/LayerMenus` holds the menus the Layer menu and the right
+  clicks share (time, blending, track matte, masks) and the Speed / Duration
+  dialog.
 - **Export Frame** renders the frame at the playhead through
   `renderFramesPng` (the same as `bemotion render`), to a file or the
   clipboard.

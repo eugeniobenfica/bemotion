@@ -155,7 +155,7 @@ void applyExperience(const std::string& experience) {
         s.showRulers = false;
         s.advanced = false;
     } else if (s.experience == "expert") {
-        s.toolbar = {"select", "razor", "crop", "split", "compound", "duplicate", "easy_ease", "forward", "backward", "delete"};
+        s.toolbar = {"select", "razor", "pen", "ripple", "roll", "slip", "crop", "split", "compound", "duplicate", "easy_ease", "delete"};
         s.showMeters = true;
         s.showRulers = true;
         s.showExpressionButtons = s.showGraphButton = true;

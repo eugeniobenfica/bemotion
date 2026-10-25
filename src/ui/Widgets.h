@@ -127,6 +127,17 @@ enum class Icon {
     Eyedropper,     // picks a color from the screen
     Meter,          // audio meters: two level bars
     Snapshot,       // a photo camera: save the frame as a picture
+    Pen,            // the pen tool: a nib
+    PathShape,      // a path shape: a curve between two points
+    Mask,           // a mask: a dashed outline on a square
+    RippleEdit,     // the ripple edit tool: an edge with arrows pushing the next clip
+    RollEdit,       // the rolling edit tool: a cut between two clips, arrows both ways
+    SlipEdit,       // the slip tool: a clip with arrows inside it
+    Marker,         // a marker: a flag on the ruler
+    Speaker,        // sound on
+    SpeakerMuted,   // sound off
+    Solo,           // solo: headphones
+    Speed,          // a clip's speed: a gauge
 };
 
 Icon iconForLayer(const Layer& layer);

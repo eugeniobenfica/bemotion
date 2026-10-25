@@ -16,6 +16,13 @@ bool finite(Color c) { return std::isfinite(c.r) && std::isfinite(c.g) && std::i
 
 std::string layerName(const Layer& l) { return "layer " + std::to_string(l.id) + " \"" + l.name + "\""; }
 
+// Drops the vertices with numbers that are not numbers; true when some went.
+bool cleanPath(BezierPath& path) {
+    const size_t before = path.vertices.size();
+    std::erase_if(path.vertices, [](const PathVertex& v) { return !finite(v.point) || !finite(v.in) || !finite(v.out); });
+    return path.vertices.size() != before;
+}
+
 // Checks every rule and repairs as it goes; validate() runs it on a copy.
 class Checker {
 public:
@@ -24,6 +31,7 @@ public:
         composition();
         mediaItems();
         layers();
+        mattes();
         tracks();
         return std::move(issues_);
     }
@@ -71,6 +79,15 @@ private:
                 report("composition", "a guide has an invalid position");
                 g.position = 0.0f;
             }
+        // Markers: at a real moment, in order, one per moment, with a label color.
+        const auto before = c.markers;
+        std::erase_if(c.markers, [](const Marker& m) { return !std::isfinite(m.time) || m.time < 0.0; });
+        std::stable_sort(c.markers.begin(), c.markers.end(), [](const Marker& a, const Marker& b) { return a.time < b.time; });
+        for (size_t i = 1; i < c.markers.size();)
+            if (c.markers[i].time - c.markers[i - 1].time < kTimeEpsilon) c.markers.erase(c.markers.begin() + static_cast<std::ptrdiff_t>(i));
+            else ++i;
+        for (Marker& m : c.markers) m.color = std::clamp(m.color, 0, kLabelColorCount - 1);
+        if (c.markers != before) report("composition", "markers out of order, repeated or at invalid times (put in order)");
     }
 
     void mediaItems() {
@@ -189,6 +206,36 @@ private:
                 report(where, "unknown shape kind");
                 l.shape.kind = ShapeKind::Rectangle;
             }
+            if (static_cast<int>(l.shape.fill) < 0 || l.shape.fill >= ShapeFill::Count) {
+                report(where, "unknown fill");
+                l.shape.fill = ShapeFill::Solid;
+            }
+            if (cleanPath(l.shape.path)) report(where, "path points with invalid numbers (removed)");
+            if (static_cast<int>(l.blend) < 0 || l.blend >= BlendMode::Count) {
+                report(where, "unknown blending mode");
+                l.blend = BlendMode::Normal;
+            }
+            if (static_cast<int>(l.matte) < 0 || l.matte >= MatteMode::Count) {
+                report(where, "unknown track matte");
+                l.matte = MatteMode::None;
+            }
+            if (l.matte == MatteMode::None) l.matteLayer = 0;
+            for (Mask& m : l.masks) {
+                if (static_cast<int>(m.mode) < 0 || m.mode >= MaskMode::Count) {
+                    report(where, "a mask with an unknown mode");
+                    m.mode = MaskMode::Add;
+                }
+                if (cleanPath(m.path)) report(where, "mask points with invalid numbers (removed)");
+                if (m.name.empty()) m.name = "Mask";
+            }
+            if (l.type == LayerType::Camera && !l.masks.empty()) {
+                report(where, "cameras take no masks (removed)");
+                l.masks.clear();
+            }
+            if (!finite(l.media.speed) || l.media.speed < 0.01 || l.media.speed > 100.0) {
+                report(where, "speed must be 1% to 10000%");
+                l.media.speed = finite(l.media.speed) ? std::clamp(l.media.speed, 0.01, 100.0) : 1.0;
+            }
             if (static_cast<int>(l.text.align) < 0 || static_cast<int>(l.text.align) > static_cast<int>(TextAlign::Right)) {
                 report(where, "unknown text alignment");
                 l.text.align = TextAlign::Center;
@@ -275,6 +322,27 @@ private:
                     animated(at, prop.asColor(), def.size() >= 4 ? Color{def[0], def[1], def[2], def[3]} : Color{1, 1, 1, 1});
                     break;
                 }
+            }
+        }
+    }
+
+    // A track matte is another layer beside this one (same compound), not a camera, and no layer
+    // ends up being its own matte through others.
+    void mattes() {
+        Composition& c = p_.comp;
+        for (Layer& l : c.layers) {
+            if (l.matte == MatteMode::None) continue;
+            const Layer* m = c.findLayer(l.matteLayer);
+            bool cycle = false;
+            size_t steps = 0;
+            for (const Layer* q = m; q && q->matte != MatteMode::None && !cycle; ++steps) {
+                if (q->matteLayer == l.id || steps > c.layers.size()) cycle = true;
+                q = c.findLayer(q->matteLayer);
+            }
+            if (!m || m->id == l.id || m->parent != l.parent || m->type == LayerType::Camera || cycle) {
+                report(layerName(l), "its track matte is missing, elsewhere, a camera or itself (removed)");
+                l.matte = MatteMode::None;
+                l.matteLayer = 0;
             }
         }
     }

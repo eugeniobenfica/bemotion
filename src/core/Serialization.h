@@ -5,6 +5,8 @@
 #include "core/Project.h"
 #include "core/Validate.h"
 
+#include <nlohmann/json.hpp>
+
 #include <filesystem>
 #include <string>
 
@@ -20,5 +22,10 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
 bool saveProject(const Project& project, const std::filesystem::path& path, std::string* error = nullptr);
 bool loadProject(const std::filesystem::path& path, Project& out, std::string* error = nullptr,
                  std::vector<Issue>* repairs = nullptr);
+
+// A Bézier path as {"closed": true, "vertices": [[x, y, in_x, in_y, out_x, out_y], ...]} (a
+// vertex may be just [x, y]: a corner). Also what operations take for "path".
+nlohmann::json pathToJson(const BezierPath& path);
+bool pathFromJson(const nlohmann::json& j, BezierPath& out, std::string* error = nullptr);
 
 } // namespace bemotion

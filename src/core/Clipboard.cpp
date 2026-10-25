@@ -84,6 +84,13 @@ std::vector<uint64_t> pasteLayers(Composition& comp, const std::string& text, do
         if (inClip(src.parent)) l->parent = ids[src.parent];
         else l->parent = comp.findLayer(scope) && l->type != LayerType::Camera ? scope : 0; // no compound copied: where we paste
     }
+    // A track matte copied along: its copy. Otherwise the matte stays only beside its layer.
+    for (const Layer& src : clip.comp.layers) {
+        Layer* l = comp.findLayer(ids[src.id]);
+        const Layer* matte = src.matte != MatteMode::None && inClip(src.matteLayer) ? comp.findLayer(ids[src.matteLayer]) : nullptr;
+        if (matte && matte->parent == l->parent) l->matteLayer = matte->id;
+        else if (src.matte != MatteMode::None) l->matte = MatteMode::None, l->matteLayer = 0;
+    }
     comp.normalizeTracks();
     comp.fitDuration();
     return top;

@@ -105,9 +105,21 @@ does.
 
 ### ✦ Create
 - **Objects**: text, counter, subtitles, rectangle, ellipse, polygon, star,
-  line, camera, background and plugin objects — click to add (or the *Add*
+  line, path, camera, background and plugin objects — click to add (or the *Add*
   menu), or drag onto the canvas or the timeline; right-click one on the
   canvas for its menu
+- **Pen tool** (G): click to place points, drag for curves, click the first
+  point to close — a Bézier shape; drag points and handles (Alt: a corner),
+  click the outline to add a point, Ctrl+click to remove one. Any shape turns
+  into one (*Convert to Bézier Path*). Shapes take **gradients** (linear,
+  radial), **dashed** strokes and a **Repeater** (copies stepping in position,
+  rotation and scale, fading out)
+- **Masks**: a rectangle or ellipse over a layer, or drawn with the Pen on a
+  selected layer; feather, opacity, expansion (all animatable), Add /
+  Subtract / Intersect / Difference, inverted
+- **Track mattes and blending modes**, as in After Effects: a layer shows
+  only through another one's alpha or brightness (inverted too), and mixes
+  with what is under it (Multiply, Screen, Overlay, Add, Color… 17 modes)
 - **Counter**: a number that counts up by itself from its clip's start
   (Start → End, for how long, eased; digits that do not shake), with decimals,
   thousands separators (1,234.5 or 1.234,5), a prefix and a suffix (R$, %)
@@ -172,9 +184,18 @@ does.
 
 ### ✦ Edit
 - **Timeline** with multi-clip tracks, trimming, cut tool (C), split at
-  playhead (Ctrl+K), snapping to clips, keys and the playhead; dragging the
+  playhead (Ctrl+K), snapping to clips, keys, markers and the playhead; dragging the
   playhead past an edge scrolls the timeline along; a **scrollbar** under the
   tracks moves along long projects (drag its ends to zoom, as in Premiere)
+- **Editing like Premiere**: Ripple Edit (B), Rolling Edit (N) and Slip (Y)
+  tools, Ripple Delete (Shift+Del), Close Gap, ripple trims to the playhead
+  (Q / W), **J / K / L** to play backwards, stop and forward (again: faster)
+- **Speed**: a clip at any speed (Ctrl+R, *Speed / Duration*), reversed,
+  **Time Remap** (keyframe which moment of the footage shows: ramps, slow
+  motion) and **Freeze Frame**; the sound follows
+- **Markers** (M; Shift+M / Ctrl+Shift+M to step between them): named and
+  colored on the ruler, dragged, snapped to
+- **Solo and mute** per track, next to its eye and lock
 - **Your own toolbar**: the toolbar's *+* opens every tool; drag them into
   the toolbar, reorder them, drag them out to remove; drag its grip and it
   follows the mouse, showing where it can go: along any window edge, over the
@@ -243,7 +264,8 @@ does.
   and a clip light (View › Audio Meters, or Settings › Interface)
 - Each object says what it has: effects and transitions at the top of
   Properties; the Transitions panel shows the clip's in and out transitions,
-  their durations and a remove button
+  their durations and a remove button; clips in the timeline name their
+  speed, matte, blending mode and masks
 
 </td>
 <td valign="top">
@@ -444,8 +466,15 @@ current ones.
 | <kbd>Space</kbd> | Play / pause (hold + drag: pan the viewport) |
 | <kbd>←</kbd> / <kbd>→</kbd> (Shift: ×10) | Previous / next frame |
 | <kbd>Home</kbd> / <kbd>End</kbd> | Go to start / end |
-| <kbd>J</kbd> / <kbd>K</kbd> | Previous / next keyframe |
+| <kbd>J</kbd> / <kbd>K</kbd> / <kbd>L</kbd> | Play backwards / stop / play forward (again: faster) |
+| <kbd>Shift</kbd>+<kbd>J</kbd> / <kbd>Shift</kbd>+<kbd>K</kbd> | Previous / next keyframe |
+| <kbd>M</kbd> (<kbd>Shift</kbd>+<kbd>M</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd>) | Add a marker (next / previous marker) |
 | <kbd>V</kbd> / <kbd>C</kbd> | Selection tool / Cut tool |
+| <kbd>G</kbd> | Pen tool (Bézier shapes; a mask on a selected layer that is not a shape) |
+| <kbd>B</kbd> / <kbd>N</kbd> / <kbd>Y</kbd> | Ripple Edit / Rolling Edit / Slip tools |
+| <kbd>Q</kbd> / <kbd>W</kbd> | Ripple trim the clip's start / end to the playhead |
+| <kbd>Shift</kbd>+<kbd>Delete</kbd> | Ripple Delete: delete and close the gap |
+| <kbd>Ctrl</kbd>+<kbd>R</kbd> | Speed / Duration of a video or audio clip |
 | <kbd>Ctrl</kbd>+<kbd>K</kbd> | Split selected layers at the playhead |
 | <kbd>T</kbd> | Add text (double-click a text to edit it) |
 | <kbd>Ctrl</kbd>+<kbd>A</kbd> | Select all layers |

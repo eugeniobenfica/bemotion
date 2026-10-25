@@ -5,6 +5,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <type_traits>
@@ -98,7 +99,7 @@ void decodeProperty(const json& j, const PropertyRef& p) {
 
 // --- enums -------------------------------------------------------------------
 
-constexpr const char* kShapeIds[] = {"rectangle", "ellipse", "polygon", "star", "line"};
+constexpr const char* kShapeIds[] = {"rectangle", "ellipse", "polygon", "star", "line", "path"};
 constexpr const char* kWeightIds[] = {"regular", "medium", "semibold", "bold"};
 constexpr const char* kAlignIds[] = {"left", "center", "right"};
 
@@ -107,6 +108,42 @@ E enumFromId(const char* const (&ids)[N], const std::string& id, E fallback) {
     for (size_t i = 0; i < N; ++i)
         if (id == ids[i]) return static_cast<E>(i);
     return fallback;
+}
+
+template <size_t N>
+const char* idOrFirst(const char* const (&ids)[N], int i) { return ids[i >= 0 && i < static_cast<int>(N) ? i : 0]; }
+
+// --- masks -----------------------------------------------------------------------
+
+json encodeMasks(const std::vector<Mask>& masks) {
+    json out = json::array();
+    for (const Mask& m : masks) {
+        json j = {{"name", m.name}, {"mode", idOrFirst(kMaskModeIds, static_cast<int>(m.mode))}, {"path", pathToJson(m.path)},
+                  {"feather", encodeAnimated(m.feather)}, {"opacity", encodeAnimated(m.opacity)}, {"expansion", encodeAnimated(m.expansion)}};
+        if (m.inverted) j["inverted"] = true;
+        if (!m.enabled) j["enabled"] = false;
+        out.push_back(std::move(j));
+    }
+    return out;
+}
+
+std::vector<Mask> decodeMasks(const json& list) {
+    std::vector<Mask> masks;
+    if (!list.is_array()) return masks;
+    for (const json& j : list) {
+        if (!j.is_object()) continue;
+        Mask m;
+        m.name = j.value("name", std::string("Mask ") + std::to_string(masks.size() + 1));
+        m.mode = enumFromId(kMaskModeIds, j.value("mode", std::string()), MaskMode::Add);
+        if (j.contains("path")) pathFromJson(j["path"], m.path);
+        m.inverted = j.value("inverted", false);
+        m.enabled = j.value("enabled", true);
+        if (j.contains("feather")) decodeAnimated(j["feather"], m.feather);
+        if (j.contains("opacity")) decodeAnimated(j["opacity"], m.opacity);
+        if (j.contains("expansion")) decodeAnimated(j["expansion"], m.expansion);
+        masks.push_back(std::move(m));
+    }
+    return masks;
 }
 
 // --- plugin objects --------------------------------------------------------------
@@ -226,20 +263,31 @@ json encodeLayer(const Layer& constLayer) {
                                                     : "shape";
     j["visible"] = layer.visible;
     j["locked"] = layer.locked;
+    if (layer.muted) j["muted"] = true;
+    if (layer.solo) j["solo"] = true;
     if (layer.threeD) j["three_d"] = true;
+    if (layer.blend != BlendMode::Normal) j["blend"] = idOrFirst(kBlendModeIds, static_cast<int>(layer.blend));
+    if (layer.matte != MatteMode::None)
+        j["matte"] = {{"mode", idOrFirst(kMatteModeIds, static_cast<int>(layer.matte))}, {"layer", layer.matteLayer}};
+    if (!layer.masks.empty()) j["masks"] = encodeMasks(layer.masks);
     j["label"] = layer.label;
     j["in"] = layer.inPoint;
     j["out"] = layer.outPoint;
     if (layer.type == LayerType::Shape) {
-        j["shape"] = {{"kind", kShapeIds[static_cast<int>(layer.shape.kind)]},
-                      {"fill", layer.shape.fillEnabled},
-                      {"stroke", layer.shape.strokeEnabled}};
+        const ShapeProps& s = layer.shape;
+        j["shape"] = {{"kind", idOrFirst(kShapeIds, static_cast<int>(s.kind))}, {"fill", s.fillEnabled}, {"stroke", s.strokeEnabled}};
+        if (s.fill != ShapeFill::Solid) j["shape"]["gradient"] = idOrFirst(kShapeFillIds, static_cast<int>(s.fill));
+        if (s.repeater) j["shape"]["repeater"] = true;
+        if (s.kind == ShapeKind::Path) j["shape"]["path"] = pathToJson(s.path);
     } else if (layer.type == LayerType::Plugin) {
         j["plugin"] = encodePlugin(layer.plugin);
     } else if (layer.type == LayerType::Media) {
         const MediaProps& m = layer.media;
         j["media"] = {{"id", m.mediaId}, {"size", encode(m.size)}, {"start", m.start}, {"video", m.hasVideo},
                       {"audio", m.hasAudio}};
+        if (m.speed != 1.0) j["media"]["speed"] = m.speed;
+        if (m.reversed) j["media"]["reversed"] = true;
+        if (m.timeRemap) j["media"]["time_remap"] = true; // its keyframes: the "time_remap" property
     } else if (layer.type == LayerType::Background) {
         j["background"] = {{"fill", backgroundFillId(layer.background.fill)}, {"media", layer.background.mediaId},
                            {"fit", backgroundFitId(layer.background.fit)}};
@@ -279,7 +327,7 @@ json encodeLayer(const Layer& constLayer) {
     }
     json props = json::object();
     for (const auto& p : layer.properties())
-        if (p.effectIndex < 0) props[p.id] = encodeProperty(p); // effect parameters live in "effects"
+        if (p.effectIndex < 0 && p.maskIndex < 0) props[p.id] = encodeProperty(p); // effects' and masks' live with them
     j["properties"] = std::move(props);
     if (!layer.effects.empty()) {
         json effects = json::array();
@@ -331,6 +379,9 @@ Layer decodeLayer(const json& j) {
         layer.media.start = m->value("start", 0.0);
         layer.media.hasVideo = m->value("video", true);
         layer.media.hasAudio = m->value("audio", false);
+        layer.media.speed = m->value("speed", 1.0);
+        layer.media.reversed = m->value("reversed", false);
+        layer.media.timeRemap = m->value("time_remap", false);
     }
     if (const auto b = j.find("background"); b != j.end() && b->is_object()) { // before properties: the fill decides which exist
         const std::string fill = b->value("fill", std::string("linear")), fit = b->value("fit", std::string("cover"));
@@ -342,7 +393,15 @@ Layer decodeLayer(const json& j) {
     }
     layer.visible = j.value("visible", true);
     layer.locked = j.value("locked", false);
+    layer.muted = j.value("muted", false);
+    layer.solo = j.value("solo", false);
     layer.threeD = j.value("three_d", false); // before properties: a 3D layer has a Z position
+    layer.blend = enumFromId(kBlendModeIds, j.value("blend", std::string()), BlendMode::Normal);
+    if (const auto mt = j.find("matte"); mt != j.end() && mt->is_object()) {
+        layer.matte = enumFromId(kMatteModeIds, mt->value("mode", std::string()), MatteMode::None);
+        layer.matteLayer = mt->value("layer", uint64_t{0});
+    }
+    if (j.contains("masks")) layer.masks = decodeMasks(j["masks"]);
     layer.label = j.value("label", 0);
     layer.inPoint = j.value("in", 0.0);
     layer.outPoint = j.value("out", 10.0);
@@ -351,6 +410,9 @@ Layer decodeLayer(const json& j) {
         layer.shape.kind = enumFromId(kShapeIds, s.value("kind", std::string()), ShapeKind::Rectangle);
         layer.shape.fillEnabled = s.value("fill", true);
         layer.shape.strokeEnabled = s.value("stroke", false);
+        layer.shape.fill = enumFromId(kShapeFillIds, s.value("gradient", std::string()), ShapeFill::Solid);
+        layer.shape.repeater = s.value("repeater", false); // before properties: its rows exist
+        if (s.contains("path")) pathFromJson(s["path"], layer.shape.path);
     }
     if (j.contains("text")) {
         const auto& t = j["text"];
@@ -448,6 +510,16 @@ std::string serializeProject(const Project& project) {
     json guides = json::array();
     for (const Guide& g : c.guides) guides.push_back({{"vertical", g.vertical}, {"position", g.position}});
     comp["guides"] = std::move(guides);
+    if (!c.markers.empty()) {
+        json markers = json::array();
+        for (const Marker& m : c.markers) {
+            json mj = {{"time", m.time}};
+            if (!m.name.empty()) mj["name"] = m.name;
+            if (m.color) mj["color"] = m.color;
+            markers.push_back(std::move(mj));
+        }
+        comp["markers"] = std::move(markers);
+    }
     json media = json::array();
     for (const MediaItem& m : c.media)
         media.push_back({{"id", m.id}, {"name", m.name}, {"path", m.path}, {"relative", m.relative},
@@ -532,6 +604,8 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
                 if (fj.is_string()) c.mediaFolders.push_back(fj.get<std::string>());
             for (const auto& gj : cj.value("guides", json::array()))
                 c.guides.push_back({gj.value("vertical", true), gj.value("position", 0.0f)});
+            for (const auto& mj : cj.value("markers", json::array()))
+                if (mj.is_object()) c.markers.push_back({mj.value("time", 0.0), mj.value("name", std::string()), mj.value("color", 0)});
         }
         // A damaged or hand-edited file still opens: whatever breaks the rules is fixed here,
         // so the editor (and everything else) only ever sees valid projects.
@@ -543,6 +617,41 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
         if (error) *error = e.what();
         return false;
     }
+}
+
+json pathToJson(const BezierPath& path) {
+    json vertices = json::array();
+    for (const PathVertex& v : path.vertices) {
+        if (v.in == Vec2{} && v.out == Vec2{}) vertices.push_back({v.point.x, v.point.y});
+        else vertices.push_back({v.point.x, v.point.y, v.in.x, v.in.y, v.out.x, v.out.y});
+    }
+    return {{"closed", path.closed}, {"vertices", std::move(vertices)}};
+}
+
+bool pathFromJson(const json& j, BezierPath& out, std::string* error) {
+    auto failed = [&](const char* what) {
+        if (error) *error = what;
+        return false;
+    };
+    const json* list = &j;
+    BezierPath p;
+    if (j.is_object()) {
+        p.closed = j.value("closed", true);
+        if (!j.contains("vertices")) return failed("a path needs \"vertices\": [[x, y], ...]");
+        list = &j["vertices"];
+    }
+    if (!list->is_array()) return failed("\"vertices\" must be a list of [x, y] or [x, y, in_x, in_y, out_x, out_y]");
+    for (const json& v : *list) {
+        if (!v.is_array() || (v.size() != 2 && v.size() != 6) ||
+            !std::all_of(v.begin(), v.end(), [](const json& n) { return n.is_number() && std::isfinite(n.get<double>()); }))
+            return failed("each vertex is [x, y] or [x, y, in_x, in_y, out_x, out_y] (handles relative to the point)");
+        PathVertex pv;
+        pv.point = {v[0].get<float>(), v[1].get<float>()};
+        if (v.size() == 6) pv.in = {v[2].get<float>(), v[3].get<float>()}, pv.out = {v[4].get<float>(), v[5].get<float>()};
+        p.vertices.push_back(pv);
+    }
+    out = std::move(p);
+    return true;
 }
 
 namespace {

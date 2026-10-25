@@ -17,6 +17,7 @@
 #include "ui/AppSignals.h"
 #include "ui/Dialogs.h"
 #include "ui/Keymap.h"
+#include "ui/LayerMenus.h"
 #include "ui/Mime.h"
 #include "ui/Theme.h"
 #include "ui/PreviewWindow.h"
@@ -910,6 +911,18 @@ void EditorWindow::buildMenus() {
         if (!ctx_.selectedKeys.empty()) ctx_.deleteSelectedKeys();
         else ctx_.deleteSelected();
     }));
+    edit->addAction(action(Action::RippleDelete, "Ripple Delete", [this] { ctx_.rippleDeleteSelected(); }));
+    edit->addSeparator();
+    QMenu* markers = edit->addMenu(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), "Markers");
+    markers->addAction(action(Action::AddMarker, "Add Marker", [this] { ctx_.addMarkerAtPlayhead(); }));
+    markers->addAction(action(Action::NextMarker, "Next Marker", [this] { ctx_.jumpToMarker(true); }));
+    markers->addAction(action(Action::PrevMarker, "Previous Marker", [this] { ctx_.jumpToMarker(false); }));
+    markers->addSeparator();
+    QAction* clearMarkers = markers->addAction("Remove All Markers", this, [this] {
+        ctx_.comp().markers.clear();
+        ctx_.touch();
+    });
+    connect(markers, &QMenu::aboutToShow, this, [this, clearMarkers] { clearMarkers->setEnabled(!ctx_.comp().markers.empty()); });
     edit->addSeparator();
     edit->addAction(action(Action::SelectAll, "Select All", [this] { ctx_.selectAll(); }));
     edit->addAction(action(Action::Deselect, "Deselect", [this] {
@@ -922,6 +935,29 @@ void EditorWindow::buildMenus() {
 
     QMenu* layer = bar->addMenu("Layer");
     layer->addAction(action(Action::Split, "Split at Playhead", [this] { ctx_.splitSelectedAtPlayhead(); }));
+    // Time, blending, track matte and masks: filled when shown, for the selection then.
+    QMenu* timeMenu = layer->addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), "Time");
+    connect(timeMenu, &QMenu::aboutToShow, this, [this, timeMenu] {
+        timeMenu->clear();
+        ui::fillTimeMenu(timeMenu, ctx_, this);
+    });
+    layer->addSeparator();
+    QMenu* blendMenu = layer->addMenu("Blending Mode");
+    connect(blendMenu, &QMenu::aboutToShow, this, [this, blendMenu] {
+        blendMenu->clear();
+        ui::fillBlendMenu(blendMenu, ctx_);
+    });
+    QMenu* matteMenu = layer->addMenu("Track Matte");
+    connect(matteMenu, &QMenu::aboutToShow, this, [this, matteMenu] {
+        matteMenu->clear();
+        ui::fillMatteMenu(matteMenu, ctx_);
+    });
+    QMenu* maskMenu = layer->addMenu(ui::menuIcon(ui::Icon::Mask, theme::kTextDim), "Mask");
+    connect(maskMenu, &QMenu::aboutToShow, this, [this, maskMenu] {
+        maskMenu->clear();
+        ui::fillMaskMenu(maskMenu, ctx_);
+    });
+    layer->addAction(ui::menuIcon(ui::Icon::PathShape, theme::kTextDim), "Convert to Bézier Path", this, [this] { ui::convertSelectedToPaths(ctx_); });
     layer->addSeparator();
     layer->addAction(action(Action::CreateCompound, "Create Compound", [this] { ctx_.createCompound(); }));
     layer->addAction(action(Action::ReleaseCompound, "Release Compound", [this] { ctx_.releaseSelectedCompounds(); }));
@@ -934,6 +970,10 @@ void EditorWindow::buildMenus() {
     layer->addAction(action(Action::CutTool, "Cut Tool", [this] { ctx_.tool = Tool::Razor; }));
     layer->addAction(action(Action::CropTool, "Crop Tool", [this] { ctx_.tool = ctx_.tool == Tool::Crop ? Tool::Select : Tool::Crop; }));
     layer->addAction(action(Action::SelectTool, "Selection Tool", [this] { ctx_.tool = Tool::Select; }));
+    layer->addAction(action(Action::PenTool, "Pen Tool", [this] { ctx_.tool = ctx_.tool == Tool::Pen ? Tool::Select : Tool::Pen; }));
+    layer->addAction(action(Action::RippleTool, "Ripple Edit Tool", [this] { ctx_.tool = Tool::Ripple; }));
+    layer->addAction(action(Action::RollTool, "Rolling Edit Tool", [this] { ctx_.tool = Tool::Roll; }));
+    layer->addAction(action(Action::SlipTool, "Slip Tool", [this] { ctx_.tool = Tool::Slip; }));
     layer->addSeparator();
     layer->addAction(action(Action::BringToFront, "Bring to Front", [this] { ctx_.shiftSelected(-1000); }));
     layer->addAction(action(Action::BringForward, "Bring Forward", [this] { ctx_.shiftSelected(-1); }));
@@ -959,6 +999,12 @@ void EditorWindow::buildMenus() {
         actions_[Action::CropTool]->setChecked(ctx_.tool == Tool::Crop);
         actions_[Action::SelectTool]->setCheckable(true);
         actions_[Action::SelectTool]->setChecked(ctx_.tool == Tool::Select);
+        const std::pair<Action, Tool> tools[] = {{Action::PenTool, Tool::Pen}, {Action::RippleTool, Tool::Ripple},
+                                                 {Action::RollTool, Tool::Roll}, {Action::SlipTool, Tool::Slip}};
+        for (const auto& [a, t] : tools) {
+            actions_[a]->setCheckable(true);
+            actions_[a]->setChecked(ctx_.tool == t);
+        }
     });
     connect(layer, &QMenu::aboutToHide, this, [this] {
         for (auto& [a, act] : actions_) act->setEnabled(true); // shortcuts stay usable (they check themselves)
@@ -1141,7 +1187,16 @@ void EditorWindow::buildMenus() {
                     [] { platform::openWithDefaultApp("https://buymeacoffee.com/eugeniobenfica"); });
 
     // Shortcuts without a menu entry.
-    action(Action::PlayPause, "Play / Pause", [this] { ctx_.playing = !ctx_.playing; });
+    action(Action::PlayPause, "Play / Pause", [this] {
+        ctx_.playing = !ctx_.playing;
+        ctx_.playRate = 1.0;
+    });
+    action(Action::ShuttleBack, "Play Backwards", [this] { ctx_.shuttle(-1); });
+    action(Action::ShuttleStop, "Stop", [this] { ctx_.shuttle(0); });
+    action(Action::ShuttleForward, "Play Forward", [this] { ctx_.shuttle(1); });
+    action(Action::RippleTrimStart, "Ripple Trim Start to Playhead", [this] { ctx_.rippleTrimToPlayhead(ClipEdge::In); });
+    action(Action::RippleTrimEnd, "Ripple Trim End to Playhead", [this] { ctx_.rippleTrimToPlayhead(ClipEdge::Out); });
+    action(Action::SpeedDuration, "Speed / Duration", [this] { ui::showSpeedDialog(ctx_, this); });
     action(Action::PrevFrame, "Step Back", [this] { ctx_.stepFrames(-settings().arrowFrames); });
     action(Action::NextFrame, "Step Forward", [this] { ctx_.stepFrames(settings().arrowFrames); });
     action(Action::PrevFrames, "Big Step Back", [this] { ctx_.stepFrames(-settings().bigArrowFrames); });
@@ -1205,7 +1260,7 @@ bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
                 viewport_->setSpaceHeld(true);
             } else if (event->type() == QEvent::KeyRelease && spaceDown_) {
                 spaceDown_ = false;
-                if (!viewport_->setSpaceHeld(false)) ctx_.playing = !ctx_.playing; // not used to pan: play / pause
+                if (!viewport_->setSpaceHeld(false)) ctx_.playing = !ctx_.playing, ctx_.playRate = 1.0; // not used to pan: play / pause
             }
             return true;
         }
@@ -1230,11 +1285,12 @@ void EditorWindow::tick() {
         ctx_.tick(dt);
         // The picture follows the sound's clock (no drift, no audible resync), unless the
         // playhead really jumped (a loop).
-        if (double audio = 0.0; ctx_.playing && media::AudioEngine::get().clock(audio) && std::fabs(audio - ctx_.time) < 0.5)
+        // (Sound plays only at normal speed: shuttling faster or backwards is silent.)
+        if (double audio = 0.0; ctx_.playing && ctx_.playRate == 1.0 && media::AudioEngine::get().clock(audio) && std::fabs(audio - ctx_.time) < 0.5)
             ctx_.time = audio;
     }
     media::MediaManager::get().update(ctx_.comp());
-    media::AudioEngine::get().update(ctx_.comp(), ctx_.time, ctx_.playing);
+    media::AudioEngine::get().update(ctx_.comp(), ctx_.time, ctx_.playing && ctx_.playRate == 1.0);
 
     objects_->sync();
     media_->sync();

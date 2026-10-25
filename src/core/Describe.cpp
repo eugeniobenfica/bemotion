@@ -46,6 +46,23 @@ void describeLayer(std::string& out, Composition& c, Layer& l, int depth) {
     if (l.threeD || l.type == LayerType::Camera) line += "  z " + fmt("%.0f", l.transform.depth.valueAt(l.inPoint)) + (l.threeD ? " (3D)" : "");
     if (!l.visible) line += "  hidden";
     if (l.locked) line += "  locked";
+    if (l.solo) line += "  solo";
+    if (l.muted) line += "  muted";
+    if (l.type == LayerType::Media && l.media.timeRemap) line += l.media.remap.isAnimated() ? "  time remap" : "  frozen frame";
+    else if (l.type == LayerType::Media && (l.media.speed != 1.0 || l.media.reversed))
+        line += "  speed " + fmt("%g", l.media.speed * 100.0) + "%" + (l.media.reversed ? " reversed" : "");
+    if (l.blend != BlendMode::Normal) line += "  blend " + std::string(kBlendModeIds[static_cast<int>(l.blend)]);
+    if (l.matte != MatteMode::None) line += "  matte " + std::string(kMatteModeIds[static_cast<int>(l.matte)]) + " from " + std::to_string(l.matteLayer);
+    if (c.isMatte(l.id)) line += "  (a track matte)";
+    if (l.type == LayerType::Shape && l.shape.kind == ShapeKind::Path)
+        line += "  " + std::to_string(l.shape.path.vertices.size()) + " points" + (l.shape.path.closed ? "" : " open");
+    if (!l.masks.empty()) {
+        std::string masks;
+        for (size_t i = 0; i < l.masks.size(); ++i)
+            masks += (i ? ", " : "") + std::to_string(i) + ":" + kMaskModeIds[static_cast<int>(l.masks[i].mode)] + (l.masks[i].inverted ? " inverted" : "") +
+                     (l.masks[i].enabled ? "" : " (off)");
+        line += "\n" + std::string(6 + depth * 2, ' ') + "masks: " + masks;
+    }
     // What moves: property, keyframe count and span.
     std::string animated;
     for (const PropertyRef& p : l.properties()) {
@@ -87,6 +104,11 @@ std::string describeProject(const Project& project) {
     if (c.layers.empty()) out += "  (none)\n";
     for (Layer& l : c.layers)
         if (!l.parent || !c.findLayer(l.parent)) describeLayer(out, c, l, 0);
+    if (!c.markers.empty()) {
+        out += "Markers:";
+        for (const Marker& m : c.markers) out += " " + seconds(m.time) + " s" + (m.name.empty() ? "" : " " + inQuotes(m.name)) + ";";
+        out.back() = '\n';
+    }
     if (!c.media.empty()) {
         out += "Media:\n";
         for (const MediaItem& m : c.media) {

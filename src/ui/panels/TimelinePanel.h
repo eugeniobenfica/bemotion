@@ -82,7 +82,9 @@ private:
     //   LayerMove  drag a clip: moves it in time and, vertically, onto another
     //              track (drop in a row) or onto a new track (drop between rows)
     //   LayerIn/Out  trim a clip edge
-    enum class Drag { None, Keys, LayerName, LayerMove, LayerIn, LayerOut, TransitionIn, TransitionOut, Playhead };
+    //   RippleIn/Out, Roll, Slip  the editing tools (Tool::Ripple, Roll, Slip); Marker: a marker's flag
+    enum class Drag { None, Keys, LayerName, LayerMove, LayerIn, LayerOut, TransitionIn, TransitionOut, Playhead, Marker,
+                      RippleIn, RippleOut, Roll, Slip };
 
     // One laid out row of the body.
     struct Item {
@@ -178,6 +180,15 @@ private:
     TransitionHit transitionHit(const Item& track, float x) const;
     void clickLayer(uint64_t id);
     void clickTrack(const Item& track);
+    // Markers on the ruler: the one whose flag is under (x, y) (-1: none), dragging, renaming, menus.
+    int markerAt(float x, float y) const;
+    void dragMarkerTo(float x);
+    void renameMarker(int index);
+    void showMarkerMenu(QPoint global, int index, double t);
+    void showGapMenu(QPoint global, uint64_t track, double t); // right-click on empty track space
+    uint64_t cutAt(const Item& row, float x) const;
+    void beginEditDrag(Drag mode, uint64_t id, QPointF pos);
+    void updateEditDrag(QPointF pos);
     void showKeyMenu(QPoint global);
     void startRename(const Item& track);
 
@@ -292,6 +303,8 @@ private:
     };
     std::vector<ClipStart> dragClips_;
     std::vector<std::pair<KeySelection, double>> dragKeys_;
+    Composition dragBase_; // ripple / roll / slip drags: the timeline when they started
+    int dragMarker_ = -1;  // the marker being dragged
     bool keysMoved_ = false;
     double playheadGrab_ = 0.0;
     double followedTime_ = -1.0; // playhead time the view last followed (see sync)

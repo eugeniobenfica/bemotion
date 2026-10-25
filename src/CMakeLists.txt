@@ -1,6 +1,7 @@
 # --- bemotion_core: document model, no UI dependencies -------------------------
 add_library(bemotion_core STATIC
     core/Easing.cpp
+    core/Editing.cpp
     core/Effects.cpp
     core/Expressions.cpp
     core/Geometry.cpp
@@ -73,6 +74,7 @@ add_executable(bemotion WIN32
     ui/HomeScreen.cpp
     ui/IntroScreen.cpp
     ui/Keymap.cpp
+    ui/LayerMenus.cpp
     ui/PagedWindow.cpp
     ui/PropertyRow.cpp
     ui/ExpressionEditor.cpp

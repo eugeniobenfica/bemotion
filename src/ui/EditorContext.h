@@ -5,6 +5,7 @@
 // touch() after a change; the change becomes an undo step once the user
 // releases the mouse / finishes typing (see commitIfIdle).
 
+#include "core/Editing.h"
 #include "core/History.h"
 #include "core/Project.h"
 
@@ -23,8 +24,11 @@ struct KeySelection {
     bool operator==(const KeySelection&) const = default;
 };
 
-// Active editing tool. Razor cuts layers where you click in the timeline.
-enum class Tool { Select, Razor, Crop }; // Crop: the viewport crops videos and images
+// Active editing tool. Razor cuts layers where you click in the timeline; Crop: the viewport
+// crops videos and images; Pen draws Bézier shapes (or, with a layer selected that is not a
+// shape, a mask on it); Ripple / Roll / Slip change how the timeline's clip drags edit
+// (Premiere's ripple edit, rolling edit and slip tools).
+enum class Tool { Select, Razor, Crop, Pen, Ripple, Roll, Slip };
 
 class EditorContext {
 public:
@@ -45,6 +49,10 @@ public:
     double time = 0.0;
     bool playing = false;
     bool loop = true;
+    // Playback speed and direction (J / K / L): 1 plays as usual (with sound), 2 / 4 / 8 faster,
+    // negative backwards. Play / pause goes back to 1.
+    double playRate = 1.0;
+    void shuttle(int direction); // -1: J (backwards, faster each time), 0: K (stop), 1: L
 
     void open(Project p, std::filesystem::path file);
 
@@ -122,6 +130,15 @@ public:
     void shiftSelected(int delta);                   // stacking order of tracks: negative = forward
     void splitSelectedAtPlayhead();        // splits all selected (or all) layers under the playhead
     void splitLayerAt(uint64_t id, double t);
+    // Timeline edits (core/Editing.h) on the selection.
+    void rippleDeleteSelected();                 // removes them and closes the gaps
+    void rippleTrimToPlayhead(ClipEdge edge);    // Q / W: the selected (or every unlocked) clip under the playhead
+    void setSelectedSpeed(double speed, bool reversed, bool ripple); // video / audio clips
+    void freezeSelectedAtPlayhead();
+    void setSelectedTimeRemap(bool on);
+    // Markers at the playhead (M; there already: kept) and stepping to the next / previous one.
+    void addMarkerAtPlayhead();
+    void jumpToMarker(bool forward);
     void deleteSelectedKeys();
     void setSelectedKeysEasing(Easing easing);
     void setSelectedKeysCurve(const BezierEase& curve); // also switches them to Easing::Custom

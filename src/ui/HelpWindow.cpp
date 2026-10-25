@@ -49,6 +49,11 @@ const std::vector<Shortcut>& mouseGestures() {
         {"Alt+Drag", "Break a motion path handle into a corner"},
         {"Shift+Drag", "Constrain a move, uniform scale, 15° rotation"},
         {"Ctrl+Drag", "Move without snapping"},
+        {"Pen: Click / Drag", "Place a point / a smooth point (the first point again closes the path; Enter: done)"},
+        {"Pen: Click an Outline", "Add a point there"},
+        {"Pen: Ctrl+Click / Alt+Click a Point", "Remove it / make it a corner or smooth"},
+        {"Alt+Drag a Path Handle", "Move it alone (a corner)"},
+        {"Double Click a Marker", "Rename it (drag it to move, right-click for its color)"},
         {"Double Click a tab", "Maximize that panel (again to restore)"},
     };
     return items;

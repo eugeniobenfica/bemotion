@@ -96,6 +96,8 @@ int Composition::indexOf(uint64_t id) const {
 
 void Composition::removeLayer(uint64_t id) {
     std::erase_if(layers, [id](const Layer& l) { return l.id == id; });
+    for (Layer& l : layers) // a layer whose matte is gone shows again as it is
+        if (l.matteLayer == id) l.matte = MatteMode::None, l.matteLayer = 0;
 }
 
 std::string Composition::uniqueLayerName(const std::string& base) const {
@@ -270,12 +272,31 @@ void Composition::clipLimits(uint64_t layerId, double& minIn, double& maxOut) co
     minIn = std::max(0.0, prevOut);
     maxOut = std::min(nextIn, duration + kMaxOverhang); // the out point may pass the composition end
     // Video and audio clips cannot be trimmed past their source (stills can).
-    const Layer* l = findLayer(layerId);
-    const MediaItem* item = l && l->type == LayerType::Media ? findMedia(l->media.mediaId) : nullptr;
-    if (item && item->kind != MediaKind::Image && item->duration > 0) {
-        minIn = std::max(minIn, l->media.start);
-        maxOut = std::min(maxOut, l->media.start + item->duration);
+    if (const Layer* l = findLayer(layerId)) {
+        double from = 0, to = 0;
+        sourceSpan(*l, from, to);
+        minIn = std::max(minIn, from);
+        maxOut = std::min(maxOut, to);
     }
+}
+
+void Composition::sourceSpan(const Layer& l, double& from, double& to) const {
+    from = -std::numeric_limits<double>::infinity();
+    to = std::numeric_limits<double>::infinity();
+    const MediaItem* item = l.type == LayerType::Media ? findMedia(l.media.mediaId) : nullptr;
+    if (!item || item->kind == MediaKind::Image || item->duration <= 0 || l.media.timeRemap) return;
+    const double length = item->duration / std::max(1e-6, l.media.speed); // composition seconds of source
+    from = l.media.reversed ? l.media.start - length : l.media.start;
+    to = l.media.reversed ? l.media.start : l.media.start + length;
+}
+
+bool Composition::isMatte(uint64_t id) const {
+    return id && std::any_of(layers.begin(), layers.end(), [id](const Layer& l) { return l.matte != MatteMode::None && l.matteLayer == id; });
+}
+
+bool Composition::soloedOut(const Layer& layer) const {
+    if (layer.solo) return false;
+    return std::any_of(layers.begin(), layers.end(), [&](const Layer& l) { return l.solo && l.parent == layer.parent && l.id != layer.id; });
 }
 
 void Composition::setInPoint(uint64_t layerId, double t) {
@@ -595,6 +616,10 @@ uint64_t Composition::createCompound(const std::vector<uint64_t>& layerIds, doub
         else if (std::find(tracks.begin(), tracks.end(), rows[r].track) != tracks.end() && below == 0) ++removedAbove;
     }
     moveTracks(tracks, below - removedAbove);
+    // A track matte stays beside its layer: grouped apart from it, it is dropped.
+    for (Layer& l : layers)
+        if (const Layer* m = l.matte != MatteMode::None ? findLayer(l.matteLayer) : nullptr; m && m->parent != l.parent)
+            l.matte = MatteMode::None, l.matteLayer = 0;
     return cid;
 }
 

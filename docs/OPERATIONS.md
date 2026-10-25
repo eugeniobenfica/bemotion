@@ -32,11 +32,13 @@ layer and then animate it.
 | Layers | Properties |
 | --- | --- |
 | every layer | `anchor`, `position`, `scale`, `rotation`, `opacity`; 3D layers `position_z`, `rotation_x` (the top tips away), `rotation_y` (the right side turns away) |
-| shapes | `size`, `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end` |
+| shapes | `size` (not paths), `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end`, `stroke_dash` and `stroke_gap` (px; both above 0: a dashed line), `stroke_dash_offset`; with a gradient `fill_color2` and, linear, `fill_angle`; with a repeater `repeat_copies`, `repeat_offset` (`[x, y]` from one copy to the next), `repeat_rotation`, `repeat_scale`, `repeat_end_opacity` |
+| masks (any layer with a picture) | `mask<index>.feather` (px), `mask<index>.opacity`, `mask<index>.expansion` (px, negative shrinks) |
 | text, subtitle, counter | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness`; counter also has `counter_from` and `counter_to` (it counts between them) and `counter_value` (keyframes on it replace the count) |
 | camera | `position`, `position_z`, `rotation_x` (looks down), `rotation_y` (looks left), `rotation`, `camera_zoom` |
 | media with a picture (video, image) | `crop_left`, `crop_top`, `crop_right`, `crop_bottom` (percent of the picture cut away from that side) |
 | media with sound | `volume` |
+| video and audio with Time Remap on | `time_remap` (the source second shown at each moment) |
 | plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
 | effects | `fx<index>.<param>` (e.g. `fx0.size`; `effect.add` lists the params) |
 
@@ -59,16 +61,21 @@ the content: it ends with the last clip, but never passes `max_duration`.
   `image` with `"media": id` and `fit`: `cover`, `contain`, `stretch`) or
   `plugin` (with `"object": "charts.bar"`), or `subtitle` (captions at the
   bottom of the frame, over the whole composition; `captions` or `srt` as in
-  `layer.set`). Background properties:
+  `layer.set`), or `path` (a Bézier shape, as the pen tool draws: `"path":
+  {"closed": true, "vertices": [[x, y], [x, y, in_x, in_y, out_x, out_y],
+  ...]}`, in the layer's own space, handles relative to their point; an open
+  path is a stroked line). Background properties:
   `bg_color`, `bg_color2`, `bg_angle`, `bg_zoom`, `bg_offset`, `bg_darken`.
 - `name`, `text` (text layers), `position` (default: the center), `start`
   (seconds, default 0), `duration` (default 5; media: their own length),
   `three_d` (a 3D layer) and `z` (its Z position; alone it makes the layer 3D;
   a camera's own Z),
   `parent` (a compound), `above` / `below` (a layer) or `"at": "bottom"`
-  (default: on top).
+  (default: on top), `track_of` (a layer: the clip joins its track, a row of
+  clips one after another; it must not overlap them).
 
 **`layer.set`** → `{"in": s, "out": s}` — any of `name`, `visible`, `locked`,
+`track_of` (as in `layer.add`),
 `three_d` (not cameras or backgrounds),
 `label` (0–7), `start` (moves the clip and its keyframes), `in`, `out` (trim,
 kept between neighbors on its track), and for text `text`, `font`, `style`,
@@ -88,7 +95,15 @@ that many lines; `0` = off, subtitles start with 2); for subtitles
 read, tiny gaps closed); for
 subtitles `captions` (`[{"start": s, "end": s, "text": "..."}]`, composition
 seconds; replaces them, sorted, overlaps cut) or `srt` (SubRip text); for shapes `shape` (kind), `fill`,
-`stroke` (booleans); for backgrounds `fill`, `media`, `fit`.
+`stroke` (booleans), `gradient` (`solid`, `linear`, `radial`: from
+`fill_color` to `fill_color2`), `repeater` (boolean), `path` (as in
+`layer.add`; the shape becomes a path; `"shape": "path"` alone turns its outline
+into one); for backgrounds `fill`, `media`, `fit`. Any layer: `muted` and
+`solo` (booleans: while some layer beside it is solo, only those are seen and
+heard), `blend` (`normal`, `multiply`, `screen`, `overlay`, `darken`,
+`lighten`, `color_dodge`, `color_burn`, `hard_light`, `soft_light`,
+`difference`, `exclusion`, `hue`, `saturation`, `color`, `luminosity`, `add`),
+and a track matte (below).
 
 **`layer.remove`** — `layer` (a compound takes its contents along).
 
@@ -103,6 +118,62 @@ seconds; replaces them, sorted, overlaps cut) or `srt` (SubRip text); for shapes
 `time` (whose transforms set the compound's center).
 
 **`ungroup`** — `layer` (a compound), `time`: the layers keep their look.
+
+## Masks and track mattes
+
+**`mask.add`** → `{"index": i}` — `layer`, and `shape` (`rectangle`, the
+default, or `ellipse`) over the layer's bounds or over `box` (`[x0, y0, x1,
+y1]` in the layer's own space), or a `path` (as in `layer.add`); `name`,
+`mode` (`add`, `subtract`, `intersect`, `difference`: how it combines with the
+masks before it), `inverted`, `feather`. Its animatable values are properties:
+`mask0.feather`, `mask0.opacity`, `mask0.expansion`.
+
+**`mask.set`** — `layer`, `index`, any of `name`, `mode`, `inverted`,
+`enabled`, `path`. **`mask.remove`** — `layer`, `index`.
+
+A **track matte** (`layer.set`): `matte` (`alpha`, `alpha_inverted`, `luma`,
+`luma_inverted`, `none`) and `matte_layer` (default: the layer right above,
+in the same compound or both at the top). The layer shows only where the
+matte is opaque (or bright; inverted: where it is not), and the matte itself is
+not drawn. `query.layers` marks it `"is_matte": true`.
+
+## Editing the timeline
+
+**`layer.trim`** → `{"in": s, "out": s}` — `layer`, `edge` (`in`, `out`),
+`time`; `"ripple": true` moves the later clips on its track by as much (no gap
+opens or closes; a trimmed start keeps the clip where it began).
+
+**`layer.roll`** → `{"cut": s, "next": id}` — `layer`, `time`: the cut between
+this clip and the one right after it on its track moves there (both edges).
+
+**`layer.slip`** → `{"delta": s}` — `layer`, `delta` (seconds): the clip stays
+put and shows other moments of its content (footage, keyframes), within the
+source.
+
+**`layer.ripple_delete`** → `{"removed": n}` — `layers` (a list): removed, and
+the later clips on each one's track close the gap.
+
+**`track.close_gap`** — `layer` (any clip of the track), `time` (in the gap):
+the clips after the gap move back to the clip before it.
+
+**`layer.speed`** → `{"in": s, "out": s}` — `layer` (video or audio), `speed`
+(percent, 1–10000), `reverse` (boolean), `ripple` (the later clips follow;
+else the clip stops at the next one). The frame at the clip's start stays (when
+reversing, the end's comes first); the clip gets longer or shorter. Sound plays
+at the new speed (its pitch changes).
+
+**`layer.time_remap`** — `layer`, `enabled`: on, the `time_remap` property
+(keyframes at the clip's ends) says which source second is shown at each
+moment; off, back to its speed. **`layer.freeze`** → `{"source_time": s}` —
+`layer`, `time`: the clip holds the frame it shows there (Time Remap with one
+value).
+
+## Markers
+
+**`marker.add`** → `{"index": i, "time": s}` — `time` (to a frame), `name`,
+`color` (a label color, 0–7); at a marker's time it renames that one.
+**`marker.set`** — `index` or `time`, any of `name`, `color`, `to` (a new time).
+**`marker.remove`** — `index` or `time`. `query.composition` lists `markers`.
 
 ## Values and keyframes
 
@@ -194,10 +265,12 @@ each media item's `folder`.
 
 ## Queries (change nothing)
 
-**`query.composition`** — size, frame rate, duration, background, media items.
+**`query.composition`** — size, frame rate, duration, background, media items,
+markers.
 **`query.layers`** — every layer, top first: id, name, type, in, out, track
-row, parent. **`query.layer`** — `layer`, `time`: everything about one layer,
-with each property's value at `time` and its keyframes; a property driven by an
+row, parent (and, when set: blend, matte, masks, speed, muted, solo). **`query.layer`** — `layer`, `time`: everything about one layer,
+with each property's value at `time` and its keyframes (a path shape's `path`,
+the masks in `mask_list`); a property driven by an
 expression also has `expression` and, when it fails there, `expression_error`.
 **`query.expression`** — `layer`, `prop`, `expression` (default: the
 property's own), `time` (default 0) or `times` (a list): works it out without

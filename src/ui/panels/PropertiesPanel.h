@@ -35,6 +35,10 @@ private:
     void buildComposition(QVBoxLayout* col);
     void buildLayer(QVBoxLayout* col, Layer& layer);
     void buildMediaSource(QVBoxLayout* col, Layer& layer);
+    void buildMediaTime(QVBoxLayout* col, Layer& layer);
+    void buildBlending(QVBoxLayout* col, Layer& layer);
+    void buildMaskRows(CollapsibleSection* section, Layer& layer, int index);
+    void buildShapeRows(CollapsibleSection* section, Layer& layer);
     void buildCaptions(QVBoxLayout* col, Layer& layer); // subtitle layers
     void buildPluginData(QVBoxLayout* col, Layer& layer);
     void buildPluginTable(QVBoxLayout* col, Layer& layer);

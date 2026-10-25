@@ -13,7 +13,32 @@ namespace bemotion {
 
 enum class LayerType { Shape, Text, Camera, Plugin, Compound, Media, Background };
 
-enum class ShapeKind { Rectangle, Ellipse, Polygon, Star, Line, Count };
+enum class ShapeKind { Rectangle, Ellipse, Polygon, Star, Line, Path, Count };
+
+// How a layer mixes with what is under it (After Effects' blending modes; ids: the file format
+// and operations).
+enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, ColorDodge, ColorBurn, HardLight, SoftLight,
+                       Difference, Exclusion, Hue, Saturation, Color, Luminosity, Add, Count };
+inline constexpr const char* kBlendModeIds[] = {"normal",     "multiply",   "screen",     "overlay",    "darken",  "lighten",
+                                                "color_dodge", "color_burn", "hard_light", "soft_light", "difference",
+                                                "exclusion",  "hue",        "saturation", "color",      "luminosity", "add"};
+inline constexpr const char* kBlendModeLabels[] = {"Normal",     "Multiply",   "Screen",     "Overlay",    "Darken",  "Lighten",
+                                                   "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference",
+                                                   "Exclusion",  "Hue",        "Saturation", "Color",      "Luminosity", "Add"};
+// A track matte: the layer shows only where another layer (its matte, not drawn itself) is opaque
+// or bright, or only where it is not.
+enum class MatteMode { None, Alpha, AlphaInverted, Luma, LumaInverted, Count };
+inline constexpr const char* kMatteModeIds[] = {"none", "alpha", "alpha_inverted", "luma", "luma_inverted"};
+inline constexpr const char* kMatteModeLabels[] = {"No Track Matte", "Alpha Matte", "Alpha Inverted Matte", "Luma Matte",
+                                                   "Luma Inverted Matte"};
+// How a mask combines with the masks above it.
+enum class MaskMode { Add, Subtract, Intersect, Difference, Count };
+inline constexpr const char* kMaskModeIds[] = {"add", "subtract", "intersect", "difference"};
+inline constexpr const char* kMaskModeLabels[] = {"Add", "Subtract", "Intersect", "Difference"};
+// A shape's fill: a color, or a gradient from its color to a second one.
+enum class ShapeFill { Solid, Linear, Radial, Count };
+inline constexpr const char* kShapeFillIds[] = {"solid", "linear", "radial"};
+inline constexpr const char* kShapeFillLabels[] = {"Solid Color", "Linear Gradient", "Radial Gradient"};
 
 enum class TextAlign { Left, Center, Right };
 
@@ -65,6 +90,7 @@ struct PropertyRef {
     const char* format = "%.1f";
     int effectIndex = -1; // >= 0: parameter of Layer::effects[effectIndex]
     bool whileAnimated = false; // shown in the panels only once it has keyframes (kept for scripts)
+    int maskIndex = -1;   // >= 0: parameter of Layer::masks[maskIndex] (saved with the mask)
 
     AnimFloat& asFloat() const { return *static_cast<AnimFloat*>(anim); }
     AnimVec2& asVec2() const { return *static_cast<AnimVec2*>(anim); }
@@ -84,20 +110,66 @@ struct TransformProps {
     AnimFloat rotationY{0.0f};
 };
 
+// A point of a Bézier path and its handles, relative to it (zero: a corner without handles).
+struct PathVertex {
+    Vec2 point, in, out;
+    bool operator==(const PathVertex&) const = default;
+};
+
+// An outline made of cubic Bézier segments from vertex to vertex (shape paths, masks), in the
+// layer's own space. Closed: the last vertex joins the first.
+struct BezierPath {
+    std::vector<PathVertex> vertices;
+    bool closed = true;
+    bool operator==(const BezierPath&) const = default;
+    bool empty() const { return vertices.size() < 2; }
+};
+
 struct ShapeProps {
     ShapeKind kind = ShapeKind::Rectangle;
     AnimVec2 size{Vec2{400.0f, 400.0f}};
     AnimFloat roundness{0.0f};    // rectangle corner radius, px
     AnimFloat sides{5.0f};        // polygon sides / star points
     AnimFloat innerRadius{50.0f}; // star inner radius, percent of outer
+    BezierPath path;              // ShapeKind::Path: the outline (drawn with the pen tool)
 
     bool fillEnabled = true;
+    ShapeFill fill = ShapeFill::Solid;
     AnimColor fillColor{Color::fromHex(0xE8B931)};
+    AnimColor fillColor2{Color::fromHex(0xE5604D)}; // gradients: where they end
+    AnimFloat fillAngle{90.0f};                     // linear gradient direction: 0 left to right, 90 top to bottom
     bool strokeEnabled = false;
     AnimColor strokeColor{Color::fromHex(0xFFFFFF)};
     AnimFloat strokeWidth{8.0f};
     AnimFloat trimStart{0.0f}; // percent of the outline
     AnimFloat trimEnd{100.0f};
+    // Dashes along the stroke: `dash` px drawn, `dashGap` px left out (0: a solid line), moved
+    // along the outline by `dashOffset` px.
+    AnimFloat dash{0.0f}, dashGap{0.0f}, dashOffset{0.0f};
+    // Repeater (like After Effects'): `repeatCopies` copies, each moved, turned and scaled from the
+    // last by the same amounts, fading to `repeatEndOpacity` for the last one.
+    bool repeater = false;
+    AnimFloat repeatCopies{3.0f};
+    AnimVec2 repeatOffset{Vec2{120.0f, 0.0f}};
+    AnimFloat repeatRotation{0.0f};
+    AnimVec2 repeatScale{Vec2{100.0f, 100.0f}};
+    AnimFloat repeatEndOpacity{100.0f};
+    int copiesAt(double t) const; // 1 without a repeater
+};
+
+// A mask cuts a layer to the inside (or outside) of a path in its own space; several combine
+// from the first down (Add, Subtract, Intersect, Difference), like After Effects' masks.
+struct Mask {
+    std::string name = "Mask 1";
+    BezierPath path;
+    MaskMode mode = MaskMode::Add;
+    bool inverted = false;
+    bool enabled = true;
+    AnimFloat feather{0.0f};   // px of soft edge
+    AnimFloat opacity{100.0f}; // percent
+    AnimFloat expansion{0.0f}; // px: grows (or, negative, shrinks) the outline
+    // Runtime: property ids ("mask0.feather") and the group label, as for effects.
+    std::string group, ids[3];
 };
 
 // A camera frames the scene: its position is the composition point shown at
@@ -256,8 +328,20 @@ struct MediaProps {
     AnimFloat cropLeft{0.0f}, cropTop{0.0f}, cropRight{0.0f}, cropBottom{0.0f};
     bool hasVideo = false;
     bool hasAudio = false;
+    // Speed: 1 plays the source as it is, 2 twice as fast. Reversed, it plays backwards and
+    // `start` is where the source's first frame would come, after the clip.
+    double speed = 1.0;
+    bool reversed = false;
+    // Time Remap (After Effects): the source second shown at each moment, keyframed like any
+    // property (a single value: a frozen frame). It replaces speed and reverse while on.
+    bool timeRemap = false;
+    AnimFloat remap{0.0f};
 
-    double sourceTime(double t) const { return t - start; }
+    // The source second shown at composition time `t`.
+    double sourceTime(double t) const {
+        if (timeRemap) return remap.valueAt(t);
+        return (reversed ? start - t : t - start) * speed;
+    }
     // The part of the picture shown, in layer space (the source is centered on 0, 0); at least
     // 1% of it on each axis.
     void cropRect(double t, Vec2& mn, Vec2& mx) const;
@@ -290,7 +374,15 @@ struct Layer {
     LayerType type = LayerType::Shape;
     bool visible = true;
     bool locked = false;
+    bool muted = false; // its sound is not heard
+    bool solo = false;  // while any layer beside it is solo, only those are seen and heard
     int label = 0;
+    BlendMode blend = BlendMode::Normal;
+    // Track matte: `matteLayer` (a layer beside it, in the same compound or none) decides where
+    // this layer shows; the matte layer itself is then not drawn.
+    MatteMode matte = MatteMode::None;
+    uint64_t matteLayer = 0;
+    std::vector<Mask> masks; // applied from the first down, before the effects
     // A 3D layer has a Z position and the camera sees it in perspective (nearer is
     // bigger and moves faster). Only top-level layers count; never cameras or backgrounds.
     bool threeD = false;

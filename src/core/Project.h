@@ -34,6 +34,14 @@ struct Guide {
     float position = 0.0f;
 };
 
+// A named moment on the timeline (M): shown on the ruler, something clips and the playhead snap to.
+struct Marker {
+    double time = 0.0;
+    std::string name;
+    int color = 0; // a label color (labelColor)
+    bool operator==(const Marker&) const = default;
+};
+
 // A timeline row: a contiguous run of `layers` sharing one track id.
 struct TrackRow {
     uint64_t track = 0;
@@ -55,6 +63,7 @@ struct Composition {
     uint64_t nextLayerId = 1;
     uint64_t nextTrackId = 1;
     std::vector<Guide> guides;
+    std::vector<Marker> markers; // sorted by time, one per moment
     std::vector<MediaItem> media; // imported footage (see core/Media.h)
     // Folders of the Media panel, in order: only for keeping media tidy (nothing on disk).
     std::vector<std::string> mediaFolders;
@@ -125,6 +134,16 @@ struct Composition {
     void releaseCompound(uint64_t compoundId, double t);
     // Removes a layer and, for a compound, everything inside it.
     void removeLayerTree(uint64_t id);
+
+    // --- track mattes and solo ---------------------------------------------------------
+    // True when another layer uses `id` as its track matte: then it is not drawn by itself.
+    bool isMatte(uint64_t id) const;
+    // Hidden (and silent) by solo: a layer beside it (in the same compound, or at the top) is
+    // solo and it is not.
+    bool soloedOut(const Layer& layer) const;
+    // The composition times where a video or audio clip has source frames to show (its speed
+    // and direction counted); unbounded for other layers, stills and time-remapped clips.
+    void sourceSpan(const Layer& layer, double& from, double& to) const;
 
     // Inserts a layer, assigning it a fresh id (and a fresh track when its
     // track is 0). `index` is rounded to a track boundary so tracks stay

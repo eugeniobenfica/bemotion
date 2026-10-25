@@ -82,10 +82,12 @@ protected:
     void dragMoveEvent(QDragMoveEvent*) override;
     void dragLeaveEvent(QDragLeaveEvent*) override;
     void dropEvent(QDropEvent*) override;
+    void keyPressEvent(QKeyEvent*) override;
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle, Guide, Axis, Orbit, OrbitPan, CameraTool, Crop };
+    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle, Guide, Axis, Orbit, OrbitPan, CameraTool, Crop,
+                      PathPoint, PenHandle };
 
     void layout(); // zoom, origin and camera for the current size and time
     void press(QMouseEvent* e, bool doubleClick);
@@ -111,6 +113,33 @@ private:
     void drawMotionPath(QPainter& p);
     int pathKey_ = -1; // key being dragged
     int pathPart_ = 0;
+
+    // --- Bézier paths: the pen (Tool::Pen) and the points of the selected path shape / masks ---
+    struct PathRef {
+        uint64_t layer = 0;
+        int mask = -1; // -1: the layer's own path (a path shape)
+        bool operator==(const PathRef&) const = default;
+    };
+    struct PathPoint {
+        PathRef ref;
+        int vertex = -1;
+        int part = 0; // 0 the point, 1 its in handle, 2 its out handle
+    };
+    BezierPath* pathOf(const PathRef& r) const;
+    bool pathMatrix(uint64_t layerId, Projective& m) const; // layer space -> screen
+    Vec2 pathLocal(uint64_t layerId, Vec2 screen) const;
+    std::vector<PathRef> editablePaths() const;            // the single selected layer's
+    bool pathPointAt(Vec2 screen, PathPoint& out) const;
+    bool pathPress(QMouseEvent* e, Vec2 mouse, bool doubleClick); // true: the press was for a path
+    void dragPath(Vec2 mouse, Qt::KeyboardModifiers mods);
+    void startPen(Vec2 mouse); // a new path shape, or a mask on the selected layer
+    void addPenPoint(Vec2 mouse);
+    void finishPen();
+    void drawPaths(QPainter& p);
+    bool penDrawing_ = false;
+    PathRef penTarget_;
+    PathPoint pathDrag_;
+    Vec2 pathGrab_; // where a dragged point was held (layer space, from the point)
     void zoomAround(Vec2 screenPoint, float newZoom);
 
     EditorContext& ctx_;

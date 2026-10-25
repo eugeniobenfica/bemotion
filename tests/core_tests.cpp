@@ -5,6 +5,7 @@
 #include "core/Clipboard.h"
 #include "core/Data.h"
 #include "core/Describe.h"
+#include "core/Editing.h"
 #include "core/Expressions.h"
 #include "core/Ops.h"
 #include "core/PluginCatalog.h"
@@ -1340,6 +1341,248 @@ void testExpressionsAcrossProjects() {
     setExpressionComposition(nullptr);
 }
 
+
+// --- paths, masks, blending, mattes -----------------------------------------------------------
+
+void testPathsAndMasks() {
+    // Shapes become Bézier paths that keep their outline.
+    ShapeProps rect = makeShapeLayer(ShapeKind::Rectangle, {0, 0}, 1.0).shape;
+    rect.size.base = {200, 100};
+    rect.roundness.base = 20;
+    const BezierPath rounded = shapeToBezier(rect, 0.0);
+    CHECK(rounded.vertices.size() == 8 && rounded.closed);
+    Vec2 mn, mx;
+    CHECK(bezierBounds(rounded, mn, mx) && near(mn.x, -100) && near(mx.y, 50));
+    const BezierPath oval = ellipsePath({-50, -50}, {50, 50});
+    CHECK(oval.vertices.size() == 4 && near(bezierPoint(oval, 0, 0.5f).length(), 50.0f, 0.5f)); // on the circle
+    // A new vertex splits a curve without changing it.
+    BezierPath split = oval;
+    const Vec2 before = bezierPoint(oval, 0, 0.5f);
+    insertVertex(split, 0, 0.5f);
+    CHECK(split.vertices.size() == 5 && near((split.vertices[1].point - before).length(), 0.0f, 0.01f));
+    CHECK(near((bezierPoint(split, 0, 0.5f) - bezierPoint(oval, 0, 0.25f)).length(), 0.0f, 0.05f));
+    size_t segment = 99;
+    float u = 0;
+    CHECK(nearestSegment(oval, before + Vec2{0.5f, 0.5f}, 4.0f, segment, u) && segment == 0 && near(u, 0.5f, 0.05f));
+
+    // Operations: a path layer, a mask, a blending mode, a track matte.
+    Project p;
+    auto r = applyOps(p, nlohmann::json::parse(R"([
+        {"op": "layer.add", "type": "path", "name": "Wave", "path": {"closed": false, "vertices": [[0, 0], [100, 0, -30, -40, 30, 40], [200, 0]]}},
+        {"op": "layer.add", "type": "ellipse", "name": "Spot"},
+        {"op": "layer.add", "type": "rectangle", "name": "Card", "below": "Spot"},
+        {"op": "layer.set", "layer": "Card", "matte": "alpha", "blend": "multiply", "gradient": "linear", "repeater": true},
+        {"op": "mask.add", "layer": "Card", "shape": "ellipse", "mode": "subtract", "feather": 12},
+        {"op": "layer.set", "layer": "Spot", "shape": "path"}
+    ])"));
+    CHECK(r.ok);
+    if (!r.ok) std::printf("  %s\n", r.error.c_str());
+    Layer* wave = nullptr;
+    Layer* card = nullptr;
+    Layer* spot = nullptr;
+    for (Layer& l : p.comp.layers) (l.name == "Wave" ? wave : l.name == "Card" ? card : spot) = &l;
+    CHECK(wave && wave->shape.kind == ShapeKind::Path && wave->shape.path.vertices.size() == 3 && !wave->shape.path.closed);
+    CHECK(wave && !wave->shape.fillEnabled && wave->shape.strokeEnabled); // an open path is a line
+    CHECK(card && card->matte == MatteMode::Alpha && card->matteLayer == spot->id && card->blend == BlendMode::Multiply);
+    CHECK(p.comp.isMatte(spot->id) && !p.comp.isMatte(card->id));
+    CHECK(card->masks.size() == 1 && card->masks[0].mode == MaskMode::Subtract && near(card->masks[0].feather.base, 12.0f));
+    CHECK(card->masks[0].path.vertices.size() == 4);
+    CHECK(spot && spot->shape.kind == ShapeKind::Path && spot->shape.path.vertices.size() == 4); // the ellipse, as a path
+    const BezierPath wavePath = wave->shape.path;
+    const uint64_t spotId = spot->id; // (the layers move when the next batch replaces the project)
+    // Mask values are properties; the repeater's and the gradient's too.
+    CHECK(applyOps(p, nlohmann::json::parse(R"([{"op": "property.set", "layer": "Card", "prop": "mask0.opacity", "value": 50},
+                                     {"op": "property.set", "layer": "Card", "prop": "repeat_copies", "value": 5},
+                                     {"op": "property.set", "layer": "Card", "prop": "fill_color2", "value": "#336699"},
+                                     {"op": "property.set", "layer": "Card", "prop": "stroke_dash", "value": 8}])")).ok);
+    card = nullptr;
+    for (Layer& l : p.comp.layers) if (l.name == "Card") card = &l;
+    CHECK(card && card->shape.copiesAt(0) == 5 && near(card->masks[0].opacity.base, 50.0f));
+
+    // Everything survives the file.
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    const Layer* c2 = nullptr;
+    const Layer* w2 = nullptr;
+    for (const Layer& l : back.comp.layers) {
+        if (l.name == "Card") c2 = &l;
+        if (l.name == "Wave") w2 = &l;
+    }
+    CHECK(c2 && c2->matte == MatteMode::Alpha && c2->blend == BlendMode::Multiply && c2->shape.fill == ShapeFill::Linear);
+    CHECK(c2 && c2->masks.size() == 1 && c2->masks[0].path == card->masks[0].path && near(c2->masks[0].opacity.base, 50.0f));
+    CHECK(c2 && c2->shape.repeater && near(c2->shape.repeatCopies.base, 5.0f) && near(c2->shape.dash.base, 8.0f));
+    CHECK(w2 && w2->shape.path == wavePath);
+    CHECK(validate(back).empty());
+
+    // Track matte rules: never itself, never in a loop, gone with its layer.
+    Project bad = back;
+    for (Layer& l : bad.comp.layers)
+        if (l.name == "Spot") l.matte = MatteMode::Luma, l.matteLayer = c2->id; // Spot <-> Card
+    CHECK(!validate(bad).empty());
+    repair(bad);
+    CHECK(validate(bad).empty());
+    int matted = 0;
+    for (const Layer& l : bad.comp.layers) matted += l.matte != MatteMode::None;
+    CHECK(matted == 1);
+    CHECK(!applyOps(back, nlohmann::json::parse(R"({"op": "layer.set", "layer": "Card", "matte": "alpha", "matte_layer": "Card"})")).ok);
+    back.comp.removeLayer(spotId);
+    for (const Layer& l : back.comp.layers)
+        if (l.name == "Card") CHECK(l.matte == MatteMode::None && l.matteLayer == 0);
+
+    // Copied together, a layer keeps its matte (the copy's); grouped apart, it loses it.
+    Project two;
+    CHECK(applyOps(two, nlohmann::json::parse(R"([{"op": "layer.add", "type": "ellipse", "name": "M"},
+        {"op": "layer.add", "type": "rectangle", "name": "R", "below": "M"}, {"op": "layer.set", "layer": "R", "matte": "luma"}])")).ok);
+    std::vector<uint64_t> both;
+    for (const Layer& l : two.comp.layers) both.push_back(l.id);
+    const std::vector<uint64_t> pasted = pasteLayers(two.comp, copyLayers(two.comp, both), 0.0, 0, 0);
+    int pastedMattes = 0;
+    for (uint64_t id : pasted) {
+        const Layer* l = two.comp.findLayer(id);
+        if (l && l->matte == MatteMode::Luma) pastedMattes += std::find(pasted.begin(), pasted.end(), l->matteLayer) != pasted.end();
+    }
+    CHECK(pasted.size() == 2 && pastedMattes == 1);
+    uint64_t rId = 0;
+    for (const Layer& l : two.comp.layers)
+        if (l.name == "R") rId = l.id;
+    two.comp.createCompound({rId}, 0.0);
+    CHECK(two.comp.findLayer(rId)->matte == MatteMode::None && validate(two).empty());
+
+    // Solo: only the solo layers among their neighbors.
+    Composition solo;
+    const uint64_t a = solo.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0)).id;
+    const uint64_t b = solo.addLayer(makeShapeLayer(ShapeKind::Ellipse, {}, 1.0)).id;
+    CHECK(!solo.soloedOut(*solo.findLayer(a)));
+    solo.findLayer(b)->solo = true;
+    CHECK(solo.soloedOut(*solo.findLayer(a)) && !solo.soloedOut(*solo.findLayer(b)));
+}
+
+// --- speed, time remap, ripple, roll, slip, markers --------------------------------------------
+
+void testClipTiming() {
+    Project p;
+    MediaItem video;
+    video.name = "take.mp4";
+    video.path = "C:/footage/take.mp4";
+    video.kind = MediaKind::Video;
+    video.width = 640;
+    video.height = 360;
+    video.duration = 10.0;
+    video.fps = 30.0;
+    video.hasVideo = video.hasAudio = true;
+    const uint64_t media = p.comp.addMedia(video);
+    Composition& c = p.comp;
+    c.duration = 60.0;
+    const uint64_t id = c.addLayer(makeMediaLayer(*c.findMedia(media), {0, 0}, 0.0, 5.0)).id;
+    c.setInPoint(id, 2.0); // shows source 2..10
+    auto clip = [&]() -> Layer& { return *c.findLayer(id); };
+
+    // Twice as fast: the frame at the start stays, the clip lasts half as long.
+    CHECK(setClipSpeed(c, id, 2.0, false));
+    CHECK(near(static_cast<float>(clip().media.sourceTime(2.0)), 2.0f));
+    CHECK(near(static_cast<float>(clip().outPoint), 6.0f)); // 8 s of source at 200%
+    CHECK(near(static_cast<float>(clip().media.sourceTime(5.0)), 8.0f));
+    double minIn = 0, maxOut = 0;
+    c.clipLimits(id, minIn, maxOut);
+    CHECK(near(static_cast<float>(maxOut), 6.0f) && near(static_cast<float>(minIn), 1.0f)); // the source's ends at this speed
+    // Backwards: the same footage, from its end.
+    CHECK(setClipSpeed(c, id, 2.0, true));
+    CHECK(near(static_cast<float>(clip().media.sourceTime(2.0)), 10.0f) && near(static_cast<float>(clip().outPoint), 6.0f));
+    CHECK(near(static_cast<float>(clip().media.sourceTime(5.9)), 2.2f));
+    // Time remap: keys at the ends with what they showed; a frozen frame: one value.
+    CHECK(setTimeRemap(c, id, true));
+    CHECK(clip().media.timeRemap && clip().media.remap.keyCount() == 2 && near(clip().media.remap.keys[0].value, 10.0f));
+    auto props = clip().properties();
+    CHECK(clip().findProperty(props, "time_remap") != nullptr);
+    CHECK(freezeFrame(c, id, 4.0));
+    CHECK(near(static_cast<float>(clip().media.sourceTime(2.0)), 6.0f) && near(static_cast<float>(clip().media.sourceTime(5.0)), 6.0f));
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    const Layer& again = *back.comp.findLayer(id);
+    CHECK(again.media.timeRemap && again.media.reversed && near(static_cast<float>(again.media.speed), 2.0f) && near(again.media.remap.base, 6.0f));
+    CHECK(setTimeRemap(c, id, false) && !clip().media.timeRemap);
+    // Stills have no speed.
+    MediaItem still;
+    still.name = "logo.png";
+    still.path = "C:/footage/logo.png";
+    still.kind = MediaKind::Image;
+    still.hasVideo = true;
+    const uint64_t logo = c.addLayer(makeMediaLayer(*c.findMedia(c.addMedia(still)), {0, 0}, 0.0, 3.0)).id;
+    CHECK(!setClipSpeed(c, logo, 2.0, false) && !freezeFrame(c, logo, 1.0));
+
+    // Ripple, roll, slip on one track: A [0, 2), B [2, 4), C [5, 7).
+    Composition t;
+    t.duration = 30.0;
+    const uint64_t A = t.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 2.0)).id;
+    Layer bLayer = makeShapeLayer(ShapeKind::Ellipse, {}, 2.0);
+    bLayer.track = t.findLayer(A)->track;
+    bLayer.shiftTime(2.0);
+    bLayer.transform.opacity.setKey(3.0, 50.0f);
+    const uint64_t B = t.addLayer(bLayer).id;
+    Layer cLayer = makeShapeLayer(ShapeKind::Star, {}, 2.0);
+    cLayer.track = bLayer.track;
+    cLayer.shiftTime(5.0);
+    const uint64_t C = t.addLayer(cLayer).id;
+    auto in = [&](uint64_t x) { return static_cast<float>(t.findLayer(x)->inPoint); };
+    auto out = [&](uint64_t x) { return static_cast<float>(t.findLayer(x)->outPoint); };
+    CHECK(t.trackRows().size() == 1);
+    CHECK(rollEdit(t, A, 1.5) && near(out(A), 1.5f) && near(in(B), 1.5f) && near(out(B), 4.0f));
+    CHECK(!rollEdit(t, B, 4.5)); // a gap after B: no cut to roll
+    CHECK(rippleTrim(t, A, ClipEdge::Out, 1.0) && near(out(A), 1.0f) && near(in(B), 1.0f) && near(in(C), 4.5f));
+    CHECK(rippleTrim(t, B, ClipEdge::In, 1.5)); // the start cut away, B still starts at 1
+    CHECK(near(in(B), 1.0f) && near(out(B), 3.0f) && near(in(C), 4.0f));
+    CHECK(near(t.findLayer(B)->transform.opacity.keys[0].time, 2.0f)); // its content moved with it
+    CHECK(near(slipClip(t, B, 0.25), 0.25f) && near(in(B), 1.0f) && near(t.findLayer(B)->transform.opacity.keys[0].time, 2.25f));
+    CHECK(closeGap(t, t.findLayer(C)->track, 3.5) && near(in(C), 3.0f));
+    CHECK(rippleDelete(t, {A}) == 1 && near(in(B), 0.0f) && near(in(C), 2.0f));
+    CHECK(validate(Project{"t", t}).empty());
+
+    // The same through operations.
+    Project ops;
+    CHECK(applyOps(ops, nlohmann::json::parse(R"([
+        {"op": "layer.add", "type": "rectangle", "name": "One", "duration": 2},
+        {"op": "layer.add", "type": "rectangle", "name": "Two", "duration": 2, "start": 2},
+        {"op": "marker.add", "time": 1, "name": "Beat"},
+        {"op": "marker.add", "time": 0.5, "color": 3}
+    ])")).ok);
+    // Two on One's track, right after it.
+    Composition& oc = ops.comp;
+    CHECK(applyOps(ops, nlohmann::json::parse(R"({"op": "layer.set", "layer": "Two", "track_of": "One"})")).ok);
+    CHECK(oc.trackRows().size() == 1);
+    CHECK(!applyOps(ops, nlohmann::json::parse(R"({"op": "layer.add", "type": "ellipse", "start": 1, "track_of": "One"})")).ok); // overlaps
+    auto r = applyOps(ops, nlohmann::json::parse(R"([
+        {"op": "layer.roll", "layer": "One", "time": 1.5},
+        {"op": "layer.trim", "layer": "Two", "edge": "out", "time": 3, "ripple": true},
+        {"op": "marker.set", "time": 1, "to": 2, "name": "Drop"},
+        {"op": "query.composition"}
+    ])"));
+    CHECK(r.ok);
+    if (!r.ok) std::printf("  %s\n", r.error.c_str());
+    CHECK(oc.markers.size() == 2 && oc.markers[0].color == 3 && oc.markers[1].name == "Drop" && near(static_cast<float>(oc.markers[1].time), 2.0f));
+    CHECK(r.results.size() == 4 && r.results[3]["markers"].size() == 2);
+    CHECK(applyOps(ops, nlohmann::json::parse(R"([{"op": "layer.ripple_delete", "layers": ["One"]}, {"op": "marker.remove", "index": 0}])")).ok);
+    CHECK(oc.markers.size() == 1 && oc.layers.size() == 1 && near(static_cast<float>(oc.layers[0].inPoint), 0.0f));
+    CHECK(!applyOps(ops, nlohmann::json::parse(R"({"op": "layer.speed", "layer": "Two", "speed": 50})")).ok); // not footage
+    // Markers: one per moment, in order, stepping between them.
+    Composition m;
+    m.duration = 10.0;
+    addMarker(m, 3.0, "C");
+    addMarker(m, 1.0, "A");
+    CHECK(addMarker(m, 1.01, "", 2) == 0 && m.markers.size() == 2 && m.markers[0].name == "A" && m.markers[0].color == 2);
+    double next = 0;
+    CHECK(nextMarker(m, 1.0, true, next) && near(static_cast<float>(next), 3.0f));
+    CHECK(nextMarker(m, 3.0, false, next) && near(static_cast<float>(next), 1.0f) && !nextMarker(m, 3.0, true, next));
+    CHECK(moveMarker(m, 1, 0.5) == 0 && m.markers[0].name == "C");
+    Project mp;
+    mp.comp = m;
+    mp.comp.markers.push_back({0.2, "late", 9});
+    CHECK(!validate(mp).empty());
+    repair(mp);
+    CHECK(validate(mp).empty() && mp.comp.markers.front().name == "late" && mp.comp.markers.front().color == kLabelColorCount - 1);
+    Project mback;
+    CHECK(deserializeProject(serializeProject(mp), mback) && mback.comp.markers == mp.comp.markers);
+}
+
 } // namespace
 
 int main() {
@@ -1398,6 +1641,8 @@ int main() {
         {"media folders", testMediaFolders},
         {"references complete", testReferencesComplete},
         {"plugin catalog", testPluginCatalog},
+        {"paths, masks, blending and mattes", testPathsAndMasks},
+        {"clip speed, ripple, roll, slip, markers", testClipTiming},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

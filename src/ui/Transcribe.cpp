@@ -42,7 +42,8 @@ constexpr std::pair<const char*, const char*> kLanguages[] = {
 const MediaItem* soundOf(const EditorContext& constCtx, uint64_t clipId, const Layer** clip) {
     auto& ctx = const_cast<EditorContext&>(constCtx); // comp() is not const; nothing changes here
     const Layer* l = ctx.comp().findLayer(clipId);
-    if (!l || l->type != LayerType::Media || !l->media.hasAudio) return nullptr;
+    // Played backwards or remapped, the words would not land where they are heard.
+    if (!l || l->type != LayerType::Media || !l->media.hasAudio || l->media.reversed || l->media.timeRemap) return nullptr;
     const MediaItem* item = ctx.comp().findMedia(l->media.mediaId);
     if (!item || item->path.empty()) return nullptr;
     if (clip) *clip = l;
@@ -215,8 +216,8 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
     });
     QObject::connect(dialog, &QDialog::rejected, dialog, [job] { job->stop = true; });
     // The part of the source the clip plays, and where it sits in the composition.
-    const double sourceIn = std::max(0.0, clip->inPoint - clip->media.start), sourceOut = clip->outPoint - clip->media.start;
-    const double offset = clip->media.start, clipIn = clip->inPoint, clipOut = clip->outPoint;
+    const double sourceIn = std::max(0.0, clip->media.sourceTime(clip->inPoint)), sourceOut = clip->media.sourceTime(clip->outPoint);
+    const double offset = clip->media.start, clipIn = clip->inPoint, clipOut = clip->outPoint, speed = clip->media.speed;
     const std::filesystem::path file = platform::fromUtf8(item->path);
 
     QObject::connect(go, &QPushButton::clicked, dialog, [=, &ctx]() mutable {
@@ -245,7 +246,7 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
 
         auto* timer = new QTimer(dialog);
         QObject::connect(timer, &QTimer::timeout, dialog, [&ctx, job, dialog, timer, stage, bar, timing, started, subtitlesId, offset,
-                                                           clipIn, clipOut, parent] {
+                                                           clipIn, clipOut, speed, parent] {
             if (!job->done) {
                 const float f = job->progress;
                 bar->setValue(std::min(990, static_cast<int>(f * 1000.0f)));
@@ -272,8 +273,8 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
             // Source time -> composition time, inside the clip.
             std::vector<Caption> caps;
             for (Caption c : job->captions) {
-                c.start = std::max(clipIn, c.start + offset);
-                c.end = std::min(clipOut, c.end + offset);
+                c.start = std::max(clipIn, offset + c.start / speed);
+                c.end = std::min(clipOut, offset + c.end / speed);
                 if (c.end > c.start) caps.push_back(std::move(c));
             }
             if (caps.empty()) {

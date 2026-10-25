@@ -12,6 +12,7 @@
 #include "media/MediaManager.h"
 #include "media/Transcriber.h"
 #include "render/OffscreenRenderer.h"
+#include "render/SceneRenderer.h"
 
 #include "stb_image_write.h"
 
@@ -386,6 +387,9 @@ OpEnvironment automationEnvironment() {
         }
         out = PluginHost::get().createLayer(*type, {0, 0}, kDefaultLayerLength);
         return true;
+    };
+    env.layerBounds = [](const Composition& comp, const Layer& layer, double t, Vec2& mn, Vec2& mx) {
+        return render::localBounds(layer, t, mn, mx, &comp);
     };
     return env;
 }

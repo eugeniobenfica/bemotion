@@ -87,9 +87,12 @@ void EditorContext::stepFrames(int frames) {
 }
 
 void EditorContext::tick(double dt) {
-    if (!playing) return;
+    if (!playing) {
+        playRate = 1.0;
+        return;
+    }
     const Composition& c = comp();
-    time += dt;
+    time += dt * playRate;
     const double end = c.timeOfFrame(c.frameCount() - 1);
     if (time > end) {
         if (loop) time = std::fmod(time - end - c.frameDuration(), c.duration);
@@ -98,7 +101,22 @@ void EditorContext::tick(double dt) {
             playing = false;
         }
         time = std::max(0.0, time);
+    } else if (time < 0.0) { // backwards past the start
+        if (loop) time = end;
+        else time = 0.0, playing = false;
     }
+}
+
+void EditorContext::shuttle(int direction) {
+    if (direction == 0) {
+        playing = false;
+        playRate = 1.0;
+        return;
+    }
+    // The same key again: twice as fast (up to 8x); the other way: start over at 1x.
+    const bool same = playing && (playRate > 0) == (direction > 0);
+    playRate = same ? std::clamp(playRate * 2.0, -8.0, 8.0) : static_cast<double>(direction);
+    playing = true;
 }
 
 // --- history / files ---------------------------------------------------------------
@@ -292,8 +310,10 @@ void EditorContext::duplicateSelected() {
             }
             for (auto [old, fresh] : remap) {
                 Layer* l = comp().findLayer(fresh);
-                for (auto [o, f] : remap)
+                for (auto [o, f] : remap) {
                     if (l->parent == o) l->parent = f;
+                    if (l->matteLayer == o) l->matteLayer = f; // a matte inside it: its copy
+                }
             }
             copies.push_back(rootCopy);
         }
@@ -417,6 +437,57 @@ void EditorContext::splitSelectedAtPlayhead() {
     selection = tails;
     selectedKeys.clear();
     touch();
+}
+
+void EditorContext::rippleDeleteSelected() {
+    if (selection.empty()) return;
+    if (rippleDelete(comp(), selection) == 0) return;
+    selectedKeys.clear();
+    pruneSelection();
+    touch();
+}
+
+void EditorContext::rippleTrimToPlayhead(ClipEdge edge) {
+    std::vector<uint64_t> targets;
+    for (const Layer& l : comp().layers) {
+        const bool under = time > l.inPoint + 1e-6 && time < l.outPoint - 1e-6;
+        if (under && !l.locked && (selection.empty() || isSelected(l.id)) && l.parent == scope) targets.push_back(l.id);
+    }
+    bool changed = false;
+    for (uint64_t id : targets) changed |= rippleTrim(comp(), id, edge, time);
+    if (!changed) return;
+    // Trimming the start leaves the playhead on what came after the cut: where the clip now starts.
+    if (edge == ClipEdge::In)
+        if (const Layer* l = comp().findLayer(targets.front())) setTime(l->inPoint);
+    touch();
+}
+
+void EditorContext::setSelectedSpeed(double speed, bool reversed, bool ripple) {
+    bool changed = false;
+    for (Layer* l : selectedLayers()) changed |= setClipSpeed(comp(), l->id, speed, reversed, ripple);
+    if (changed) touch();
+}
+
+void EditorContext::freezeSelectedAtPlayhead() {
+    bool changed = false;
+    for (Layer* l : selectedLayers()) changed |= freezeFrame(comp(), l->id, time);
+    if (changed) touch();
+}
+
+void EditorContext::setSelectedTimeRemap(bool on) {
+    bool changed = false;
+    for (Layer* l : selectedLayers()) changed |= setTimeRemap(comp(), l->id, on);
+    if (changed) touch();
+}
+
+void EditorContext::addMarkerAtPlayhead() {
+    if (markerAt(comp(), time) >= 0) return;
+    addMarker(comp(), time, "");
+    touch();
+}
+
+void EditorContext::jumpToMarker(bool forward) {
+    if (double t = 0; nextMarker(comp(), time, forward, t)) setTime(t);
 }
 
 void EditorContext::deleteSelectedKeys() {

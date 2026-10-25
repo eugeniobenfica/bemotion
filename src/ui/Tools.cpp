@@ -10,6 +10,13 @@ const std::vector<ToolInfo>& toolCatalog() {
         {"select", "Selection", Icon::Pointer, "Select, move and trim layers", Action::SelectTool, true},
         {"razor", "Cut", Icon::Razor, "Click a clip to split it there", Action::CutTool, true},
         {"crop", "Crop", Icon::Crop, "Drag the edges of a video or image to crop it (Esc: done)", Action::CropTool, true},
+        {"pen", "Pen", Icon::Pen,
+         "Click to place points, drag for curves; click the first point to close (Enter: done). With a layer selected "
+         "that is not a shape: draws a mask on it",
+         Action::PenTool, true},
+        {"ripple", "Ripple Edit", Icon::RippleEdit, "Drag a clip's edge: the clips after it follow, no gap opens", Action::RippleTool, true},
+        {"roll", "Rolling Edit", Icon::RollEdit, "Drag the cut between two clips: one gets longer, the other shorter", Action::RollTool, true},
+        {"slip", "Slip", Icon::SlipEdit, "Drag a clip: it stays put and shows other frames of its footage", Action::SlipTool, true},
         {"split", "Split at Playhead", Icon::SplitPlayhead, "Split the selected layers at the playhead", Action::Split},
         {"compound", "Create Compound", Icon::Compound, "Combine the selected layers; double-click it to open its timeline",
          Action::CreateCompound},
@@ -33,7 +40,7 @@ int toolIndex(std::string_view id) {
     return -1;
 }
 
-std::vector<std::string> defaultToolbar() { return {"select", "razor", "crop", "split", "compound", "delete"}; }
+std::vector<std::string> defaultToolbar() { return {"select", "razor", "pen", "crop", "split", "compound", "delete"}; }
 
 std::string toolTooltip(const ToolInfo& tool) {
     std::string tip = tool.label;
@@ -54,7 +61,8 @@ bool toolEnabled(EditorContext& ctx, const ToolInfo& tool) {
 bool toolActive(const EditorContext& ctx, const ToolInfo& tool) {
     const std::string_view id = tool.id;
     return (id == "select" && ctx.tool == Tool::Select) || (id == "razor" && ctx.tool == Tool::Razor) ||
-           (id == "crop" && ctx.tool == Tool::Crop);
+           (id == "crop" && ctx.tool == Tool::Crop) || (id == "pen" && ctx.tool == Tool::Pen) ||
+           (id == "ripple" && ctx.tool == Tool::Ripple) || (id == "roll" && ctx.tool == Tool::Roll) || (id == "slip" && ctx.tool == Tool::Slip);
 }
 
 void runTool(EditorContext& ctx, const ToolInfo& tool) {
@@ -62,6 +70,10 @@ void runTool(EditorContext& ctx, const ToolInfo& tool) {
     if (id == "select") ctx.tool = Tool::Select;
     else if (id == "razor") ctx.tool = Tool::Razor;
     else if (id == "crop") ctx.tool = ctx.tool == Tool::Crop ? Tool::Select : Tool::Crop;
+    else if (id == "pen") ctx.tool = ctx.tool == Tool::Pen ? Tool::Select : Tool::Pen;
+    else if (id == "ripple") ctx.tool = Tool::Ripple;
+    else if (id == "roll") ctx.tool = Tool::Roll;
+    else if (id == "slip") ctx.tool = Tool::Slip;
     else if (id == "split") ctx.splitSelectedAtPlayhead();
     else if (id == "compound") ctx.createCompound();
     else if (id == "release") ctx.releaseSelectedCompounds();

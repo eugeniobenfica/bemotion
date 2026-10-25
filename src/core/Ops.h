@@ -34,6 +34,8 @@ struct OpEnvironment {
     std::function<bool(const std::string& path, MediaItem& out, std::string& error)> probeMedia;
     // A layer of a plugin object type ("charts.bar") with its parameters at their defaults.
     std::function<bool(const std::string& objectType, Layer& out, std::string& error)> makePluginLayer;
+    // A layer's bounds in its own space (texts need the renderer), for masks made to fit it.
+    std::function<bool(const Composition& comp, const Layer& layer, double t, Vec2& mn, Vec2& mx)> layerBounds;
 };
 
 struct OpsResult {

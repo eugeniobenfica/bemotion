@@ -18,8 +18,11 @@ enum class Action {
     BringForward, SendBackward, BringToFront, SendToBack,
     // Playback & time
     PlayPause, PrevFrame, NextFrame, PrevFrames, NextFrames, GoToStart, GoToEnd, PrevKeyframe, NextKeyframe,
+    ShuttleBack, ShuttleStop, ShuttleForward, AddMarker, NextMarker, PrevMarker,
     // Tools
-    SelectTool, CutTool, Split, ToggleSnapping, AddText, CropTool,
+    SelectTool, CutTool, Split, ToggleSnapping, AddText, CropTool, PenTool, RippleTool, RollTool, SlipTool,
+    // Timeline editing
+    RippleDelete, RippleTrimStart, RippleTrimEnd, SpeedDuration,
     // Keyframes
     EasyEase, EaseIn, EaseOut,
     // View

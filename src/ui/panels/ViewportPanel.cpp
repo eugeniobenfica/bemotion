@@ -2,6 +2,7 @@
 
 #include "app/PluginHost.h"
 #include "app/Settings.h"
+#include "core/Geometry.h"
 #include "core/Snapping.h"
 #include "render/SceneRenderer.h"
 #include "ui/AppSignals.h"
@@ -352,6 +353,9 @@ bool ViewportPanel::setSpaceHeld(bool held) {
 
 void ViewportPanel::sync() {
     if (!isVisible()) return;
+    // The pen stops drawing when its tool, its layer or the selection goes.
+    if (penDrawing_ && (ctx_.tool != Tool::Pen || !pathOf(penTarget_) || ctx_.selection.size() != 1 || ctx_.primaryId() != penTarget_.layer))
+        finishPen();
     Signature s{ctx_.revision(), ctx_.time,       ctx_.selection, ctx_.scope,  ctx_.snapping,
                 ctx_.showGuides, ctx_.showRulers, ctx_.playing,   static_cast<int>(ctx_.tool)};
     if (s == drawn_) return;
@@ -729,6 +733,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
     drawMotionPath(p);
 
     // Selection outlines.
+    drawPaths(p);
     const auto selected = ctx_.selectedLayers();
     Vec2 groupMin{1e9f, 1e9f}, groupMax{-1e9f, -1e9f};
     int visibleSelected = 0;
@@ -950,6 +955,238 @@ bool ViewportPanel::pathHit(Vec2 screen, int& key, int& part) const {
     return false;
 }
 
+// --- paths: the pen, a path shape's points, masks -----------------------------------------------
+
+BezierPath* ViewportPanel::pathOf(const PathRef& r) const {
+    Layer* l = const_cast<EditorContext&>(ctx_).comp().findLayer(r.layer);
+    if (!l) return nullptr;
+    if (r.mask < 0) return l->type == LayerType::Shape && l->shape.kind == ShapeKind::Path ? &l->shape.path : nullptr;
+    return r.mask < static_cast<int>(l->masks.size()) ? &l->masks[r.mask].path : nullptr;
+}
+
+bool ViewportPanel::pathMatrix(uint64_t layerId, Projective& m) const {
+    const Layer* l = const_cast<EditorContext&>(ctx_).comp().findLayer(layerId);
+    Projective camera;
+    if (!l || !cameraOf(*l, ctx_.time, camera)) return false;
+    m = parentView(sceneView(), *l, ctx_.time).matrix() * l->matrixAt(ctx_.time);
+    return true;
+}
+
+std::vector<ViewportPanel::PathRef> ViewportPanel::editablePaths() const {
+    std::vector<PathRef> out;
+    if (orbit_ || ctx_.selection.size() != 1) return out;
+    const Layer* l = const_cast<EditorContext&>(ctx_).selected();
+    if (!l || l->locked || !l->activeAt(ctx_.time) || l->type == LayerType::Camera) return out;
+    if (l->type == LayerType::Shape && l->shape.kind == ShapeKind::Path) out.push_back({l->id, -1});
+    for (int i = 0; i < static_cast<int>(l->masks.size()); ++i) out.push_back({l->id, i});
+    return out;
+}
+
+bool ViewportPanel::pathPointAt(Vec2 s, PathPoint& out) const {
+    for (const PathRef& r : editablePaths()) {
+        const BezierPath* path = pathOf(r);
+        Projective m;
+        if (!path || !pathMatrix(r.layer, m)) continue;
+        for (int i = 0; i < static_cast<int>(path->vertices.size()); ++i) { // handles over points: they sit on top
+            const PathVertex& v = path->vertices[i];
+            if (v.in != Vec2{} && near(s, m.apply(v.point + v.in), kHandleRadius + 2)) return out = {r, i, 1}, true;
+            if (v.out != Vec2{} && near(s, m.apply(v.point + v.out), kHandleRadius + 2)) return out = {r, i, 2}, true;
+        }
+        for (int i = 0; i < static_cast<int>(path->vertices.size()); ++i)
+            if (near(s, m.apply(path->vertices[i].point), kHandleRadius + 3)) return out = {r, i, 0}, true;
+    }
+    return false;
+}
+
+Vec2 ViewportPanel::pathLocal(uint64_t layerId, Vec2 screen) const {
+    Projective m;
+    return pathMatrix(layerId, m) ? m.inverse().apply(screen) : Vec2{};
+}
+
+void ViewportPanel::startPen(Vec2 mouse) {
+    Layer* sel = ctx_.selection.size() == 1 ? ctx_.selected() : nullptr;
+    // A layer selected that is not a shape gets a mask; otherwise a new shape layer starts here.
+    const bool mask = sel && sel->type != LayerType::Shape && sel->type != LayerType::Camera && !sel->locked && sel->activeAt(ctx_.time) &&
+                      !(sel->type == LayerType::Media && !sel->media.hasVideo);
+    if (mask) {
+        Mask m;
+        m.name = "Mask " + std::to_string(sel->masks.size() + 1);
+        m.path.vertices.clear();
+        sel->masks.push_back(std::move(m));
+        penTarget_ = {sel->id, static_cast<int>(sel->masks.size()) - 1};
+    } else {
+        Layer& l = ctx_.addShape(ShapeKind::Path, sceneView().screenToScene(mouse));
+        l.shape.path.vertices.clear();
+        l.shape.path.closed = false;
+        l.shape.fillEnabled = false; // an open path is a line until it is closed
+        l.shape.strokeEnabled = true;
+        l.shape.strokeColor.base = Color::fromHex(0xE8B931);
+        l.shape.strokeWidth.base = 6.0f;
+        penTarget_ = {l.id, -1};
+    }
+    penDrawing_ = true;
+    addPenPoint(mouse);
+}
+
+void ViewportPanel::addPenPoint(Vec2 mouse) {
+    BezierPath* path = pathOf(penTarget_);
+    if (!path) return;
+    path->vertices.push_back({pathLocal(penTarget_.layer, mouse), {}, {}});
+    drag_ = Drag::PenHandle;
+    pathDrag_ = {penTarget_, static_cast<int>(path->vertices.size()) - 1, 2};
+    ctx_.touch();
+}
+
+void ViewportPanel::finishPen() {
+    if (!penDrawing_) return;
+    penDrawing_ = false;
+    Layer* l = ctx_.comp().findLayer(penTarget_.layer);
+    BezierPath* path = pathOf(penTarget_);
+    if (l && path) {
+        if (penTarget_.mask >= 0 && path->vertices.size() < 3) l->masks.erase(l->masks.begin() + penTarget_.mask); // nothing to cut with
+        else if (penTarget_.mask < 0 && path->vertices.size() < 2) ctx_.comp().removeLayer(l->id), ctx_.pruneSelection();
+    }
+    ctx_.touch();
+    update();
+}
+
+bool ViewportPanel::pathPress(QMouseEvent* e, Vec2 mouse, bool doubleClick) {
+    const bool pen = ctx_.tool == Tool::Pen && !orbit_;
+    const auto mods = e->modifiers();
+    if (pen && penDrawing_ && doubleClick) { // done, open
+        finishPen();
+        return true;
+    }
+    PathPoint hit;
+    if (pathPointAt(mouse, hit)) {
+        BezierPath* path = pathOf(hit.ref);
+        if (pen && penDrawing_ && hit.ref == penTarget_ && hit.vertex == 0 && hit.part == 0 && path->vertices.size() >= 2) {
+            path->closed = true; // the first point again: closed
+            if (Layer* l = ctx_.comp().findLayer(penTarget_.layer); l && penTarget_.mask < 0)
+                l->shape.fillEnabled = true, l->shape.strokeEnabled = false;
+            finishPen();
+            return true;
+        }
+        if (pen && (mods & Qt::ControlModifier) && hit.part == 0) { // Ctrl+click: the point goes
+            path->vertices.erase(path->vertices.begin() + hit.vertex);
+            ctx_.touch();
+            return true;
+        }
+        if (pen && (mods & Qt::AltModifier) && hit.part == 0) { // Alt+click: corner <-> smooth
+            PathVertex& v = path->vertices[hit.vertex];
+            if (v.in != Vec2{} || v.out != Vec2{}) {
+                v.in = v.out = {};
+            } else { // handles along the line between its neighbors, a third of the way to each
+                const size_t n = path->vertices.size();
+                const Vec2 prev = path->vertices[(hit.vertex + n - 1) % n].point, next = path->vertices[(hit.vertex + 1) % n].point;
+                const Vec2 dir = next - prev;
+                const float len = dir.length();
+                if (len > 1e-3f) {
+                    v.out = dir * ((next - v.point).length() / (3.0f * len));
+                    v.in = dir * (-(prev - v.point).length() / (3.0f * len));
+                }
+            }
+            ctx_.touch();
+            return true;
+        }
+        drag_ = Drag::PathPoint;
+        pathDrag_ = hit;
+        pathGrab_ = pathLocal(hit.ref.layer, mouse) - path->vertices[hit.vertex].point;
+        return true;
+    }
+    if (!pen || (mods & Qt::AltModifier)) return false; // (Alt+drag pans)
+    if (penDrawing_) {
+        addPenPoint(mouse);
+        return true;
+    }
+    // On an outline: a new point there, keeping the curve.
+    for (const PathRef& r : editablePaths()) {
+        BezierPath* path = pathOf(r);
+        Projective m;
+        if (!path || !pathMatrix(r.layer, m)) continue;
+        const Vec2 local = m.inverse().apply(mouse);
+        const float scale = std::max(1e-4f, m.localScale(local));
+        size_t segment = 0;
+        float u = 0.0f;
+        BezierPath outline = *path;
+        if (r.mask >= 0) outline.closed = true; // masks are always closed
+        if (nearestSegment(outline, local, 6.0f / scale, segment, u)) {
+            path->closed = outline.closed;
+            insertVertex(*path, segment, u);
+            drag_ = Drag::PathPoint;
+            pathDrag_ = {r, static_cast<int>(segment) + 1, 0};
+            pathGrab_ = {};
+            ctx_.touch();
+            return true;
+        }
+    }
+    startPen(mouse);
+    return true;
+}
+
+void ViewportPanel::dragPath(Vec2 mouse, Qt::KeyboardModifiers mods) {
+    BezierPath* path = pathOf(pathDrag_.ref);
+    if (!path || pathDrag_.vertex < 0 || pathDrag_.vertex >= static_cast<int>(path->vertices.size())) return;
+    PathVertex& v = path->vertices[pathDrag_.vertex];
+    const Vec2 q = pathLocal(pathDrag_.ref.layer, mouse);
+    if (drag_ == Drag::PenHandle) { // dragging out a new point's handles (a tiny drag: a corner)
+        const Vec2 d = (mouse - dragStartScreen_).length() < 3.0f ? Vec2{} : q - v.point;
+        v.out = d;
+        v.in = d * -1.0f;
+    } else if (pathDrag_.part == 0) {
+        v.point = q - pathGrab_;
+    } else {
+        Vec2& own = pathDrag_.part == 1 ? v.in : v.out;
+        Vec2& other = pathDrag_.part == 1 ? v.out : v.in;
+        own = q - v.point;
+        // The other handle mirrors it (a smooth point) unless Alt breaks them into a corner.
+        const float ol = other.length(), hl = own.length();
+        if (!(mods & Qt::AltModifier) && ol > 1e-4f && hl > 1e-4f) other = own * (-ol / hl);
+    }
+    ctx_.touch();
+}
+
+void ViewportPanel::drawPaths(QPainter& p) {
+    Draw d(p);
+    for (const PathRef& r : editablePaths()) {
+        const BezierPath* path = pathOf(r);
+        Projective m;
+        if (!path || path->vertices.empty() || !pathMatrix(r.layer, m)) continue;
+        BezierPath outline = *path;
+        if (r.mask >= 0 && !(penDrawing_ && r == penTarget_)) outline.closed = true;
+        const Rgba line = r.mask >= 0 ? theme::withAlpha(theme::kGuide, 230) : theme::kAccent;
+        const Path flat = flattenBezier(outline, 24);
+        std::vector<Pt> pts;
+        for (const Vec2& q : flat.points) pts.push_back(pt(m.apply(q)));
+        if (pts.size() >= 2) d.polyline(pts.data(), static_cast<int>(pts.size()), line, outline.closed, 1.4f);
+        for (int i = 0; i < static_cast<int>(path->vertices.size()); ++i) {
+            const PathVertex& v = path->vertices[i];
+            const Vec2 c = m.apply(v.point);
+            for (const Vec2& h : {v.in, v.out}) {
+                if (h == Vec2{}) continue;
+                const Vec2 hs = m.apply(v.point + h);
+                d.line(pt(c), pt(hs), ui::rgba(255, 255, 255, 110), 1.0f);
+                d.circleFilled(pt(hs), 3.5f, line);
+            }
+            const bool first = i == 0 && penDrawing_ && r == penTarget_;
+            const float s = first ? 5.0f : 4.0f; // the first point closes the path
+            d.rectFilled(Pt(c.x - s, c.y - s), Pt(c.x + s, c.y + s), first ? line : theme::kBgDeep);
+            d.rect(Pt(c.x - s, c.y - s), Pt(c.x + s, c.y + s), line, 0.0f, 1.5f);
+        }
+        // Drawing: where the next segment would go.
+        if (penDrawing_ && r == penTarget_ && drag_ == Drag::None && hovered_)
+            d.line(pt(m.apply(path->vertices.back().point)), pt(mouse_), theme::withAlpha(line, 140), 1.0f);
+    }
+}
+
+void ViewportPanel::keyPressEvent(QKeyEvent* e) {
+    if (penDrawing_ && (e->key() == Qt::Key_Return || e->key() == Qt::Key_Enter)) {
+        finishPen();
+        return;
+    }
+    QWidget::keyPressEvent(e);
+}
+
 // --- crop ---------------------------------------------------------------------------------------
 
 Layer* ViewportPanel::cropLayer() const {
@@ -1051,6 +1288,10 @@ void ViewportPanel::updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods) {
         else if (overRulerLeft && ctx_.showGuides) shape = Qt::SizeHorCursor;
         else if (const int g = guideAt(mouse); g >= 0 && !ctx_.lockGuides)
             shape = ctx_.comp().guides[g].vertical ? Qt::SizeHorCursor : Qt::SizeVerCursor;
+        else if (PathPoint hit; pathPointAt(mouse, hit))
+            shape = Qt::PointingHandCursor;
+        else if (ctx_.tool == Tool::Pen && !orbit_)
+            shape = Qt::CrossCursor;
         else {
             const double t = ctx_.time;
             Layer* single = ctx_.selection.size() == 1 ? ctx_.selected() : nullptr;
@@ -1151,6 +1392,12 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
         guideDrag_ = static_cast<int>(guides.size()) - 1;
         drag_ = Drag::Guide;
         ctx_.touch();
+        return;
+    }
+
+    // Paths: the pen draws; the points of a path shape or of masks drag.
+    if (!spaceHeld_ && !additive && pathPress(e, mouse, doubleClick)) {
+        update();
         return;
     }
 
@@ -1348,6 +1595,10 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
     default: break;
     }
 
+    if (drag_ == Drag::PenHandle || drag_ == Drag::PathPoint) {
+        dragPath(mouse, mods);
+        return;
+    }
     if (!dragMoved_) return;
     switch (drag_) {
     case Drag::Axis: { // along one world axis, as far as the mouse went along its arrow

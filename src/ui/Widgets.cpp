@@ -55,6 +55,7 @@ Icon iconForShape(ShapeKind kind) {
     case ShapeKind::Polygon: return Icon::Polygon;
     case ShapeKind::Star: return Icon::Star;
     case ShapeKind::Line: return Icon::Line;
+    case ShapeKind::Path: return Icon::PathShape;
     case ShapeKind::Count: break;
     }
     return Icon::Rectangle;
@@ -260,6 +261,89 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.line(Pt(c.x - h * 0.15f, c.y - h * 0.65f), Pt(c.x + h * 0.25f, c.y - h * 0.65f), col, th);
         dl.line(Pt(c.x + h * 0.25f, c.y - h * 0.65f), Pt(c.x + h * 0.4f, c.y - h * 0.4f), col, th);
         dl.circle(Pt(c.x, c.y + h * 0.12f), h * 0.3f, col, th);
+        break;
+    }
+    case Icon::Pen: { // a nib: a pointed shield with a slit and a hole
+        const Pt nib[5] = {Pt(c.x, c.y + h * 0.9f), Pt(c.x - h * 0.55f, c.y + h * 0.05f), Pt(c.x - h * 0.3f, c.y - h * 0.55f),
+                           Pt(c.x + h * 0.3f, c.y - h * 0.55f), Pt(c.x + h * 0.55f, c.y + h * 0.05f)};
+        dl.polyline(nib, 5, col, true, th);
+        dl.line(Pt(c.x, c.y + h * 0.9f), Pt(c.x, c.y + h * 0.05f), col, th);
+        dl.circleFilled(Pt(c.x, c.y - h * 0.05f), h * 0.12f, col);
+        dl.line(Pt(c.x - h * 0.3f, c.y - h * 0.8f), Pt(c.x + h * 0.3f, c.y - h * 0.8f), col, th);
+        break;
+    }
+    case Icon::PathShape: { // a curve between two vertices, with a handle
+        const Pt a(c.x - h * 0.75f, c.y + h * 0.55f), b(c.x + h * 0.75f, c.y - h * 0.55f);
+        dl.bezier(a, Pt(c.x - h * 0.2f, c.y - h * 0.9f), Pt(c.x + h * 0.2f, c.y + h * 0.9f), b, col, th);
+        dl.rectFilled(Pt(a.x - h * 0.17f, a.y - h * 0.17f), Pt(a.x + h * 0.17f, a.y + h * 0.17f), col);
+        dl.rectFilled(Pt(b.x - h * 0.17f, b.y - h * 0.17f), Pt(b.x + h * 0.17f, b.y + h * 0.17f), col);
+        break;
+    }
+    case Icon::Mask: { // a square with a round hole marked by a dashed outline
+        dl.rect(Pt(c.x - h * 0.8f, c.y - h * 0.8f), Pt(c.x + h * 0.8f, c.y + h * 0.8f), col, 2.0f, th);
+        for (int i = 0; i < 8; i += 2)
+            dl.arc(c, h * 0.45f, kPi * 0.25f * i, kPi * 0.25f * (i + 1), col, th);
+        break;
+    }
+    case Icon::RippleEdit: { // a clip's edge and an arrow pushing what follows
+        dl.line(Pt(c.x - h * 0.3f, c.y - h * 0.8f), Pt(c.x - h * 0.3f, c.y + h * 0.8f), col, th);
+        dl.line(Pt(c.x - h * 0.3f, c.y - h * 0.8f), Pt(c.x - h * 0.75f, c.y - h * 0.8f), col, th);
+        dl.line(Pt(c.x - h * 0.3f, c.y + h * 0.8f), Pt(c.x - h * 0.75f, c.y + h * 0.8f), col, th);
+        dl.line(Pt(c.x, c.y), Pt(c.x + h * 0.8f, c.y), col, th);
+        dl.line(Pt(c.x + h * 0.8f, c.y), Pt(c.x + h * 0.5f, c.y - h * 0.3f), col, th);
+        dl.line(Pt(c.x + h * 0.8f, c.y), Pt(c.x + h * 0.5f, c.y + h * 0.3f), col, th);
+        break;
+    }
+    case Icon::RollEdit: { // the cut between two clips, arrows both ways
+        dl.line(Pt(c.x, c.y - h * 0.85f), Pt(c.x, c.y + h * 0.85f), col, th);
+        for (float s : {-1.0f, 1.0f}) {
+            dl.line(Pt(c.x + s * h * 0.2f, c.y), Pt(c.x + s * h * 0.85f, c.y), col, th);
+            dl.line(Pt(c.x + s * h * 0.85f, c.y), Pt(c.x + s * h * 0.55f, c.y - h * 0.3f), col, th);
+            dl.line(Pt(c.x + s * h * 0.85f, c.y), Pt(c.x + s * h * 0.55f, c.y + h * 0.3f), col, th);
+        }
+        break;
+    }
+    case Icon::SlipEdit: { // a clip, its content sliding inside it
+        dl.rect(Pt(c.x - h * 0.85f, c.y - h * 0.55f), Pt(c.x + h * 0.85f, c.y + h * 0.55f), col, 2.0f, th);
+        dl.line(Pt(c.x - h * 0.45f, c.y), Pt(c.x + h * 0.45f, c.y), col, th);
+        for (float s : {-1.0f, 1.0f}) {
+            dl.line(Pt(c.x + s * h * 0.45f, c.y), Pt(c.x + s * h * 0.2f, c.y - h * 0.22f), col, th);
+            dl.line(Pt(c.x + s * h * 0.45f, c.y), Pt(c.x + s * h * 0.2f, c.y + h * 0.22f), col, th);
+        }
+        break;
+    }
+    case Icon::Marker: { // a flag on its pole
+        dl.line(Pt(c.x - h * 0.55f, c.y - h * 0.85f), Pt(c.x - h * 0.55f, c.y + h * 0.85f), col, th);
+        const Pt flag[4] = {Pt(c.x - h * 0.55f, c.y - h * 0.85f), Pt(c.x + h * 0.7f, c.y - h * 0.55f), Pt(c.x - h * 0.55f, c.y - h * 0.15f),
+                            Pt(c.x - h * 0.55f, c.y - h * 0.85f)};
+        dl.polyFilled(flag, 4, col);
+        break;
+    }
+    case Icon::Speaker:
+    case Icon::SpeakerMuted: { // a speaker, with waves or a cross
+        const Pt body[6] = {Pt(c.x - h * 0.85f, c.y - h * 0.3f), Pt(c.x - h * 0.45f, c.y - h * 0.3f), Pt(c.x + h * 0.05f, c.y - h * 0.75f),
+                            Pt(c.x + h * 0.05f, c.y + h * 0.75f), Pt(c.x - h * 0.45f, c.y + h * 0.3f), Pt(c.x - h * 0.85f, c.y + h * 0.3f)};
+        dl.polyFilled(body, 6, col);
+        if (icon == Icon::Speaker) {
+            dl.arc(Pt(c.x + h * 0.05f, c.y), h * 0.42f, -kPi * 0.3f, kPi * 0.3f, col, th);
+            dl.arc(Pt(c.x + h * 0.05f, c.y), h * 0.78f, -kPi * 0.3f, kPi * 0.3f, col, th);
+        } else {
+            dl.line(Pt(c.x + h * 0.35f, c.y - h * 0.35f), Pt(c.x + h * 0.85f, c.y + h * 0.35f), col, th);
+            dl.line(Pt(c.x + h * 0.35f, c.y + h * 0.35f), Pt(c.x + h * 0.85f, c.y - h * 0.35f), col, th);
+        }
+        break;
+    }
+    case Icon::Solo: { // headphones
+        dl.arc(Pt(c.x, c.y + h * 0.1f), h * 0.7f, kPi, kPi * 2.0f, col, th);
+        dl.rectFilled(Pt(c.x - h * 0.85f, c.y + h * 0.05f), Pt(c.x - h * 0.45f, c.y + h * 0.75f), col, 2.0f);
+        dl.rectFilled(Pt(c.x + h * 0.45f, c.y + h * 0.05f), Pt(c.x + h * 0.85f, c.y + h * 0.75f), col, 2.0f);
+        break;
+    }
+    case Icon::Speed: { // a gauge and its needle
+        dl.arc(Pt(c.x, c.y + h * 0.3f), h * 0.8f, kPi, kPi * 2.0f, col, th);
+        dl.line(Pt(c.x - h * 0.8f, c.y + h * 0.3f), Pt(c.x + h * 0.8f, c.y + h * 0.3f), col, th);
+        dl.line(Pt(c.x, c.y + h * 0.3f), Pt(c.x + h * 0.45f, c.y - h * 0.3f), col, th);
+        dl.circleFilled(Pt(c.x, c.y + h * 0.3f), h * 0.13f, col);
         break;
     }
     case Icon::Meter:

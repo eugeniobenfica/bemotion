@@ -5,16 +5,20 @@
 #include "render/PluginCanvas.h"
 #include "render/Text.h"
 
+#include "include/core/SkBlurTypes.h"
 #include "include/core/SkCanvas.h"
 #include "include/core/SkColorFilter.h"
+#include "include/core/SkMaskFilter.h"
 #include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPathEffect.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRRect.h"
 #include "include/effects/SkColorMatrix.h"
+#include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkGradientShader.h"
 #include "include/effects/SkImageFilters.h"
+#include "include/effects/SkLumaColorFilter.h"
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/effects/SkTrimPathEffect.h"
 
@@ -57,7 +61,30 @@ bool clipToFront(SkCanvas* canvas, const Projective& m) {
 
 SkColor4f color4(Color c, float opacity = 1.0f) { return {c.r, c.g, c.b, std::clamp(c.a * opacity, 0.0f, 1.0f)}; }
 
+SkMatrix toSk(const Affine& m) { return SkMatrix::MakeAll(m.a, m.c, m.tx, m.b, m.d, m.ty, 0, 0, 1); }
+
 // --- shapes ------------------------------------------------------------------------
+
+SkPath bezierSkPath(const BezierPath& path) {
+    const size_t n = path.vertices.size();
+    if (n < 2) return {};
+    SkPathBuilder b;
+    b.moveTo(path.vertices[0].point.x, path.vertices[0].point.y);
+    for (size_t i = 0; i < segmentCount(path); ++i) {
+        const PathVertex& a = path.vertices[i];
+        const PathVertex& c = path.vertices[(i + 1) % n];
+        if (a.out == Vec2{} && c.in == Vec2{}) b.lineTo(c.point.x, c.point.y);
+        else b.cubicTo(a.point.x + a.out.x, a.point.y + a.out.y, c.point.x + c.in.x, c.point.y + c.in.y, c.point.x, c.point.y);
+    }
+    if (path.closed) b.close();
+    return b.detach();
+}
+
+// The repeater's step from one copy to the next, around the shape's own origin.
+Affine repeatStep(const ShapeProps& s, double t) {
+    return Affine::translate(s.repeatOffset.valueAt(t)) * Affine::rotateDeg(s.repeatRotation.valueAt(t)) *
+           Affine::scale(s.repeatScale.valueAt(t) * 0.01f);
+}
 
 SkPath shapePath(const ShapeProps& shape, double t) {
     const Vec2 size = shape.size.valueAt(t);
@@ -72,6 +99,7 @@ SkPath shapePath(const ShapeProps& shape, double t) {
         return b.detach();
     }
     case ShapeKind::Ellipse: b.addOval(SkRect::MakeLTRB(-hw, -hh, hw, hh), SkPathDirection::kCW, 0); return b.detach(); // from the top
+    case ShapeKind::Path: return bezierSkPath(shape.path);
     default: break;
     }
     // Polygons, stars and lines: the core outline (the same points the editor uses).
@@ -83,15 +111,34 @@ SkPath shapePath(const ShapeProps& shape, double t) {
     return b.detach();
 }
 
-void drawShape(SkCanvas* canvas, const Layer& layer, double t, float opacity) {
-    const ShapeProps& shape = layer.shape;
-    const SkPath path = shapePath(shape, t);
-    if (path.isEmpty()) return;
-    const bool closed = shape.kind != ShapeKind::Line;
-    if (shape.fillEnabled && closed) {
-        SkPaint fill(color4(shape.fillColor.valueAt(t), opacity));
-        fill.setAntiAlias(true);
-        if (fill.getAlphaf() > 0.0f) canvas->drawPath(path, fill);
+// The fill's paint: a color, or a gradient across the outline's bounds.
+SkPaint fillPaint(const ShapeProps& shape, const SkPath& path, double t, float opacity) {
+    const SkColor4f c1 = color4(shape.fillColor.valueAt(t), opacity);
+    SkPaint fill(c1);
+    fill.setAntiAlias(true);
+    if (shape.fill == ShapeFill::Solid) return fill;
+    const SkColor4f colors[2] = {c1, color4(shape.fillColor2.valueAt(t), opacity)};
+    const SkRect r = path.getBounds();
+    const float w = std::max(1.0f, r.width()), h = std::max(1.0f, r.height());
+    if (shape.fill == ShapeFill::Linear) { // end to end along the angle, like a background's
+        const float a = degToRad(shape.fillAngle.valueAt(t));
+        const float dx = std::cos(a), dy = std::sin(a);
+        const float half = (std::fabs(w * dx) + std::fabs(h * dy)) * 0.5f;
+        const SkPoint pts[2] = {{r.centerX() - dx * half, r.centerY() - dy * half}, {r.centerX() + dx * half, r.centerY() + dy * half}};
+        fill.setShader(SkGradientShader::MakeLinear(pts, colors, nullptr, nullptr, 2, SkTileMode::kClamp));
+    } else {
+        fill.setShader(SkGradientShader::MakeRadial({r.centerX(), r.centerY()}, std::max(w, h) * 0.5f, colors, nullptr, nullptr, 2,
+                                                    SkTileMode::kClamp));
+    }
+    return fill;
+}
+
+void drawShapeCopy(SkCanvas* canvas, const ShapeProps& shape, const SkPath& path, double t, float opacity) {
+    const bool line = shape.kind == ShapeKind::Line;
+    const bool open = line || (shape.kind == ShapeKind::Path && !shape.path.closed);
+    if (shape.fillEnabled && !line) {
+        const SkPaint fill = fillPaint(shape, path, t, opacity);
+        if (fill.getAlphaf() > 0.0f || fill.getShader()) canvas->drawPath(path, fill);
     }
     const float width = shape.strokeWidth.valueAt(t);
     if (shape.strokeEnabled && width > 0.0f) {
@@ -101,15 +148,45 @@ void drawShape(SkCanvas* canvas, const Layer& layer, double t, float opacity) {
         stroke.setStyle(SkPaint::kStroke_Style);
         stroke.setStrokeWidth(width);
         stroke.setStrokeJoin(SkPaint::kMiter_Join);
-        stroke.setStrokeCap(closed ? SkPaint::kButt_Cap : SkPaint::kRound_Cap);
+        stroke.setStrokeCap(open ? SkPaint::kRound_Cap : SkPaint::kButt_Cap);
         float a = std::clamp(shape.trimStart.valueAt(t) * 0.01f, 0.0f, 1.0f), b = std::clamp(shape.trimEnd.valueAt(t) * 0.01f, 0.0f, 1.0f);
         if (a > b) std::swap(a, b);
         if (b - a <= 1e-4f) return;
+        sk_sp<SkPathEffect> effect;
         if (a > 1e-4f || b < 1.0f - 1e-4f) {
-            stroke.setPathEffect(SkTrimPathEffect::Make(a, b));
+            effect = SkTrimPathEffect::Make(a, b);
             stroke.setStrokeCap(SkPaint::kButt_Cap);
         }
+        const float dash = shape.dash.valueAt(t), gap = shape.dashGap.valueAt(t);
+        if (dash > 0.01f && gap > 0.01f) { // dashes along what the trim leaves
+            const SkScalar intervals[2] = {dash, gap};
+            sk_sp<SkPathEffect> dashes = SkDashPathEffect::Make(SkSpan<const SkScalar>(intervals, 2), shape.dashOffset.valueAt(t));
+            effect = effect ? SkPathEffect::MakeCompose(std::move(dashes), std::move(effect)) : std::move(dashes);
+        }
+        stroke.setPathEffect(std::move(effect));
         canvas->drawPath(path, stroke);
+    }
+}
+
+void drawShape(SkCanvas* canvas, const Layer& layer, double t, float opacity) {
+    const ShapeProps& shape = layer.shape;
+    const SkPath path = shapePath(shape, t);
+    if (path.isEmpty()) return;
+    const int copies = shape.copiesAt(t);
+    if (copies == 1) {
+        drawShapeCopy(canvas, shape, path, t, opacity);
+        return;
+    }
+    // The repeater: each copy one step further, fading toward the last; the first on top.
+    const Affine step = repeatStep(shape, t);
+    std::vector<Affine> at(static_cast<size_t>(copies));
+    for (int i = 1; i < copies; ++i) at[i] = at[i - 1] * step;
+    const float endOpacity = std::clamp(shape.repeatEndOpacity.valueAt(t) * 0.01f, 0.0f, 1.0f);
+    for (int i = copies - 1; i >= 0; --i) {
+        canvas->save();
+        canvas->concat(toSk(at[i]));
+        drawShapeCopy(canvas, shape, path, t, opacity * lerp(1.0f, endOpacity, static_cast<float>(i) / (copies - 1)));
+        canvas->restore();
     }
 }
 
@@ -401,19 +478,66 @@ std::vector<double> momentsOf(const Layer& layer, double t, double frameDuration
     return {t};
 }
 
+// How the top-level layers of a composition reach the output: the view, the camera.
+struct Frame {
+    const Composition* comp = nullptr;
+    Affine screen;            // composition -> output
+    bool throughCamera = true;
+    const Lens* lens = nullptr; // the 3D view's eye
+    float zoom = 1.0f;        // composition -> output scale
+    Affine flat;              // the 2D camera
+};
+
+// Where the layers beside one land: at the top of a frame (each seen by the camera), or inside a
+// compound (through its transform). Track mattes are drawn through it.
+struct Place {
+    const Frame* frame = nullptr;
+    bool top = true;
+    Projective parent; // inside a compound: compound space -> output
+    float zoom = 1.0f;
+
+    // Layer -> output and the effects' scale; false when the camera does not see the layer.
+    bool locate(const Layer& l, double t, Projective& m, float& z) const {
+        if (!top || !frame || !frame->comp) {
+            m = parent * l.matrixAt(t);
+            z = zoom;
+            return true;
+        }
+        const Composition& comp = *frame->comp;
+        Projective camera;
+        if (frame->lens ? !comp.viewThrough(*frame->lens, l, t, camera, true, true) : !comp.viewFor(l, t, camera, frame->throughCamera))
+            return false; // behind the camera
+        z = frame->zoom;
+        if (l.threeD || frame->lens) { // effects shrink with distance (as the 2D camera's own zoom leaves them)
+            const float s = camera.localScale(l.transform.position.valueAt(t));
+            z *= s / std::max(1e-6f, std::sqrt(std::fabs(frame->flat.determinant())));
+        }
+        m = Projective(frame->screen) * camera * l.matrixAt(t);
+        return true;
+    }
+};
+
+void drawLayerIn(SkCanvas* canvas, const Layer& layer, double time, const Projective& layerToOutput, float zoom, const Composition* comp,
+                 float opacityOverride, const Place* place, const Frame* frame);
+
+// Drawn by itself: not someone's track matte, not hidden by solo.
+bool drawnAlone(const Composition& comp, const Layer& l) { return !comp.isMatte(l.id) && !comp.soloedOut(l); }
+
 // The layer's own content in its local space (the canvas carries its transform).
 void drawContent(SkCanvas* canvas, const Layer& layer, double t, float opacity, const Composition* comp, const Projective& toOutput,
-                 float zoom) {
+                 float zoom, const Frame* frame) {
     switch (layer.type) {
-    case LayerType::Compound:
+    case LayerType::Compound: {
         if (!comp) return;
         // Children, bottom first, in the compound's space; its opacity multiplies theirs.
+        const Place inside{frame, false, toOutput, zoom};
         for (auto it = comp->layers.rbegin(); it != comp->layers.rend(); ++it) {
-            if (it->parent != layer.id || !it->activeAt(t) || it->type == LayerType::Camera) continue;
+            if (it->parent != layer.id || !it->activeAt(t) || it->type == LayerType::Camera || !drawnAlone(*comp, *it)) continue;
             const float own = std::clamp(it->transform.opacity.valueAt(t) * 0.01f, 0.0f, 1.0f);
-            drawLayer(canvas, *it, t, toOutput * it->matrixAt(t), zoom, comp, own * opacity);
+            drawLayerIn(canvas, *it, t, toOutput * it->matrixAt(t), zoom, comp, own * opacity, &inside, frame);
         }
         return;
+    }
     case LayerType::Media: drawMedia(canvas, comp, layer, t, opacity); return;
     case LayerType::Text: drawText(canvas, layer.text, t, opacity, {layer.inPoint, layer.outPoint}); return;
     case LayerType::Plugin: drawPlugin(canvas, layer, t, opacity); return;
@@ -421,6 +545,157 @@ void drawContent(SkCanvas* canvas, const Layer& layer, double t, float opacity, 
     case LayerType::Camera: return;
     default: drawShape(canvas, layer, t, opacity); return;
     }
+}
+
+// How much of a mask's coverage the next one leaves (its mode), drawn over the masks above it.
+SkBlendMode maskBlend(MaskMode mode) {
+    switch (mode) {
+    case MaskMode::Subtract: return SkBlendMode::kDstOut;
+    case MaskMode::Intersect: return SkBlendMode::kDstIn;
+    case MaskMode::Difference: return SkBlendMode::kXor;
+    default: return SkBlendMode::kSrcOver;
+    }
+}
+
+// One mask's coverage, white, in layer space: its outline grown or shrunk, softened, maybe inverted.
+void drawMaskCoverage(SkCanvas* canvas, const Mask& m, double t) {
+    const SkPath path = bezierSkPath(m.path);
+    SkPaint white(SkColors::kWhite);
+    white.setAntiAlias(true);
+    if (const float feather = m.feather.valueAt(t); feather > 0.01f) white.setMaskFilter(SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, feather * 0.5f));
+    if (m.inverted) canvas->saveLayer(nullptr, nullptr);
+    canvas->drawPath(path, white);
+    if (const float grow = m.expansion.valueAt(t); std::fabs(grow) > 0.01f) {
+        SkPaint edge = white;
+        edge.setStyle(SkPaint::kStroke_Style);
+        edge.setStrokeWidth(std::fabs(grow) * 2.0f);
+        edge.setStrokeJoin(SkPaint::kRound_Join);
+        if (grow < 0.0f) edge.setBlendMode(SkBlendMode::kDstOut);
+        canvas->drawPath(path, edge);
+    }
+    if (m.inverted) { // white where the mask was not
+        SkPaint rest(SkColors::kWhite);
+        rest.setBlendMode(SkBlendMode::kSrcOut);
+        canvas->drawPaint(rest);
+        canvas->restore();
+    }
+}
+
+// The content cut by the layer's masks (in layer space, the canvas carrying its transform).
+void drawMasked(SkCanvas* canvas, const Layer& layer, double t, float opacity, const Composition* comp, const Projective& toOutput,
+                float zoom, const Frame* frame) {
+    const bool masked = std::any_of(layer.masks.begin(), layer.masks.end(), [](const Mask& m) { return m.enabled && !m.path.empty(); });
+    if (!masked) {
+        drawContent(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
+        return;
+    }
+    Vec2 lo, hi;
+    SkRect bounds;
+    const SkRect* hint = nullptr;
+    if (localBounds(layer, t, lo, hi, comp)) {
+        const float pad = 2.0f + 0.02f * std::max(hi.x - lo.x, hi.y - lo.y);
+        bounds = SkRect::MakeLTRB(lo.x - pad, lo.y - pad, hi.x + pad, hi.y + pad);
+        hint = &bounds;
+    }
+    canvas->saveLayer(hint, nullptr);
+    drawContent(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
+    SkPaint keep;
+    keep.setBlendMode(SkBlendMode::kDstIn);
+    canvas->saveLayer(hint, &keep);
+    bool first = true;
+    for (const Mask& m : layer.masks) {
+        if (!m.enabled || m.path.empty()) continue;
+        // A first mask that takes away starts from everything (as in After Effects).
+        if (first && (m.mode == MaskMode::Subtract || m.mode == MaskMode::Intersect)) canvas->drawPaint(SkPaint(SkColors::kWhite));
+        SkPaint compose;
+        compose.setAlphaf(std::clamp(m.opacity.valueAt(t) * 0.01f, 0.0f, 1.0f));
+        compose.setBlendMode(first && m.mode == MaskMode::Difference ? SkBlendMode::kSrcOver : maskBlend(m.mode));
+        canvas->saveLayer(hint, &compose);
+        drawMaskCoverage(canvas, m, t);
+        canvas->restore();
+        first = false;
+    }
+    canvas->restore();
+    canvas->restore();
+}
+
+SkBlendMode skBlend(BlendMode mode) {
+    switch (mode) {
+    case BlendMode::Multiply: return SkBlendMode::kMultiply;
+    case BlendMode::Screen: return SkBlendMode::kScreen;
+    case BlendMode::Overlay: return SkBlendMode::kOverlay;
+    case BlendMode::Darken: return SkBlendMode::kDarken;
+    case BlendMode::Lighten: return SkBlendMode::kLighten;
+    case BlendMode::ColorDodge: return SkBlendMode::kColorDodge;
+    case BlendMode::ColorBurn: return SkBlendMode::kColorBurn;
+    case BlendMode::HardLight: return SkBlendMode::kHardLight;
+    case BlendMode::SoftLight: return SkBlendMode::kSoftLight;
+    case BlendMode::Difference: return SkBlendMode::kDifference;
+    case BlendMode::Exclusion: return SkBlendMode::kExclusion;
+    case BlendMode::Hue: return SkBlendMode::kHue;
+    case BlendMode::Saturation: return SkBlendMode::kSaturation;
+    case BlendMode::Color: return SkBlendMode::kColor;
+    case BlendMode::Luminosity: return SkBlendMode::kLuminosity;
+    case BlendMode::Add: return SkBlendMode::kPlus;
+    default: return SkBlendMode::kSrcOver;
+    }
+}
+
+// Output pixels the layer covers at these moments (`parent`: its parent space -> output); false
+// when unbounded (or reaching behind the camera).
+bool outputBounds(const Layer& layer, const std::vector<double>& times, const Projective& parent, const Composition* comp, SkRect& out) {
+    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
+    for (double ti : times) {
+        Vec2 lo, hi;
+        if (!localBounds(layer, ti, lo, hi, comp)) return false;
+        const Projective m = parent * layer.matrixAt(ti);
+        for (Vec2 corner : {lo, Vec2{hi.x, lo.y}, hi, Vec2{lo.x, hi.y}}) {
+            if (!m.inFront(corner)) return false;
+            const Vec2 q = m.apply(corner);
+            x0 = std::min(x0, q.x), y0 = std::min(y0, q.y), x1 = std::max(x1, q.x), y1 = std::max(y1, q.y);
+        }
+    }
+    out = SkRect::MakeLTRB(x0 - 4, y0 - 4, x1 + 4, y1 + 4); // antialiasing and strokes past the bounds
+    return !out.isEmpty();
+}
+
+void drawLayerCore(SkCanvas* canvas, const Layer& layer, double time, const Projective& layerToOutput, float zoom, const Composition* comp,
+                   float opacityOverride, const Frame* frame);
+
+// A layer with its blending mode and track matte around the rest (drawLayerCore).
+void drawLayerIn(SkCanvas* canvas, const Layer& layer, double time, const Projective& layerToOutput, float zoom, const Composition* comp,
+                 float opacityOverride, const Place* place, const Frame* frame) {
+    const bool matted = layer.matte != MatteMode::None && comp && place;
+    if (layer.blend == BlendMode::Normal && !matted) {
+        drawLayerCore(canvas, layer, time, layerToOutput, zoom, comp, opacityOverride, frame);
+        return;
+    }
+    SkRect bounds;
+    const Projective parent = layerToOutput * layer.matrixAt(time).inverse();
+    const SkRect* hint = outputBounds(layer, momentsOf(layer, time, comp ? comp->frameDuration() : 1.0 / 30.0), parent, comp, bounds) ? &bounds : nullptr;
+    canvas->save();
+    canvas->resetMatrix();
+    SkPaint blend;
+    blend.setBlendMode(skBlend(layer.blend));
+    canvas->saveLayer(hint, &blend);
+    drawLayerCore(canvas, layer, time, layerToOutput, zoom, comp, opacityOverride, frame);
+    if (matted) {
+        // The matte's picture (its alpha, or its brightness) keeps or removes the layer's pixels.
+        SkPaint cut;
+        const bool inverted = layer.matte == MatteMode::AlphaInverted || layer.matte == MatteMode::LumaInverted;
+        cut.setBlendMode(inverted ? SkBlendMode::kDstOut : SkBlendMode::kDstIn);
+        if (layer.matte == MatteMode::Luma || layer.matte == MatteMode::LumaInverted) cut.setColorFilter(SkLumaColorFilter::Make());
+        canvas->saveLayer(hint, &cut);
+        const Layer* matte = comp->findLayer(layer.matteLayer);
+        Projective m;
+        float z = zoom;
+        // Seen while it exists (its eye may be off: it is not drawn by itself anyway).
+        if (matte && time >= matte->inPoint && time < matte->outPoint && place->locate(*matte, time, m, z))
+            drawLayerIn(canvas, *matte, time, m, z, comp, -1.0f, place, frame);
+        canvas->restore();
+    }
+    canvas->restore();
+    canvas->restore();
 }
 
 } // namespace
@@ -434,6 +709,13 @@ bool hasActiveEffects(const Layer& layer) {
 
 void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projective& layerToOutput, float zoom,
                const Composition* comp, float opacityOverride) {
+    const Place beside{nullptr, false, layerToOutput * layer.matrixAt(time).inverse(), zoom};
+    drawLayerIn(canvas, layer, time, layerToOutput, zoom, comp, opacityOverride, &beside, nullptr);
+}
+
+namespace {
+void drawLayerCore(SkCanvas* canvas, const Layer& layer, double time, const Projective& layerToOutput, float zoom, const Composition* comp,
+                   float opacityOverride, const Frame* frame) {
     const float opacity = opacityOverride >= 0.0f ? std::min(opacityOverride, 1.0f)
                                                   : std::clamp(layer.transform.opacity.valueAt(time) * 0.01f, 0.0f, 1.0f);
     if (opacity <= 0.0f || layer.type == LayerType::Camera) return;
@@ -441,7 +723,7 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projecti
     if (!hasActiveEffects(layer)) {
         canvas->save();
         canvas->setMatrix(toSk(layerToOutput));
-        if (clipToFront(canvas, layerToOutput)) drawContent(canvas, layer, time, opacity, comp, layerToOutput, zoom);
+        if (clipToFront(canvas, layerToOutput)) drawMasked(canvas, layer, time, opacity, comp, layerToOutput, zoom, frame);
         canvas->restore();
         return;
     }
@@ -452,23 +734,8 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projecti
     const std::vector<double> times = momentsOf(layer, time, comp ? comp->frameDuration() : 1.0 / 30.0);
     // The offscreen layer only needs to hold what the layer draws (in output pixels): image
     // filters on the CPU cost per pixel of the layer.
-    float x0 = 1e30f, y0 = 1e30f, x1 = -1e30f, y1 = -1e30f;
-    bool bounded = true;
-    for (double ti : times) {
-        Vec2 lo, hi;
-        if (!localBounds(layer, ti, lo, hi, comp)) {
-            bounded = false;
-            break;
-        }
-        const Projective m = parent * layer.matrixAt(ti);
-        for (Vec2 corner : {lo, Vec2{hi.x, lo.y}, hi, Vec2{lo.x, hi.y}}) {
-            if (!m.inFront(corner)) bounded = false; // reaches behind the camera: no usable bounds
-            const Vec2 q = m.apply(corner);
-            x0 = std::min(x0, q.x), y0 = std::min(y0, q.y), x1 = std::max(x1, q.x), y1 = std::max(y1, q.y);
-        }
-    }
-    const SkRect bounds = SkRect::MakeLTRB(x0 - 4, y0 - 4, x1 + 4, y1 + 4); // antialiasing and strokes past the bounds
-    const SkRect* hint = bounded && !bounds.isEmpty() ? &bounds : nullptr;
+    SkRect bounds;
+    const SkRect* hint = outputBounds(layer, times, parent, comp, bounds) ? &bounds : nullptr;
     canvas->save();
     canvas->resetMatrix();
     SkPaint filtered;
@@ -489,7 +756,7 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projecti
         const Projective m = parent * layer.matrixAt(ti);
         canvas->save();
         canvas->setMatrix(toSk(m));
-        if (clipToFront(canvas, m)) drawContent(canvas, layer, ti, 1.0f, comp, m, zoom);
+        if (clipToFront(canvas, m)) drawMasked(canvas, layer, ti, 1.0f, comp, m, zoom, frame);
         canvas->restore();
         if (average) canvas->restore();
     }
@@ -497,6 +764,7 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projecti
     canvas->restore();
     canvas->restore();
 }
+} // namespace
 
 // Drawing order in depth, refined with each layer's size: a layer is judged by its far end, so a
 // big plane (a floor, a wall) goes before what stands in front of it or on it. Sorted: each run of
@@ -546,21 +814,18 @@ void drawComposition(SkCanvas* canvas, const Composition& comp, double time, con
     }
     canvas->save();
     if (!lens) canvas->clipRect(frame, true); // layers are clipped to the composition frame (not in the 3D view)
-    const Affine screen = Affine::translate(view.origin) * Affine::scale(view.zoom);
-    const Affine flat = throughCamera && !lens ? comp.cameraAt(time) : Affine{};
+    // Backgrounds stay on the frame whatever the camera does. 3D layers are seen in perspective
+    // through the camera (the free view shows them from the front; the 3D view shows every layer
+    // in space, from its own eye).
+    const Frame f{&comp, Affine::translate(view.origin) * Affine::scale(view.zoom), throughCamera, lens, view.zoom,
+                  throughCamera && !lens ? comp.cameraAt(time) : Affine{}};
+    const Place top{&f, true, {}, view.zoom};
     for (const Layer* layer : depthOrder(comp, time, false, throughCamera, lens)) {
-        // Backgrounds stay on the frame whatever the camera does. 3D layers are seen in
-        // perspective through the camera (the free view shows them from the front; the 3D
-        // view shows every layer in space, from its own eye).
-        Projective camera;
-        if (lens ? !comp.viewThrough(*lens, *layer, time, camera, true, true) : !comp.viewFor(*layer, time, camera, throughCamera))
-            continue; // behind the camera
+        if (!drawnAlone(comp, *layer)) continue; // a track matte, or hidden by solo
+        Projective m;
         float zoom = view.zoom;
-        if (layer->threeD || lens) { // effects shrink with distance (as the 2D camera's own zoom leaves them)
-            const float s = camera.localScale(layer->transform.position.valueAt(time));
-            zoom *= s / std::max(1e-6f, std::sqrt(std::fabs(flat.determinant())));
-        }
-        drawLayer(canvas, *layer, time, screen * camera * layer->matrixAt(time), zoom, &comp);
+        if (!top.locate(*layer, time, m, zoom)) continue; // behind the camera
+        drawLayerIn(canvas, *layer, time, m, zoom, &comp, -1.0f, &top, &f);
     }
     canvas->restore();
 }
@@ -614,11 +879,30 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
         return true;
     }
     const ShapeProps& s = layer.shape;
-    const Vec2 size = s.size.valueAt(time);
     float pad = s.strokeEnabled ? s.strokeWidth.valueAt(time) * 0.5f : 0.0f;
-    if (s.kind == ShapeKind::Line) pad = std::max(pad, 6.0f);
-    outMin = {-std::fabs(size.x) * 0.5f - pad, -std::fabs(size.y) * 0.5f - pad};
-    outMax = {std::fabs(size.x) * 0.5f + pad, std::fabs(size.y) * 0.5f + pad};
+    if (s.kind == ShapeKind::Line || (s.kind == ShapeKind::Path && !s.path.closed)) pad = std::max(pad, 6.0f);
+    Vec2 lo, hi;
+    if (s.kind == ShapeKind::Path) {
+        if (!bezierBounds(s.path, lo, hi)) lo = {-20, -20}, hi = {20, 20}; // empty: still something to grab
+    } else {
+        const Vec2 size = s.size.valueAt(time);
+        hi = {std::fabs(size.x) * 0.5f, std::fabs(size.y) * 0.5f};
+        lo = hi * -1.0f;
+    }
+    lo = lo - Vec2{pad, pad}, hi = hi + Vec2{pad, pad};
+    outMin = lo, outMax = hi;
+    if (const int copies = s.copiesAt(time); copies > 1) { // every copy of the repeater
+        const Affine step = repeatStep(s, time);
+        Affine at;
+        for (int i = 1; i < copies; ++i) {
+            at = at * step;
+            for (const Vec2& c : {lo, Vec2{hi.x, lo.y}, hi, Vec2{lo.x, hi.y}}) {
+                const Vec2 q = at.apply(c);
+                outMin = {std::min(outMin.x, q.x), std::min(outMin.y, q.y)};
+                outMax = {std::max(outMax.x, q.x), std::max(outMax.y, q.y)};
+            }
+        }
+    }
     return true;
 }
 

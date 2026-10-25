@@ -2,7 +2,10 @@
 
 #include "core/Arrange.h"
 #include "core/Data.h"
+#include "core/Editing.h"
 #include "core/Expressions.h"
+#include "core/Geometry.h"
+#include "core/Serialization.h"
 #include "core/Suggest.h"
 #include "core/Transitions.h"
 #include "core/Validate.h"
@@ -20,7 +23,7 @@ using json = nlohmann::json;
 
 namespace {
 
-const char* kShapeNames[] = {"rectangle", "ellipse", "polygon", "star", "line"};
+const char* kShapeNames[] = {"rectangle", "ellipse", "polygon", "star", "line", "path"};
 const char* kAlignNames[] = {"left", "center", "right"};
 
 // Thrown by the operations; applyOps turns it into OpsResult::error.
@@ -204,6 +207,20 @@ public:
             {"layer.move", &Applier::layerMove},
             {"layer.split", &Applier::layerSplit},
             {"layer.duplicate", &Applier::layerDuplicate},
+            {"layer.trim", &Applier::layerTrim},
+            {"layer.roll", &Applier::layerRoll},
+            {"layer.slip", &Applier::layerSlip},
+            {"layer.ripple_delete", &Applier::layerRippleDelete},
+            {"track.close_gap", &Applier::trackCloseGap},
+            {"layer.speed", &Applier::layerSpeed},
+            {"layer.time_remap", &Applier::layerTimeRemap},
+            {"layer.freeze", &Applier::layerFreeze},
+            {"mask.add", &Applier::maskAdd},
+            {"mask.set", &Applier::maskSet},
+            {"mask.remove", &Applier::maskRemove},
+            {"marker.add", &Applier::markerAdd},
+            {"marker.set", &Applier::markerSet},
+            {"marker.remove", &Applier::markerRemove},
             {"group", &Applier::group},
             {"ungroup", &Applier::ungroup},
             {"property.set", &Applier::propertySet},
@@ -333,6 +350,11 @@ private:
         Layer l;
         if (const int kind = shapeKindOf(type); kind >= 0) {
             l = makeShapeLayer(static_cast<ShapeKind>(kind), position, duration);
+            if (has(op, "path")) {
+                if (l.shape.kind != ShapeKind::Path) fail("\"path\" is for \"path\" layers (the pen tool's shapes)");
+                l.shape.path = pathOf(op["path"]);
+                if (!l.shape.path.closed) l.shape.fillEnabled = false, l.shape.strokeEnabled = true;
+            }
         } else if (type == "text") {
             l = makeTextLayer(has(op, "text") ? text(op["text"], "text") : "Text", position, duration);
         } else if (type == "counter") {
@@ -395,8 +417,22 @@ private:
             while (index < static_cast<int>(c_.layers.size()) && c_.layers[index].track == ref.track) ++index;
         } else if ((has(op, "at") && text(op["at"], "at") == "bottom") || (type == "background" && !has(op, "at")))
             index = static_cast<int>(c_.layers.size()); // a background goes under everything unless told otherwise
-        const Layer& added = c_.addLayer(std::move(l), index);
+        const uint64_t addedId = c_.addLayer(std::move(l), index).id;
+        if (has(op, "track_of")) joinTrack(addedId, op);
+        const Layer& added = *c_.findLayer(addedId);
         return {{"layer", added.id}, {"name", added.name}};
+    }
+
+    // "track_of": the clip goes on that layer's track (a sequence of clips on one row); it must
+    // not overlap the clips there, and be beside it (same compound, or both at the top).
+    void joinTrack(uint64_t id, const json& op) {
+        const Layer& other = layer(op, "track_of");
+        const Layer& l = *c_.findLayer(id);
+        if (other.id == id || other.track == l.track) return;
+        if (other.parent != l.parent) fail("\"track_of\" must be a layer beside it (in the same compound, or both at the top)");
+        if (!c_.moveClipsToTrack({id}, other.track))
+            fail("\"" + l.name + "\" does not fit on the track of \"" + other.name + "\": it would overlap a clip there (" +
+                 std::to_string(l.inPoint) + " to " + std::to_string(l.outPoint) + " s)");
     }
 
     // A counter's look: "decimals" (0-6), "prefix", "suffix", "separator" ("", ",", "." or " ").
@@ -530,6 +566,13 @@ private:
         }
         if (has(op, "visible")) l.visible = boolean(op["visible"], "visible");
         if (has(op, "locked")) l.locked = boolean(op["locked"], "locked");
+        if (has(op, "muted")) l.muted = boolean(op["muted"], "muted");
+        if (has(op, "solo")) l.solo = boolean(op["solo"], "solo");
+        if (has(op, "blend")) {
+            if (l.type == LayerType::Camera) fail("cameras have no blending mode");
+            l.blend = static_cast<BlendMode>(idOf(kBlendModeIds, op, "blend"));
+        }
+        if (has(op, "matte") || has(op, "matte_layer")) setMatte(l, op);
         if (has(op, "three_d")) {
             const bool on = boolean(op["three_d"], "three_d");
             if (on && (l.type == LayerType::Camera || l.type == LayerType::Background))
@@ -572,9 +615,19 @@ private:
             requireType(l.type == LayerType::Shape, "shape", "shape");
             const std::string s = text(op["shape"], "shape");
             const int kind = shapeKindOf(s);
-            if (kind < 0) fail("unknown shape \"" + s + "\"" + suggest(s, {"rectangle", "ellipse", "polygon", "star", "line"}));
+            if (kind < 0) fail("unknown shape \"" + s + "\"" + suggest(s, {"rectangle", "ellipse", "polygon", "star", "line", "path"}));
+            // Becoming a path: its outline so far, as Bézier points to edit (unless one is given).
+            if (kind == static_cast<int>(ShapeKind::Path) && l.shape.kind != ShapeKind::Path && !has(op, "path"))
+                l.shape.path = shapeToBezier(l.shape, time(op));
             l.shape.kind = static_cast<ShapeKind>(kind);
         }
+        if (has(op, "path")) {
+            requireType(l.type == LayerType::Shape, "path", "shape");
+            l.shape.path = pathOf(op["path"]);
+            l.shape.kind = ShapeKind::Path;
+        }
+        if (has(op, "gradient")) requireType(l.type == LayerType::Shape, "gradient", "shape"), l.shape.fill = static_cast<ShapeFill>(idOf(kShapeFillIds, op, "gradient"));
+        if (has(op, "repeater")) requireType(l.type == LayerType::Shape, "repeater", "shape"), l.shape.repeater = boolean(op["repeater"], "repeater");
         if (l.type == LayerType::Background && (has(op, "fill") || has(op, "media") || has(op, "fit"))) setBackground(l, op);
         else if (has(op, "fill")) requireType(l.type == LayerType::Shape, "fill", "shape"), l.shape.fillEnabled = boolean(op["fill"], "fill");
         if (has(op, "stroke")) requireType(l.type == LayerType::Shape, "stroke", "shape"), l.shape.strokeEnabled = boolean(op["stroke"], "stroke");
@@ -594,10 +647,46 @@ private:
         }
         if (has(op, "in")) c_.setInPoint(id, time(op, "in"));
         if (has(op, "out")) c_.setOutPoint(id, time(op, "out"));
+        if (has(op, "track_of")) joinTrack(id, op);
         const Layer& now = *c_.findLayer(id);
         out["in"] = now.inPoint;
         out["out"] = now.outPoint;
         return out;
+    }
+
+    BezierPath pathOf(const json& v) {
+        BezierPath p;
+        std::string error;
+        if (!pathFromJson(v, p, &error)) fail("\"path\": " + error);
+        if (p.vertices.size() < 2) fail("\"path\" needs at least two vertices");
+        if (p.vertices.size() > 10000) fail("\"path\" has too many vertices (10000 at most)");
+        return p;
+    }
+
+    // "matte": "alpha" / "alpha_inverted" / "luma" / "luma_inverted" / "none", "matte_layer": the layer
+    // whose picture decides (beside this one; default: the one right above it, like After Effects).
+    void setMatte(Layer& l, const json& op) {
+        const MatteMode mode = has(op, "matte") ? static_cast<MatteMode>(idOf(kMatteModeIds, op, "matte")) : MatteMode::Alpha;
+        if (mode == MatteMode::None) {
+            l.matte = MatteMode::None;
+            l.matteLayer = 0;
+            return;
+        }
+        if (l.type == LayerType::Camera) fail("cameras take no track matte");
+        uint64_t matte = 0;
+        if (has(op, "matte_layer")) {
+            matte = layer(op, "matte_layer").id;
+        } else {
+            for (int i = c_.indexOf(l.id) - 1; i >= 0 && !matte; --i)
+                if (c_.layers[i].parent == l.parent && c_.layers[i].type != LayerType::Camera) matte = c_.layers[i].id;
+            if (!matte) fail("there is no layer above \"" + l.name + "\" to be its matte: give \"matte_layer\"");
+        }
+        const Layer* m = c_.findLayer(matte);
+        if (m->id == l.id) fail("a layer cannot be its own matte");
+        if (m->parent != l.parent) fail("the matte must be beside the layer (in the same compound, or both at the top)");
+        if (m->type == LayerType::Camera) fail("a camera cannot be a matte");
+        l.matte = mode;
+        l.matteLayer = matte;
     }
 
     json layerMove(const json& op) {
@@ -626,6 +715,196 @@ private:
         const int index = c_.indexOf(l.id);
         const Layer& added = c_.addLayer(std::move(copy), index);
         return {{"layer", added.id}, {"name", added.name}};
+    }
+
+    // --- timeline edits (core/Editing.h) ---
+    ClipEdge edgeOf(const json& op) {
+        const std::string e = text(field(op, "edge"), "edge");
+        if (e != "in" && e != "out") fail("\"edge\" must be \"in\" or \"out\"");
+        return e == "in" ? ClipEdge::In : ClipEdge::Out;
+    }
+
+    // An edge to `time`; with "ripple": true the later clips on the track follow (Premiere's ripple trim).
+    json layerTrim(const json& op) {
+        Layer& l = layer(op);
+        const uint64_t id = l.id;
+        const ClipEdge edge = edgeOf(op);
+        const double t = c_.snapToFrame(time(op));
+        c_.duration = std::max(c_.duration, t + 1.0); // room to grow (fitDuration after the batch)
+        if (has(op, "ripple") && boolean(op["ripple"], "ripple")) rippleTrim(c_, id, edge, t);
+        else if (edge == ClipEdge::In) c_.setInPoint(id, t);
+        else c_.setOutPoint(id, t);
+        const Layer& now = *c_.findLayer(id);
+        return {{"in", now.inPoint}, {"out", now.outPoint}};
+    }
+
+    json layerRoll(const json& op) {
+        const Layer& l = layer(op);
+        const uint64_t next = clipAfterCut(c_, l.id);
+        if (!next) fail("\"" + l.name + "\" has no clip right after it on its track (a rolling edit moves the cut between two clips)");
+        rollEdit(c_, l.id, c_.snapToFrame(time(op)));
+        return {{"cut", c_.findLayer(l.id)->outPoint}, {"next", next}};
+    }
+
+    json layerSlip(const json& op) {
+        const Layer& l = layer(op);
+        const double delta = number(field(op, "delta"), "delta");
+        return {{"delta", slipClip(c_, l.id, delta)}};
+    }
+
+    json layerRippleDelete(const json& op) {
+        const json& list = field(op, "layers");
+        if (!list.is_array() || list.empty()) fail("\"layers\" must be a list of layers");
+        std::vector<uint64_t> ids;
+        for (const json& ref : list) ids.push_back(layer(json{{"layer", ref}}).id);
+        return {{"removed", rippleDelete(c_, ids)}};
+    }
+
+    // The empty space at `time` on the track of `layer` (any clip of it) closes up.
+    json trackCloseGap(const json& op) {
+        const Layer& l = layer(op);
+        const double t = time(op);
+        if (!closeGap(c_, l.track, t)) fail("there is no gap at " + std::to_string(t) + " s on the track of \"" + l.name + "\" with a clip after it");
+        return json::object();
+    }
+
+    Layer& footage(const json& op) {
+        Layer& l = layer(op);
+        if (!hasTimeline(c_, l)) fail("\"" + l.name + "\" is not a video or audio clip (" + typeName(l) + ")");
+        return l;
+    }
+
+    // "speed": percent (100 = as recorded), "reverse": backwards, "ripple": the later clips follow.
+    json layerSpeed(const json& op) {
+        Layer& l = footage(op);
+        const double speed = has(op, "speed") ? number(op["speed"], "speed") : l.media.speed * 100.0;
+        if (speed < 1.0 || speed > 10000.0) fail("\"speed\" is a percent from 1 to 10000");
+        const bool reverse = has(op, "reverse") ? boolean(op["reverse"], "reverse") : l.media.reversed;
+        const bool ripple = has(op, "ripple") && boolean(op["ripple"], "ripple");
+        c_.duration += kMaxOverhang; // a slower clip may grow past the end (fitDuration after the batch)
+        setClipSpeed(c_, l.id, speed / 100.0, reverse, ripple);
+        c_.duration -= kMaxOverhang;
+        const Layer& now = *c_.findLayer(l.id);
+        return {{"in", now.inPoint}, {"out", now.outPoint}};
+    }
+
+    json layerTimeRemap(const json& op) {
+        Layer& l = footage(op);
+        setTimeRemap(c_, l.id, boolean(field(op, "enabled"), "enabled"));
+        return json::object();
+    }
+
+    json layerFreeze(const json& op) {
+        Layer& l = footage(op);
+        freezeFrame(c_, l.id, time(op));
+        return {{"source_time", round3(l.media.remap.base)}};
+    }
+
+    // --- masks ---
+    Mask& mask(Layer& l, const json& op) {
+        const double i = number(field(op, "index"), "index");
+        if (i < 0 || i >= static_cast<double>(l.masks.size()) || i != std::floor(i))
+            fail("layer \"" + l.name + "\" has " + std::to_string(l.masks.size()) + " mask(s): index must be 0.." +
+                 std::to_string(static_cast<int>(l.masks.size()) - 1));
+        return l.masks[static_cast<size_t>(i)];
+    }
+
+    void setMask(Mask& m, const json& op) {
+        if (has(op, "name")) {
+            m.name = text(op["name"], "name");
+            if (m.name.empty()) fail("\"name\" cannot be empty");
+        }
+        if (has(op, "mode")) m.mode = static_cast<MaskMode>(idOf(kMaskModeIds, op, "mode"));
+        if (has(op, "inverted")) m.inverted = boolean(op["inverted"], "inverted");
+        if (has(op, "enabled")) m.enabled = boolean(op["enabled"], "enabled");
+        if (has(op, "path")) m.path = pathOf(op["path"]);
+    }
+
+    // A mask: "shape" rectangle / ellipse over the layer's bounds (or "box": [x0, y0, x1, y1] in
+    // the layer's space), or a "path"; the animatable values are properties ("mask0.feather").
+    json maskAdd(const json& op) {
+        Layer& l = layer(op);
+        if (l.type == LayerType::Camera || (l.type == LayerType::Media && !l.media.hasVideo)) fail("\"" + l.name + "\" has no picture to mask");
+        Mask m;
+        m.name = "Mask " + std::to_string(l.masks.size() + 1);
+        if (has(op, "path")) {
+            m.path = pathOf(op["path"]);
+        } else {
+            Vec2 mn{-200, -200}, mx{200, 200};
+            if (has(op, "box")) {
+                const json& b = op["box"];
+                if (!b.is_array() || b.size() != 4) fail("\"box\" is [x0, y0, x1, y1] in the layer's own space");
+                mn = {static_cast<float>(number(b[0], "box")), static_cast<float>(number(b[1], "box"))};
+                mx = {static_cast<float>(number(b[2], "box")), static_cast<float>(number(b[3], "box"))};
+            } else if (!env_.layerBounds || !env_.layerBounds(c_, l, time(op), mn, mx)) {
+                // Without the renderer: what the core knows of the layer's size.
+                const Vec2 size = l.type == LayerType::Media ? l.media.size : l.type == LayerType::Plugin ? l.plugin.size.valueAt(time(op))
+                                  : l.type == LayerType::Shape && l.shape.kind != ShapeKind::Path ? l.shape.size.valueAt(time(op))
+                                                                                                    : Vec2{400, 400};
+                mn = size * -0.5f, mx = size * 0.5f;
+                if (l.type == LayerType::Shape && l.shape.kind == ShapeKind::Path) bezierBounds(l.shape.path, mn, mx);
+            }
+            const std::string shape = has(op, "shape") ? text(op["shape"], "shape") : "rectangle";
+            if (shape != "rectangle" && shape != "ellipse") fail("\"shape\" must be \"rectangle\" or \"ellipse\" (or give a \"path\")");
+            m.path = shape == "ellipse" ? ellipsePath(mn, mx) : rectanglePath(mn, mx);
+        }
+        setMask(m, op);
+        l.masks.push_back(std::move(m));
+        const int index = static_cast<int>(l.masks.size()) - 1;
+        if (has(op, "feather")) propertySet({{"layer", l.id}, {"prop", "mask" + std::to_string(index) + ".feather"}, {"value", op["feather"]}});
+        return {{"index", index}};
+    }
+
+    json maskSet(const json& op) {
+        Layer& l = layer(op);
+        setMask(mask(l, op), op);
+        return json::object();
+    }
+
+    json maskRemove(const json& op) {
+        Layer& l = layer(op);
+        Mask& m = mask(l, op);
+        l.masks.erase(l.masks.begin() + (&m - l.masks.data()));
+        return json::object();
+    }
+
+    // --- markers ---
+    int markerIndex(const json& op) {
+        if (has(op, "index")) {
+            const double i = number(op["index"], "index");
+            if (i < 0 || i >= static_cast<double>(c_.markers.size()) || i != std::floor(i))
+                fail("there are " + std::to_string(c_.markers.size()) + " marker(s): index must be 0.." + std::to_string(static_cast<int>(c_.markers.size()) - 1));
+            return static_cast<int>(i);
+        }
+        const double t = time(op);
+        const int i = markerAt(c_, t);
+        if (i < 0) fail("there is no marker at " + std::to_string(t) + " s (give \"index\" or the marker's \"time\")");
+        return i;
+    }
+
+    int markerColorOf(const json& op) {
+        if (!has(op, "color")) return -1;
+        const double v = number(op["color"], "color");
+        if (v < 0 || v >= kLabelColorCount || v != std::floor(v)) fail("\"color\" is a label color, 0 to 7");
+        return static_cast<int>(v);
+    }
+
+    json markerAdd(const json& op) {
+        const int i = addMarker(c_, time(op), has(op, "name") ? text(op["name"], "name") : std::string(), markerColorOf(op));
+        return {{"index", i}, {"time", c_.markers[i].time}};
+    }
+
+    json markerSet(const json& op) {
+        int i = markerIndex(op);
+        if (has(op, "name")) c_.markers[i].name = text(op["name"], "name");
+        if (const int color = markerColorOf(op); color >= 0) c_.markers[i].color = color;
+        if (has(op, "to")) i = moveMarker(c_, i, time(op, "to"));
+        return {{"index", i}, {"time", c_.markers[i].time}};
+    }
+
+    json markerRemove(const json& op) {
+        c_.markers.erase(c_.markers.begin() + markerIndex(op));
+        return json::object();
     }
 
     json group(const json& op) {
@@ -1041,6 +1320,11 @@ private:
                     {"max_duration", c_.maxDuration}, {"background", hexOf(c_.background)}, {"layers", c_.layers.size()},
                     {"media", media}};
         if (!c_.mediaFolders.empty()) out["folders"] = c_.mediaFolders;
+        if (!c_.markers.empty()) {
+            json markers = json::array();
+            for (const Marker& m : c_.markers) markers.push_back({{"time", m.time}, {"name", m.name}, {"color", m.color}});
+            out["markers"] = markers;
+        }
         return out;
     }
 
@@ -1050,7 +1334,16 @@ private:
         if (l.parent) j["parent"] = l.parent;
         if (!l.visible) j["visible"] = false;
         if (l.locked) j["locked"] = true;
+        if (l.muted) j["muted"] = true;
+        if (l.solo) j["solo"] = true;
         if (l.threeD) j["three_d"] = true;
+        if (l.blend != BlendMode::Normal) j["blend"] = kBlendModeIds[static_cast<int>(l.blend)];
+        if (l.matte != MatteMode::None) j["matte"] = {{"mode", kMatteModeIds[static_cast<int>(l.matte)]}, {"layer", l.matteLayer}};
+        if (c_.isMatte(l.id)) j["is_matte"] = true;
+        if (!l.masks.empty()) j["masks"] = l.masks.size();
+        if (l.type == LayerType::Media && (l.media.speed != 1.0 || l.media.reversed)) j["speed"] = round3(static_cast<float>(l.media.speed * 100.0));
+        if (l.type == LayerType::Media && l.media.reversed) j["reversed"] = true;
+        if (l.type == LayerType::Media && l.media.timeRemap) j["time_remap"] = true;
         if (l.text.subtitle && l.type == LayerType::Text) j["captions"] = l.text.captions.size();
         if (!l.effects.empty()) j["effects"] = l.effects.size();
         return j;
@@ -1104,7 +1397,20 @@ private:
             for (const Caption& c : l.text.captions) caps.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
             j["captions"] = std::move(caps);
         }
-        if (l.type == LayerType::Shape) j["shape"] = {{"fill", l.shape.fillEnabled}, {"stroke", l.shape.strokeEnabled}};
+        if (l.type == LayerType::Shape) {
+            j["shape"] = {{"fill", l.shape.fillEnabled}, {"stroke", l.shape.strokeEnabled}, {"gradient", kShapeFillIds[static_cast<int>(l.shape.fill)]},
+                          {"repeater", l.shape.repeater}};
+            if (l.shape.kind == ShapeKind::Path) j["shape"]["path"] = pathToJson(l.shape.path);
+        }
+        if (!l.masks.empty()) {
+            json masks = json::array();
+            for (size_t i = 0; i < l.masks.size(); ++i) {
+                const Mask& m = l.masks[i];
+                masks.push_back({{"index", i}, {"name", m.name}, {"mode", kMaskModeIds[static_cast<int>(m.mode)]}, {"inverted", m.inverted},
+                                 {"enabled", m.enabled}, {"path", pathToJson(m.path)}});
+            }
+            j["mask_list"] = masks;
+        }
         if (l.type == LayerType::Media) j["media"] = l.media.mediaId;
         if (l.type == LayerType::Background)
             j["background"] = {{"fill", backgroundFillId(l.background.fill)}, {"media", l.background.mediaId},

@@ -282,7 +282,8 @@ void Application::scriptStep() {
         const int dot = file.lastIndexOf('.');
         for (QWidget* w : QApplication::topLevelWidgets()) {
             if (w == window_ || !w->isVisible()) continue;
-            const QString title = qobject_cast<QMenu*>(w) ? QString("menu") : w->windowTitle().replace(' ', '_');
+            QString title = qobject_cast<QMenu*>(w) ? QString("menu") : w->windowTitle().replace(' ', '_');
+            for (const QChar c : QString("/\\:*?\"<>|")) title.replace(c, '-'); // a file name ("Speed / Duration")
             if (!title.isEmpty()) w->grab().save(file.left(dot) + "-" + title + file.mid(dot));
         }
     }
