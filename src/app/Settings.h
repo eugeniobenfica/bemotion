@@ -45,6 +45,12 @@ struct Settings {
     std::vector<std::string> disabledPlugins; // plugin ids
     std::vector<std::string> recentColors;    // the color picker's last colors, "#RRGGBBAA", newest first
     bool showMeters = true;                   // the left / right audio level meters beside the timeline
+    // What the interface shows, one by one (Settings › Interface › Show); Friendly starts with
+    // the first two off.
+    bool showExpressionButtons = true; // the ƒ button beside each property (one with an expression keeps it)
+    bool showGraphButton = true;       // the timeline's graph editor button
+    bool showSnapshotButton = true;    // the viewport's Export Frame button
+    bool showTimelineScrollbar = true; // the timeline's horizontal scrollbar
     // How much the interface shows: "friendly" (the essentials), "balanced" or "expert" (all of
     // it). Chosen on the first start (ui/ExperienceScreen), changed in Settings › Interface.
     std::string experience = "balanced";

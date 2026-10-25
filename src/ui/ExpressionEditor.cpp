@@ -3,6 +3,7 @@
 #include "core/Expressions.h"
 
 #include "ui/EditorContext.h"
+#include "ui/ExpressionLibrary.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -12,7 +13,7 @@
 #include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
-#include <QMenu>
+#include <QPointer>
 #include <QRegularExpression>
 #include <QScrollBar>
 #include <QStringListModel>
@@ -23,6 +24,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <tuple>
 
 namespace bemotion::ui {
 
@@ -232,9 +234,11 @@ ExpressionEditor::ExpressionEditor(EditorContext& ctx, uint64_t layerId, bool ve
     ui::setTone(problem_, ui::Tone::Danger);
     footer->addWidget(problem_, 1);
     auto* fx = new QToolButton;
-    fx->setText(QString::fromUtf8("ƒ"));
-    fx->setToolTip("Insert a function, a value of this clip, or a property of another layer");
-    fx->setFixedSize(24, 22);
+    fx_ = fx;
+    fx->setText(QString::fromUtf8("ƒ  Insert"));
+    fx->setToolTip("The expression library: examples, functions, this clip's values, other layers' properties");
+    fx->setFixedHeight(22);
+    fx->setCursor(Qt::PointingHandCursor);
     connect(fx, &QToolButton::clicked, this, [this] { showMenu(); });
     footer->addWidget(fx, 0, Qt::AlignTop);
     // Close (the expression stays: the fx button by the diamond opens it again) and remove.
@@ -288,69 +292,92 @@ void ExpressionEditor::insert(const QString& snippet) {
     text_->setFocus();
 }
 
-void ExpressionEditor::showMenu() {
-    QMenu menu;
-    menu.setToolTipsVisible(true);
-    auto add = [this](QMenu* m, const QString& label, const QString& snippet, const QString& tip = {}) {
-        QAction* a = m->addAction(label, this, [this, snippet] { insert(snippet); });
-        if (!tip.isEmpty()) a->setToolTip(tip);
+void ExpressionEditor::setProperty(const std::string& propId, bool color) {
+    propId_ = propId;
+    color_ = color;
+}
+
+std::vector<ExpressionEntry> expressionExamples(const std::string& propId, bool vector, bool color) {
+    const QString id = QString::fromStdString(propId.empty() ? std::string("position") : propId);
+    const char* cat = "Examples";
+    return {
+        {cat, vector ? "wiggle(2, 25)" : color ? "wiggle(1, 0.1)" : "wiggle(2, 10)", {}, "Shake gently: twice a second, a little"},
+        {cat, vector ? "value + [time * 100, 0]" : "value + time * 90", {}, "Keep moving: a steady amount a second"},
+        {cat, "loop()", {}, "Play the keyframes again and again"},
+        {cat, "pingpong()", {}, "Play them back and forth"},
+        {cat, "value * (1 + sin(time * 6) * 0.08)", {}, "Pulse: a little bigger, a little smaller"},
+        {cat, QString("layer(\"Name\").%1").arg(id), QString("layer(\"|Name\").%1").arg(id), "Follow another layer (type its name)"},
+        {cat, QString("layer(\"Name\").%1(time - 0.25)").arg(id), QString("layer(\"|Name\").%1(time - 0.25)").arg(id),
+         "Follow it a quarter of a second later"},
+        {cat, vector ? "lerp(value, value + [300, 0], smooth(progress))" : "lerp(value, value * 2, smooth(progress))", {},
+         "Change smoothly over the whole clip"},
+        {cat, "valueAt(time - 0.2)", {}, "Its own keyframes, a moment late"},
+        {cat, "progress < 0.5 ? 0 : 100", {}, "A choice: one value, then another"},
     };
-    QMenu* clip = menu.addMenu("This Clip");
-    add(clip, "time", "time", "Seconds, now");
-    add(clip, "value", "value", "What the keyframes (or the static value) say now");
-    add(clip, "progress", "progress", "0 at the clip's start, 1 at its end");
-    add(clip, "start / end", "start", "The clip's in and out, seconds");
-    add(clip, "duration", "duration");
-    add(clip, "index", "index", "The layer's row, 1 at the top");
-    add(clip, "frame", "frame");
-    QMenu* motion = menu.addMenu("Animation");
-    add(motion, "wiggle(times a second, amount)", vector_ ? "wiggle(2, 25|)" : "wiggle(2, 10|)", "The value, shaken smoothly");
-    add(motion, "loop()", "loop()", "The keyframes again and again");
-    add(motion, "pingpong()", "pingpong()", "The keyframes back and forth");
+}
+
+void ExpressionEditor::showMenu() {
+    std::vector<ExpressionEntry> e = expressionExamples(propId_, vector_, color_);
+    auto add = [&e](const char* category, const QString& code, const QString& snippet, const QString& about) {
+        e.push_back({category, code, snippet, about});
+    };
+    const char* clip = "This Clip";
+    add(clip, "time", {}, "Seconds, now");
+    add(clip, "value", {}, "What the keyframes (or the static value) say now");
+    add(clip, "progress", {}, "0 at the clip's start, 1 at its end");
+    add(clip, "start", {}, "The clip's in point, seconds");
+    add(clip, "end", {}, "The clip's out point, seconds");
+    add(clip, "duration", {}, "The clip's length, seconds");
+    add(clip, "velocity", {}, "How fast the keyframes change, per second");
+    add(clip, "speed", {}, "The same, as one number");
+    add(clip, "index", {}, "The layer's row, 1 at the top");
+    add(clip, "frame", {}, "The frame number");
+    add(clip, "fps", {}, "Frames per second");
+    const char* motion = "Animation";
+    add(motion, "wiggle(freq, amount)", vector_ ? "wiggle(2, 25|)" : "wiggle(2, 10|)", "The value, shaken smoothly");
+    add(motion, "loop()", {}, "The keyframes again and again");
+    add(motion, "pingpong()", {}, "The keyframes back and forth");
     add(motion, "valueAt(t)", "valueAt(time - 0.2|)", "This property's keyframes at another time");
-    add(motion, "velocity / speed", "velocity", "How fast the keyframes change, per second");
     add(motion, "noise(x)", "noise(time|)", "Smooth noise, -1 to 1");
     add(motion, "random(min, max)", "random(0, 100|)", "A fixed random number for this property");
     add(motion, "lerp(a, b, t)", "lerp(|value, value * 2, progress)", "From a to b as t goes 0 to 1");
     add(motion, "smooth(t)", "smooth(progress|)", "0 to 1, eased in and out");
-    QMenu* math = menu.addMenu("Math");
-    for (const auto& [label, snippet] : std::initializer_list<std::pair<const char*, const char*>>{
-             {"sin(x)", "sin(time|)"}, {"cos(x)", "cos(time|)"}, {"abs(x)", "abs(|)"}, {"round(x)", "round(|)"},
-             {"floor(x)", "floor(|)"}, {"min(a, b)", "min(|, )"}, {"max(a, b)", "max(|, )"}, {"clamp(v, lo, hi)", "clamp(|value, 0, 100)"},
-             {"map(x, a, b, lo, hi)", "map(|time, 0, 1, 0, 100)"}, {"pow(a, b)", "pow(|, 2)"}, {"sqrt(x)", "sqrt(|)"},
-             {"length(v)", "length(|)"}, {"distance(a, b)", "distance(|, )"}, {"pi", "pi"}})
-        add(math, label, snippet);
-    QMenu* values = menu.addMenu("Values");
+    add(motion, "map(x, a, b, lo, hi)", "map(|time, 0, 1, 0, 100)", "x from a to b onto lo to hi");
+    const char* math = "Math";
+    for (const auto& [code, snippet, about] : std::initializer_list<std::tuple<const char*, const char*, const char*>>{
+             {"sin(x)", "sin(time|)", "A wave, -1 to 1 (radians)"}, {"cos(x)", "cos(time|)", "The same wave, a quarter turn ahead"},
+             {"abs(x)", "abs(|)", "Without its sign"}, {"round(x)", "round(|)", "To the nearest whole number"},
+             {"floor(x)", "floor(|)", "Down to a whole number"}, {"min(a, b)", "min(|, )", "The smaller"},
+             {"max(a, b)", "max(|, )", "The larger"}, {"clamp(v, lo, hi)", "clamp(|value, 0, 100)", "Kept between two values"},
+             {"pow(a, b)", "pow(|, 2)", "a to the power of b"}, {"sqrt(x)", "sqrt(|)", "Square root"},
+             {"length(v)", "length(|)", "How long a vector is"}, {"distance(a, b)", "distance(|, )", "How far apart two points are"},
+             {"degrees(r)", "degrees(|)", "Radians to degrees"}, {"pi", "pi", "3.14159..."}})
+        add(math, code, snippet, about);
+    const char* values = "Values";
     add(values, "[x, y]", "[|, ]", "A vector: positions, scales, sizes");
     add(values, "rgb(r, g, b)", "rgb(232, 185, 49|)", "A color, 0 to 255");
-    add(values, "width / height", "width", "The composition's size");
-    add(values, "center", "center", "The middle of the frame");
+    add(values, "width, height", "width", "The composition's size");
+    add(values, "center", {}, "The middle of the frame");
     add(values, "condition ? a : b", "time < 1 ? 0 : 100|", "A choice");
-    add(values, "name = ...", "var |name = value\n", "A line that names a value (the last line is the result)");
+    add(values, "var name = value", "var |name = value\n", "A line that names a value (the last line is the result)");
     // Other layers' properties: what After Effects' pick whip does, by name.
-    QMenu* layers = menu.addMenu("Layers");
+    const char* layers = "Layers";
     const Composition& comp = ctx_.comp();
     for (const Layer& l : comp.layers) {
         if (l.type == LayerType::Camera && l.id == layerId_) continue;
         const QString name = QString::fromStdString(l.name);
-        QMenu* sub = layers->addMenu(l.id == layerId_ ? name + "  (this one)" : name);
         const QString ref = l.id == layerId_ ? QString("layer()") : QString("layer(\"%1\")").arg(name);
-        std::string group;
+        e.push_back({layers, {}, {}, l.id == layerId_ ? name + "  (this one)" : name, true});
         for (const PropertyRef& pr : const_cast<Layer&>(l).properties()) {
             if (pr.effectIndex >= 0 || (pr.whileAnimated && !pr.anim->isAnimated())) continue;
-            if (pr.group != group) {
-                if (!group.empty()) sub->addSeparator();
-                group = pr.group;
-            }
-            add(sub, QString::fromUtf8(pr.label), ref + "." + QString::fromUtf8(pr.id),
-                QString("%1.%2 (add (time - 0.2) to read it a moment earlier)").arg(ref, QString::fromUtf8(pr.id)));
+            add(layers, ref + "." + QString::fromUtf8(pr.id), {}, QString::fromUtf8(pr.label) + " (add (time - 0.2) to read it a moment earlier)");
         }
-        sub->addSeparator();
-        add(sub, "Clip Start", ref + ".start");
-        add(sub, "Clip End", ref + ".end");
+        add(layers, ref + ".start", {}, "Its clip's in point");
     }
-    if (comp.layers.empty()) layers->addAction("No layers")->setEnabled(false);
-    menu.exec(QCursor::pos());
+    QPointer<ExpressionEditor> self(this);
+    showExpressionLibrary(fx_, std::move(e), [self](const QString& snippet) {
+        if (self) self->insert(snippet);
+    });
 }
 
 } // namespace bemotion::ui

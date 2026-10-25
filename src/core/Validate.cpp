@@ -87,6 +87,21 @@ private:
                 c.nextMediaId = m.id + 1;
             }
         }
+        // Folders: named, each once; every item's folder among them.
+        std::vector<std::string> folders;
+        for (const std::string& f : c.mediaFolders) {
+            if (f.empty() || std::find(folders.begin(), folders.end(), f) != folders.end()) {
+                report("composition", "a media folder without a name or listed twice (removed)");
+                continue;
+            }
+            folders.push_back(f);
+        }
+        c.mediaFolders = std::move(folders);
+        for (MediaItem& m : c.media)
+            if (!m.folder.empty() && std::find(c.mediaFolders.begin(), c.mediaFolders.end(), m.folder) == c.mediaFolders.end()) {
+                report("media \"" + m.name + "\"", "is in a folder that does not exist (the folder was added)");
+                c.mediaFolders.push_back(m.folder);
+            }
     }
 
     template <typename T>

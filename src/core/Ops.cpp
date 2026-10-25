@@ -222,6 +222,10 @@ public:
             {"data.set", &Applier::dataSet},
             {"param.set", &Applier::paramSet},
             {"media.import", &Applier::mediaImport},
+            {"media.move", &Applier::mediaMove},
+            {"folder.add", &Applier::folderAdd},
+            {"folder.rename", &Applier::folderRename},
+            {"folder.remove", &Applier::folderRemove},
             {"query.composition", &Applier::queryComposition},
             {"query.layers", &Applier::queryLayers},
             {"query.layer", &Applier::queryLayer},
@@ -974,14 +978,70 @@ private:
                 {"duration", m.duration}};
     }
 
+    // Media folders: names only, to keep the Media panel tidy (nothing moves on disk).
+    MediaItem& mediaItem(const json& op) {
+        const json& ref = field(op, "media");
+        if (!ref.is_number_integer()) fail("\"media\" must be a media id (from media.import or query.composition)");
+        if (MediaItem* m = c_.findMedia(ref.get<uint64_t>())) return *m;
+        fail("there is no media item with id " + std::to_string(ref.get<uint64_t>()));
+    }
+    std::string folderName(const json& op, const char* key, bool mustExist) {
+        const std::string name = text(field(op, key), key);
+        const bool exists = std::find(c_.mediaFolders.begin(), c_.mediaFolders.end(), name) != c_.mediaFolders.end();
+        if (mustExist && !exists) fail("there is no media folder named \"" + name + "\"" + suggest(name, c_.mediaFolders));
+        return name;
+    }
+    std::string newFolderName(const json& op, const char* key) {
+        std::string name = text(field(op, key), key);
+        while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+        while (!name.empty() && std::isspace(static_cast<unsigned char>(name.front()))) name.erase(name.begin());
+        if (name.empty()) fail("a folder needs a name");
+        if (std::find(c_.mediaFolders.begin(), c_.mediaFolders.end(), name) != c_.mediaFolders.end())
+            fail("there is already a media folder named \"" + name + "\"");
+        return name;
+    }
+    json folderAdd(const json& op) {
+        const std::string name = newFolderName(op, "name");
+        c_.mediaFolders.push_back(name);
+        return {{"folder", name}};
+    }
+    json folderRename(const json& op) {
+        const std::string from = folderName(op, "folder", true);
+        const std::string to = newFolderName(op, "name");
+        std::replace(c_.mediaFolders.begin(), c_.mediaFolders.end(), from, to);
+        for (MediaItem& m : c_.media)
+            if (m.folder == from) m.folder = to;
+        return {{"folder", to}};
+    }
+    json folderRemove(const json& op) { // its media go to the top
+        const std::string name = folderName(op, "folder", true);
+        std::erase(c_.mediaFolders, name);
+        for (MediaItem& m : c_.media)
+            if (m.folder == name) m.folder.clear();
+        return json::object();
+    }
+    json mediaMove(const json& op) {
+        MediaItem& m = mediaItem(op);
+        const std::string folder = has(op, "folder") && !(op["folder"].is_string() && op["folder"].get<std::string>().empty())
+                                       ? folderName(op, "folder", true)
+                                       : std::string();
+        m.folder = folder;
+        return json::object();
+    }
+
     // --- queries ---
     json queryComposition(const json&) {
         json media = json::array();
-        for (const MediaItem& m : c_.media)
-            media.push_back({{"media", m.id}, {"name", m.name}, {"kind", mediaKindLabel(m.kind)}, {"path", m.path}});
-        return {{"name", p_.name}, {"width", c_.width}, {"height", c_.height}, {"fps", c_.fps}, {"duration", c_.duration},
-                {"max_duration", c_.maxDuration}, {"background", hexOf(c_.background)}, {"layers", c_.layers.size()},
-                {"media", media}};
+        for (const MediaItem& m : c_.media) {
+            json mj = {{"media", m.id}, {"name", m.name}, {"kind", mediaKindLabel(m.kind)}, {"path", m.path}};
+            if (!m.folder.empty()) mj["folder"] = m.folder;
+            media.push_back(std::move(mj));
+        }
+        json out = {{"name", p_.name}, {"width", c_.width}, {"height", c_.height}, {"fps", c_.fps}, {"duration", c_.duration},
+                    {"max_duration", c_.maxDuration}, {"background", hexOf(c_.background)}, {"layers", c_.layers.size()},
+                    {"media", media}};
+        if (!c_.mediaFolders.empty()) out["folders"] = c_.mediaFolders;
+        return out;
     }
 
     json layerSummary(const Layer& l) {

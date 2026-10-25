@@ -114,7 +114,7 @@ ExperienceScreen::ExperienceScreen(QWidget* parent) : QWidget(parent) {
         QStringList points;
     };
     const Choice choices[] = {
-        {"friendly", Icon::Star, "Friendly", "The essentials, calm.", {"A short toolbar", "No expressions or curves to deal with", "Simple settings"}},
+        {"friendly", Icon::Star, "Friendly", "The essentials, nothing in the way.", {"A short toolbar", "No expressions or curves to deal with", "Simple settings"}},
         {"balanced", Icon::Sliders, "Balanced", "bemotion picks for you: the usual tools, the rest when you need it.",
          {"The usual toolbar", "Audio meters", "Everything else a click away"}},
         {"expert", Icon::Graph, "Expert", "Everything at hand.", {"Every option in Settings", "Rulers, meters, the graph editor", "A fuller toolbar"}},

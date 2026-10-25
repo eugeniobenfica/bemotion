@@ -1,6 +1,7 @@
 #include "ui/panels/MediaPanel.h"
 
 #include "app/Platform.h"
+#include "core/Ops.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
 #include "ui/EditorContext.h"
@@ -16,6 +17,7 @@
 #include <QDragEnterEvent>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -30,6 +32,7 @@
 #include <algorithm>
 #include <cctype>
 #include <map>
+#include <set>
 
 namespace bemotion {
 
@@ -78,11 +81,13 @@ QImage toQImage(const sk_sp<SkImage>& img) {
 
 } // namespace
 
-// The list of items: painted rows (thumbnail, name, details), selectable, draggable.
+// The list of items: folders (open or closed), then what sits at the top; painted rows
+// (thumbnail, name, details), selectable, draggable onto the canvas, the timeline or a folder.
 class MediaList : public QWidget {
 public:
     MediaList(EditorContext& ctx, MediaPanel& panel) : QWidget(&panel), ctx_(ctx), panel_(panel) {
         setMouseTracking(true);
+        setAcceptDrops(true);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     }
 
@@ -90,22 +95,78 @@ public:
     uint64_t selected = 0;
 
     void refresh() {
-        std::vector<uint64_t> ids;
-        for (const MediaItem& item : ctx_.comp().media)
-            if (matches(item.name, filter)) ids.push_back(item.id);
-        if (ids != ids_) {
-            ids_ = std::move(ids);
-            setFixedHeight(std::max(1, static_cast<int>(ids_.size()) * kRow));
+        const Composition& comp = ctx_.comp();
+        std::vector<Row> rows;
+        auto itemsIn = [&](const std::string& folder, int indent) {
+            for (const MediaItem& item : comp.media)
+                if (item.folder == folder && matches(item.name, filter)) rows.push_back({Row::Item, folder, item.id, indent});
+        };
+        for (const std::string& f : comp.mediaFolders) {
+            const size_t at = rows.size();
+            const bool open = !closed_.count(f) || !filter.empty(); // searching opens them
+            rows.push_back({Row::Folder, f, 0, 0});
+            if (open) itemsIn(f, 16);
+            // Searching: only the folders with something that matches (or whose name does).
+            if (!filter.empty() && rows.size() == at + 1 && !matches(f, filter)) rows.pop_back();
+        }
+        itemsIn({}, 0);
+        if (rows != rows_) {
+            rows_ = std::move(rows);
+            int h = 0;
+            for (const Row& r : rows_) h += height(r);
+            setFixedHeight(std::max(1, h));
         }
         update();
     }
 
-protected:
-    static constexpr int kRow = 46;
+    // Folders are names in the project: changed through operations (core/Ops.cpp), one undo step each.
+    bool apply(const nlohmann::json& op) {
+        const OpsResult r = applyOps(ctx_.project, op);
+        if (!r.ok) {
+            QMessageBox::warning(window(), "Media", QString::fromStdString(r.error.substr(r.error.find(": ") + 2)));
+            return false;
+        }
+        ctx_.touch();
+        refresh();
+        return true;
+    }
+    void newFolder(uint64_t moveHere = 0) {
+        bool ok = false;
+        std::string name = "Folder";
+        for (int n = 2; std::find(ctx_.comp().mediaFolders.begin(), ctx_.comp().mediaFolders.end(), name) != ctx_.comp().mediaFolders.end(); ++n)
+            name = "Folder " + std::to_string(n);
+        const QString typed = QInputDialog::getText(window(), "New Folder", "Name", QLineEdit::Normal, QString::fromStdString(name), &ok);
+        if (!ok || typed.trimmed().isEmpty()) return;
+        nlohmann::json ops = nlohmann::json::array({{{"op", "folder.add"}, {"name", typed.trimmed().toStdString()}}});
+        if (moveHere) ops.push_back({{"op", "media.move"}, {"media", moveHere}, {"folder", typed.trimmed().toStdString()}});
+        apply(ops);
+    }
 
+protected:
+    struct Row {
+        enum Kind { Folder, Item } kind;
+        std::string folder; // its own name (a folder) or the one it is in (an item)
+        uint64_t id = 0;    // an item's media id
+        int indent = 0;
+        bool operator==(const Row&) const = default;
+    };
+    static constexpr int kRow = 46, kFolderRow = 30;
+    static int height(const Row& r) { return r.kind == Row::Folder ? kFolderRow : kRow; }
+
+    const Row* rowAt(int y, float* top = nullptr) const {
+        int t = 0;
+        for (const Row& r : rows_) {
+            if (y >= t && y < t + height(r)) {
+                if (top) *top = static_cast<float>(t);
+                return &r;
+            }
+            t += height(r);
+        }
+        return nullptr;
+    }
     const MediaItem* itemAt(int y) const {
-        const int i = y / kRow;
-        return i >= 0 && i < static_cast<int>(ids_.size()) ? ctx_.comp().findMedia(ids_[i]) : nullptr;
+        const Row* r = rowAt(y);
+        return r && r->kind == Row::Item ? ctx_.comp().findMedia(r->id) : nullptr;
     }
 
     QImage thumbnail(const MediaItem& item) {
@@ -117,22 +178,49 @@ protected:
         return entry.second;
     }
 
+    void paintFolder(QPainter& p, ui::Draw& d, const Row& r, float y, bool hot) {
+        const bool target = r.folder == dropFolder_;
+        if (target) d.rectFilled(ui::Pt(2, y + 1), ui::Pt(width() - 2, y + kFolderRow - 1), theme::accent(45), 6.0f);
+        else if (hot) d.rectFilled(ui::Pt(2, y + 1), ui::Pt(width() - 2, y + kFolderRow - 1), theme::kBgHover, 6.0f);
+        const bool open = !closed_.count(r.folder) || !filter.empty();
+        const float cy = y + kFolderRow * 0.5f;
+        ui::drawIcon(d, open ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, ui::Pt(13, cy), 14.0f, theme::kTextDim);
+        ui::drawIcon(d, ui::Icon::Folder, ui::Pt(30, cy), 14.0f, target ? theme::kAccent : theme::kTextDim);
+        int count = 0;
+        for (const MediaItem& m : ctx_.comp().media) count += m.folder == r.folder;
+        const QString n = QString::number(count);
+        const float nw = static_cast<float>(p.fontMetrics().horizontalAdvance(n));
+        d.pushClip(ui::Pt(44, y), ui::Pt(width() - nw - 18, y + kFolderRow));
+        d.text(ui::Pt(44, cy - d.textHeight() * 0.5f), theme::kText, QString::fromStdString(r.folder));
+        d.popClip();
+        d.text(ui::Pt(width() - nw - 10, cy - d.textHeight() * 0.5f), theme::kTextFaint, n);
+    }
+
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
         ui::Draw d(p);
         media::MediaManager& mm = media::MediaManager::get();
-        for (size_t i = 0; i < ids_.size(); ++i) {
-            const MediaItem* item = ctx_.comp().findMedia(ids_[i]);
+        float y = 0;
+        for (size_t i = 0; i < rows_.size(); ++i) {
+            const Row& row = rows_[i];
+            const float rowTop = y;
+            y += height(row);
+            if (row.kind == Row::Folder) {
+                paintFolder(p, d, row, rowTop, static_cast<int>(i) == hover_);
+                continue;
+            }
+            const MediaItem* item = ctx_.comp().findMedia(row.id);
             if (!item) continue;
-            const float y = static_cast<float>(i * kRow);
+            const float x0 = static_cast<float>(row.indent);
             const bool missing = mm.fileMissing(*item);
             const std::string error = missing ? "File not found: " + item->path : mm.error(item->id);
-            if (item->id == selected) d.rectFilled(ui::Pt(2, y + 1), ui::Pt(width() - 2, y + kRow - 1), theme::accent(45), 6.0f);
-            else if (static_cast<int>(i) == hover_) d.rectFilled(ui::Pt(2, y + 1), ui::Pt(width() - 2, y + kRow - 1), theme::kBgHover, 6.0f);
+            if (item->id == selected) d.rectFilled(ui::Pt(x0 + 2, rowTop + 1), ui::Pt(width() - 2, rowTop + kRow - 1), theme::accent(45), 6.0f);
+            else if (static_cast<int>(i) == hover_) d.rectFilled(ui::Pt(x0 + 2, rowTop + 1), ui::Pt(width() - 2, rowTop + kRow - 1), theme::kBgHover, 6.0f);
+            if (row.indent) d.line(ui::Pt(12, rowTop), ui::Pt(12, rowTop + kRow), theme::kBorder, 1.0f); // inside a folder
 
             // Thumbnail box: the picture fitted inside, or the kind's icon.
             const float th = kRow - 10.0f, tw = th * 16.0f / 9.0f;
-            const ui::Pt a(6, y + 5), b(6 + tw, y + 5 + th);
+            const ui::Pt a(x0 + 6, rowTop + 5), b(x0 + 6 + tw, rowTop + 5 + th);
             d.rectFilled(a, b, theme::kBgDeep, 4.0f);
             const QImage img = missing || item->kind == MediaKind::Audio ? QImage() : thumbnail(*item);
             if (!img.isNull()) {
@@ -147,22 +235,23 @@ protected:
             d.rect(a, b, missing ? theme::kDanger : theme::kBorder, 4.0f);
 
             const float tx = b.x + 8.0f;
-            d.pushClip(ui::Pt(tx, y), ui::Pt(width() - 14, y + kRow));
+            d.pushClip(ui::Pt(tx, rowTop), ui::Pt(width() - 14, rowTop + kRow));
             const float lh = d.textHeight();
-            const float ty = y + (kRow - lh * 2.0f - 2.0f) * 0.5f;
+            const float ty = rowTop + (kRow - lh * 2.0f - 2.0f) * 0.5f;
             d.text(ui::Pt(tx, ty), missing ? theme::kDanger : theme::kText, item->name);
             std::string info = missing ? "Missing — right-click to relink" : describe(*item, ctx_.comp().fps);
             if (!missing && item->hasAudio && mm.audioPending(item->id)) info += "  ·  reading audio...";
             else if (!missing && !error.empty()) info = "Error — " + error;
             d.text(ui::Pt(tx, ty + lh + 2.0f), !error.empty() ? theme::kDanger : theme::kTextFaint, info);
             d.popClip();
-            if (layersUsing(ctx_.comp(), item->id) > 0) d.circleFilled(ui::Pt(width() - 9.0f, y + 10.0f), 3.0f, theme::kAccent);
+            if (layersUsing(ctx_.comp(), item->id) > 0) d.circleFilled(ui::Pt(width() - 9.0f, rowTop + 10.0f), 3.0f, theme::kAccent);
         }
     }
 
     bool event(QEvent* e) override {
         if (e->type() == QEvent::ToolTip) {
             auto* he = static_cast<QHelpEvent*>(e);
+            const Row* row = rowAt(he->pos().y());
             if (const MediaItem* item = itemAt(he->pos().y())) {
                 const bool missing = media::MediaManager::get().fileMissing(*item);
                 const std::string error = missing ? "File not found: " + item->path : media::MediaManager::get().error(item->id);
@@ -170,6 +259,8 @@ protected:
                                    QString::fromStdString(item->name + "\n" + item->path + "\n" +
                                                           (error.empty() ? "Drag onto the canvas or the timeline, or double-click to add at the playhead." : error)),
                                    this);
+            } else if (row && row->kind == Row::Folder) {
+                QToolTip::showText(he->globalPos(), "A folder to keep media tidy (nothing moves on disk). Drag media onto it.", this);
             } else {
                 QToolTip::hideText();
             }
@@ -178,16 +269,20 @@ protected:
         return QWidget::event(e);
     }
 
+    int indexAt(int y) const {
+        const Row* r = rowAt(y);
+        return r ? static_cast<int>(r - rows_.data()) : -1;
+    }
+
     void mouseMoveEvent(QMouseEvent* e) override {
-        const int h = static_cast<int>(e->position().y()) / kRow;
-        if (h != hover_) {
+        if (const int h = indexAt(static_cast<int>(e->position().y())); h != hover_) {
             hover_ = h;
             update();
         }
         if ((e->buttons() & Qt::LeftButton) && pressed_ && (e->position().toPoint() - pressPos_).manhattanLength() > QApplication::startDragDistance()) {
             const MediaItem* item = ctx_.comp().findMedia(pressed_);
             pressed_ = 0;
-            if (!item || media::MediaManager::get().fileMissing(*item)) return;
+            if (!item) return;
             auto* drag = new QDrag(this);
             drag->setMimeData(ui::makeMime(ui::kMediaMime, item->id));
             QPixmap pm(56, 56);
@@ -200,7 +295,7 @@ protected:
             }
             drag->setPixmap(pm);
             drag->setHotSpot(QPoint(28, 28));
-            drag->exec(Qt::CopyAction);
+            drag->exec(Qt::CopyAction | Qt::MoveAction);
         }
     }
 
@@ -210,17 +305,77 @@ protected:
     }
 
     void mousePressEvent(QMouseEvent* e) override {
+        const Row* row = rowAt(static_cast<int>(e->position().y()));
+        if (row && row->kind == Row::Folder) {
+            const std::string folder = row->folder;
+            if (e->button() == Qt::LeftButton && filter.empty()) { // open / close
+                if (!closed_.erase(folder)) closed_.insert(folder);
+                refresh();
+            } else if (e->button() == Qt::RightButton) {
+                showFolderMenu(folder, e->globalPosition().toPoint());
+            }
+            return;
+        }
         const MediaItem* item = itemAt(static_cast<int>(e->position().y()));
         selected = item ? item->id : 0;
         pressed_ = e->button() == Qt::LeftButton && item ? item->id : 0;
         pressPos_ = e->position().toPoint();
         update();
-        if (e->button() == Qt::RightButton && item) showMenu(item->id, e->globalPosition().toPoint());
+        if (e->button() == Qt::RightButton) {
+            if (item) showMenu(item->id, e->globalPosition().toPoint());
+            else showEmptyMenu(e->globalPosition().toPoint());
+        }
     }
 
     void mouseDoubleClickEvent(QMouseEvent* e) override {
+        const Row* row = rowAt(static_cast<int>(e->position().y()));
+        if (row && row->kind == Row::Folder) return mousePressEvent(e); // a second click opens / closes again
         const MediaItem* item = itemAt(static_cast<int>(e->position().y()));
         if (item && !media::MediaManager::get().fileMissing(*item)) ctx_.addMedia(item->id);
+    }
+
+    // Media dragged onto a folder goes into it; onto the items at the top, out of its folder.
+    std::string dropTarget(int y) const {
+        const Row* r = rowAt(y);
+        if (!r) return {};
+        return r->folder;
+    }
+    void dragEnterEvent(QDragEnterEvent* e) override {
+        if (e->mimeData()->hasFormat(ui::kMediaMime)) e->acceptProposedAction();
+        else e->ignore(); // files: the panel imports them
+    }
+    void dragMoveEvent(QDragMoveEvent* e) override {
+        if (!e->mimeData()->hasFormat(ui::kMediaMime)) return e->ignore();
+        const std::string target = dropTarget(static_cast<int>(e->position().y()));
+        if (target != dropFolder_) dropFolder_ = target, update();
+        e->acceptProposedAction();
+    }
+    void dragLeaveEvent(QDragLeaveEvent*) override {
+        dropFolder_.clear();
+        update();
+    }
+    void dropEvent(QDropEvent* e) override {
+        uint64_t id = 0;
+        const std::string target = dropTarget(static_cast<int>(e->position().y()));
+        dropFolder_.clear();
+        if (!ui::readMime(e->mimeData(), ui::kMediaMime, id)) return e->ignore();
+        const MediaItem* item = ctx_.comp().findMedia(id);
+        if (item && item->folder != target) apply({{"op", "media.move"}, {"media", id}, {"folder", target}});
+        e->acceptProposedAction();
+    }
+
+    void addMoveMenu(QMenu& menu, uint64_t id) {
+        const MediaItem* item = ctx_.comp().findMedia(id);
+        QMenu* move = menu.addMenu(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Move to Folder");
+        for (const std::string& f : ctx_.comp().mediaFolders) {
+            QAction* a = move->addAction(QString::fromStdString(f), [this, id, f] { apply({{"op", "media.move"}, {"media", id}, {"folder", f}}); });
+            a->setCheckable(true);
+            a->setChecked(item && item->folder == f);
+        }
+        if (!ctx_.comp().mediaFolders.empty()) move->addSeparator();
+        QAction* top = move->addAction("No Folder", [this, id] { apply({{"op", "media.move"}, {"media", id}, {"folder", ""}}); });
+        top->setEnabled(item && !item->folder.empty());
+        move->addAction("New Folder...", [this, id] { newFolder(id); });
     }
 
     void showMenu(uint64_t id, QPoint at) {
@@ -234,7 +389,33 @@ protected:
         reveal->setEnabled(!missing);
         menu.addAction(missing ? "Relink..." : "Replace Footage...", [this, id] { relink(id); });
         menu.addSeparator();
+        addMoveMenu(menu, id);
+        menu.addSeparator();
         menu.addAction("Remove", [this, id] { remove(id); });
+        menu.exec(at);
+    }
+
+    void showFolderMenu(const std::string& folder, QPoint at) {
+        QMenu menu(this);
+        menu.addAction("Rename...", [this, folder] {
+            bool ok = false;
+            const QString typed = QInputDialog::getText(window(), "Rename Folder", "Name", QLineEdit::Normal, QString::fromStdString(folder), &ok);
+            if (ok && typed.trimmed().toStdString() != folder)
+                if (apply({{"op", "folder.rename"}, {"folder", folder}, {"name", typed.trimmed().toStdString()}}) && closed_.erase(folder))
+                    closed_.insert(typed.trimmed().toStdString());
+        });
+        menu.addAction("New Folder...", [this] { newFolder(); });
+        menu.addSeparator();
+        menu.addAction("Delete Folder", [this, folder] { apply({{"op", "folder.remove"}, {"folder", folder}}); })
+            ->setToolTip("The media inside stay, at the top");
+        menu.setToolTipsVisible(true);
+        menu.exec(at);
+    }
+
+    void showEmptyMenu(QPoint at) {
+        QMenu menu(this);
+        menu.addAction("Import...", [this] { panel_.openImportDialog(); });
+        menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "New Folder...", [this] { newFolder(); });
         menu.exec(at);
     }
 
@@ -287,7 +468,9 @@ protected:
 private:
     EditorContext& ctx_;
     MediaPanel& panel_;
-    std::vector<uint64_t> ids_;
+    std::vector<Row> rows_;
+    std::set<std::string> closed_; // folders closed (for this session)
+    std::string dropFolder_;       // the folder media is being dragged onto
     std::map<uint64_t, std::pair<std::string, QImage>> thumbs_;
     int hover_ = -1;
     uint64_t pressed_ = 0;
@@ -304,6 +487,9 @@ MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), c
     auto* import = new ui::IconButton(ui::Icon::Import, "Import images, videos or audio (Ctrl+I)", 28);
     connect(import, &QAbstractButton::clicked, this, &MediaPanel::openImportDialog);
     top->addWidget(import);
+    auto* folder = new ui::IconButton(ui::Icon::Folder, "New folder: keep media tidy (only in bemotion, nothing moves on disk)", 28);
+    connect(folder, &QAbstractButton::clicked, this, [this] { list_->newFolder(); });
+    top->addWidget(folder);
     search_ = new QLineEdit;
     search_->setPlaceholderText("Search media");
     search_->setClearButtonEnabled(true);
@@ -356,7 +542,7 @@ MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), c
 
 void MediaPanel::sync() {
     if (!isVisible()) return;
-    const bool none = ctx_.comp().media.empty();
+    const bool none = ctx_.comp().media.empty() && ctx_.comp().mediaFolders.empty();
     empty_->setVisible(none);
     scroll_->setVisible(!none);
     list_->refresh();

@@ -9,6 +9,7 @@
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
 #include "ui/AppSignals.h"
+#include "ui/Draw.h"
 #include "ui/Mime.h"
 #include "ui/PropertyRow.h"
 #include "ui/Theme.h"
@@ -250,6 +251,101 @@ private:
     TimelinePanel* panel_;
     QTimer edgeTimer_;
     float mouseX_ = 0.0f;
+};
+
+// The horizontal scrollbar under the tracks: the thumb is the time in view. Drag it to move,
+// drag its ends to zoom (as in Premiere), click beside it to jump there.
+class TimelineScrollbar : public QWidget {
+public:
+    explicit TimelineScrollbar(TimelinePanel* panel) : panel_(panel) {
+        setFixedHeight(12);
+        setMouseTracking(true);
+    }
+
+protected:
+    enum class Part { None, Thumb, Start, End };
+    // The thumb in pixels, over the track area only.
+    void thumb(float& x0, float& x1) const {
+        const float left = panel_->trackX0(), w = panel_->trackW();
+        const double total = std::max(panel_->scrollEnd(), 1e-3), span = w / panel_->pxPerSec_;
+        x0 = left + static_cast<float>(panel_->scroll_ / total) * w;
+        x1 = left + static_cast<float>(std::min(1.0, (panel_->scroll_ + span) / total)) * w;
+        if (x1 - x0 < 24.0f) x1 = std::min(left + w, x0 + 24.0f), x0 = std::min(x0, x1 - 24.0f);
+    }
+    Part partAt(float x) const {
+        float x0, x1;
+        thumb(x0, x1);
+        if (x < x0 - 2 || x > x1 + 2) return Part::None;
+        if (x - x0 < 7) return Part::Start;
+        if (x1 - x < 7) return Part::End;
+        return Part::Thumb;
+    }
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        ui::Draw d(p);
+        const float left = panel_->trackX0(), w = panel_->trackW(), h = static_cast<float>(height());
+        d.rectFilled({left, 2}, {left + w, h - 2}, theme::kBgDeep, (h - 4) * 0.5f);
+        float x0, x1;
+        thumb(x0, x1);
+        const bool hot = drag_ != Part::None || hover_ != Part::None;
+        d.rectFilled({x0, 2}, {x1, h - 2}, hot ? theme::kTextFaint : theme::kBgHover, (h - 4) * 0.5f);
+        // Grips at the ends: they zoom.
+        if (hot)
+            for (float gx : {x0 + 4.5f, x1 - 4.5f}) d.line({gx, 4.5f}, {gx, h - 4.5f}, theme::kTextDim, 1.5f);
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        if (e->button() != Qt::LeftButton) return;
+        const float x = static_cast<float>(e->position().x());
+        drag_ = partAt(x);
+        grabX_ = x;
+        grabScroll_ = panel_->scroll_;
+        grabPx_ = panel_->pxPerSec_;
+        if (drag_ == Part::None && x >= panel_->trackX0()) { // beside the thumb: center the view there
+            const double total = panel_->scrollEnd(), span = panel_->trackW() / panel_->pxPerSec_;
+            const double at = (x - panel_->trackX0()) / panel_->trackW() * total;
+            panel_->scroll_ = std::max(0.0, at - span * 0.5);
+            panel_->relayout();
+            drag_ = Part::Thumb;
+            grabScroll_ = panel_->scroll_;
+        }
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        const float x = static_cast<float>(e->position().x());
+        if (drag_ == Part::None) {
+            const Part over = partAt(x);
+            if (over != hover_) hover_ = over, update();
+            setCursor(over == Part::Start || over == Part::End ? Qt::SizeHorCursor : Qt::ArrowCursor);
+            return;
+        }
+        const double total = panel_->scrollEnd(), perPixel = total / panel_->trackW(); // seconds per scrollbar pixel
+        const double dt = (x - grabX_) * perPixel;
+        const double span = panel_->trackW() / grabPx_;
+        if (drag_ == Part::Thumb) {
+            panel_->scroll_ = std::max(0.0, grabScroll_ + dt);
+        } else { // an end: the other one stays, the span changes (the zoom)
+            const double start = drag_ == Part::Start ? std::clamp(grabScroll_ + dt, 0.0, grabScroll_ + span - 0.05) : grabScroll_;
+            const double end = drag_ == Part::End ? std::max(grabScroll_ + span + dt, grabScroll_ + 0.05) : grabScroll_ + span;
+            panel_->pxPerSec_ = panel_->trackW() / (end - start);
+            panel_->scroll_ = start;
+        }
+        panel_->relayout();
+        update();
+    }
+    void mouseReleaseEvent(QMouseEvent*) override {
+        drag_ = Part::None;
+        update();
+    }
+    void leaveEvent(QEvent*) override {
+        hover_ = Part::None;
+        update();
+    }
+    void wheelEvent(QWheelEvent* e) override { panel_->wheel(e); }
+
+private:
+    TimelinePanel* panel_;
+    Part drag_ = Part::None, hover_ = Part::None;
+    float grabX_ = 0;
+    double grabScroll_ = 0, grabPx_ = 1;
 };
 
 class TimelineRows : public QWidget {
@@ -641,11 +737,17 @@ TimelinePanel::TimelinePanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     col->addWidget(ruler_);
     rows_ = new TimelineRows(this);
     col->addWidget(rows_, 1);
+    hscroll_ = new TimelineScrollbar(this);
+    hscroll_->setVisible(settings().showTimelineScrollbar);
+    col->addWidget(hscroll_);
     connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] {
         pill_->updateGeometry();
         pill_->update();
     });
-    connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, this, [this] { relayout(); });
+    connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, this, [this] {
+        hscroll_->setVisible(settings().showTimelineScrollbar);
+        relayout();
+    });
     connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
         QTimer::singleShot(300, this, [this] { rebuildPluginButtons(); }); // after the reload
     });
@@ -856,7 +958,13 @@ void TimelinePanel::clampView() {
     }
     pxPerSec_ = std::clamp(pxPerSec_, std::min(minPx, 4000.0), 4000.0);
     // Some room past the end: the playhead can go there to add objects (the composition grows).
-    scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, contentEnd + kDefaultLayerLength - (w - 24.0) / pxPerSec_));
+    scroll_ = std::clamp(scroll_, 0.0, std::max(0.0, scrollEnd() - (w - 24.0) / pxPerSec_));
+}
+
+double TimelinePanel::scrollEnd() const {
+    double contentEnd = visibleEnd();
+    for (const Layer& l : ctx_.comp().layers) contentEnd = std::max(contentEnd, l.outPoint);
+    return contentEnd + kDefaultLayerLength;
 }
 
 void TimelinePanel::wheel(QWheelEvent* e) {
@@ -1005,6 +1113,7 @@ void TimelinePanel::relayout() {
     placeRowWidgets();
     rows_->update();
     ruler_->update();
+    hscroll_->update();
 }
 
 void TimelinePanel::syncBreadcrumb() {
@@ -1080,7 +1189,7 @@ void TimelinePanel::sync() {
     snap_->setActive(ctx_.snapping);
     loop_->setActive(ctx_.loop);
     graph_->setActive(graphMode_);
-    graph_->setVisible(graphMode_ || !friendlyMode()); // Friendly: keyframes, without their curves
+    graph_->setVisible(graphMode_ || settings().showGraphButton); // off (Friendly, or by choice): keyframes, without curves
     addKeys_->setVisible(graphMode_);
     addKeys_->setEnabled(ctx_.selected() != nullptr);
     animOnly_->setActive(animatedOnly_);

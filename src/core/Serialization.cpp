@@ -453,7 +453,10 @@ std::string serializeProject(const Project& project) {
         media.push_back({{"id", m.id}, {"name", m.name}, {"path", m.path}, {"relative", m.relative},
                          {"kind", mediaKindLabel(m.kind)}, {"width", m.width}, {"height", m.height},
                          {"duration", m.duration}, {"fps", m.fps}, {"video", m.hasVideo}, {"audio", m.hasAudio}});
+    for (size_t i = 0; i < c.media.size(); ++i)
+        if (!c.media[i].folder.empty()) media[i]["folder"] = c.media[i].folder;
     comp["media"] = std::move(media);
+    if (!c.mediaFolders.empty()) comp["media_folders"] = c.mediaFolders;
     comp["next_media_id"] = c.nextMediaId;
     json layers = json::array();
     for (const auto& l : c.layers) layers.push_back(encodeLayer(l));
@@ -520,10 +523,13 @@ bool deserializeProject(const std::string& text, Project& out, std::string* erro
                 m.fps = mj.value("fps", 0.0);
                 m.hasVideo = mj.value("video", m.kind != MediaKind::Audio);
                 m.hasAudio = mj.value("audio", m.kind == MediaKind::Audio);
+                m.folder = mj.value("folder", std::string());
                 c.nextMediaId = std::max(c.nextMediaId, m.id + 1);
                 c.media.push_back(std::move(m));
             }
             c.nextMediaId = std::max(c.nextMediaId, cj.value("next_media_id", uint64_t{1}));
+            for (const auto& fj : cj.value("media_folders", json::array()))
+                if (fj.is_string()) c.mediaFolders.push_back(fj.get<std::string>());
             for (const auto& gj : cj.value("guides", json::array()))
                 c.guides.push_back({gj.value("vertical", true), gj.value("position", 0.0f)});
         }

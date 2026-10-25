@@ -56,6 +56,8 @@ struct Composition {
     uint64_t nextTrackId = 1;
     std::vector<Guide> guides;
     std::vector<MediaItem> media; // imported footage (see core/Media.h)
+    // Folders of the Media panel, in order: only for keeping media tidy (nothing on disk).
+    std::vector<std::string> mediaFolders;
     uint64_t nextMediaId = 1;
     MediaItem* findMedia(uint64_t id);
     const MediaItem* findMedia(uint64_t id) const;

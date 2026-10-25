@@ -386,7 +386,9 @@ Rules:
   expression button, label, drag-to-scrub value, reset, context menu), used by
   Properties, Effects and the timeline rows; the expression is written in a
   `ui::ExpressionEditor` under the row (open ones stay open when the panel
-  rebuilds).
+  rebuilds). Its *ƒ Insert* opens `ui/ExpressionLibrary` (a popup:
+  categories, entries with their code and what they do, a search); the
+  examples (`expressionExamples`) are shared with the property's menu.
 - **`PreviewWindow`** — the full screen preview: the composition alone on
   black, driven by the editor's tick (playback, audio), its own keys and the
   buttons of its bar.
@@ -406,9 +408,14 @@ Rules:
 - **Experience** (`settings().experience`: friendly, balanced, expert;
   `applyExperience` sets the toolbar, rulers, meters, advanced options) is
   asked by `ui/ExperienceScreen` on the first start (no settings file yet);
-  the interface asks `friendlyMode()` where it shows less (the ƒ expression
-  button unless one is set, the graph editor button). `essentials_only`
-  makes `PluginHost::load` load no plugin.
+  what it shows is a set of `show_*` settings (`show_expression_buttons`,
+  `show_graph_button`, `show_snapshot_button`, `show_timeline_scrollbar`,
+  `show_meters`: Settings › Interface › Show) that the experiences preset
+  (Friendly turns the first two off; a file without them follows its
+  experience). `essentials_only` makes `PluginHost::load` load no plugin.
+- **Media folders** (`Composition::mediaFolders`, `MediaItem::folder`) are
+  names only, for the Media panel; changed through `folder.*` and
+  `media.move`; `Validate` keeps every item's folder in the list.
 - **Export Frame** renders the frame at the playhead through
   `renderFramesPng` (the same as `bemotion render`), to a file or the
   clipboard.

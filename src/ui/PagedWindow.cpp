@@ -11,6 +11,7 @@
 #include <QPainter>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QTimer>
 #include <QVBoxLayout>
 
 namespace bemotion::ui {
@@ -61,6 +62,10 @@ void PagedWindow::showPage(int index) {
     }
     area_->setWidget(pages_[index].build());
     area_->verticalScrollBar()->setValue(scroll);
+    // The new page is laid out a moment later: until then the scroll range is too short.
+    if (scroll > 0) QTimer::singleShot(0, this, [this, scroll, index] {
+            if (current_ == index) area_->verticalScrollBar()->setValue(scroll);
+        });
 }
 
 void PagedWindow::rebuild() { showPage(current_); }

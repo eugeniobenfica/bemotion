@@ -5,6 +5,7 @@
 #include "core/Expressions.h"
 #include "core/Ops.h"
 #include "ui/ExpressionEditor.h"
+#include "ui/ExpressionLibrary.h"
 #include "ui/EditorContext.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -152,6 +153,7 @@ PropertyRow::PropertyRow(EditorContext& ctx, uint64_t layerId, const PropertyRef
     col->setContentsMargins(0, 0, 0, 4);
     col->setSpacing(2);
     expr_ = new ui::ExpressionEditor(ctx_, layerId, prop.kind == PropertyKind::Vec2);
+    expr_->setProperty(prop.id, prop.kind == PropertyKind::Color);
     connect(expr_, &ui::ExpressionEditor::edited, this, [this](const QString& t) { applyExpression(t); });
     connect(expr_, &ui::ExpressionEditor::closeRequested, this, [this] { closeExpression(); });
     connect(expr_, &ui::ExpressionEditor::removeRequested, this, [this] { removeExpression(); });
@@ -293,7 +295,7 @@ void PropertyRow::refresh() {
     // Driven by an expression: "= Label" in the accent, the expression's value shown.
     const bool driven = anim.hasExpression();
     fx_->setActive(driven);
-    fx_->setVisible(driven || !friendlyMode()); // Friendly: formulas stay out of the way
+    fx_->setVisible(driven || settings().showExpressionButtons); // off (Friendly, or by choice): formulas stay out of the way
     fx_->setToolTip(driven ? QString(exprOpen_ ? "Close the expression" : "Show the expression") + "\n" + QString::fromStdString(anim.expression)
                            : "Add an expression: a formula worked out every frame");
     label_->setText(driven ? "= " + labelText_ : labelText_);
@@ -355,19 +357,15 @@ void PropertyRow::showMenu(QPoint at) {
     } else {
         menu.addAction("Add Expression", [this] { openExpression({}); });
     }
+    // Examples: what each does, its code beside it (the same as the ƒ library's first page).
     QMenu* examples = menu.addMenu("Expression Examples");
-    const bool vec = kind_ == PropertyKind::Vec2, color = kind_ == PropertyKind::Color;
-    const std::pair<const char*, QString> samples[] = {
-        {"Wiggle (shake gently)", vec ? "wiggle(2, 25)" : color ? "wiggle(1, 0.1)" : "wiggle(2, 10)"},
-        {"Keep turning / growing", vec ? "value + [time * 100, 0]" : "value + time * 90"},
-        {"Loop the keyframes", "loop()"},
-        {"Back and forth", "pingpong()"},
-        {"Pulse", vec ? "value * (1 + sin(time * 6) * 0.08)" : "value * (1 + sin(time * 6) * 0.08)"},
-        {"Follow another layer", QString("layer(\"Name\").%1").arg(QString::fromStdString(id_))},
-        {"Follow it a moment later", QString("layer(\"Name\").%1(time - 0.25)").arg(QString::fromStdString(id_))},
-        {"Change over the clip", vec ? "lerp(value, value + [300, 0], smooth(progress))" : "lerp(value, value * 2, smooth(progress))"},
-    };
-    for (const auto& [name, text] : samples) examples->addAction(name, [this, text = text] { openExpression(text); });
+    examples->setToolTipsVisible(true);
+    for (const ui::ExpressionEntry& ex : ui::expressionExamples(id_, kind_ == PropertyKind::Vec2, kind_ == PropertyKind::Color)) {
+        QString code = ex.snippet.isEmpty() ? ex.code : ex.snippet;
+        code.remove('|');
+        QAction* a = examples->addAction(ex.about + "\t" + ex.code, [this, code] { openExpression(code); });
+        a->setToolTip(code);
+    }
     menu.addSeparator();
     menu.addAction("Clear Animation", [&] {
         anim.clearKeys(t);
@@ -395,6 +393,7 @@ void PropertyRow::openExpression(const QString& text) {
         ui::setTone(head, ui::Tone::TextDim);
         col->addWidget(head);
         auto* editor = new ui::ExpressionEditor(ctx_, layerId_, kind_ == PropertyKind::Vec2);
+        editor->setProperty(id_, kind_ == PropertyKind::Color);
         editor->setRowButtons(false);
         editor->setText(text);
         connect(editor, &ui::ExpressionEditor::edited, &dialog, [editor](const QString& t) {

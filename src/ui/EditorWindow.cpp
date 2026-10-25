@@ -1122,13 +1122,21 @@ void EditorWindow::buildMenus() {
     fillPlugins();
     connect(plugins, &QMenu::aboutToShow, this, fillPlugins);
 
+    // Help: the same pages as the Help window, then the outside links.
     QMenu* help = bar->addMenu("Help");
-    help->addAction(action(Action::Help, "Keyboard Shortcuts", [] { ui::openHelp(ui::HelpTab::Shortcuts); }));
+    QAction* keys = action(Action::Help, "Keyboard Shortcuts", [] { ui::openHelp(ui::HelpTab::Shortcuts); });
+    keys->setIcon(ui::menuIcon(ui::Icon::Keyboard, theme::kTextDim));
+    help->addAction(keys);
+    help->addAction(ui::menuIcon(ui::Icon::Help, theme::kTextDim), "Learn bemotion", this, [] { ui::openHelp(ui::HelpTab::Learn); });
+    help->addAction(ui::menuIcon(ui::Icon::Expression, theme::kTextDim), "Expressions Guide", this,
+                    [] { platform::openWithDefaultApp("https://github.com/eugeniobenfica/bemotion/blob/main/docs/EXPRESSIONS.md"); });
     help->addSeparator();
-    help->addAction("About bemotion", this, [] { ui::openHelp(ui::HelpTab::About); });
-    help->addAction("Credits", this, [] { ui::openHelp(ui::HelpTab::Credits); });
-    help->addAction("License", this, [] { ui::openHelp(ui::HelpTab::License); });
+    help->addAction(ui::menuIcon(ui::Icon::Logo, theme::kTextDim), "About bemotion", this, [] { ui::openHelp(ui::HelpTab::About); });
+    help->addAction(ui::menuIcon(ui::Icon::Star, theme::kTextDim), "Credits", this, [] { ui::openHelp(ui::HelpTab::Credits); });
+    help->addAction(ui::menuIcon(ui::Icon::Lock, theme::kTextDim), "License", this, [] { ui::openHelp(ui::HelpTab::License); });
     help->addSeparator();
+    help->addAction(ui::menuIcon(ui::Icon::Help, theme::kTextDim), "Report an Issue...", this,
+                    [] { platform::openWithDefaultApp("https://github.com/eugeniobenfica/bemotion/issues"); });
     help->addAction(ui::menuIcon(ui::Icon::Coffee, theme::kAccent), "Support bemotion (Buy Me a Coffee)...", this,
                     [] { platform::openWithDefaultApp("https://buymeacoffee.com/eugeniobenfica"); });
 

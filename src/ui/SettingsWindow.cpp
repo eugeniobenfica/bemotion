@@ -35,6 +35,7 @@
 #include <QSpinBox>
 #include <QStringList>
 #include <QStyle>
+#include <QSignalBlocker>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -502,10 +503,10 @@ QWidget* interfacePage() {
     });
     SettingsCard* experience = addSection(col, "Experience");
     const int which = s.experience == "friendly" ? 0 : s.experience == "expert" ? 2 : 1;
+    // One description for the three: the row keeps its height while choosing (it used to grow
+    // and shrink under the mouse).
     experience->addRow("How much the interface shows",
-                       which == 0   ? "Friendly: the essentials, calm. Fewer tools, no expressions or graph editor"
-                       : which == 2 ? "Expert: everything at hand. Every option, rulers, audio meters, a fuller toolbar"
-                                    : "Balanced: the usual tools, the rest when you look for it",
+                       "Friendly: the essentials. Balanced: the usual tools. Expert: every option, rulers, a fuller toolbar",
                        segmented({"Friendly", "Balanced", "Expert"}, which, [](int i) {
                            applyExperience(i == 0 ? "friendly" : i == 2 ? "expert" : "balanced");
                            emit AppSignals::get().toolbarChanged();
@@ -563,17 +564,26 @@ QWidget* interfacePage() {
     });
     text->addRow("Interface font", "Inter ships with bemotion; the others come from your system", font);
 
+    // Each extra on its own, whatever the experience.
+    SettingsCard* show = addSection(col, "Show");
+    auto showRow = [&](const char* name, const char* about, bool Settings::*field) {
+        show->addRow(name, about, switchControl(s.*field, [field](bool on) {
+                         settings().*field = on;
+                         saveSettings();
+                         emit AppSignals::get().appearanceChanged();
+                     }));
+    };
+    showRow("Expression buttons", "The ƒ beside each property (one with an expression keeps it)", &Settings::showExpressionButtons);
+    showRow("Graph editor button", "The curves of the keyframes, in the timeline", &Settings::showGraphButton);
+    showRow("Export Frame button", "The camera in the viewport: this frame as a picture (also Shift+E)", &Settings::showSnapshotButton);
+    showRow("Timeline scrollbar", "Under the timeline, to move along long projects", &Settings::showTimelineScrollbar);
+    showRow("Audio meters", "Left and right sound levels beside the timeline (also View › Audio Meters)", &Settings::showMeters);
+
     SettingsCard* startup = addSection(col, "Startup");
     startup->addRow("Intro animation", "The bemotion logo when the app opens (a click or any key skips it)",
                     switchControl(s.showIntro, [](bool on) {
                         settings().showIntro = on;
                         saveSettings();
-                    }));
-    startup->addRow("Audio meters", "Left and right sound levels beside the timeline (also in View › Audio Meters)",
-                    switchControl(s.showMeters, [](bool on) {
-                        settings().showMeters = on;
-                        saveSettings();
-                        emit AppSignals::get().appearanceChanged();
                     }));
     startup->addRow("Welcome project", "The example project on the home screen (deleting it there turns this off)",
                     switchControl(!s.welcomeRemoved, [](bool on) {
@@ -1187,6 +1197,11 @@ void openSettings(SettingsTab tab) {
         advanced->setToolTip(advancedLabel->toolTip());
         advanced->setChecked(settings().advanced);
         advancedRow->addWidget(advanced);
+        // An experience can switch it too (Expert: on): follow it.
+        QObject::connect(&AppSignals::get(), &AppSignals::appearanceChanged, advanced, [advanced] {
+            const QSignalBlocker block(advanced);
+            advanced->setChecked(settings().advanced);
+        });
         QObject::connect(advanced, &QAbstractButton::toggled, advanced, [](bool on) {
             settings().advanced = on;
             saveSettings();

@@ -9,6 +9,8 @@
 #include <QWidget>
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 class QCompleter;
 class QLabel;
@@ -21,6 +23,11 @@ class EditorContext;
 namespace ui {
 
 class ExpressionText;
+struct ExpressionEntry;
+
+// Examples for a property (`propId`: "position"...; `vector`: [x, y]; `color`: rgba), the
+// first page of the ƒ library and of the property's menu.
+std::vector<ExpressionEntry> expressionExamples(const std::string& propId, bool vector, bool color);
 
 class ExpressionEditor : public QWidget {
     Q_OBJECT
@@ -35,6 +42,7 @@ public:
     void focusText();
     void setProblem(const QString& problem); // shown under it (empty: none)
     void setRowButtons(bool shown);          // close and remove (not in a dialog, which has its own)
+    void setProperty(const std::string& propId, bool color); // what the examples are written for
 
 signals:
     void edited(const QString& text); // as typed
@@ -48,6 +56,9 @@ private:
     EditorContext& ctx_;
     uint64_t layerId_;
     bool vector_;
+    std::string propId_;
+    bool color_ = false;
+    QWidget* fx_ = nullptr; // the ƒ button: the library opens under it
     ExpressionText* text_ = nullptr;
     QLabel* problem_ = nullptr;
     QWidget* rowButtons_ = nullptr;

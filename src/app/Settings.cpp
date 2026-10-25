@@ -114,6 +114,11 @@ void loadSettings() {
         s.showMeters = j.value("show_meters", s.showMeters);
         s.experience = j.value("experience", s.experience);
         if (s.experience != "friendly" && s.experience != "expert") s.experience = "balanced";
+        // Before these were settings, Friendly hid the ƒ and graph buttons: it still does.
+        s.showExpressionButtons = j.value("show_expression_buttons", s.experience != "friendly");
+        s.showGraphButton = j.value("show_graph_button", s.experience != "friendly");
+        s.showSnapshotButton = j.value("show_snapshot_button", s.showSnapshotButton);
+        s.showTimelineScrollbar = j.value("show_timeline_scrollbar", s.showTimelineScrollbar);
         s.essentialsOnly = j.value("essentials_only", s.essentialsOnly);
         ui::loadKeymap(j.contains("shortcuts") ? j["shortcuts"].dump() : "{}");
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
@@ -132,6 +137,8 @@ void saveSettings() {
               {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"show_rulers", s.showRulers}, {"preview_quality", s.previewQuality}, {"welcome_added", s.welcomeAdded}, {"welcome_removed", s.welcomeRemoved}, {"projects_folder", s.projectsFolder}, {"speech_language", s.speechLanguage}, {"toolbar", s.toolbar},
               {"toolbar_in_viewport", s.toolbarInViewport}, {"toolbar_in_window", s.toolbarInWindow}, {"toolbar_x", s.toolbarX}, {"toolbar_y", s.toolbarY},
               {"recent_colors", s.recentColors}, {"show_meters", s.showMeters},
+              {"show_expression_buttons", s.showExpressionButtons}, {"show_graph_button", s.showGraphButton},
+              {"show_snapshot_button", s.showSnapshotButton}, {"show_timeline_scrollbar", s.showTimelineScrollbar},
               {"experience", s.experience}, {"essentials_only", s.essentialsOnly},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
@@ -144,16 +151,19 @@ void applyExperience(const std::string& experience) {
     if (s.experience == "friendly") {
         s.toolbar = {"select", "razor", "delete"};
         s.showMeters = false;
+        s.showExpressionButtons = s.showGraphButton = false;
         s.showRulers = false;
         s.advanced = false;
     } else if (s.experience == "expert") {
         s.toolbar = {"select", "razor", "crop", "split", "compound", "duplicate", "easy_ease", "forward", "backward", "delete"};
         s.showMeters = true;
         s.showRulers = true;
+        s.showExpressionButtons = s.showGraphButton = true;
         s.advanced = true;
     } else {
         s.toolbar = ui::defaultToolbar();
         s.showMeters = true;
+        s.showExpressionButtons = s.showGraphButton = true;
         s.showRulers = false;
         s.advanced = false;
     }

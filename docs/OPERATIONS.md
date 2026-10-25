@@ -185,6 +185,13 @@ lists an object's `params`.
 "duration"}` — `path`. Then `layer.add` with `"type": "media", "media": id`.
 (Plugins need the `media` permission.)
 
+**Media folders** keep the Media panel tidy; they are only names (nothing moves
+on disk). **`folder.add`** → `{"folder": name}` — `name`.
+**`folder.rename`** — `folder`, `name`. **`folder.remove`** — `folder` (its
+media go back to the top). **`media.move`** — `media` (an id), `folder` (a
+folder's name; `""` or none: the top). `query.composition` lists `folders` and
+each media item's `folder`.
+
 ## Queries (change nothing)
 
 **`query.composition`** — size, frame rate, duration, background, media items.

@@ -24,6 +24,7 @@ namespace bemotion {
 class PropertyRow;
 class TimelineRuler;
 class TimelineRows;
+class TimelineScrollbar;
 class ToolPill;
 namespace ui {
 class Draw;
@@ -73,6 +74,7 @@ public:
 private:
     friend class TimelineRuler;
     friend class TimelineRows;
+    friend class TimelineScrollbar;
     friend class ToolPill;
 
     // Each timeline row is a track that may hold several clips (layers).
@@ -125,6 +127,7 @@ private:
     void buildToolbar(QHBoxLayout* bar);
     void syncBreadcrumb();
     void clampView();
+    double scrollEnd() const; // the time the view can scroll to (the content, plus room to grow)
     void computeItems();
     void placeRowWidgets();
     void relayout(); // after the document or the view changed: items, row widgets, repaint
@@ -255,6 +258,7 @@ private:
     std::string breadcrumbKey_;
     TimelineRuler* ruler_ = nullptr;
     TimelineRows* rows_ = nullptr;
+    TimelineScrollbar* hscroll_ = nullptr; // under the rows (Settings › Interface › Show)
 
     float leftWidth_ = 300.0f;
     double pxPerSec_ = 0.0; // 0 = fit on next layout

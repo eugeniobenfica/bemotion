@@ -24,6 +24,7 @@ struct MediaItem {
     double fps = 0.0;          // videos
     bool hasVideo = false;
     bool hasAudio = false;
+    std::string folder; // the Media panel's folder it is kept in (Composition::mediaFolders); empty: the top
 };
 
 } // namespace bemotion

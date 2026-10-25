@@ -1,5 +1,5 @@
-// Help window: keyboard shortcuts (drawn as key caps), about the project,
-// credits and the license.
+// Help window, in the style of Settings: keyboard shortcuts (drawn as key caps, searchable),
+// the guides, about the project, credits and the license.
 
 #include "ui/Dialogs.h"
 
@@ -13,6 +13,7 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPointer>
@@ -21,6 +22,8 @@
 
 #include <cctype>
 #include <cstring>
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -68,6 +71,7 @@ constexpr Credit kCredits[] = {
     {"stb", "Sean Barrett", "MIT / Public Domain", "image import and PNG export"},
     {"miniaudio", "David Reid", "MIT-0 / Public Domain", "audio playback"},
     {"Lua 5.4", "PUC-Rio (Lua.org)", "MIT", "the plugin scripting language"},
+    {"whisper.cpp", "Georgi Gerganov and the ggml authors", "MIT", "speech to text (captions)"},
     {"Inter", "Rasmus Andersson", "SIL Open Font License 1.1", "the interface typeface"},
 };
 
@@ -162,123 +166,192 @@ private:
     std::string keys_;
 };
 
-void shortcutTable(QVBoxLayout* col, const std::vector<std::pair<std::string, std::string>>& rows) {
-    auto* grid = new QGridLayout;
-    grid->setColumnMinimumWidth(0, 270);
-    grid->setColumnStretch(1, 1);
-    grid->setVerticalSpacing(4);
-    int r = 0;
-    for (const auto& [keys, action] : rows) {
-        if (keys.empty()) grid->addWidget(hintLabel("(none)"), r, 0);
-        else grid->addWidget(new KeyCaps(keys), r, 0);
-        grid->addWidget(new QLabel(QString::fromStdString(action)), r, 1);
-        ++r;
-    }
-    col->addLayout(grid);
+// The page's title, with a button on the right (as Settings' Reset Page).
+void pageHeader(QVBoxLayout* col, const QString& title, QWidget* right = nullptr) {
+    auto* row = new QHBoxLayout;
+    row->addWidget(pageTitle(title), 1);
+    if (right) row->addWidget(right);
+    col->addLayout(row);
+    col->addSpacing(2);
 }
 
+QPushButton* linkButton(const QString& label, const std::string& url, Icon icon = Icon::ArrowRight) {
+    auto* b = new QPushButton(makeIcon(icon, theme::kTextDim, 16), label);
+    b->setCursor(Qt::PointingHandCursor);
+    QObject::connect(b, &QPushButton::clicked, b, [url] { platform::openWithDefaultApp(url); });
+    return b;
+}
+
+// Shortcuts, as Settings shows its options: a card per group, the keys on the right. The
+// search keeps the rows whose action or keys match.
 QWidget* shortcutsPage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    col->addWidget(pageTitle("Keyboard shortcuts"));
-    col->addWidget(paragraph("Change any of them in Settings > Shortcuts."));
-    std::vector<std::pair<std::string, std::string>> rows;
-    const char* group = nullptr;
-    auto flush = [&] {
-        if (!group) return;
-        std::string upper = group;
-        for (char& c : upper) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-        col->addSpacing(6);
-        col->addWidget(sectionLabel(QString::fromStdString(upper)));
-        shortcutTable(col, rows);
-        rows.clear();
+    auto* edit = new QPushButton(makeIcon(Icon::Keyboard, theme::kTextDim, 16), "Change Shortcuts...");
+    QObject::connect(edit, &QPushButton::clicked, edit, [] { openSettings(SettingsTab::Shortcuts); });
+    pageHeader(col, "Keyboard shortcuts", edit);
+    auto* search = new QLineEdit;
+    search->setPlaceholderText("Search shortcuts");
+    search->setClearButtonEnabled(true);
+    col->addWidget(search);
+    col->addSpacing(4);
+
+    struct Row {
+        QWidget* row;
+        QWidget* section; // its title and card, hidden when nothing in them matches
+        QString text;
     };
+    auto rows = std::make_shared<std::vector<Row>>();
+    std::vector<std::pair<QWidget*, int>> sections; // the section's widgets, how many rows
+    auto addGroup = [&](const QString& title, const std::vector<std::pair<std::string, std::string>>& items) {
+        auto* holder = new QWidget;
+        auto* hcol = new QVBoxLayout(holder);
+        hcol->setContentsMargins(0, 0, 0, 0);
+        hcol->setSpacing(6);
+        SettingsCard* card = addSection(hcol, title);
+        for (const auto& [keys, action] : items) {
+            QWidget* control = keys.empty() ? static_cast<QWidget*>(hintLabel("None")) : new KeyCaps(keys);
+            QWidget* r = card->addRow(QString::fromStdString(action), {}, control);
+            rows->push_back({r, holder, QString::fromStdString(action + " " + keys)});
+        }
+        col->addWidget(holder);
+    };
+    std::vector<std::pair<std::string, std::string>> items;
+    const char* group = nullptr;
     for (int i = 0; i < static_cast<int>(Action::Count); ++i) {
         const ActionInfo& info = actionInfo(static_cast<Action>(i));
-        if (group && std::strcmp(group, info.group) != 0) flush();
+        if (group && std::strcmp(group, info.group) != 0) {
+            addGroup(group, items);
+            items.clear();
+        }
         group = info.group;
-        rows.emplace_back(chordName(chordOf(static_cast<Action>(i))), info.label);
+        items.emplace_back(chordName(chordOf(static_cast<Action>(i))), info.label);
     }
-    flush();
-    col->addSpacing(6);
-    col->addWidget(sectionLabel("MOUSE"));
-    for (const Shortcut& m : mouseGestures()) rows.emplace_back(m.keys, m.action);
-    shortcutTable(col, rows);
+    if (group) addGroup(group, items);
+    items.clear();
+    for (const Shortcut& m : mouseGestures()) items.emplace_back(m.keys, m.action);
+    addGroup("Mouse", items);
+    QObject::connect(search, &QLineEdit::textChanged, page, [rows](const QString& q) {
+        std::set<QWidget*> shown;
+        for (const Row& r : *rows) {
+            const bool match = q.trimmed().isEmpty() || r.text.contains(q.trimmed(), Qt::CaseInsensitive);
+            r.row->setVisible(match);
+            if (match) shown.insert(r.section);
+        }
+        for (const Row& r : *rows) r.section->setVisible(shown.count(r.section) > 0);
+    });
+    return page;
+}
+
+// Where to read more: the guides, one card each.
+QWidget* learnPage() {
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    pageHeader(col, "Learn");
+    col->addWidget(paragraph("The guides live with bemotion's code on GitHub: what each part does, and how to drive it."));
+    col->addSpacing(4);
+    const std::string docs = std::string(kRepoUrl) + "/blob/main/docs/";
+    SettingsCard* use = addSection(col, "Animating");
+    use->addRow("Expressions", "Formulas on any property: wiggle, loop, follow another layer. The ƒ button opens the library",
+                linkButton("Open", docs + "EXPRESSIONS.md"));
+    use->addRow("Getting around", "Panels, tools, the timeline and the viewport, from the start",
+                linkButton("Open", std::string(kRepoUrl) + "#readme"));
+    SettingsCard* extend = addSection(col, "Extending");
+    extend->addRow("Plugins", "New kinds of objects and commands, in Lua", linkButton("Open", docs + "PLUGINS.md"));
+    extend->addRow("Operations", "Every change a script or an AI can make, with its fields", linkButton("Open", docs + "OPERATIONS.md"));
+    extend->addRow("Automation and AI", "The command line, and connecting Claude or another assistant (MCP)",
+                   linkButton("Open", docs + "AUTOMATION.md"));
+    SettingsCard* inside = addSection(col, "Inside bemotion");
+    inside->addRow("Architecture", "How the code is laid out, for anyone changing it", linkButton("Open", docs + "ARCHITECTURE.md"));
+    inside->addRow("Report an issue", "Something wrong or missing: tell us on GitHub",
+                   linkButton("Report", std::string(kRepoUrl) + "/issues", Icon::Help));
     return page;
 }
 
 class Mark : public QWidget {
 public:
-    Mark() { setFixedSize(48, 48); }
+    Mark() { setFixedSize(56, 56); }
 
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
-        drawLogoMark(p, {24, 24}, 23.0f, theme::kAccent);
+        drawLogoMark(p, {28, 28}, 27.0f, theme::kAccent);
     }
 };
 
 QWidget* aboutPage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    auto* head = new QHBoxLayout;
-    head->setSpacing(14);
-    head->addWidget(new Mark);
+    // The mark, the name, the version and the slogan, in a card of their own.
+    auto* hero = new SettingsCard;
+    auto* head = new QWidget;
+    auto* hrow = new QHBoxLayout(head);
+    hrow->setContentsMargins(4, 6, 4, 6);
+    hrow->setSpacing(16);
+    hrow->addWidget(new Mark);
     auto* names = new QVBoxLayout;
-    names->setSpacing(0);
+    names->setSpacing(1);
     auto* title = pageTitle("bemotion");
     QFont f = title->font();
-    f.setPointSizeF(f.pointSizeF() * 1.4);
+    f.setPointSizeF(f.pointSizeF() * 1.5);
     title->setFont(f);
     names->addWidget(title);
-    names->addWidget(hintLabel(QString("Version %1  ·  free and open source").arg(BEMOTION_VERSION)));
-    head->addLayout(names, 1);
-    col->addLayout(head);
-    col->addSpacing(6);
-    col->addWidget(paragraph("bemotion is a free video editor with a special focus on 2D animation. Bring in footage, cut and arrange it, drop text, shapes and charts on top, set "
-                             "keyframes, shape the motion with paths and curves, add effects and export a video.",
-                             theme::kText));
-    col->addWidget(paragraph("The goal is simplicity without giving up control: the common moves are one click away (quick "
-                             "animations, effect presets, snapping), while every property stays animatable and the interface "
-                             "follows the industry standards motion designers already know. Themes and plugins let anyone shape "
-                             "it to their taste and extend it."));
-    col->addWidget(paragraph("Written in C++20 with Qt and Skia; video through FFmpeg. Plugins are sandboxed Lua scripts."));
-    col->addSpacing(10);
+    names->addWidget(paragraph("where motion takes shape"));
+    names->addWidget(hintLabel(QString("Version %1  ·  free and open source (MIT)").arg(BEMOTION_VERSION)));
+    hrow->addLayout(names, 1);
+    hero->addContent(head);
+    col->addWidget(hero);
+    col->addSpacing(4);
+    SettingsCard* idea = addSection(col, "The idea");
+    idea->addRow("A video editor first, an animator at heart", "Cut and arrange footage like in Premiere; animate anything like in After Effects", nullptr);
+    idea->addRow("Not an airplane cockpit", "What you need in front of you, the rest out of the way, every panel yours to arrange", nullptr);
+    idea->addRow("Human and robot friendly", "Edited by hand, by scripts and by AI assistants, through the same rules and undo", nullptr);
+    idea->addRow("An engine and a basic app", "A small core you can drive headless, a simple editor on top, the rest as plugins", nullptr);
+    col->addSpacing(4);
     auto* buttons = new QHBoxLayout;
     auto* github = accentButton("View on GitHub");
     QObject::connect(github, &QPushButton::clicked, [] { platform::openWithDefaultApp(kRepoUrl); });
-    auto* issue = new QPushButton("Report an Issue");
-    QObject::connect(issue, &QPushButton::clicked, [] { platform::openWithDefaultApp(std::string(kRepoUrl) + "/issues"); });
-    auto* plugin = new QPushButton("Write a Plugin");
-    QObject::connect(plugin, &QPushButton::clicked, [] { platform::openWithDefaultApp(std::string(kRepoUrl) + "/blob/main/docs/PLUGINS.md"); });
     buttons->addWidget(github);
-    buttons->addWidget(issue);
-    buttons->addWidget(plugin);
+    buttons->addWidget(linkButton("Report an Issue", std::string(kRepoUrl) + "/issues", Icon::Help));
+    buttons->addWidget(linkButton("Support bemotion", "https://buymeacoffee.com/eugeniobenfica", Icon::Coffee));
     buttons->addStretch();
     col->addLayout(buttons);
+    col->addSpacing(6);
+    col->addWidget(hintLabel("Written in C++20 with Qt and Skia; video through FFmpeg; plugins are sandboxed Lua scripts."));
     return page;
 }
+
+// The license of a library, as a small pill.
+class LicensePill : public QWidget {
+public:
+    explicit LicensePill(QString text) : text_(std::move(text)) {
+        setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        setFixedSize(fontMetrics().horizontalAdvance(text_) + 20, fontMetrics().height() + 8);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        Draw d(p);
+        const float h = static_cast<float>(height());
+        d.rectFilled({0.5f, 0.5f}, {width() - 0.5f, h - 0.5f}, theme::withAlpha(theme::kAccent, 30), h * 0.5f);
+        d.text({10, (h - d.textHeight()) * 0.5f}, theme::kAccent, text_);
+    }
+
+private:
+    QString text_;
+};
 
 QWidget* creditsPage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    col->addWidget(pageTitle("Credits"));
+    pageHeader(col, "Credits");
     col->addWidget(paragraph("Created by Eugênio Benfica and the bemotion contributors. bemotion stands on the shoulders of these "
                              "open source projects:"));
-    col->addSpacing(6);
-    for (const Credit& c : kCredits) {
-        auto* row = new QHBoxLayout;
-        auto* name = new QLabel(c.name);
-        QFont f = name->font();
-        f.setWeight(QFont::DemiBold);
-        name->setFont(f);
-        row->addWidget(name);
-        row->addWidget(paragraph(c.license, theme::kAccent));
-        row->addStretch();
-        col->addLayout(row);
-        col->addWidget(paragraph(QString("%1  ·  %2").arg(c.by, c.use)));
-        col->addSpacing(4);
-    }
+    col->addSpacing(4);
+    SettingsCard* card = addSection(col, "Open source inside bemotion");
+    for (const Credit& c : kCredits) card->addRow(c.name, QString("%1  ·  %2").arg(c.by, c.use), new LicensePill(c.license));
+    col->addSpacing(4);
     col->addWidget(hintLabel("Thank you to everyone who builds, tests, reports and shares."));
     return page;
 }
@@ -286,16 +359,30 @@ QWidget* creditsPage() {
 QWidget* licensePage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    col->addWidget(pageTitle("License"));
-    col->addWidget(paragraph("bemotion is free software under the MIT license: use it for anything, including commercial work, "
-                             "and change and share it, as long as the notice below travels with it. Your projects and exported "
-                             "videos are entirely yours.",
-                             theme::kText));
+    pageHeader(col, "License");
+    SettingsCard* summary = addSection(col, "In short");
+    summary->addRow("Free for anything", "Personal and commercial work alike, with no price, account or watermark", nullptr);
+    summary->addRow("Yours to change and share", "As long as the notice below travels with it", nullptr);
+    summary->addRow("Your work is yours", "Projects and exported videos belong entirely to you", nullptr);
+    SettingsCard* full = addSection(col, "MIT License");
     auto* text = new QPlainTextEdit(kLicense);
     text->setReadOnly(true);
-    text->setMinimumHeight(320);
-    col->addWidget(text, 1);
+    text->setFrameShape(QFrame::NoFrame);
+    text->setMinimumHeight(300);
+    full->addContent(text);
     return page;
+}
+
+// The pages, in their order (HelpTab names them).
+int pageOf(HelpTab tab) {
+    switch (tab) {
+    case HelpTab::Shortcuts: return 0;
+    case HelpTab::Learn: return 1;
+    case HelpTab::About: return 2;
+    case HelpTab::Credits: return 3;
+    case HelpTab::License: return 4;
+    }
+    return 0;
 }
 
 } // namespace
@@ -303,11 +390,12 @@ QWidget* licensePage() {
 void openHelp(HelpTab tab) {
     static QPointer<PagedWindow> window;
     if (!window) {
-        window = new PagedWindow("Help", {{"Shortcuts", Icon::Text, shortcutsPage},
+        window = new PagedWindow("Help", {{"Shortcuts", Icon::Keyboard, shortcutsPage},
+                                          {"Learn", Icon::Help, learnPage},
                                           {"About", Icon::Logo, aboutPage},
                                           {"Credits", Icon::Star, creditsPage},
                                           {"License", Icon::Lock, licensePage}});
-        window->resize(820, 620);
+        window->resize(860, 660);
         QObject::connect(&AppSignals::get(), &AppSignals::shortcutsChanged, window, [] {
             if (window && window->currentPage() == 0) window->rebuild();
         });
@@ -315,7 +403,7 @@ void openHelp(HelpTab tab) {
             if (window) window->rebuild();
         });
     }
-    window->showPage(static_cast<int>(tab));
+    window->showPage(pageOf(tab));
     window->present();
 }
 

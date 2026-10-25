@@ -9,8 +9,10 @@ bemotion has two kinds of code, like After Effects:
   It is written right there, under the property in *Properties* (in a small
   window from the timeline): several lines, colored as you type, names
   completed (functions, the clip's times, other layers and their
-  properties), and **ƒ** inserts any of them — *Layers* lists every layer's
-  properties, what After Effects' pick whip does. Esc, the arrow under it or
+  properties), and **ƒ Insert** opens the library: examples for that
+  property, then everything else by category, each with what it does, and a
+  search — *Layers* lists every layer's properties, what After Effects' pick
+  whip does. Esc, the arrow under it or
   the ƒ button close the editor (the expression keeps working, the ƒ button
   stays lit); its bin, or Alt+click again, removes it.
   The property's name turns into `= Name` and shows the result. An expression that does not read is not applied (the error shows

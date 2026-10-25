@@ -390,9 +390,11 @@ void ViewportPanel::positionHud() {
     const int controlsY = width() >= 520 ? y : y - 32;
     qualityButton_->move(12, controlsY);
     fullscreenButton_->move(88, controlsY);
+    const bool snapshot = settings().showSnapshotButton; // Settings › Interface › Show
+    snapshotButton_->setVisible(snapshot);
     snapshotButton_->move(88 + 26 + 4, controlsY);
     // Next to them, off the picture: it would hide the top of the frame.
-    int tx = 88 + 2 * 26 + 4 + 12;
+    int tx = 88 + (snapshot ? 2 * 26 + 4 : 26) + 12;
     for (QPushButton* b : cameraTools_) {
         b->setVisible(tools);
         b->adjustSize();

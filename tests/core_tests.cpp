@@ -1236,6 +1236,36 @@ void testExpressionsThroughOperations() {
           std::find(names.begin(), names.end(), "expression.bake") != names.end());
 }
 
+// Media folders: names that keep the Media panel tidy, saved with the project.
+void testMediaFolders() {
+    Project p;
+    MediaItem a, b;
+    a.name = "intro.mp4", b.name = "logo.png";
+    const uint64_t ida = p.comp.addMedia(a), idb = p.comp.addMedia(b);
+    const std::string ops = R"j([{"op": "folder.add", "name": "Footage"}, {"op": "folder.add", "name": " Logos "},
+                                 {"op": "media.move", "media": )j" + std::to_string(ida) + R"j(, "folder": "Footage"},
+                                 {"op": "media.move", "media": )j" + std::to_string(idb) + R"j(, "folder": "Logos"},
+                                 {"op": "folder.rename", "folder": "Footage", "name": "Video"},
+                                 {"op": "query.composition"}])j";
+    OpsResult r = run(p, ops.c_str());
+    CHECK(r.ok);
+    if (r.ok) CHECK(r.results[5]["folders"] == nlohmann::json::array({"Video", "Logos"}) && r.results[5]["media"][0]["folder"] == "Video");
+    CHECK(!run(p, R"j({"op": "folder.add", "name": "Video"})j").ok);                         // each name once
+    CHECK(!run(p, R"j({"op": "folder.rename", "folder": "Vdeo", "name": "X"})j").ok);       // a folder that is not there
+    CHECK(!run(p, R"j({"op": "media.move", "media": 1, "folder": "Nowhere"})j").ok);
+    // Saved, and read back; a folder an item names but the list lost comes back.
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    CHECK(back.comp.mediaFolders.size() == 2 && back.comp.findMedia(ida)->folder == "Video");
+    back.comp.mediaFolders.clear();
+    CHECK(!validate(back).empty());
+    repair(back);
+    CHECK(back.comp.mediaFolders.size() == 2);
+    // Removing a folder keeps its media, at the top.
+    CHECK(run(p, R"j({"op": "folder.remove", "folder": "Video"})j").ok);
+    CHECK(p.comp.mediaFolders.size() == 1 && p.comp.findMedia(ida)->folder.empty());
+}
+
 // The docs list every word of the expression language and every operation.
 void testReferencesComplete() {
     auto read = [](const char* file) {
@@ -1365,6 +1395,7 @@ int main() {
         {"expressions", testExpressions},
         {"expressions across projects", testExpressionsAcrossProjects},
         {"expressions through operations", testExpressionsThroughOperations},
+        {"media folders", testMediaFolders},
         {"references complete", testReferencesComplete},
         {"plugin catalog", testPluginCatalog},
     };

@@ -149,8 +149,10 @@ does.
   *Auto Fit* gives captions time to be read
 - **Expressions** typed under any property (its *ƒ* button, next to the
   keyframe diamond, or Alt+click the diamond, as in After Effects): several
-  lines, completion, a ƒ menu of functions and of other layers' properties;
-  close it and it keeps working; *Convert to Keyframes* bakes it
+  lines, completion, and the **ƒ library** (*ƒ Insert*): examples for that
+  property, this clip's values, animation, math and every other layer's
+  properties, each with what it does, searchable; close it and it keeps
+  working; *Convert to Keyframes* bakes it
 - **Quick Animations** in their own panel (*Animate*): Fade, Pop, Slide,
   Drop, Zoom, Rise, Shake, Heartbeat, Float, Bounce, Wobble, Blink, Spin,
   Typewriter, Draw On… click one for the selection or drag it onto a clip;
@@ -171,7 +173,8 @@ does.
 ### ✦ Edit
 - **Timeline** with multi-clip tracks, trimming, cut tool (C), split at
   playhead (Ctrl+K), snapping to clips, keys and the playhead; dragging the
-  playhead past an edge scrolls the timeline along
+  playhead past an edge scrolls the timeline along; a **scrollbar** under the
+  tracks moves along long projects (drag its ends to zoom, as in Premiere)
 - **Your own toolbar**: the toolbar's *+* opens every tool; drag them into
   the toolbar, reorder them, drag them out to remove; drag its grip and it
   follows the mouse, showing where it can go: along any window edge, over the
@@ -214,6 +217,9 @@ does.
   *Settings › Interface*): from the essentials (a short toolbar, no
   expressions or curves) to everything at hand (every option, rulers, audio
   meters, a fuller toolbar); **Essentials only** turns every plugin off
+- **Show** what you want, one by one (*Settings › Interface › Show*): the ƒ
+  expression buttons, the graph editor button, the Export Frame button, the
+  timeline scrollbar, the audio meters — whatever the experience
 - Dark, Light and Midnight themes, any accent color; *Advanced Options* show
   every color (surfaces, fields, buttons, focus, selection, menus, status,
   playhead, keyframes...), corner rounding, outline width and control height;
@@ -288,7 +294,9 @@ does.
 - **Media panel** (like After Effects' *Project* panel): images (PNG, JPEG,
   BMP, TGA, GIF, PSD, HDR), audio (WAV, MP3, FLAC, M4A/AAC, OGG/Opus, WMA, AIFF)
   and video (MP4, MOV, M4V, MKV, WebM, AVI, WMV, MPEG, MTS) on every platform,
-  through FFmpeg.
+  through FFmpeg. **Folders** keep it tidy (they live in the project only;
+  nothing moves on disk): *New Folder*, then drag media onto one or
+  right-click › *Move to Folder*.
   Audio plays with the timeline, clips show their waveform, video and audio
   clips trim only within their source, and missing files can be relinked
 - **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
@@ -309,7 +317,8 @@ does.
 - **Settings** (Ctrl+,): Theme, Interface, Editor, Shortcuts (searchable) and
   Plugins pages, each option a titled, described row, each page with a reset;
   the intro animation can be turned off in *Interface*
-- **Help** (F1): every shortcut drawn as key caps, plus About, Credits and License
+- **Help** (F1), in the same style as Settings: every shortcut as key caps
+  (searchable), *Learn* (the guides), About, Credits and License
 - **Undo / redo** for everything, unsaved-changes protection
 
 </details>
