@@ -75,35 +75,64 @@ namespace {
 
 std::filesystem::path layoutFile() { return platform::appDataDir() / "layout.ads"; }
 
-// Real drop targets stay above the floating toolbar while its grip is dragged.
-class ToolbarTarget : public QPushButton {
+// While the toolbar's grip is dragged: the places it can go (the window edges, the viewport, the
+// timeline), the one under the mouse lit with its name, and the bar's picture where it would land.
+class ToolbarOverlay : public QWidget {
 public:
-    explicit ToolbarTarget(QWidget* parent) : QPushButton(parent) {
-        setAcceptDrops(true);
-        setFocusPolicy(Qt::NoFocus);
+    struct Zone {
+        QRect rect;
+        QString label;
+    };
+    explicit ToolbarOverlay(QWidget* parent) : QWidget(parent) {
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setAttribute(Qt::WA_NoSystemBackground);
     }
+    std::vector<Zone> zones;
+    int hot = -1;          // the zone under the mouse
+    QRect landing;         // where the bar goes (empty: nowhere, it stays)
+    QPixmap picture;       // the bar, horizontal
+    QPixmap uprightPicture; // ... and vertical (left / right edges)
+    bool upright = false;
+    QPoint cursorAt;       // the picture follows the mouse when it is over no zone
 
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
         ui::Draw d(p);
-        d.rect({1.5f, 1.5f}, {width() - 1.5f, height() - 1.5f}, theme::kAccent, 6.0f, isDown() ? 3.0f : 1.5f);
-    }
-    void dragEnterEvent(QDragEnterEvent* e) override {
-        if (!e->mimeData()->hasFormat(ui::kToolbarMime)) return e->ignore();
-        setDown(true);
-        e->acceptProposedAction();
-    }
-    void dragMoveEvent(QDragMoveEvent* e) override {
-        if (e->mimeData()->hasFormat(ui::kToolbarMime)) e->acceptProposedAction();
-        else e->ignore();
-    }
-    void dragLeaveEvent(QDragLeaveEvent*) override { setDown(false); }
-    void dropEvent(QDropEvent* e) override {
-        if (!e->mimeData()->hasFormat(ui::kToolbarMime)) return e->ignore();
-        setDown(false);
-        e->acceptProposedAction();
-        click();
+        for (int i = 0; i < static_cast<int>(zones.size()); ++i) {
+            const QRectF r = QRectF(zones[i].rect).adjusted(1.5, 1.5, -1.5, -1.5);
+            const ui::Pt a(r.topLeft()), b(r.bottomRight());
+            if (i == hot) {
+                d.rectFilled(a, b, theme::withAlpha(theme::kAccent, 34), 8.0f);
+                d.rect(a, b, theme::kAccent, 8.0f, 2.0f);
+            } else {
+                d.rect(a, b, theme::withAlpha(theme::kAccent, 90), 8.0f, 1.0f);
+            }
+        }
+        // The name of the place under the mouse, in a chip by the landing spot.
+        if (hot >= 0) {
+            const QString label = zones[hot].label;
+            QFont f = font();
+            f.setBold(true);
+            p.setFont(f);
+            const float w = d.textWidth(label) + 20.0f, h = d.textHeight() + 10.0f;
+            const QRect near = landing.isEmpty() ? zones[hot].rect : landing;
+            float x = near.center().x() - w * 0.5f, y = near.bottom() + 8.0f;
+            if (y + h > height() - 4) y = near.top() - h - 8.0f;
+            x = std::clamp(x, 4.0f, std::max(4.0f, width() - w - 4.0f));
+            d.rectFilled({x, y}, {x + w, y + h}, theme::kAccent, h * 0.5f);
+            d.text({x + 10.0f, y + 5.0f}, theme::kOnAccent, label);
+        }
+        const QPixmap& pic = upright ? uprightPicture : picture;
+        if (!landing.isEmpty()) {
+            p.setOpacity(0.95);
+            p.drawPixmap(landing.topLeft(), pic);
+            p.setOpacity(1.0);
+            d.rect(ui::Pt(landing.left() - 1.5f, landing.top() - 1.5f), ui::Pt(landing.right() + 2.5f, landing.bottom() + 2.5f), theme::kAccent, 8.0f, 1.5f);
+        } else {
+            p.setOpacity(0.55);
+            p.drawPixmap(cursorAt, picture);
+        }
     }
 };
 
@@ -122,16 +151,16 @@ bool typingInField() {
     return f && (qobject_cast<QLineEdit*>(f) || qobject_cast<QPlainTextEdit*>(f));
 }
 
-// The tab a minimized panel leaves on the window edge; the chevron points where it comes back from.
-// The same handle, pointing the other way, minimizes a panel: it shows where the restore handle
-// will be, when the mouse comes near.
+// The tab a minimized panel leaves on the window edge: its names (upright on the side edges, like
+// a book's spine) and a chevron pointing where it comes back from. A click brings it back.
 class RestoreHandle : public QAbstractButton {
 public:
-    RestoreHandle(int edge, QWidget* parent, bool minimizes = false) : QAbstractButton(parent), edge_(edge), minimizes_(minimizes) {
+    RestoreHandle(int edge, const QString& names, QWidget* parent) : QAbstractButton(parent), edge_(edge) {
+        setText(names);
         setCursor(Qt::PointingHandCursor);
         setFocusPolicy(Qt::NoFocus);
-        const bool upright = edge_ < 2;
-        setFixedSize(upright ? QSize(18, 56) : QSize(56, 18));
+        const int along = std::clamp(fontMetrics().horizontalAdvance(names) + 40, 64, 320);
+        setFixedSize(edge_ < 2 ? QSize(24, along) : QSize(along, 24));
     }
 
 protected:
@@ -140,19 +169,34 @@ protected:
         ui::Draw d(p);
         const bool hot = underMouse();
         const ui::Pt a(0.5f, 0.5f), b(width() - 0.5f, height() - 0.5f);
-        d.rectFilled(a, b, hot ? theme::kAccent : theme::withAlpha(theme::kBgHover, 240), 5.0f);
-        d.rect(a, b, hot ? theme::kAccent : theme::kBorder, 5.0f);
-        const int to = minimizes_ ? edge_ : edge_ ^ 1; // where the chevron points: away from or toward the edge
+        d.rectFilled(a, b, hot ? theme::withAlpha(theme::kAccent, 40) : theme::kBgRaised, 6.0f);
+        d.rect(a, b, hot ? theme::kAccent : theme::kBorder, 6.0f);
+        const int to = edge_ ^ 1; // toward the inside: where the panel comes back
         const ui::Icon icon = to == 1 ? ui::Icon::ChevronRight : to == 0 ? ui::Icon::ChevronLeft
                               : to == 3 ? ui::Icon::ChevronDown : ui::Icon::ChevronUp;
-        ui::drawIcon(d, icon, ui::Pt(width() * 0.5f, height() * 0.5f), 13.0f, hot ? theme::kOnAccent : theme::kText);
+        const ui::Rgba ink = hot ? theme::kText : theme::kTextDim;
+        // Laid out as if horizontal, then turned for the side edges (reading upward on the left,
+        // downward on the right).
+        const float len = static_cast<float>(edge_ < 2 ? height() : width()), across = static_cast<float>(edge_ < 2 ? width() : height());
+        p.save();
+        if (edge_ == 0) {
+            p.translate(0, height());
+            p.rotate(-90);
+        } else if (edge_ == 1) {
+            p.translate(width(), 0);
+            p.rotate(90);
+        }
+        ui::Draw r(p);
+        r.text({12.0f, (across - r.textHeight()) * 0.5f}, ink, p.fontMetrics().elidedText(text(), Qt::ElideRight, static_cast<int>(len - 40)));
+        p.restore();
+        const ui::Pt chevron = edge_ == 0 ? ui::Pt(across * 0.5f, 14.0f) : edge_ == 1 ? ui::Pt(across * 0.5f, len - 14.0f) : ui::Pt(len - 14.0f, across * 0.5f);
+        ui::drawIcon(d, icon, chevron, 11.0f, hot ? theme::kAccent : theme::kTextDim);
     }
     void enterEvent(QEnterEvent*) override { update(); }
     void leaveEvent(QEvent*) override { update(); }
 
 private:
     int edge_;
-    bool minimizes_;
 };
 
 } // namespace
@@ -186,11 +230,14 @@ EditorWindow::~EditorWindow() {
     while (!minimized_.empty()) restoreMinimized(0); // minimized panels come back with the next project
     recovery::discard(ctx_.path, ctx_.project.name); // closed normally: nothing to recover
     if (media::Recorder::get().recording()) media::Recorder::get().cancel(); // a recording left running ends with the project
-    // The layout is remembered for the next project.
-    const QByteArray state = docks_->saveState();
+    // The layout is remembered for the next project: the whole one, not the viewport alone (the
+    // window comes back from full screen too) or a panel maximized.
+    if (viewportFullscreen_) toggleViewportFullscreen();
+    const QByteArray state = beforeMaximize_.isEmpty() ? docks_->saveState() : beforeMaximize_;
     std::ofstream out(layoutFile(), std::ios::binary | std::ios::trunc);
     out.write(state.constData(), state.size());
     media::AudioEngine::get().update(Composition{}, 0.0, false);
+    setExpressionComposition(nullptr); // this composition goes with the window
 }
 
 QString EditorWindow::title() const {
@@ -206,6 +253,7 @@ void EditorWindow::buildDocks() {
     ads::CDockManager::setAutoHideConfigFlags(ads::CDockManager::AutoHideFeatureEnabled); // used by maximize
     docks_ = new ads::CDockManager(this);
     docks_->installEventFilter(this); // restore handles follow its size
+    connect(docks_, &ads::CDockManager::dockAreaCreated, this, &EditorWindow::decorateArea);
     // The docking library's own style sheet beats the application's: our colors go on top of it.
     const QString adsStyle = docks_->styleSheet();
     docks_->setStyleSheet(adsStyle + theme::dockStyleSheet());
@@ -213,6 +261,7 @@ void EditorWindow::buildDocks() {
             [this, adsStyle] {
                 docks_->setStyleSheet(adsStyle + theme::dockStyleSheet());
                 if (viewport_) viewport_->setPreviewQuality(settings().previewQuality);
+                if (meters_) meters_->setVisible(settings().showMeters);
                 ctx_.showRulers = settings().showRulers;
             });
     connect(&ui::AppSignals::get(), &ui::AppSignals::interfaceResetRequested, this, [this] { resetLayout(); });
@@ -246,9 +295,10 @@ void EditorWindow::buildDocks() {
         saveSettings();
         placeToolbar();
     };
-    connect(timeline_, &TimelinePanel::toolbarDragActive, this, &EditorWindow::showToolbarTargets);
+    connect(timeline_, &TimelinePanel::toolbarDragStarted, this, &EditorWindow::toolbarDragStarted);
+    connect(timeline_, &TimelinePanel::toolbarDragMoved, this, &EditorWindow::toolbarDragMoved);
+    connect(timeline_, &TimelinePanel::toolbarDragFinished, this, &EditorWindow::toolbarDragFinished);
     connect(timeline_, &TimelinePanel::toolbarDockRequested, this, &EditorWindow::dockToolbar);
-    connect(viewport_, &ViewportPanel::toolbarDropped, this, [moveToolbar](QPoint at) { moveToolbar(true, at); });
     connect(viewport_, &ViewportPanel::previewQualityChanged, this, [](int divisor) {
         settings().previewQuality = divisor;
         saveSettings();
@@ -259,6 +309,13 @@ void EditorWindow::buildDocks() {
         else openPreview();
     });
     connect(viewport_, &ViewportPanel::layerMenuRequested, timeline_, &TimelinePanel::showTrackMenu);
+    connect(properties_, &PropertiesPanel::panelRequested, this, [this](const QString& name) {
+        auto it = dockWidgets_.find(name.toStdString());
+        if (it == dockWidgets_.end()) return;
+        if (it->second->isClosed()) it->second->toggleView(true); // (a minimized panel comes back too)
+        it->second->setAsCurrentTab();
+        it->second->raise();
+    });
     connect(timeline_, &TimelinePanel::toolbarMoveRequested, this, moveToolbar);
     connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] { QTimer::singleShot(0, this, [this] { placeToolbar(); }); });
     QTimer::singleShot(0, this, [this] { placeToolbar(); });
@@ -292,7 +349,17 @@ void EditorWindow::buildDocks() {
     docks_->addDockWidgetTabToArea(dock("Effects", effects_), right);
     docks_->addDockWidgetTabToArea(dock("Transitions", transitions_), right);
     right->setCurrentIndex(0);
-    auto* bottom = docks_->addDockWidget(ads::BottomDockWidgetArea, dock("Timeline", timeline_));
+    // The timeline with the audio meters at its right.
+    auto* timelineHost = new QWidget;
+    auto* timelineRow = new QHBoxLayout(timelineHost);
+    timelineRow->setContentsMargins(0, 0, 0, 0);
+    timelineRow->setSpacing(0);
+    timelineRow->addWidget(timeline_, 1);
+    meters_ = new ui::AudioMeter;
+    meters_->setContentsMargins(0, 0, 0, 0);
+    timelineRow->addWidget(meters_);
+    meters_->setVisible(settings().showMeters);
+    auto* bottom = docks_->addDockWidget(ads::BottomDockWidgetArea, dock("Timeline", timelineHost));
     (void)center;
     QTimer::singleShot(0, this, [this, left, right, bottom] {
         docks_->setSplitterSizes(left, {width() * 17 / 100, width() * 57 / 100, width() * 26 / 100});
@@ -328,47 +395,135 @@ QRect EditorWindow::toolbarBounds() const {
     return QRect(docks_->mapTo(this, QPoint()), docks_->size()).adjusted(8, 8, -8, -8);
 }
 
-void EditorWindow::showToolbarTargets(bool visible) {
-    const QPointF positions[] = {{0.5, 0}, {0.5, 1}, {0, 0.5}, {1, 0.5}, {0, 0}};
-    for (int i = 0; i < 5; ++i) {
-        if (!toolbarTargets_[i]) {
-            auto* target = new ToolbarTarget(this);
-            target->setAccessibleName(i == 4 ? "Return toolbar to timeline" : "Float toolbar at window edge");
-            connect(target, &QPushButton::clicked, this, [this, i, position = positions[i]] {
-                if (i == 4) {
-                    settings().toolbarInViewport = false;
-                    settings().toolbarInWindow = false;
-                    saveSettings();
-                    placeToolbar();
-                } else dockToolbar(position);
-                showToolbarTargets(false);
-            });
-            toolbarTargets_[i] = target;
-        }
-    }
-    positionToolbarTargets();
-    for (auto* target : toolbarTargets_) {
-        const bool show = visible && (target != toolbarTargets_[4] || (settings().toolbarInViewport && timeline_->isVisible()));
-        target->setVisible(show);
-        if (show) target->raise();
-    }
+namespace {
+// What a toolbar drop would do: go back to the timeline, float over the viewport at `at`
+// (viewport coordinates), or sit on a window edge at `edge` (Settings' fractions).
+struct ToolbarDrop {
+    enum Kind { None, Timeline, Viewport, Edge } kind = None;
+    QPoint at;
+    QPointF edge;
+    QRect landing; // in the editor window
+};
+ToolbarDrop g_toolbarDrop;
+QPoint g_toolbarGrab;
+} // namespace
+
+void EditorWindow::toolbarDragStarted(QPoint grab) {
+    g_toolbarGrab = grab;
+    g_toolbarDrop = {};
+    auto* overlay = static_cast<ToolbarOverlay*>(toolbarOverlay_);
+    if (!overlay) toolbarOverlay_ = overlay = new ToolbarOverlay(this);
+    QWidget* pill = timeline_->toolPill();
+    const bool wasUpright = pill->width() < pill->height();
+    // Its pictures both ways, as it looks (the grab is taken before it fades).
+    timeline_->setToolPillVertical(false);
+    pill->resize(pill->sizeHint());
+    overlay->picture = pill->grab();
+    timeline_->setToolPillVertical(true);
+    pill->resize(pill->sizeHint());
+    overlay->uprightPicture = pill->grab();
+    timeline_->setToolPillVertical(wasUpright);
+    pill->resize(pill->sizeHint());
+    if (wasUpright) g_toolbarGrab = QPoint(g_toolbarGrab.y(), g_toolbarGrab.x()); // held at the same spot of the bar
+    overlay->setGeometry(rect());
+    overlay->show();
+    overlay->raise();
 }
 
-void EditorWindow::positionToolbarTargets() {
+void EditorWindow::toolbarDragMoved(QPoint global) {
+    auto* overlay = static_cast<ToolbarOverlay*>(toolbarOverlay_);
+    if (!overlay) return;
+    const QPoint m = mapFromGlobal(global);
     const QRect bounds = toolbarBounds();
-    const QPointF positions[] = {{0.5, 0}, {0.5, 1}, {0, 0.5}, {1, 0.5}};
-    for (int i = 0; i < 4; ++i) {
-        auto* target = toolbarTargets_[i];
-        if (!target) continue;
-        target->resize(i < 2 ? QSize(112, 32) : QSize(32, 112));
-        target->move(bounds.topLeft() + QPoint(
-            static_cast<int>(positions[i].x() * std::max(0, bounds.width() - target->width())),
-            static_cast<int>(positions[i].y() * std::max(0, bounds.height() - target->height()))));
+    const QSize flat = overlay->picture.size() / std::max(1.0, overlay->picture.devicePixelRatio());
+    const QSize upright = overlay->uprightPicture.size() / std::max(1.0, overlay->uprightPicture.devicePixelRatio());
+    constexpr int kBand = 52; // how near an edge counts as "on" it
+    overlay->zones.clear();
+    std::vector<ToolbarDrop> drops;
+    auto zone = [&](QRect r, const QString& label, ToolbarDrop drop) {
+        overlay->zones.push_back({r, label});
+        drops.push_back(drop);
+    };
+    // Back in the timeline, where its bar starts.
+    const bool floating = settings().toolbarInViewport;
+    if (floating && timeline_->isVisible()) {
+        const QRect r(timeline_->mapTo(this, QPoint(4, 2)), QSize(std::max(flat.width() + 8, 200), flat.height() + 6));
+        zone(r, "Back to the timeline", {ToolbarDrop::Timeline, {}, {}, QRect(r.topLeft() + QPoint(4, 3), flat)});
     }
-    if (auto* target = toolbarTargets_[4]) {
-        target->resize(190, 32);
-        target->move(timeline_->mapTo(this, QPoint(6, 4)));
+    // Along an edge: where the mouse is along it, the middle and the ends snap.
+    auto along = [](double u) {
+        u = std::clamp(u, 0.0, 1.0);
+        if (std::fabs(u - 0.5) < 0.04) return 0.5;
+        return u < 0.02 ? 0.0 : u > 0.98 ? 1.0 : u;
+    };
+    const int innerW = std::max(1, bounds.width() - flat.width()), innerH = std::max(1, bounds.height() - upright.height());
+    const double ux = along((m.x() - g_toolbarGrab.x() - bounds.left()) / static_cast<double>(innerW));
+    const double uy = along((m.y() - g_toolbarGrab.x() - bounds.top()) / static_cast<double>(innerH));
+    const double flatU = std::clamp(ux, 0.0005, 0.9995); // exactly 0 or 1 across means a side edge (upright)
+    const QPoint top(bounds.left() + static_cast<int>(flatU * innerW), bounds.top());
+    const QPoint bottom(top.x(), bounds.bottom() - flat.height() + 1);
+    const QPoint left(bounds.left(), bounds.top() + static_cast<int>(uy * innerH));
+    const QPoint right(bounds.right() - upright.width() + 1, left.y());
+    zone(QRect(bounds.left(), bounds.top(), bounds.width(), kBand), "Top edge", {ToolbarDrop::Edge, {}, {flatU, 0}, QRect(top, flat)});
+    zone(QRect(bounds.left(), bounds.bottom() - kBand + 1, bounds.width(), kBand), "Bottom edge",
+         {ToolbarDrop::Edge, {}, {flatU, 1}, QRect(bottom, flat)});
+    zone(QRect(bounds.left(), bounds.top() + kBand, kBand, bounds.height() - 2 * kBand), "Left edge",
+         {ToolbarDrop::Edge, {}, {0, uy}, QRect(left, upright)});
+    zone(QRect(bounds.right() - kBand + 1, bounds.top() + kBand, kBand, bounds.height() - 2 * kBand), "Right edge",
+         {ToolbarDrop::Edge, {}, {1, uy}, QRect(right, upright)});
+    // Anywhere over the viewport.
+    const QRect vp(viewport_->mapTo(this, QPoint()), viewport_->size());
+    if (viewport_->isVisible()) {
+        const QRect inside = vp.adjusted(6, 6, -6 - flat.width(), -6 - flat.height());
+        const QPoint at(std::clamp(m.x() - g_toolbarGrab.x(), inside.left(), std::max(inside.left(), inside.right())),
+                        std::clamp(m.y() - g_toolbarGrab.y(), inside.top(), std::max(inside.top(), inside.bottom())));
+        zone(vp.adjusted(4, 4, -4, -4), "Float over the viewport", {ToolbarDrop::Viewport, at - vp.topLeft() - QPoint(6, 6), {}, QRect(at, flat)});
     }
+    // The first zone under the mouse wins (the timeline, then the edges, then the viewport).
+    overlay->hot = -1;
+    g_toolbarDrop = {};
+    for (int i = 0; i < static_cast<int>(drops.size()); ++i)
+        if (overlay->zones[i].rect.contains(m)) {
+            overlay->hot = i;
+            g_toolbarDrop = drops[i];
+            break;
+        }
+    overlay->landing = g_toolbarDrop.landing;
+    overlay->upright = g_toolbarDrop.kind == ToolbarDrop::Edge && (g_toolbarDrop.edge.x() == 0.0 || g_toolbarDrop.edge.x() == 1.0);
+    overlay->cursorAt = m - g_toolbarGrab;
+    overlay->update();
+}
+
+void EditorWindow::toolbarDragFinished(QPoint global, bool dropped) {
+    if (dropped) toolbarDragMoved(global);
+    if (toolbarOverlay_) toolbarOverlay_->hide();
+    const ToolbarDrop drop = std::exchange(g_toolbarDrop, {});
+    if (!dropped) return;
+    // Moved after this event returns: the bar being dragged is the one that changes parents.
+    QTimer::singleShot(0, this, [this, drop] {
+        switch (drop.kind) {
+        case ToolbarDrop::Timeline:
+            settings().toolbarInViewport = false;
+            settings().toolbarInWindow = false;
+            saveSettings();
+            placeToolbar();
+            break;
+        case ToolbarDrop::Edge: dockToolbar(drop.edge); break;
+        case ToolbarDrop::Viewport: {
+            Settings& s = settings();
+            s.toolbarInViewport = true;
+            s.toolbarInWindow = false;
+            timeline_->setToolPillVertical(false);
+            const QSize free = viewport_->size() - timeline_->toolPill()->sizeHint() - QSize(12, 12);
+            s.toolbarX = std::clamp(static_cast<float>(drop.at.x()) / std::max(1, free.width()), 0.0f, 1.0f);
+            s.toolbarY = std::clamp(static_cast<float>(drop.at.y()) / std::max(1, free.height()), 0.0f, 1.0f);
+            saveSettings();
+            placeToolbar();
+            break;
+        }
+        case ToolbarDrop::None: break; // over nothing: it stays where it was
+        }
+    });
 }
 
 void EditorWindow::placeToolbar() {
@@ -425,48 +580,44 @@ QPoint EditorWindow::handlePos(int edge, float along, QSize size) const {
             edge == 2 ? area.top() + 2 : area.bottom() - size.height() - 1};
 }
 
-void EditorWindow::updateMinimizeHandles() {
-    // Each panel's minimize handle sits where its restore handle will be, shown when the mouse is near.
-    // The pointer: the cursor when it moved, else the last mouse event (scripted input moves no cursor).
-    if (const QPoint cursor = QCursor::pos(); cursor != lastCursor_) pointer_ = lastCursor_ = cursor;
-    const QPoint mouse = docks_->mapFromGlobal(pointer_);
-    const bool idle = QApplication::mouseButtons() == Qt::NoButton && !QApplication::activePopupWidget() &&
-                      QApplication::activeModalWidget() == nullptr && isVisible();
-    std::vector<ads::CDockAreaWidget*> areas;
-    for (ads::CDockAreaWidget* a : docks_->openedDockAreas())
-        if (!a->isCentralWidgetArea() && a->dockContainer() == docks_ && a->isVisible()) areas.push_back(a);
-    std::erase_if(minimizeHandles_, [&](const MinimizeHandle& h) {
-        if (h.area && std::find(areas.begin(), areas.end(), h.area.data()) != areas.end()) return false;
-        h.handle->deleteLater();
-        return true;
+void EditorWindow::decorateArea(ads::CDockAreaWidget* area) {
+    // At the right of each panel header: minimize (to a tab on the window edge) and maximize
+    // (the panel fills the window; again, or a double-click on a tab, brings the layout back).
+    ads::CDockAreaTitleBar* bar = area->titleBar();
+    if (!bar) return;
+    auto* min = new ui::IconButton(ui::Icon::Minimize, "Minimize panel", 22);
+    auto* max = new ui::IconButton(ui::Icon::Maximize, "Maximize panel (or double-click its tab)", 22);
+    min->setObjectName("bemotionMinimize");
+    max->setObjectName("bemotionMaximize");
+    QPointer<ads::CDockAreaWidget> guard(area);
+    connect(min, &QAbstractButton::clicked, this, [this, guard] {
+        if (guard) QTimer::singleShot(0, this, [this, guard] { if (guard) minimizeArea(guard); });
     });
-    for (ads::CDockAreaWidget* a : areas) {
-        auto it = std::find_if(minimizeHandles_.begin(), minimizeHandles_.end(), [&](const MinimizeHandle& h) { return h.area == a; });
-        float along = 0.5f;
-        const int edge = edgeOf(a, &along);
-        if (it == minimizeHandles_.end() || it->edge != edge) {
-            if (it != minimizeHandles_.end()) {
-                it->handle->deleteLater();
-                minimizeHandles_.erase(it);
-            }
-            auto* h = new RestoreHandle(edge, docks_, true);
-            h->setToolTip("Minimize panel  (double-click a tab to maximize)");
-            QPointer<ads::CDockAreaWidget> area(a);
-            connect(h, &QAbstractButton::clicked, this, [this, area, h] {
-                h->hide();
-                if (area) minimizeArea(area);
-            });
-            minimizeHandles_.push_back({area, h, edge});
-            it = std::prev(minimizeHandles_.end());
-        }
-        QWidget* h = it->handle;
-        const QPoint pos = handlePos(edge, along, h->size());
-        if (h->pos() != pos) h->move(pos);
-        const bool near = QRect(pos, h->size()).adjusted(-48, -48, 48, 48).contains(mouse);
-        const bool show = (idle && near) || (h->isVisible() && h->underMouse());
-        if (show != h->isVisible()) {
-            h->setVisible(show);
-            if (show) h->raise();
+    connect(max, &QAbstractButton::clicked, this, [this, guard] {
+        if (guard && guard->currentDockWidget())
+            QTimer::singleShot(0, this, [this, guard] { if (guard && guard->currentDockWidget()) maximizeDock(guard->currentDockWidget()); });
+    });
+    const int at = bar->indexOf(bar->button(ads::TitleBarButtonTabsMenu));
+    bar->insertWidget(at < 0 ? bar->layout()->count() : at, min);
+    bar->insertWidget(at < 0 ? bar->layout()->count() : at + 1, max);
+}
+
+void EditorWindow::updateAreaButtons() {
+    const bool maximized = !beforeMaximize_.isEmpty();
+    for (ads::CDockAreaWidget* a : docks_->openedDockAreas()) {
+        ads::CDockAreaTitleBar* bar = a->titleBar();
+        if (!bar) continue;
+        auto* min = bar->findChild<ui::IconButton*>("bemotionMinimize", Qt::FindDirectChildrenOnly);
+        auto* max = bar->findChild<ui::IconButton*>("bemotionMaximize", Qt::FindDirectChildrenOnly);
+        if (!min || !max) continue;
+        // The viewport stays (it has its own full screen); a maximized panel can only come back.
+        const bool regular = !a->isCentralWidgetArea() && a->dockContainer() == docks_;
+        if (min->isVisible() != (regular && !maximized)) min->setVisible(regular && !maximized);
+        if (max->isVisible() != regular) max->setVisible(regular);
+        if (max->active() != maximized) {
+            max->setActive(maximized);
+            max->setIcon(maximized ? ui::Icon::Restore : ui::Icon::Maximize);
+            max->setToolTip(maximized ? "Restore the layout (or double-click the tab)" : "Maximize panel (or double-click its tab)");
         }
     }
 }
@@ -481,8 +632,8 @@ void EditorWindow::minimizeArea(ads::CDockAreaWidget* area) {
     m.docks.assign(open.begin(), open.end());
     QStringList names;
     for (ads::CDockWidget* d : m.docks) names << d->windowTitle();
-    auto* handle = new RestoreHandle(m.edge, docks_);
-    handle->setToolTip("Restore " + names.join(", "));
+    auto* handle = new RestoreHandle(m.edge, names.join("  ·  "), docks_);
+    handle->setToolTip("Show " + names.join(", ") + " again");
     m.handle = handle;
     connect(handle, &QAbstractButton::clicked, this, [this, handle] {
         for (size_t i = 0; i < minimized_.size(); ++i)
@@ -531,8 +682,21 @@ void EditorWindow::restoreMinimized(size_t index) {
 }
 
 void EditorWindow::placeRestoreHandles() {
+    // Where each panel was along its edge; tabs on the same edge do not overlap.
+    std::vector<QRect> placed;
     for (const Minimized& m : minimized_) {
-        m.handle->move(handlePos(m.edge, m.along, m.handle->size()));
+        QRect r(handlePos(m.edge, m.along, m.handle->size()), m.handle->size());
+        for (bool moved = true; moved;) {
+            moved = false;
+            for (const QRect& other : placed)
+                if (other.intersects(r.adjusted(-4, -4, 4, 4))) {
+                    if (m.edge < 2) r.moveTop(other.bottom() + 8);
+                    else r.moveLeft(other.right() + 8);
+                    moved = true;
+                }
+        }
+        placed.push_back(r);
+        m.handle->move(r.topLeft());
         m.handle->raise();
     }
 }
@@ -556,6 +720,20 @@ void EditorWindow::maximizeDock(ads::CDockWidget* dock) {
     for (auto& [name, d] : dockWidgets_)
         if (d != dock && name != "Viewport" && !d->isAutoHide() && !d->isClosed()) d->setAutoHide(true);
     if (dock->objectName() != "Viewport" && dock->isAutoHide()) dock->setAutoHide(false);
+    // The viewport is the center and stays: the panel takes nearly all of the space beside it.
+    QPointer<ads::CDockWidget> guard(dock);
+    QTimer::singleShot(0, this, [guard] {
+        ads::CDockAreaWidget* area = guard ? guard->dockAreaWidget() : nullptr;
+        auto* splitter = area ? qobject_cast<QSplitter*>(area->parentWidget()) : nullptr;
+        if (!splitter || guard->objectName() == "Viewport") return;
+        QList<int> sizes = splitter->sizes();
+        const int i = splitter->indexOf(area);
+        if (i < 0) return;
+        int total = 0;
+        for (int s : sizes) total += s;
+        for (int k = 0; k < sizes.size(); ++k) sizes[k] = k == i ? total - 40 * (static_cast<int>(sizes.size()) - 1) : 40;
+        splitter->setSizes(sizes);
+    });
 }
 
 void EditorWindow::toggleViewportFullscreen() {
@@ -871,17 +1049,21 @@ void EditorWindow::buildMenus() {
         actions_[Action::FullScreen]->setChecked(window()->isFullScreen());
     });
     view->addSeparator();
+    QAction* meters = view->addAction("Audio Meters", this, [this](bool on) {
+        settings().showMeters = on;
+        saveSettings();
+        meters_->setVisible(on);
+    });
+    meters->setCheckable(true);
+    meters->setChecked(settings().showMeters);
+    connect(view, &QMenu::aboutToShow, meters, [meters] { meters->setChecked(settings().showMeters); });
     QMenu* panels = view->addMenu("Panels");
     view->addAction("Tools...", this, [this] { showTools(); });
     for (const char* name : {"Objects", "Media", "Animate", "Properties", "Effects", "Transitions", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction("Reset Layout", this, [this] { resetLayout(); });
     view->addSeparator();
-    QAction* full = action(Action::FullScreen, "Full Screen", [this] {
-        QWidget* w = window();
-        if (w->isFullScreen()) w->showMaximized();
-        else w->showFullScreen();
-    });
+    QAction* full = action(Action::FullScreen, "Full Screen", [this] { ui::toggleFullScreen(window()); });
     full->setCheckable(true);
     view->addAction(full);
 
@@ -969,6 +1151,10 @@ void EditorWindow::buildMenus() {
     status_ = new QLabel;
     ui::setTone(status_, ui::Tone::Danger);
     row->addWidget(status_);
+    // The whole app full screen (F11): menus and panels stay, only the system's frame goes.
+    fullScreenButton_ = new ui::IconButton(ui::Icon::Fullscreen, "Full screen (F11)", 28);
+    connect(fullScreenButton_, &QAbstractButton::clicked, this, [this] { ui::toggleFullScreen(window()); });
+    row->addWidget(fullScreenButton_);
     auto* gear = new ui::IconButton(ui::Icon::Gear, "Settings", 28);
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
     row->addWidget(gear);
@@ -981,17 +1167,17 @@ void EditorWindow::buildMenus() {
 }
 
 bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
-    if (viewportFullscreen_ && event->type() == QEvent::KeyPress) {
+    // Esc leaves the viewport-only layout. It is caught before shortcuts are (Esc also deselects).
+    if (viewportFullscreen_ && (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)) {
         auto* key = static_cast<QKeyEvent*>(event);
-        if (key->key() == Qt::Key_Escape && !key->isAutoRepeat()) {
+        if (key->key() == Qt::Key_Escape && !key->isAutoRepeat() && QApplication::activeModalWidget() == nullptr) {
             toggleViewportFullscreen();
+            key->accept();
             return true;
         }
     }
-    if (event->type() == QEvent::MouseMove) pointer_ = static_cast<QMouseEvent*>(event)->globalPosition().toPoint();
     if (watched == docks_ && event->type() == QEvent::Resize) {
         placeRestoreHandles();
-        positionToolbarTargets();
         if (timeline_ && settings().toolbarInViewport && settings().toolbarInWindow) placeToolbar();
     }
     if (watched == viewport_ && event->type() == QEvent::Resize && settings().toolbarInViewport) placeToolbar();
@@ -1053,10 +1239,19 @@ void EditorWindow::tick() {
     animations_->sync();
     timeline_->sync();
     if (preview_) preview_->sync();
+    if (meters_ && meters_->isVisible()) {
+        const auto levels = media::AudioEngine::get().takeLevels();
+        meters_->feed(levels.left, levels.right, levels.clipped, static_cast<float>(dt));
+    }
+    if (const bool full = window()->isFullScreen(); fullScreenButton_ && full != fullScreenButton_->active()) {
+        fullScreenButton_->setActive(full);
+        fullScreenButton_->setIcon(full ? ui::Icon::ExitFullscreen : ui::Icon::Fullscreen);
+        fullScreenButton_->setToolTip(full ? "Leave full screen (F11)" : "Full screen (F11)");
+    }
 
     ctx_.commitIfIdle(interacting());
     autosave();
-    updateMinimizeHandles();
+    updateAreaButtons();
     const QString t = title();
     if (t != lastTitle_) {
         lastTitle_ = t;

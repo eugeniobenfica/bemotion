@@ -4,11 +4,11 @@
 #include "core/Math.h"
 #include "render/LogoMark.h"
 #include "ui/AppSignals.h"
+#include "ui/ColorPicker.h"
 #include "ui/Theme.h"
 
 #include <QApplication>
 #include <QCheckBox>
-#include <QColorDialog>
 #include <QHBoxLayout>
 #include <QDrag>
 #include <QHash>
@@ -21,6 +21,7 @@
 #include <QPushButton>
 #include <QButtonGroup>
 #include <QPixmap>
+#include <QPointer>
 
 #include <algorithm>
 #include <cctype>
@@ -223,6 +224,40 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.line({c.x + a, c.y + a}, {c.x + b, c.y + a}, col, th);
         break;
     }
+    case Icon::ExitFullscreen: {
+        const float a = h * 0.78f, b = h * 0.3f;
+        for (const float sx : {-1.0f, 1.0f})
+            for (const float sy : {-1.0f, 1.0f}) {
+                const Pt corner(c.x + sx * b, c.y + sy * b);
+                dl.line(corner, Pt(c.x + sx * b, c.y + sy * a), col, th);
+                dl.line(corner, Pt(c.x + sx * a, c.y + sy * b), col, th);
+            }
+        break;
+    }
+    case Icon::Close: {
+        const float a = h * 0.55f;
+        dl.line(Pt(c.x - a, c.y - a), Pt(c.x + a, c.y + a), col, th * 1.15f);
+        dl.line(Pt(c.x - a, c.y + a), Pt(c.x + a, c.y - a), col, th * 1.15f);
+        break;
+    }
+    case Icon::Maximize:
+        dl.rect(Pt(c.x - h * 0.6f, c.y - h * 0.6f), Pt(c.x + h * 0.6f, c.y + h * 0.6f), col, 1.5f, th);
+        break;
+    case Icon::Restore:
+        dl.rect(Pt(c.x - h * 0.65f, c.y - h * 0.3f), Pt(c.x + h * 0.3f, c.y + h * 0.65f), col, 1.5f, th);
+        dl.line(Pt(c.x - h * 0.3f, c.y - h * 0.65f), Pt(c.x + h * 0.65f, c.y - h * 0.65f), col, th);
+        dl.line(Pt(c.x + h * 0.65f, c.y - h * 0.65f), Pt(c.x + h * 0.65f, c.y + h * 0.3f), col, th);
+        break;
+    case Icon::Eyedropper: { // a pipette, tip at the bottom left
+        dl.line(Pt(c.x - h * 0.7f, c.y + h * 0.7f), Pt(c.x + h * 0.15f, c.y - h * 0.15f), col, th * 1.3f);
+        dl.line(Pt(c.x - h * 0.05f, c.y - h * 0.55f), Pt(c.x + h * 0.55f, c.y + h * 0.05f), col, th * 1.3f);
+        dl.circleFilled(Pt(c.x + h * 0.45f, c.y - h * 0.45f), h * 0.3f, col);
+        break;
+    }
+    case Icon::Meter:
+        dl.rectFilled(Pt(c.x - h * 0.6f, c.y - h * 0.2f), Pt(c.x - h * 0.1f, c.y + h * 0.75f), col, 1.0f);
+        dl.rectFilled(Pt(c.x + h * 0.1f, c.y - h * 0.7f), Pt(c.x + h * 0.6f, c.y + h * 0.75f), col, 1.0f);
+        break;
     case Icon::Copy:
         dl.rect(Pt(c.x - h * 0.7f, c.y - h * 0.7f), Pt(c.x + h * 0.25f, c.y + h * 0.35f), col, 2.0f, th);
         dl.rect(Pt(c.x - h * 0.25f, c.y - h * 0.25f), Pt(c.x + h * 0.7f, c.y + h * 0.8f), col, 2.0f, th);
@@ -748,6 +783,98 @@ QIcon menuIcon(Icon icon, Rgba color) {
     return QIcon(pm);
 }
 
+// --- AudioMeter --------------------------------------------------------------------------
+
+namespace {
+constexpr float kMeterFloor = -60.0f; // dB at the bottom
+float meterU(float db) { return std::clamp((db - kMeterFloor) / -kMeterFloor, 0.0f, 1.0f); }
+} // namespace
+
+AudioMeter::AudioMeter(QWidget* parent) : QWidget(parent) {
+    setToolTip("Audio levels, left and right (dB). Red at the top: the sound clipped; click to clear it.");
+    setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
+}
+
+void AudioMeter::feed(float left, float right, bool clipped, float seconds) {
+    bool changed = clipped && !clipped_;
+    clipped_ = clipped_ || clipped;
+    const float in[2] = {left, right};
+    for (int c = 0; c < 2; ++c) {
+        const float db = in[c] > 1e-5f ? 20.0f * std::log10(in[c]) : -90.0f;
+        // Up at once, down at 24 dB a second (like a hardware meter).
+        const float next = std::max(db, level_[c] - 24.0f * seconds);
+        if (std::fabs(next - level_[c]) > 0.05f) changed = true;
+        level_[c] = std::max(next, -90.0f);
+        if (db >= hold_[c]) {
+            hold_[c] = db;
+            holdFor_[c] = 1.5f;
+        } else if ((holdFor_[c] -= seconds) <= 0.0f && hold_[c] > -90.0f) {
+            hold_[c] = std::max(-90.0f, hold_[c] - 30.0f * seconds);
+            changed = true;
+        }
+    }
+    if (changed) update();
+}
+
+void AudioMeter::mousePressEvent(QMouseEvent*) {
+    clipped_ = false;
+    hold_[0] = hold_[1] = -90.0f;
+    update();
+}
+
+void AudioMeter::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    Draw d(p);
+    QFont small = font();
+    small.setPointSizeF(small.pointSizeF() * 0.78);
+    p.setFont(small);
+    const float th = d.textHeight();
+    const float top = 14.0f, bottom = static_cast<float>(height()) - th - 6.0f;
+    const float barW = 8.0f, gap = 3.0f, x0 = 9.0f;
+    d.line(Pt(0.5f, 4.0f), Pt(0.5f, static_cast<float>(height()) - 4.0f), theme::kBorder); // apart from the timeline
+    const float h = std::max(10.0f, bottom - top);
+    auto yOf = [&](float db) { return bottom - meterU(db) * h; };
+    // The clip light.
+    d.circleFilled(Pt(x0 + barW + gap * 0.5f, 6.0f), 3.5f, clipped_ ? theme::kDanger : theme::shade(60));
+    for (int c = 0; c < 2; ++c) {
+        const float x = x0 + c * (barW + gap);
+        d.rectFilled(Pt(x, top), Pt(x + barW, bottom), theme::kBgDeep, 2.0f);
+        // Lit up to the level, in three zones.
+        const float lit = yOf(level_[c]);
+        struct Zone {
+            float from, to;
+            Rgba color;
+        } zones[] = {{kMeterFloor, -12.0f, theme::kSuccess}, {-12.0f, -3.0f, theme::kWarning}, {-3.0f, 0.0f, theme::kDanger}};
+        for (const Zone& z : zones) {
+            const float y0 = std::max(lit, yOf(z.to)), y1 = yOf(z.from);
+            if (y0 < y1) d.rectFilled(Pt(x, y0), Pt(x + barW, y1), z.color, 1.0f);
+        }
+        if (hold_[c] > kMeterFloor) {
+            const float hy = yOf(hold_[c]);
+            d.line(Pt(x, hy), Pt(x + barW, hy), hold_[c] > -3.0f ? theme::kDanger : theme::kText, 1.5f);
+        }
+        d.text(Pt(x + barW * 0.5f - d.textWidth(c ? "R" : "L") * 0.5f, bottom + 3.0f), theme::kTextFaint, QString(c ? "R" : "L"));
+    }
+    // The scale.
+    const float sx = x0 + 2 * barW + gap + 4.0f;
+    for (const float db : {0.0f, -6.0f, -12.0f, -24.0f, -36.0f, -48.0f}) {
+        const float y = yOf(db);
+        if (h < 120 && (db == -6.0f || db == -36.0f)) continue; // short: fewer marks
+        d.line(Pt(sx - 2.0f, y), Pt(sx, y), theme::kTextFaint);
+        d.text(Pt(sx + 2.0f, y - th * 0.5f), theme::kTextFaint, QString::number(static_cast<int>(-db)));
+    }
+}
+
+void toggleFullScreen(QWidget* window) {
+    if (window->isFullScreen()) {
+        if (window->property("bemotionWasMaximized").toBool()) window->showMaximized();
+        else window->showNormal();
+        return;
+    }
+    window->setProperty("bemotionWasMaximized", window->isMaximized());
+    window->showFullScreen();
+}
+
 QWidget* lengthLimitRow(double seconds, std::function<void(double)> changed) {
     auto* row = new QWidget;
     auto* h = new QHBoxLayout(row);
@@ -1089,21 +1216,16 @@ void ColorButton::paintEvent(QPaintEvent*) {
 }
 
 void ColorButton::pick() {
-    QColorDialog dialog(QColor::fromRgbF(color_.r, color_.g, color_.b, color_.a), window());
-    dialog.setOption(QColorDialog::ShowAlphaChannel, alphaEnabled_);
-    const Color before = color_;
+    QPointer<ColorButton> self(this); // a panel may rebuild while the picker is open
+    Color c = color_;
     emit editStarted();
-    connect(&dialog, &QColorDialog::currentColorChanged, this, [this](const QColor& c) {
-        color_ = {static_cast<float>(c.redF()), static_cast<float>(c.greenF()), static_cast<float>(c.blueF()), static_cast<float>(c.alphaF())};
-        update();
-        emit colorChanged(color_);
+    pickColor(this, c, alphaEnabled_, [self](Color live) {
+        if (!self) return;
+        self->color_ = live;
+        self->update();
+        emit self->colorChanged(live);
     });
-    if (dialog.exec() != QDialog::Accepted) { // cancelled: back to the color before
-        color_ = before;
-        update();
-        emit colorChanged(color_);
-    }
-    emit editFinished();
+    if (self) emit editFinished();
 }
 
 } // namespace bemotion::ui

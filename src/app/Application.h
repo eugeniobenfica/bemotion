@@ -70,6 +70,7 @@ private:
     IntroScreen* intro_ = nullptr;
     EditorWindow* editor_ = nullptr;
     std::unique_ptr<DevScript> script_; // BEMOTION_SCRIPT developer aid
+    std::unique_ptr<DevScript> retiredScript_; // the script after its quit
     int frameIndex_ = 0;
 };
 

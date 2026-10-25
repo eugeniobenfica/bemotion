@@ -81,6 +81,8 @@ struct Device {
     std::vector<Clip> clips;
     double clock = 0.0;        // composition time of the next sample
     bool playing = false;
+    float peakL = 0.0f, peakR = 0.0f; // since the meters last looked
+    bool clipped = false;
 };
 
 Device& device() {
@@ -95,6 +97,12 @@ void callback(ma_device*, void* output, const void*, ma_uint32 frames) {
     std::lock_guard lock(d.mutex);
     if (!d.playing) return;
     mixInto(d.clips, d.clock, frames, out);
+    for (ma_uint32 i = 0; i < frames; ++i) {
+        const float l = std::fabs(out[i * 2]), r = std::fabs(out[i * 2 + 1]);
+        d.peakL = std::max(d.peakL, l);
+        d.peakR = std::max(d.peakR, r);
+        d.clipped = d.clipped || l > 1.0f || r > 1.0f;
+    }
     for (ma_uint32 i = 0; i < frames * 2; ++i) out[i] = std::clamp(out[i], -1.0f, 1.0f);
     d.clock += static_cast<double>(frames) / kAudioRate;
 }
@@ -140,6 +148,16 @@ void AudioEngine::update(const Composition& comp, double time, bool playing) {
     if (playing && (!d.playing || std::fabs(d.clock - time) > 0.5)) d.clock = time;
     d.playing = playing;
     d.clips = std::move(clips);
+}
+
+AudioEngine::Levels AudioEngine::takeLevels() {
+    Device& d = device();
+    if (!d.open) return {};
+    std::lock_guard lock(d.mutex);
+    Levels levels{std::min(1.0f, d.peakL), std::min(1.0f, d.peakR), d.clipped};
+    d.peakL = d.peakR = 0.0f;
+    d.clipped = false;
+    return levels;
 }
 
 bool AudioEngine::clock(double& time) const {

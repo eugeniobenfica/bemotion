@@ -10,12 +10,12 @@
 #include "render/Fonts.h"
 #include "ui/AppSignals.h"
 #include "ui/Keymap.h"
+#include "ui/ColorPicker.h"
 #include "ui/PagedWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
 #include <QCheckBox>
-#include <QColorDialog>
 #include <QComboBox>
 #include <QCompleter>
 #include <QEvent>
@@ -407,10 +407,11 @@ QWidget* themePage() {
     custom->setToolTip("Pick any color");
     QObject::connect(custom, &QPushButton::clicked, custom, [custom] {
         const Rgba cur = settings().customAccent ? settings().accent : basePalette(settings()).accent;
-        const QColor picked = QColorDialog::getColor(qcolor(cur), custom->window(), "Accent Color");
-        if (!picked.isValid()) return;
+        Color c{red(cur) / 255.0f, green(cur) / 255.0f, blue(cur) / 255.0f, 1.0f};
+        if (!pickColor(custom, c, false)) return;
         settings().customAccent = true;
-        settings().accent = rgba(picked.red(), picked.green(), picked.blue());
+        settings().accent = rgba(static_cast<int>(std::lround(c.r * 255)), static_cast<int>(std::lround(c.g * 255)),
+                                 static_cast<int>(std::lround(c.b * 255)));
         changed(true);
     });
     accents->addWidget(custom);
@@ -547,6 +548,18 @@ QWidget* interfacePage() {
                     switchControl(s.showIntro, [](bool on) {
                         settings().showIntro = on;
                         saveSettings();
+                    }));
+    startup->addRow("Audio meters", "Left and right sound levels beside the timeline (also in View › Audio Meters)",
+                    switchControl(s.showMeters, [](bool on) {
+                        settings().showMeters = on;
+                        saveSettings();
+                        emit AppSignals::get().appearanceChanged();
+                    }));
+    startup->addRow("Welcome project", "The example project on the home screen (deleting it there turns this off)",
+                    switchControl(!s.welcomeRemoved, [](bool on) {
+                        settings().welcomeRemoved = !on; // on: a fresh copy comes back if it was deleted
+                        saveSettings();
+                        emit AppSignals::get().projectsChanged();
                     }));
 
     SettingsCard* reset = addSection(col, "Start over");

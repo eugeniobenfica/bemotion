@@ -21,8 +21,9 @@
 namespace bemotion::ui {
 
 namespace {
-constexpr int kBarHeight = 64;
-constexpr qint64 kBarMs = 2200; // how long the bar stays after the mouse stops
+constexpr int kBarHeight = 72;
+constexpr qint64 kBarMs = 2200;  // how long the bar stays after the mouse stops
+constexpr float kButton = 18.0f; // a round button's radius
 } // namespace
 
 PreviewWindow::PreviewWindow(EditorContext& ctx, QWidget* parent) : QWidget(parent, Qt::Window), ctx_(ctx) {
@@ -35,7 +36,32 @@ PreviewWindow::PreviewWindow(EditorContext& ctx, QWidget* parent) : QWidget(pare
 
 bool PreviewWindow::barShown() const { return !ctx_.playing || sinceMouse_.elapsed() < kBarMs; }
 
-QRectF PreviewWindow::barTrack() const { return QRectF(150, height() - kBarHeight * 0.5 - 2, std::max(40, width() - 300), 4); }
+// The bar, left to right: step back, play, step forward, the time, the progress, the length,
+// loop, exit.
+QPointF PreviewWindow::partCenter(Part part) const {
+    const double mid = height() - kBarHeight * 0.5;
+    switch (part) {
+    case Part::StepBack: return {36, mid};
+    case Part::Play: return {78, mid};
+    case Part::StepForward: return {120, mid};
+    case Part::Loop: return {width() - 78.0, mid};
+    case Part::Exit: return {width() - 36.0, mid};
+    default: return {};
+    }
+}
+
+QRectF PreviewWindow::barTrack() const { return QRectF(262, height() - kBarHeight * 0.5 - 2, std::max(40, width() - 524), 4); }
+
+PreviewWindow::Part PreviewWindow::partAt(QPointF pos) const {
+    if (pos.y() < height() - kBarHeight) return Part::None;
+    for (Part part : {Part::StepBack, Part::Play, Part::StepForward, Part::Loop, Part::Exit}) {
+        const QPointF d = pos - partCenter(part);
+        if (d.x() * d.x() + d.y() * d.y() <= (kButton + 3) * (kButton + 3)) return part;
+    }
+    const QRectF track = barTrack();
+    if (pos.x() >= track.left() - 8 && pos.x() <= track.right() + 8) return Part::Track;
+    return Part::None;
+}
 
 void PreviewWindow::wake() {
     sinceMouse_.restart();
@@ -79,25 +105,40 @@ void PreviewWindow::paintEvent(QPaintEvent*) {
     drawnBar_ = barShown();
     if (!drawnBar_) return;
 
-    // The bar: play / pause, the time, the progress (click to seek), how to leave.
-    const float top = static_cast<float>(height() - kBarHeight);
-    for (int i = 0; i < kBarHeight; ++i) // fades up from the bottom
-        d.rectFilled(Pt(0, top + i), Pt(width(), top + i + 1), rgba(0, 0, 0, static_cast<int>(200.0f * i / kBarHeight)));
+    // The bar: buttons, the time, the progress (click or drag to seek), the length.
+    const int fade = static_cast<int>(kBarHeight * 1.6f);
+    const float top = static_cast<float>(height() - fade);
+    for (int i = 0; i < fade; ++i) // fades up from the bottom
+        d.rectFilled(Pt(0, top + i), Pt(width(), top + i + 1), rgba(0, 0, 0, static_cast<int>(210.0f * i / fade)));
     const float mid = height() - kBarHeight * 0.5f;
-    drawIcon(d, ctx_.playing ? Icon::Pause : Icon::Play, Pt(40, mid), 20, theme::kText);
-    const QString now = QString::fromStdString(formatTimecode(t, c.fps));
+    auto button = [&](Part part, Icon icon, float size, bool on = false) {
+        const QPointF at = partCenter(part);
+        const Pt center(static_cast<float>(at.x()), static_cast<float>(at.y()));
+        if (part == Part::Play) d.circleFilled(center, kButton + 2, hover_ == part ? theme::kAccentHover : theme::kAccent);
+        else if (hover_ == part) d.circleFilled(center, kButton, rgba(255, 255, 255, 34));
+        const Rgba color = part == Part::Play ? theme::kOnAccent : on ? theme::kAccent : hover_ == part ? theme::kText : theme::kTextDim;
+        drawIcon(d, icon, center, size, color);
+    };
+    button(Part::StepBack, Icon::StepBack, 16);
+    button(Part::Play, ctx_.playing ? Icon::Pause : Icon::Play, 18);
+    button(Part::StepForward, Icon::StepForward, 16);
+    button(Part::Loop, Icon::Loop, 16, ctx_.loop);
+    button(Part::Exit, Icon::ExitFullscreen, 16);
     p.setFont(font());
-    d.text(Pt(66, mid - d.textHeight() * 0.5f), theme::kText, now);
+    const QString now = QString::fromStdString(formatTimecode(t, c.fps));
+    d.text(Pt(158, mid - d.textHeight() * 0.5f), theme::kText, now);
     const QRectF track = barTrack();
     const double end = std::max(1e-6, c.duration);
     const float done = static_cast<float>(std::clamp(t / end, 0.0, 1.0));
-    d.rectFilled(Pt(track.left(), track.top()), Pt(track.right(), track.bottom()), rgba(255, 255, 255, 60), 2.0f);
-    d.rectFilled(Pt(track.left(), track.top()), Pt(track.left() + track.width() * done, track.bottom()), theme::kAccent, 2.0f);
-    d.circleFilled(Pt(track.left() + track.width() * done, track.center().y()), 6.0f, theme::kAccent);
-    const QString hint = "Esc";
-    d.text(Pt(width() - 24 - d.textWidth(hint), mid - d.textHeight() * 0.5f), theme::kTextDim, hint);
+    const bool active = hover_ == Part::Track || seeking_;
+    const float grow = active ? 1.5f : 0.0f; // the line thickens under the mouse
+    const float l = static_cast<float>(track.left()), r = static_cast<float>(track.right());
+    const float y0 = static_cast<float>(track.top()) - grow, y1 = static_cast<float>(track.bottom()) + grow;
+    d.rectFilled(Pt(l, y0), Pt(r, y1), rgba(255, 255, 255, 60), 3.0f);
+    d.rectFilled(Pt(l, y0), Pt(l + (r - l) * done, y1), theme::kAccent, 3.0f);
+    d.circleFilled(Pt(l + (r - l) * done, static_cast<float>(track.center().y())), active ? 8.0f : 6.0f, theme::kAccent);
     const QString total = QString::fromStdString(formatTimecode(c.duration, c.fps));
-    d.text(Pt(track.right() + 14, mid - d.textHeight() * 0.5f), theme::kTextDim, total);
+    d.text(Pt(r + 16, mid - d.textHeight() * 0.5f), theme::kTextDim, total);
 }
 
 void PreviewWindow::seek(double x) {
@@ -128,6 +169,10 @@ void PreviewWindow::keyPressEvent(QKeyEvent* e) {
         ctx_.playing = false;
         ctx_.stepFrames(shift ? 10 : 1);
         return;
+    case Qt::Key_L:
+        ctx_.loop = !ctx_.loop;
+        update();
+        return;
     case Qt::Key_Home: ctx_.setTime(0.0); return;
     case Qt::Key_End: ctx_.setTime(ctx_.comp().timeOfFrame(ctx_.comp().frameCount() - 1)); return;
     default: QWidget::keyPressEvent(e);
@@ -136,18 +181,58 @@ void PreviewWindow::keyPressEvent(QKeyEvent* e) {
 
 void PreviewWindow::mouseMoveEvent(QMouseEvent* e) {
     wake();
-    if (e->buttons() & Qt::LeftButton && e->position().y() > height() - kBarHeight) seek(e->position().x());
+    if (seeking_) seek(e->position().x());
+    const Part part = seeking_ ? Part::Track : partAt(e->position());
+    if (part != hover_) {
+        hover_ = part;
+        update();
+    }
+    if (part != Part::None) setCursor(Qt::PointingHandCursor);
 }
 
 void PreviewWindow::mousePressEvent(QMouseEvent* e) {
     wake();
     if (e->button() != Qt::LeftButton) return;
-    if (e->position().y() > height() - kBarHeight) seek(e->position().x()); // the bar: seek
-    else ctx_.playing = !ctx_.playing;                                     // the picture: play / pause
+    switch (partAt(e->position())) {
+    case Part::StepBack:
+        ctx_.playing = false;
+        ctx_.stepFrames(-1);
+        break;
+    case Part::StepForward:
+        ctx_.playing = false;
+        ctx_.stepFrames(1);
+        break;
+    case Part::Play:
+        if (!ctx_.playing && ctx_.time >= ctx_.comp().timeOfFrame(ctx_.comp().frameCount() - 1) - 1e-6) ctx_.setTime(0.0);
+        ctx_.playing = !ctx_.playing;
+        break;
+    case Part::Track:
+        seeking_ = true;
+        ctx_.playing = false;
+        seek(e->position().x());
+        break;
+    case Part::Loop: ctx_.loop = !ctx_.loop; break;
+    case Part::Exit: close(); return;
+    case Part::None:
+        if (e->position().y() < height() - kBarHeight) ctx_.playing = !ctx_.playing; // the picture: play / pause
+        break;
+    }
+    update();
+}
+
+void PreviewWindow::mouseReleaseEvent(QMouseEvent*) {
+    seeking_ = false;
+    update();
+}
+
+void PreviewWindow::leaveEvent(QEvent*) {
+    hover_ = Part::None;
+    update();
 }
 
 void PreviewWindow::mouseDoubleClickEvent(QMouseEvent* e) {
-    if (e->position().y() <= height() - kBarHeight) close();
+    if (e->position().y() < height() - kBarHeight) close();
+    else mousePressEvent(e); // quick clicks on the buttons each count
 }
 
 void PreviewWindow::closeEvent(QCloseEvent* e) {

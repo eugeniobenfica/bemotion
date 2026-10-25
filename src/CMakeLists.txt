@@ -74,6 +74,7 @@ add_executable(bemotion WIN32
     ui/PropertyRow.cpp
     ui/ExpressionEditor.cpp
     ui/PreviewWindow.cpp
+    ui/ColorPicker.cpp
     ui/SettingsWindow.cpp
     ui/Theme.cpp
     ui/Tools.cpp

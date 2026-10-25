@@ -1553,13 +1553,11 @@ bool ViewportPanel::updateDrop(const QMimeData* mime, Vec2 mouse, Qt::KeyboardMo
 }
 
 void ViewportPanel::dragEnterEvent(QDragEnterEvent* e) {
-    if (e->mimeData()->hasFormat(ui::kToolbarMime)) return e->acceptProposedAction();
     if (updateDrop(e->mimeData(), vec(e->position()), e->modifiers())) e->acceptProposedAction();
     else e->ignore();
 }
 
 void ViewportPanel::dragMoveEvent(QDragMoveEvent* e) {
-    if (e->mimeData()->hasFormat(ui::kToolbarMime)) return e->acceptProposedAction();
     if (updateDrop(e->mimeData(), vec(e->position()), e->modifiers())) e->acceptProposedAction();
     else e->ignore();
 }
@@ -1572,14 +1570,6 @@ void ViewportPanel::dragLeaveEvent(QDragLeaveEvent*) {
 }
 
 void ViewportPanel::dropEvent(QDropEvent* e) {
-    if (e->mimeData()->hasFormat(ui::kToolbarMime)) {
-        // Where the grip was grabbed (x in the bar): the bar lands under the mouse as it was held.
-        const auto grab = e->mimeData()->data(ui::kToolbarMime).split(',');
-        const QPoint offset(grab[0].toInt(), grab.size() > 1 ? grab[1].toInt() : 14);
-        e->acceptProposedAction();
-        emit toolbarDropped(e->position().toPoint() - offset);
-        return;
-    }
     if (!updateDrop(e->mimeData(), vec(e->position()), e->modifiers())) return;
     const Vec2 scenePos = world_.inverse().apply(dropPos_); // where the camera shows that point
     if (dropMedia_) ctx_.addMedia(dropMedia_, scenePos);

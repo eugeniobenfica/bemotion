@@ -35,6 +35,7 @@ struct Settings {
     bool showRulers = false;           // the viewport's rulers (View > Rulers)
     int previewQuality = 1;            // raster preview divisor: 1, 2 or 4 (export is unaffected)
     bool welcomeAdded = false;         // the Welcome project was put in the projects folder once
+    bool welcomeRemoved = false;       // the user deleted the Welcome project (Settings › Interface brings it back)
     std::string projectsFolder;        // where projects live, chosen by the user (empty: not yet)
     std::string speechLanguage = "auto"; // speech to text: "auto" or a language code ("en", "pt"...)
     std::vector<std::string> toolbar = ui::defaultToolbar(); // tool ids in the timeline's toolbar (ui/Tools.h)
@@ -42,6 +43,8 @@ struct Settings {
     bool toolbarInWindow = false;        // window-relative floating position; older viewport positions stay unchanged
     float toolbarX = 0.5f, toolbarY = 0.0f; // ... with its top-left here (fractions of the free space)
     std::vector<std::string> disabledPlugins; // plugin ids
+    std::vector<std::string> recentColors;    // the color picker's last colors, "#RRGGBBAA", newest first
+    bool showMeters = true;                   // the left / right audio level meters beside the timeline
 };
 
 Settings& settings();

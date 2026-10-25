@@ -2,6 +2,8 @@
 
 #include <QScrollArea>
 
+class QVBoxLayout;
+
 #include <string>
 #include <vector>
 
@@ -13,8 +15,9 @@ class DragValue;
 class Tile;
 } // namespace ui
 
-// How clips come in and go away (core/Transitions.h): open a category and drag
-// one onto a clip edge. Its duration and deletion are handled on the timeline.
+// How clips come in and go away (core/Transitions.h). On top, what the selected clip has (its
+// in and out transitions, their durations, a way to take them off); below, the categories:
+// click one for the selected clips, or drag it onto a clip edge.
 class TransitionsPanel : public QScrollArea {
     Q_OBJECT
 public:
@@ -26,8 +29,13 @@ protected:
 
 private:
     void rebuild();
+    void buildApplied(QVBoxLayout* col); // the selected clip's transitions
+    std::string selectionKey() const;          // what the top part shows (rebuilt when it changes)
     EditorContext& ctx_;
     std::vector<ui::Tile*> tiles_;
+    std::vector<std::string> tileIds_; // a category name or a transition id, per tile
+    std::string shownKey_;
+    ui::DragValue* durations_[2] = {}; // in, out (null: none shown)
     int columns_ = 0;
     std::string category_; // the open category ("": the list of categories)
 };

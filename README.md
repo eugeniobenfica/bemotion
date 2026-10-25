@@ -171,8 +171,9 @@ does.
   playhead (Ctrl+K), snapping to clips, keys and the playhead; dragging the
   playhead past an edge scrolls the timeline along
 - **Your own toolbar**: the toolbar's *+* opens every tool; drag them into
-  the toolbar, reorder them, drag them out to remove; drag its grip to float
-  it over the viewport
+  the toolbar, reorder them, drag them out to remove; drag its grip and it
+  follows the mouse, showing where it can go: along any window edge, over the
+  viewport, or back into the timeline
 - **No fixed length**: the composition ends where its last clip ends and grows
   as you add objects — or set a length limit (15 s ads, 60 s shorts)
 - **Arrange**: distribute layers evenly, stagger their start times
@@ -214,10 +215,21 @@ does.
   what applies at once, segmented choices
 - Rebind every shortcut, pick the interface font and text size, timeline
   densities, frames per arrow press
-- Dockable panels: drag tabs anywhere, minimize a panel to a handle on the
-  window edge, double-click a tab to maximize it; full screen with F11
+- Dockable panels: drag tabs anywhere; each header has **minimize** (the
+  panel becomes a named tab on the window edge) and **maximize** (or
+  double-click a tab); **full screen** for the whole app with F11 or the
+  button by Settings; *Maximize Viewport* (Ctrl+F11, Esc returns)
 - **Full Screen Preview** (Ctrl+Shift+F, or the viewport's full screen
-  button): only the picture, playing, on the whole screen; Esc returns
+  button): only the picture, playing, on the whole screen, with step, play,
+  seek, loop and exit buttons; Esc returns
+- **bemotion's own color picker**: saturation / brightness square, hue and
+  opacity bars, eyedropper (anywhere on the screen), hex and RGB fields, the
+  color before, the last colors used
+- **Audio meters**: left and right levels beside the timeline, with peak hold
+  and a clip light (View › Audio Meters, or Settings › Interface)
+- Each object says what it has: effects and transitions at the top of
+  Properties; the Transitions panel shows the clip's in and out transitions,
+  their durations and a remove button
 
 </td>
 <td valign="top">

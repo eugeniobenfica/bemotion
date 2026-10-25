@@ -397,6 +397,7 @@ public:
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
+        if (dragging_) p.setOpacity(0.35); // its picture follows the mouse: this is where it was
         ui::Draw d(p);
         d.rectFilled({0, 0}, {float(width()), float(height())}, theme::kBgDeep, 7.0f);
         if (parentWidget() != panel_) d.rect({0.5f, 0.5f}, {width() - 0.5f, height() - 0.5f}, theme::kBorder, 7.0f); // floating
@@ -436,7 +437,7 @@ protected:
             const int i = indexAt(he->pos());
             const auto ts = tools();
             if (i >= 0) QToolTip::showText(he->globalPos(), QString::fromStdString(ui::toolTooltip(ui::toolCatalog()[ts[i]])), this);
-            else if (i == -3) QToolTip::showText(he->globalPos(), "Drag to a window edge or back to the timeline; right-click for positions", this);
+            else if (i == -3) QToolTip::showText(he->globalPos(), "Drag to move the toolbar: along a window edge, over the viewport or back to the timeline (right-click for positions)", this);
             else if (i == -2) QToolTip::showText(he->globalPos(), "All tools: click to open them, then drag the ones you want here", this);
             else QToolTip::hideText();
             return true;
@@ -444,6 +445,10 @@ protected:
         return QWidget::event(e);
     }
     void mousePressEvent(QMouseEvent* e) override {
+        if (dragging_) { // another button while moving the bar: cancelled
+            endDrag(e->globalPosition().toPoint(), false);
+            return;
+        }
         pressed_ = indexAt(e->position());
         pressPos_ = e->position();
         if (e->button() == Qt::RightButton && pressed_ == -3) {
@@ -472,21 +477,17 @@ protected:
         }
     }
     void mouseMoveEvent(QMouseEvent* e) override {
+        if (dragging_) {
+            emit panel_->toolbarDragMoved(e->globalPosition().toPoint());
+            return;
+        }
         if ((e->buttons() & Qt::LeftButton) && pressed_ == -3 && (e->position() - pressPos_).manhattanLength() > 4) {
-            pressed_ = -1; // the grip: the whole bar goes where it is dropped
-            auto* drag = new QDrag(this);
-            auto* mime = new QMimeData;
-            mime->setData(ui::kToolbarMime, QByteArray::number(static_cast<int>(pressPos_.x())) + "," +
-                          QByteArray::number(static_cast<int>(pressPos_.y())));
-            drag->setMimeData(mime);
-            drag->setPixmap(grab());
-            drag->setHotSpot(pressPos_.toPoint());
-            emit panel_->toolbarDragActive(true);
-            drag->exec(Qt::MoveAction);
-            emit panel_->toolbarDragActive(false);
-            hover_ = -1;
-            unsetCursor();
+            pressed_ = -1; // the grip: the whole bar moves with the mouse, the window shows where it can go
+            emit panel_->toolbarDragStarted(pressPos_.toPoint()); // (pictures it as it looks)
+            dragging_ = true;
+            setCursor(Qt::ClosedHandCursor);
             update();
+            emit panel_->toolbarDragMoved(e->globalPosition().toPoint());
             return;
         }
         if ((e->buttons() & Qt::LeftButton) && pressed_ >= 0 && (e->position() - pressPos_).manhattanLength() > 6) {
@@ -516,6 +517,10 @@ protected:
     }
     void mouseReleaseEvent(QMouseEvent* e) override {
         if (e->button() != Qt::LeftButton) return;
+        if (dragging_) {
+            endDrag(e->globalPosition().toPoint(), true);
+            return;
+        }
         const int i = indexAt(e->position());
         if (i == pressed_ && i >= 0) {
             const ui::ToolInfo& tool = ui::toolCatalog()[tools()[i]];
@@ -528,9 +533,14 @@ protected:
         update();
     }
     void leaveEvent(QEvent*) override {
+        if (dragging_) return;
         hover_ = -1;
         unsetCursor();
         update();
+    }
+    void keyPressEvent(QKeyEvent* e) override {
+        if (dragging_ && e->key() == Qt::Key_Escape) endDrag(QCursor::pos(), false);
+        else QWidget::keyPressEvent(e);
     }
     void dragEnterEvent(QDragEnterEvent* e) override {
         if (e->mimeData()->hasFormat(ui::kToolMime)) e->acceptProposedAction();
@@ -600,9 +610,16 @@ private:
         saveSettings();
         emit ui::AppSignals::get().toolbarChanged();
     }
+    void endDrag(QPoint global, bool dropped) {
+        dragging_ = false;
+        hover_ = -1;
+        unsetCursor();
+        update();
+        emit panel_->toolbarDragFinished(global, dropped); // may move this bar elsewhere
+    }
 
     TimelinePanel* panel_;
-    bool vertical_ = false;
+    bool vertical_ = false, dragging_ = false;
     int hover_ = -1, pressed_ = -1, dropAt_ = -1;
     QPointF pressPos_;
 };
@@ -610,7 +627,6 @@ private:
 // --- panel -------------------------------------------------------------------------------------
 
 TimelinePanel::TimelinePanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), ctx_(ctx) {
-    setAcceptDrops(true); // the toolbar, dragged back here
     auto* col = new QVBoxLayout(this);
     col->setContentsMargins(6, 6, 6, 4);
     col->setSpacing(4);
@@ -788,16 +804,6 @@ void TimelinePanel::dockToolPill() {
     bar_->insertWidget(0, pill_);
     divider_->show();
     pill_->show();
-}
-
-void TimelinePanel::dragEnterEvent(QDragEnterEvent* e) {
-    if (e->mimeData()->hasFormat(ui::kToolbarMime)) e->acceptProposedAction();
-}
-
-void TimelinePanel::dropEvent(QDropEvent* e) {
-    if (!e->mimeData()->hasFormat(ui::kToolbarMime)) return;
-    e->acceptProposedAction();
-    emit toolbarMoveRequested(false, QPoint());
 }
 
 float TimelinePanel::trackW() const { return std::max(50.0f, static_cast<float>(rows_->width()) - leftWidth_); }
@@ -1195,6 +1201,7 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
         for (float yy = 0; yy < rowsBottom_; yy += 8.0f) d.line({cx, yy}, {cx, std::min(yy + 4.0f, rowsBottom_)}, theme::kDanger, 1.5f);
     }
     d.popClip();
+    if (graphMode_) paintGraphEmpty(p, size);
 
     // Where a vertical clip / track drag lands.
     if (restacking_ && (drag_ == Drag::LayerMove || drag_ == Drag::LayerName)) {

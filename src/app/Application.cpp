@@ -19,6 +19,7 @@
 #include "ui/Keymap.h"
 #include "ui/Style.h"
 #include "ui/Theme.h"
+#include "ui/Widgets.h"
 
 #include <QAction>
 #include <QApplication>
@@ -209,15 +210,18 @@ void Application::buildWindow() {
     // Settings and Help work from the home screen too (the editor has its own menu actions).
     auto* settingsAction = new QAction(home_);
     auto* helpAction = new QAction(home_);
-    settingsAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
-    helpAction->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    auto* fullAction = new QAction(home_);
+    for (QAction* a : {settingsAction, helpAction, fullAction}) a->setShortcutContext(Qt::WidgetWithChildrenShortcut);
     connect(settingsAction, &QAction::triggered, this, [] { ui::openSettings(); });
     connect(helpAction, &QAction::triggered, this, [] { ui::openHelp(); });
+    connect(fullAction, &QAction::triggered, this, [this] { ui::toggleFullScreen(window_); });
     home_->addAction(settingsAction);
     home_->addAction(helpAction);
-    auto bindHome = [settingsAction, helpAction] {
+    home_->addAction(fullAction);
+    auto bindHome = [settingsAction, helpAction, fullAction] {
         settingsAction->setShortcut(ui::sequenceOf(ui::Action::Settings));
         helpAction->setShortcut(ui::sequenceOf(ui::Action::Help));
+        fullAction->setShortcut(ui::sequenceOf(ui::Action::FullScreen));
     };
     bindHome();
     connect(&ui::AppSignals::get(), &ui::AppSignals::shortcutsChanged, this, bindHome);
@@ -277,7 +281,9 @@ void Application::scriptStep() {
         }
     }
     if (script_->wantsQuit()) {
-        script_.reset();
+        // Kept alive: an earlier step may still be running under this one (it opened a popup or a
+        // dialog with its own event loop) and returns into it.
+        retiredScript_ = std::move(script_);
         window_->canClose = nullptr; // scripted runs never ask
         window_->close();
     }

@@ -23,7 +23,6 @@ inline constexpr const char* kMediaMime = "application/x-bemotion-media";
 // A tool of the Tools popover: its index in toolCatalog().
 inline constexpr const char* kToolMime = "application/x-bemotion-tool";
 // The toolbar itself, dragged by its grip (to the viewport, or back to the timeline).
-inline constexpr const char* kToolbarMime = "application/x-bemotion-toolbar";
 inline constexpr const char* kTransitionMime = "application/x-bemotion-transition";
 // A Quick Animation: the preset as JSON (core/Presets.h format).
 inline constexpr const char* kAnimationMime = "application/x-bemotion-animation";

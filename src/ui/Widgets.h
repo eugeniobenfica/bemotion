@@ -120,6 +120,12 @@ enum class Icon {
     Keyboard,   // Settings › Shortcuts
     Edit,       // a pencil: Settings › Editor
     Help,       // a question mark in a circle
+    ExitFullscreen, // corners pointing in
+    Close,          // a cross
+    Maximize,       // a panel's maximize button: a square
+    Restore,        // a maximized panel's button: two squares
+    Eyedropper,     // picks a color from the screen
+    Meter,          // audio meters: two level bars
 };
 
 Icon iconForLayer(const Layer& layer);
@@ -134,6 +140,31 @@ void drawDiamond(Draw& d, Pt center, float radius, Rgba fill, Rgba outline);
 void drawLogoMark(QPainter& p, Pt center, float radius, Rgba color);
 QIcon makeIcon(Icon icon, Rgba color, int size = 32); // for Qt buttons
 QIcon menuIcon(Icon icon, Rgba color);                 // fills a menu's icon column
+
+// Left and right audio level meters: two upright bars on a dB scale (-60 to 0), green, then
+// yellow from -12 dB, red from -3 dB; the loudest of the last moments stays as a line, and a
+// red light on top says the mix clipped (a click turns it off).
+class AudioMeter : public QWidget {
+    Q_OBJECT
+public:
+    explicit AudioMeter(QWidget* parent = nullptr);
+    // Each frame: the loudest samples since the last call (0..1) and the seconds that passed.
+    void feed(float left, float right, bool clipped, float seconds);
+    QSize sizeHint() const override { return {58, 160}; }
+    QSize minimumSizeHint() const override { return {58, 60}; }
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+    void mousePressEvent(QMouseEvent*) override;
+
+private:
+    float level_[2] = {-90, -90}, hold_[2] = {-90, -90}; // dB
+    float holdFor_[2] = {0, 0};                         // seconds the hold line stays
+    bool clipped_ = false;
+};
+
+// The whole window full screen, or back as it was before (maximized or not).
+void toggleFullScreen(QWidget* window);
 
 // "Limit length to [N] s": a checkbox and a seconds field; `changed` gets 0 when unchecked.
 QWidget* lengthLimitRow(double seconds, std::function<void(double)> changed);

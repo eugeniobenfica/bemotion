@@ -26,6 +26,9 @@ public:
     explicit PropertiesPanel(EditorContext& ctx, QWidget* parent = nullptr);
     void sync();
 
+signals:
+    void panelRequested(const QString& name); // "Effects", "Transitions": show that panel
+
 private:
     std::string structureKey();
     void rebuild();

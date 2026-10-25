@@ -232,6 +232,7 @@ HomeScreen::HomeScreen(RecentProjects& recents, QWidget* parent) : QWidget(paren
         search_->setText(search);
         rebuildGrid();
     });
+    connect(&ui::AppSignals::get(), &ui::AppSignals::projectsChanged, this, [this] { refresh(); });
     // Projects saved, copied or removed in the projects folder show up by themselves.
     watcher_ = new QFileSystemWatcher(this);
     if (const auto folder = projectsFolder(); !folder.empty()) watcher_->addPath(QString::fromStdString(platform::toUtf8(folder)));
@@ -408,8 +409,8 @@ void HomeScreen::refresh() {
             continue;
         entries_.push_back({path, platform::toUtf8(path.stem()), modified(path)});
     }
-    // The Welcome project is always there, whatever folder is chosen.
-    if (const fs::path welcome = platform::welcomeProject(); !welcome.empty() &&
+    // The Welcome project is there whatever folder is chosen, until the user deletes it.
+    if (const fs::path welcome = settings().welcomeRemoved ? fs::path() : platform::welcomeProject(); !welcome.empty() &&
         std::none_of(entries_.begin(), entries_.end(), [&](const RecentProject& e) { std::error_code fe; return fs::equivalent(e.path, welcome, fe); }))
         entries_.push_back({welcome, "Welcome to bemotion", modified(welcome)});
     std::stable_sort(entries_.begin(), entries_.end(),
@@ -530,12 +531,8 @@ void HomeScreen::rebuildGrid() {
                 });
                 menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Show in Folder",
                                [copy] { platform::revealInFileManager(copy.path); });
-                std::error_code fe;
-                if (!std::filesystem::equivalent(copy.path, platform::welcomeProject(), fe)) { // the Welcome project stays
-                    menu.addSeparator();
-                    menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), "Delete Project...",
-                                   [this, copy] { confirmDelete(copy); });
-                }
+                menu.addSeparator();
+                menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), "Delete Project...", [this, copy] { confirmDelete(copy); });
                 menu.exec(at);
             });
         card->setCardWidth(cardW);
@@ -569,20 +566,87 @@ void HomeScreen::confirmDelete(const RecentProject& item) {
 #else
     const char* bin = "Trash";
 #endif
-    QMessageBox box(this);
-    box.setWindowTitle("Delete Project?");
-    box.setText(QString("Delete \"%1\"?").arg(QString::fromStdString(item.name)));
-    box.setInformativeText(QString("The project file goes to the %1. Media files it uses are not touched.").arg(bin));
-    QPushButton* del = box.addButton("Delete", QMessageBox::DestructiveRole);
+    std::error_code fe;
+    const bool welcome = std::filesystem::equivalent(item.path, platform::welcomeProject(), fe);
+    // Which project (as its card shows it), what happens to it, and the two answers: keeping it is
+    // the default, deleting is red.
+    QDialog dialog(this);
+    dialog.setWindowTitle("Delete Project");
+    dialog.setMinimumWidth(480);
+    auto* col = new QVBoxLayout(&dialog);
+    col->setContentsMargins(24, 22, 24, 18);
+    col->setSpacing(12);
+    auto* head = new QHBoxLayout;
+    head->setSpacing(12);
+    auto* icon = new QLabel;
+    icon->setPixmap(ui::makeIcon(ui::Icon::Trash, theme::kDanger, 26).pixmap(26, 26));
+    icon->setAlignment(Qt::AlignTop);
+    head->addWidget(icon, 0, Qt::AlignTop);
+    auto* title = styled(QString("Delete \"%1\"?").arg(QString::fromStdString(item.name)), theme::kText, 1.25f, true);
+    title->setWordWrap(true);
+    head->addWidget(title, 1);
+    col->addLayout(head);
+
+    auto* card = new ui::SettingsCard;
+    auto* project = new QWidget;
+    auto* row = new QHBoxLayout(project);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(14);
+    auto* thumb = new QLabel;
+    const QSize thumbSize(128, 72);
+    thumb->setFixedSize(thumbSize);
+    if (auto it = previews_.find(item.path); it != previews_.end() && !it->second.thumbnail.isNull())
+        thumb->setPixmap(QPixmap::fromImage(it->second.thumbnail.scaled(thumbSize, Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    else thumb->setPixmap(ui::makeIcon(ui::Icon::Film, theme::kTextFaint, 32).pixmap(32, 32));
+    thumb->setAlignment(Qt::AlignCenter);
+    row->addWidget(thumb);
+    auto* about = new QVBoxLayout;
+    about->setSpacing(3);
+    about->addWidget(styled(QString::fromStdString(item.name), theme::kText, 1.0f, true));
+    auto* where = styled(QString::fromStdString(platform::toUtf8(item.path)), theme::kTextFaint, 0.92f);
+    where->setWordWrap(true);
+    where->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    about->addWidget(where);
+    about->addStretch();
+    row->addLayout(about, 1);
+    card->addContent(project);
+    col->addWidget(card);
+
+    auto* what = styled(QString("It goes to the %1, where you can still restore it. The media files it uses are not touched.").arg(bin),
+                        theme::kTextDim);
+    what->setWordWrap(true);
+    col->addWidget(what);
+    if (welcome) {
+        auto* back = styled("The Welcome project can come back later: Settings › Interface › Welcome project.", theme::kTextFaint, 0.92f);
+        back->setWordWrap(true);
+        col->addWidget(back);
+    }
+    col->addSpacing(4);
+    auto* buttons = new QHBoxLayout;
+    buttons->addStretch();
+    auto* keep = new QPushButton("Cancel");
+    keep->setMinimumWidth(96);
+    keep->setDefault(true);
+    keep->setAutoDefault(true);
+    auto* del = new QPushButton("Delete Project");
     del->setProperty("danger", true);
-    box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(QMessageBox::Cancel);
-    box.exec();
-    if (box.clickedButton() != del) return;
+    del->setAutoDefault(false);
+    del->setMinimumWidth(120);
+    connect(keep, &QPushButton::clicked, &dialog, &QDialog::reject);
+    connect(del, &QPushButton::clicked, &dialog, &QDialog::accept);
+    buttons->addWidget(keep);
+    buttons->addWidget(del);
+    col->addLayout(buttons);
+    keep->setFocus();
+    if (dialog.exec() != QDialog::Accepted) return;
     std::string err;
     std::error_code ec;
     // A file that is already gone just leaves the list.
     if (!std::filesystem::exists(item.path, ec) || platform::moveToTrash(item.path, &err)) {
+        if (welcome) { // not made again at the next start
+            settings().welcomeRemoved = true;
+            saveSettings();
+        }
         recents_.remove(item.path);
         previews_.erase(item.path);
         std::erase_if(entries_, [&](const RecentProject& e) { return e.path == item.path; });

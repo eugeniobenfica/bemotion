@@ -26,6 +26,14 @@ public:
     // Empty when no audio layer is heard in that range.
     static std::vector<float> mix(const Composition& comp, double start, double end);
 
+    // What was played since the last call (the audio meters): each channel's loudest sample
+    // (0..1, 1 = full scale) and whether the mix went past full scale (it is clipped).
+    struct Levels {
+        float left = 0.0f, right = 0.0f;
+        bool clipped = false;
+    };
+    Levels takeLevels();
+
 private:
     AudioEngine() = default;
 };

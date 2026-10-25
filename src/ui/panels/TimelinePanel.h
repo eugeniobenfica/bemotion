@@ -51,7 +51,11 @@ signals:
     // The toolbar was dragged (or sent) to the viewport (at `at`, viewport coordinates; (-1, -1):
     // its default place) or back to the timeline.
     void toolbarMoveRequested(bool toViewport, QPoint at);
-    void toolbarDragActive(bool active);
+    // The grip is being dragged: the window shows where the bar can go and moves it on release
+    // (`grab`: where the bar was held, in its own coordinates; `dropped` false: cancelled).
+    void toolbarDragStarted(QPoint grab);
+    void toolbarDragMoved(QPoint global);
+    void toolbarDragFinished(QPoint global, bool dropped);
     void toolbarDockRequested(QPointF position);
     // A plugin command's button (API 5) was clicked; `pressed`: its state for toggle buttons.
     void pluginButtonClicked(const std::string& commandId, bool pressed);
@@ -65,9 +69,6 @@ public:
     void dockToolPill();    // back into it
     bool deleteSelectedTransition();
 
-protected:
-    void dragEnterEvent(QDragEnterEvent* e) override;
-    void dropEvent(QDropEvent* e) override;
 
 private:
     friend class TimelineRuler;
@@ -150,6 +151,9 @@ private:
     void paintPropKeys(QPainter& p, const Item& item, float width);
     void paintWaveform(QPainter& p, const Layer& layer, QPointF a, QPointF b, uint32_t color) const;
     void paintGraph(QPainter& p, QSize size);
+    void paintGraphEmpty(QPainter& p, QSize size); // what the graph needs, when it has nothing to show
+    std::vector<uint64_t> graphLayers() const;     // with nothing selected, the layers listed to pick one
+    std::pair<QString, QString> graphEmpty_;       // its title and text (empty: there are curves)
 
     // Input on the body.
     void rowsPress(QMouseEvent* e);

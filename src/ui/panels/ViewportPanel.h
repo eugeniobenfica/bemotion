@@ -44,7 +44,6 @@ class IconButton;
 class ViewportPanel : public QWidget {
     Q_OBJECT
 signals:
-    void toolbarDropped(QPoint at); // the toolbar's grip was dropped here
     void viewportFullscreenRequested();
     void previewQualityChanged(int divisor);
     void layerMenuRequested(QPoint global); // right click on a layer (now selected)

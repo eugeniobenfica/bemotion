@@ -4,6 +4,7 @@
 #include "app/PluginHost.h"
 #include "app/Automation.h"
 #include "app/PresetLibrary.h"
+#include "core/Transitions.h"
 #include "app/Settings.h"
 #include "core/Data.h"
 #include "core/Presets.h"
@@ -393,6 +394,45 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         col->addLayout(row);
         refreshers_.push_back([this, id, name] {
             if (const Layer* l = ctx_.comp().findLayer(id); l && !name->hasFocus()) name->setText(QString::fromStdString(l->name));
+        });
+    }
+    // What it has besides its properties: its effects and transitions, each a click away.
+    if (layer.type != LayerType::Camera) {
+        const bool audioOnly = layer.type == LayerType::Media && layer.media.hasAudio && !layer.media.hasVideo;
+        auto* row = new QHBoxLayout;
+        row->setSpacing(6);
+        auto chip = [&](const QString& panel, const QString& tip) {
+            auto* b = new QPushButton;
+            b->setProperty("flat", true);
+            b->setCursor(Qt::PointingHandCursor);
+            b->setToolTip(tip);
+            connect(b, &QPushButton::clicked, this, [this, panel] { emit panelRequested(panel); });
+            row->addWidget(b);
+            return b;
+        };
+        auto* fx = chip("Effects", audioOnly ? "Its audio effects (Effects panel)" : "Its effects (Effects panel)");
+        fx->setIcon(ui::makeIcon(ui::Icon::FxStylize, theme::kTextDim, 16));
+        QPushButton* tr = audioOnly ? nullptr : chip("Transitions", "How it comes in and goes away (Transitions panel)");
+        if (tr) tr->setIcon(ui::makeIcon(ui::Icon::Transition, theme::kTextDim, 16));
+        row->addStretch();
+        col->addLayout(row);
+        auto fill = [fx, tr, audioOnly](const Layer& l) {
+            const size_t n = audioOnly ? l.audioEffects.size() : l.effects.size();
+            fx->setText(n == 0 ? QString("No effects") : n == 1 ? QString("1 effect") : QString("%1 effects").arg(n));
+            if (!tr) return;
+            auto name = [](const ClipTransition& t) {
+                const TransitionInfo* info = t.active() ? findTransition(t.id) : nullptr;
+                return info ? QString::fromUtf8(info->name) : QString::fromStdString(t.id);
+            };
+            const bool in = l.transitionIn.active(), out = l.transitionOut.active();
+            tr->setText(!in && !out ? QString("No transitions")
+                        : in && out  ? QString("In: %1  ·  Out: %2").arg(name(l.transitionIn), name(l.transitionOut))
+                        : in         ? QString("In: %1").arg(name(l.transitionIn))
+                                     : QString("Out: %1").arg(name(l.transitionOut)));
+        };
+        fill(layer);
+        refreshers_.push_back([this, id, fill] {
+            if (const Layer* l = ctx_.comp().findLayer(id)) fill(*l);
         });
     }
     if (ctx_.selection.size() > 1) {

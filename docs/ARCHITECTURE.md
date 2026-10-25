@@ -335,25 +335,30 @@ Rules:
   audio, undo commits, autosave (a moment after each change, once the
   document's revision stops moving) and every panel's `sync()`. A slower
   timer keeps crash-recovery copies (`app/Recovery`).
-  - Panel headers have only tabs and a **minimize** button (no close, undock,
-    tabs-menu or pin buttons): a minimized panel hides and leaves a handle on
-    the window edge that brings it back at its size. View > Panels shows or
-    hides panels; double-clicking a tab maximizes it.
+  - Panel headers have only tabs and **minimize** / **maximize** buttons
+    (`decorateArea`, added to every dock area; no close, undock, tabs-menu or
+    pin buttons): a minimized panel hides and leaves a tab on the window edge,
+    with its names, that brings it back at its size. Maximize (or a
+    double-click on a tab) auto-hides the other panels and gives this one
+    nearly all the space beside the viewport; the same button brings the
+    layout back. View > Panels shows or hides panels. The layout saved for
+    the next project is always the whole one (never maximized or the
+    viewport alone).
   - Floating helpers that are not panels (the Tools popover, the toolbar
     when it floats over the viewport) are child widgets of the window, not
     separate windows, so drag and drop keeps working. The toolbar moves by its
-    grip (a drag with its own MIME type); its tools move by themselves.
-    Dragging the toolbar grip reveals drop targets at the window's top,
-    bottom, left and right edges, with an 8 px margin below the main header
-    and inside the other edges. The toolbar floats above all panels; the grip's
-    context menu offers the same positions. Normalized coordinates preserve
-    the position when resizing. The optional `toolbar_in_window` setting
-    defaults to false so older free viewport positions keep their meaning.
-    Edge targets are accent outlines without labels, with an extra target over
-    the timeline toolbar to restore it. Side positions use a vertical toolbar;
-    its grip appears on hover and clears its hover/cursor state after dragging.
-  - Panels minimize from a handle that appears, on hover, where the restore
-    handle will be. No focus highlight on panels.
+    grip with a live drag inside the window (no system drag): the grip keeps
+    the mouse and reports it (`toolbarDragStarted / Moved / Finished`), and the
+    window draws an overlay with the places it can go (window edges, where
+    the mouse is along them, the middle and the ends snapping; anywhere over
+    the viewport; back in the timeline), the one under the mouse named and the
+    bar's picture where it would land. Esc or another button cancels. Its tools
+    still move by themselves (drag and drop with `kToolMime`). The toolbar
+    floats above all panels; the grip's context menu offers the same
+    positions. Normalized coordinates preserve the position when resizing. The
+    optional `toolbar_in_window` setting defaults to false so older free
+    viewport positions keep their meaning. Side positions use a vertical
+    toolbar. No focus highlight on panels.
   - Never `show()` / `setVisible(true)` a widget before it has a parent: for
     a moment it is a window of its own (it flashes on screen).
 - **Panels** (`ui/panels`) follow one pattern:
@@ -372,7 +377,17 @@ Rules:
   `ui::ExpressionEditor` under the row (open ones stay open when the panel
   rebuilds).
 - **`PreviewWindow`** — the full screen preview: the composition alone on
-  black, driven by the editor's tick (playback, audio) and its own keys.
+  black, driven by the editor's tick (playback, audio), its own keys and the
+  buttons of its bar.
+- **`ColorPicker`** (`ui::pickColor`) — every color in the app is picked here
+  (a themed popup, not the system dialog), changes apply live; the last
+  colors are the `recent_colors` setting.
+- **`AudioMeter`** (`ui/Widgets.h`) — fed each tick by
+  `AudioEngine::takeLevels()` (the loudest samples the output callback
+  played since the last look); `show_meters` turns it off.
+- Expressions read the editor's composition between scopes
+  (`setExpressionComposition`); a closed editor sets it to null, and a new
+  one replaces it, so nothing reads a composition that is gone.
 - **Drag and drop** between panels uses the MIME types of `ui/Mime.h`.
 - **`Theme`** — palettes (`Palette`) applied as a `QPalette` + style sheet.
   Colors come from the named tokens (`theme::kText`, `kTextDim`, `kAccent`,

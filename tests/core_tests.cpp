@@ -23,6 +23,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -1161,6 +1162,32 @@ void testExpressions() {
         if (l.name == "Box") CHECK(l.transform.rotation.expression == "time * 90");
 }
 
+// A project closed and another opened: expressions read the new one (the closed one is gone,
+// reading it crashed when a project was opened again).
+void testExpressionsAcrossProjects() {
+    auto make = [](float x) {
+        auto p = std::make_unique<Project>();
+        CHECK(run(*p, R"([{"op": "layer.add", "type": "ellipse", "name": "Ball"},
+                          {"op": "layer.add", "type": "rectangle", "name": "Box"},
+                          {"op": "expression.set", "layer": "Box", "prop": "position", "expression": "layer(\"Ball\").position"}])").ok);
+        for (Layer& l : p->comp.layers)
+            if (l.name == "Ball") l.transform.position.base = Vec2{x, 0};
+        return p;
+    };
+    auto first = make(10.0f);
+    setExpressionComposition(&first->comp);
+    { const ExpressionScope s(first->comp); }
+    first.reset(); // closed
+    auto second = make(20.0f);
+    setExpressionComposition(&second->comp);
+    { const ExpressionScope s(second->comp); } // ends back on the editor's composition: the second
+    const Layer* box = nullptr;
+    for (const Layer& l : second->comp.layers)
+        if (l.name == "Box") box = &l;
+    CHECK(box && near(box->transform.position.valueAt(0).x, 20.0f));
+    setExpressionComposition(nullptr);
+}
+
 } // namespace
 
 int main() {
@@ -1214,6 +1241,7 @@ int main() {
         {"crop", testCrop},
         {"lens", testLens},
         {"expressions", testExpressions},
+        {"expressions across projects", testExpressionsAcrossProjects},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

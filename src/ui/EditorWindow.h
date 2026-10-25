@@ -43,6 +43,8 @@ class EffectsPanel;
 class TimelinePanel;
 namespace ui {
 class PreviewWindow;
+class IconButton;
+class AudioMeter;
 enum class Action;
 }
 
@@ -101,11 +103,14 @@ private:
     void placeToolbar(); // timeline, free viewport position, or a window edge
     QRect toolbarBounds() const;
     void dockToolbar(QPointF position);
-    void showToolbarTargets(bool visible);
-    void positionToolbarTargets();
-    QPushButton* toolbarTargets_[5]{};
+    // Moving the toolbar by its grip: the places it can go, shown over the window.
+    void toolbarDragStarted(QPoint grab);
+    void toolbarDragMoved(QPoint global);
+    void toolbarDragFinished(QPoint global, bool dropped);
+    QWidget* toolbarOverlay_ = nullptr;
     void placeRestoreHandles();
-    void updateMinimizeHandles();
+    void decorateArea(ads::CDockAreaWidget* area); // its minimize and maximize buttons
+    void updateAreaButtons();
     int edgeOf(ads::CDockAreaWidget* area, float* along) const; // 0 left, 1 right, 2 top, 3 bottom
     QPoint handlePos(int edge, float along, QSize size) const;
     QAction* action(ui::Action a, const QString& text, std::function<void()> fn);
@@ -141,13 +146,6 @@ private:
         QWidget* handle = nullptr;
     };
     std::vector<Minimized> minimized_;
-    struct MinimizeHandle {
-        QPointer<ads::CDockAreaWidget> area;
-        QWidget* handle = nullptr;
-        int edge = 0;
-    };
-    std::vector<MinimizeHandle> minimizeHandles_;
-    QPoint pointer_, lastCursor_; // where the mouse is (global), for the minimize handles
 
     std::map<ui::Action, QAction*> actions_;
     QTimer* timer_ = nullptr;
@@ -155,6 +153,8 @@ private:
     QPointer<ui::PreviewWindow> preview_; // the full screen preview, while open
     QElapsedTimer sinceChange_;    // autosave: a moment after the last change
     uint64_t seenRevision_ = 0, triedRevision_ = ~0ull; // once per change, even when saving fails
+    ui::IconButton* fullScreenButton_ = nullptr;
+    ui::AudioMeter* meters_ = nullptr; // beside the timeline (View › Audio Meters)
     QLabel* status_ = nullptr; // errors next to the menus
     QString lastTitle_;
     double recordingStart_ = -1.0;

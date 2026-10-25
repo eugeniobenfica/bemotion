@@ -694,8 +694,15 @@ ExpressionScope::~ExpressionScope() {
 }
 
 void setExpressionComposition(const Composition* comp) {
+    // Outside any scope (or in the editor's own) the editor's composition is what reads: a
+    // closed editor's composition must never stay bound once another one, or none, takes over.
+    const bool editors = !t_ctx.comp || t_ctx.comp == t_editorComp || t_ctx.comp == comp;
     t_editorComp = comp;
-    if (!t_ctx.comp || t_ctx.comp == comp || !comp) t_ctx.comp = comp;
+    if ((editors || !comp) && t_ctx.comp != comp) {
+        t_ctx.comp = comp;
+        t_ctx.owners.clear();
+        t_ctx.errors.clear();
+    }
 }
 
 std::string checkExpression(const std::string& expression) { return compile(expression)->error; }

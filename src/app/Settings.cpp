@@ -95,6 +95,7 @@ void loadSettings() {
         s.previewQuality = j.value("preview_quality", s.previewQuality);
         if (s.previewQuality != 2 && s.previewQuality != 4) s.previewQuality = 1;
         s.welcomeAdded = j.value("welcome_added", s.welcomeAdded);
+        s.welcomeRemoved = j.value("welcome_removed", s.welcomeRemoved);
         s.projectsFolder = j.value("projects_folder", s.projectsFolder);
         s.speechLanguage = j.value("speech_language", s.speechLanguage);
         s.toolbarInViewport = j.value("toolbar_in_viewport", s.toolbarInViewport);
@@ -106,6 +107,9 @@ void loadSettings() {
             for (const std::string& id : j.value("toolbar", std::vector<std::string>{}))
                 if (ui::toolIndex(id) >= 0) s.toolbar.push_back(id); // tools of newer versions are skipped
         }
+        s.recentColors = j.value("recent_colors", std::vector<std::string>{});
+        if (s.recentColors.size() > 16) s.recentColors.resize(16);
+        s.showMeters = j.value("show_meters", s.showMeters);
         ui::loadKeymap(j.contains("shortcuts") ? j["shortcuts"].dump() : "{}");
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
     } catch (const std::exception&) {
@@ -120,8 +124,9 @@ void saveSettings() {
               {"timeline_layer_row", s.timelineLayerRow}, {"timeline_property_row", s.timelinePropertyRow},
               {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}, {"ui_font", s.uiFont},
               {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames},
-              {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"show_rulers", s.showRulers}, {"preview_quality", s.previewQuality}, {"welcome_added", s.welcomeAdded}, {"projects_folder", s.projectsFolder}, {"speech_language", s.speechLanguage}, {"toolbar", s.toolbar},
+              {"autosave_minutes", s.autosaveMinutes}, {"show_intro", s.showIntro}, {"show_rulers", s.showRulers}, {"preview_quality", s.previewQuality}, {"welcome_added", s.welcomeAdded}, {"welcome_removed", s.welcomeRemoved}, {"projects_folder", s.projectsFolder}, {"speech_language", s.speechLanguage}, {"toolbar", s.toolbar},
               {"toolbar_in_viewport", s.toolbarInViewport}, {"toolbar_in_window", s.toolbarInWindow}, {"toolbar_x", s.toolbarX}, {"toolbar_y", s.toolbarY},
+              {"recent_colors", s.recentColors}, {"show_meters", s.showMeters},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);

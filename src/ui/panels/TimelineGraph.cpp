@@ -205,14 +205,35 @@ void TimelinePanel::paintGraph(QPainter& p, QSize size) {
     ui::Draw d(p);
     const float height = static_cast<float>(size.height());
     Layer* layer = ctx_.selected();
-    auto hint = [&](const char* text) { d.text({16, 14}, theme::kTextFaint, QString(text)); };
+    graphEmpty_ = {};
+    // Nothing to draw: the list column stays, the graph says what it needs (drawn over the
+    // playhead by paintRows, see paintGraphEmpty).
+    auto empty = [&](const char* title, const char* text) {
+        d.rectFilled({0, 0}, {trackX0() - 1, height}, theme::shade(30));
+        graphEmpty_ = {title, text};
+    };
     if (!layer) {
-        hint("Select a layer to edit the curves of its animated properties.");
+        // The layers to pick from, right here (their rows are hidden while the graph shows).
+        empty("Select a layer", "Pick one on the left (or in the viewport): its animated properties show here as curves.");
+        const auto layers = graphLayers();
+        const QPoint mouse = rowsWidget()->mapFromGlobal(QCursor::pos());
+        d.text({16, 8 + (kListRow - d.textHeight()) * 0.5f}, theme::kTextFaint, QString("Layers"));
+        for (size_t i = 0; i < layers.size(); ++i) {
+            const Layer* l = ctx_.comp().findLayer(layers[i]);
+            if (!l) continue;
+            const float y = 8 + kListRow * static_cast<float>(i + 1);
+            if (rowsWidget()->underMouse() && mouse.x() >= 8 && mouse.x() < leftWidth_ - 8 && mouse.y() >= y && mouse.y() < y + kListRow)
+                d.rectFilled({8, y}, {leftWidth_ - 8, y + kListRow}, theme::kBgHover, 4.0f);
+            const Color lc = labelColor(l->label);
+            d.rectFilled({16, y + 6}, {19, y + kListRow - 6}, ui::rgba(static_cast<int>(lc.r * 255), static_cast<int>(lc.g * 255), static_cast<int>(lc.b * 255)), 1.5f);
+            ui::drawIcon(d, ui::iconForLayer(*l), {34, y + kListRow * 0.5f}, 12, theme::kTextDim);
+            d.text({48, y + (kListRow - d.textHeight()) * 0.5f}, theme::kTextDim, l->name);
+        }
         return;
     }
     const auto animated = animatedProps(*layer);
     if (animated.empty()) {
-        hint("No animated properties: add keyframes (the diamond next to a property) to edit their curves here.");
+        empty("Nothing animated yet", "Add keyframes with the diamond beside a property in Properties: their curves show here.");
         return;
     }
     const auto hits = graphHits(); // fits the range too
@@ -285,10 +306,54 @@ void TimelinePanel::paintGraph(QPainter& p, QSize size) {
     d.popClip();
 }
 
+void TimelinePanel::paintGraphEmpty(QPainter& p, QSize size) {
+    if (graphEmpty_.first.isEmpty()) return;
+    ui::Draw d(p);
+    const float gx0 = trackX0(), gx1 = trackX0() + trackW();
+    const QFont base = p.font();
+    QFont bold = base;
+    bold.setBold(true);
+    p.setFont(bold);
+    const float titleW = d.textWidth(graphEmpty_.first), lineH = d.textHeight();
+    p.setFont(base);
+    const float textW = std::min(d.textWidth(graphEmpty_.second), gx1 - gx0 - 80.0f);
+    const float w = std::max(titleW, textW) + 40.0f, h = lineH * 2 + 70.0f;
+    const float cx = (gx0 + gx1) * 0.5f, top = std::max(16.0f, (size.height() - h) * 0.4f);
+    d.rectFilled({cx - w * 0.5f, top}, {cx + w * 0.5f, top + h}, theme::kBgRaised, theme::current().rounding + 2.0f);
+    d.rect({cx - w * 0.5f, top}, {cx + w * 0.5f, top + h}, theme::kBorder, theme::current().rounding + 2.0f);
+    ui::drawIcon(d, ui::Icon::Graph, {cx, top + 26}, 20, theme::kTextDim);
+    p.setFont(bold);
+    d.text({cx - titleW * 0.5f, top + 44}, theme::kText, graphEmpty_.first);
+    p.setFont(base);
+    const QRectF box(cx - textW * 0.5f, top + 46 + lineH, textW, lineH + 4);
+    p.setPen(ui::qcolor(theme::kTextDim));
+    p.drawText(box, Qt::AlignHCenter | Qt::AlignTop | Qt::TextSingleLine,
+               p.fontMetrics().elidedText(graphEmpty_.second, Qt::ElideRight, static_cast<int>(textW)));
+}
+
+std::vector<uint64_t> TimelinePanel::graphLayers() const {
+    // Every clip of the timeline in view (the top level or the compound opened), top to bottom.
+    std::vector<uint64_t> out;
+    const Composition& comp = ctx_.comp();
+    for (const TrackRow& row : comp.trackRows())
+        for (int i = row.first; i < row.first + row.count; ++i) {
+            const Layer& l = comp.layers[i];
+            const uint64_t owner = comp.findLayer(l.parent) ? l.parent : 0;
+            if (owner == ctx_.scope) out.push_back(l.id);
+        }
+    return out;
+}
+
 void TimelinePanel::graphPress(QMouseEvent* e) {
     Layer* layer = ctx_.selected();
-    if (!layer) return;
     const QPointF m = e->position();
+    if (!layer) { // the layer list
+        const auto layers = graphLayers();
+        const int row = static_cast<int>(std::floor((m.y() - 8) / kListRow)) - 1;
+        if (m.x() < trackX0() && e->button() == Qt::LeftButton && row >= 0 && row < static_cast<int>(layers.size())) ctx_.select(layers[row]);
+        rowsWidget()->update();
+        return;
+    }
     const bool right = e->button() == Qt::RightButton;
     // Property list: show / hide curves.
     if (m.x() < trackX0()) {
