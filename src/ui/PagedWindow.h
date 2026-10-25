@@ -8,6 +8,7 @@
 #include <vector>
 
 class QLabel;
+class QLayout;
 class QListWidget;
 class QVBoxLayout;
 class QScrollArea;
@@ -40,6 +41,28 @@ private:
     QScrollArea* area_ = nullptr;
     int current_ = -1;
 };
+
+// A group of settings: a rounded card of rows, each with a title (and a short description
+// under it) on the left and its control on the right, as in the system settings of Windows and
+// macOS. Every Settings page is made of them, so every option looks and sits the same way.
+class SettingsCard : public QWidget {
+public:
+    SettingsCard();
+    // `control` on the right (or, `below`, under the text: wide controls). Returns the row.
+    QWidget* addRow(const QString& title, const QString& description, QWidget* control, bool below = false);
+    QWidget* addContent(QWidget* content); // a row of its own, padded (grids, previews, lists)
+    QWidget* addLayout(QLayout* content);
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+
+private:
+    QVBoxLayout* col_;
+    std::vector<QWidget*> rows_;
+};
+
+// A section: its small capitals title, then its card (added to `col`).
+SettingsCard* addSection(QVBoxLayout* col, const QString& title, const QString& hint = {});
 
 // Page building helpers.
 QWidget* pageWidget(QVBoxLayout*& col);                            // a page with its column layout

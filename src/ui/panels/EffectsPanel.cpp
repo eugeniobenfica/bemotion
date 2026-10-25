@@ -216,7 +216,7 @@ void EffectsPanel::rebuildStack() {
             auto* row = new QWidget;
             auto* controls = new QHBoxLayout(row);
             controls->setContentsMargins(0, 0, 0, 0);
-            auto* enabled = new QCheckBox;
+            auto* enabled = new ui::Switch;
             enabled->setChecked(effect.enabled);
             controls->addWidget(enabled);
             controls->addWidget(new QLabel(audioEffectLabel(effect.type)), 1);
@@ -229,7 +229,7 @@ void EffectsPanel::rebuildStack() {
             controls->addWidget(value);
             auto* remove = new ui::IconButton(ui::Icon::Trash, "Remove audio effect", 24);
             controls->addWidget(remove);
-            connect(enabled, &QCheckBox::toggled, this, [this, id, i](bool on) {
+            connect(enabled, &QAbstractButton::toggled, this, [this, id, i](bool on) {
                 if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size())) l->audioEffects[i].enabled = on, ctx_.touch();
             });
             connect(value, &ui::DragValue::valueChanged, this, [this, id, i](float v) {
@@ -261,8 +261,8 @@ void EffectsPanel::rebuildStack() {
         auto* tools = new QHBoxLayout(extra);
         tools->setContentsMargins(0, 0, 0, 0);
         tools->setSpacing(2);
-        auto* on = new QCheckBox;
-        connect(on, &QCheckBox::toggled, this, [this, id, i](bool v) {
+        auto* on = new ui::Switch;
+        connect(on, &QAbstractButton::toggled, this, [this, id, i](bool v) {
             if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size()) && l->effects[i].enabled != v) {
                 l->effects[i].enabled = v;
                 ctx_.touch();

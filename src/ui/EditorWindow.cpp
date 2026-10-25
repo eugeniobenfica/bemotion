@@ -836,7 +836,7 @@ void EditorWindow::buildMenus() {
     view->addAction(action(Action::ZoomIn, "Zoom In", [this] { viewport_->zoomBy(1.25f); }));
     view->addAction(action(Action::ZoomOut, "Zoom Out", [this] { viewport_->zoomBy(1.0f / 1.25f); }));
     view->addAction(action(Action::FullScreenPreview, "Full Screen Preview", [this] { openPreview(); }));
-    view->addAction(action(Action::ViewportFullscreen, "Viewport Fullscreen", [this] { toggleViewportFullscreen(); }));
+    view->addAction(action(Action::ViewportFullscreen, "Maximize Viewport", [this] { toggleViewportFullscreen(); }));
     view->addSeparator();
     QAction* snap = action(Action::ToggleSnapping, "Snapping", [this] { ctx_.snapping = !ctx_.snapping; });
     snap->setCheckable(true);
@@ -873,7 +873,7 @@ void EditorWindow::buildMenus() {
     view->addSeparator();
     QMenu* panels = view->addMenu("Panels");
     view->addAction("Tools...", this, [this] { showTools(); });
-    for (const char* name : {"Objects", "Media", "Properties", "Effects", "Transitions", "Animate", "Timeline"})
+    for (const char* name : {"Objects", "Media", "Animate", "Properties", "Effects", "Transitions", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction("Reset Layout", this, [this] { resetLayout(); });
     view->addSeparator();

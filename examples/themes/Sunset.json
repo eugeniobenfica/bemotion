@@ -2,6 +2,8 @@
   "name": "Sunset",
   "light": false,
   "rounding": 7,
+  "border_width": 1,
+  "control_height": 30,
   "colors": {
     "background": "#1A1016",
     "panel": "#22151D",
@@ -15,6 +17,9 @@
     "danger": "#FF4D6D",
     "snap": "#FFD166",
     "guide": "#7BDFF2C8",
-    "canvas": "#2A1A23"
+    "canvas": "#2A1A23",
+    "field": "#170D13",
+    "button": "#3A2430",
+    "playhead": "#FFD166"
   }
 }

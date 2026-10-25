@@ -1150,8 +1150,8 @@ void TimelinePanel::paintRuler(QPainter& p, int width) {
     // Playhead handle.
     const float ph = timeToX(ctx_.time);
     const Pt head[5] = {{ph - 6, 3}, {ph + 6, 3}, {ph + 6, 14}, {ph, 20}, {ph - 6, 14}};
-    d.polyFilled(head, 5, theme::kAccent);
-    d.line({ph, 18}, {ph, h}, theme::kAccent, 1.5f);
+    d.polyFilled(head, 5, theme::kPlayhead);
+    d.line({ph, 18}, {ph, h}, theme::kPlayhead, 1.5f);
     d.popClip();
 }
 
@@ -1184,7 +1184,7 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
     const float endX = timeToX(visibleEnd());
     if (endX < x1 && (!ctx_.comp().layers.empty() || hasRecordingPreview())) d.rectFilled({endX, 0}, {x1, bottom}, theme::shade(80));
     const float ph = timeToX(ctx_.time);
-    d.line({ph, 0}, {ph, bottom}, theme::kAccent, 1.5f);
+    d.line({ph, 0}, {ph, bottom}, theme::kPlayhead, 1.5f);
     if (snapLineTime_ >= 0.0) { // what the dragged item snapped to
         const float sx = timeToX(snapLineTime_);
         d.line({sx, 0}, {sx, bottom}, theme::kSnap, 1.0f);
@@ -1426,15 +1426,16 @@ void TimelinePanel::paintPropKeys(QPainter& p, const Item& item, float width) {
     d.rectFilled({timeToX(layer->outPoint), y}, {x1, y + h}, theme::shade(70));
     for (int k = 0; k + 1 < anim.keyCount(); ++k) {
         const float xa = timeToX(anim.keyTime(k)), xb = timeToX(anim.keyTime(k + 1));
-        d.line({xa, cy}, {xb, cy}, anim.keyEasing(k) == Easing::Hold ? theme::ink(25) : theme::accent(70), 1.5f);
+        d.line({xa, cy}, {xb, cy}, anim.keyEasing(k) == Easing::Hold ? theme::ink(25) : theme::withAlpha(theme::kKeyframe, 70), 1.5f);
     }
     for (int k = 0; k < anim.keyCount(); ++k) {
         const bool sel = ctx_.isKeySelected({layer->id, item.prop, anim.keyUid(k)});
         const float kx = timeToX(anim.keyTime(k));
         const bool hot = hoverX_ >= 0 && std::fabs(hoverX_ - kx) <= keyRadius() + 2 && rows_->underMouse() &&
                          rows_->mapFromGlobal(QCursor::pos()).y() >= y && rows_->mapFromGlobal(QCursor::pos()).y() < y + h;
-        const Rgba fill = sel ? theme::kAccent : (hot ? theme::kText : theme::kTextDim);
-        drawKeyGlyph(d, {kx, cy}, keyRadius() + (sel ? 1.0f : 0.0f), anim.keyEasing(k), fill, sel ? theme::kAccentHover : theme::kBgDeep);
+        const Rgba fill = sel ? theme::kKeyframe : (hot ? theme::kText : theme::kTextDim);
+        drawKeyGlyph(d, {kx, cy}, keyRadius() + (sel ? 1.0f : 0.0f), anim.keyEasing(k), fill,
+                     sel ? theme::mix(theme::kKeyframe, ui::rgba(255, 255, 255), 0.18f) : theme::kBgDeep);
     }
     d.popClip();
 }

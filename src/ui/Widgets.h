@@ -12,6 +12,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QToolButton>
+#include <QStringList>
 #include <QWidget>
 
 #include <functional>
@@ -116,6 +117,9 @@ enum class Icon {
     Fade,      // squares fading out
     Expression, // an italic f: a property's expression
     Crop,       // two crossing corners
+    Keyboard,   // Settings › Shortcuts
+    Edit,       // a pencil: Settings › Editor
+    Help,       // a question mark in a circle
 };
 
 Icon iconForLayer(const Layer& layer);
@@ -271,6 +275,25 @@ private:
     float pressValue_ = 0.0f;
     QLineEdit* edit_ = nullptr;
 };
+
+// An on / off switch, for settings that apply at once (a check box is for choices confirmed
+// later, in a form). Checkable: `toggled` says when it flips.
+class Switch : public QAbstractButton {
+    Q_OBJECT
+public:
+    explicit Switch(QWidget* parent = nullptr);
+    QSize sizeHint() const override { return {38, 22}; }
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+};
+
+// A row of buttons of which one is chosen (Size: Full / Half / Quarter...). `changed` gets the
+// index. Disabled choices (`enabled` false) stay visible.
+QWidget* segmented(const QStringList& choices, int current, std::function<void(int)> changed,
+                   const std::vector<bool>& enabled = {});
 
 // A color swatch; clicking opens a color picker that edits live.
 class ColorButton : public QAbstractButton {

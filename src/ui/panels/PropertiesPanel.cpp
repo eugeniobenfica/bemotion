@@ -449,9 +449,9 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                 return l ? l->plugin.find(pid) : nullptr;
             };
             if (q.kind == PluginParamKind::Toggle) {
-                auto* cb = new QCheckBox;
+                auto* cb = new ui::Switch;
                 cb->setChecked(q.toggle);
-                connect(cb, &QCheckBox::toggled, this, [this, param](bool on) {
+                connect(cb, &QAbstractButton::toggled, this, [this, param](bool on) {
                     if (PluginParam* pp = param()) {
                         pp->toggle = on;
                         ctx_.touch();
@@ -506,9 +506,9 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             col->addWidget(section);
             if (group == "Transform" && layer.type != LayerType::Camera && layer.type != LayerType::Background && !layer.parent) {
                 // A 3D layer gets a Z position: the camera sees it in perspective (parallax).
-                auto* on = new QCheckBox;
+                auto* on = new ui::Switch;
                 on->setToolTip("Seen in perspective by the camera at its Z position: nearer layers look bigger and move faster");
-                connect(on, &QCheckBox::toggled, this, [this](bool v) {
+                connect(on, &QAbstractButton::toggled, this, [this](bool v) {
                     for (Layer* l : ctx_.selectedLayers())
                         if (l->type != LayerType::Camera && l->type != LayerType::Background && !l->parent) l->threeD = v;
                     ctx_.touch(); // the Z Position row comes and goes (the panel rebuilds)
@@ -531,8 +531,8 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                     };
                     switch (p.kind) {
                     case PluginParamKind::Toggle: {
-                        auto* cb = new QCheckBox;
-                        connect(cb, &QCheckBox::toggled, this, [this, param](bool on) {
+                        auto* cb = new ui::Switch;
+                        connect(cb, &QAbstractButton::toggled, this, [this, param](bool on) {
                             if (PluginParam* pp = param(); pp && pp->toggle != on) {
                                 pp->toggle = on;
                                 ctx_.touch();
@@ -613,8 +613,8 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                 section->addPlainRow("Type", kind);
             } else if ((group == "Outline" || group == "Box") && layer.type == LayerType::Text) {
                 const bool outline = group == "Outline";
-                auto* on = new QCheckBox;
-                connect(on, &QCheckBox::toggled, this, [this, outline](bool v) {
+                auto* on = new ui::Switch;
+                connect(on, &QAbstractButton::toggled, this, [this, outline](bool v) {
                     for (Layer* l : ctx_.selectedLayers())
                         if (l->type == LayerType::Text) (outline ? l->text.outlineEnabled : l->text.boxEnabled) = v;
                     ctx_.touch();
@@ -628,8 +628,8 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                 });
             } else if (group == "Fill" || group == "Stroke") {
                 const bool fill = group == "Fill";
-                auto* on = new QCheckBox;
-                connect(on, &QCheckBox::toggled, this, [this, id, fill](bool v) {
+                auto* on = new ui::Switch;
+                connect(on, &QAbstractButton::toggled, this, [this, id, fill](bool v) {
                     if (Layer* l = ctx_.comp().findLayer(id)) {
                         (fill ? l->shape.fillEnabled : l->shape.strokeEnabled) = v;
                         ctx_.touch();

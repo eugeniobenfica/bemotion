@@ -4,14 +4,16 @@
 #include "app/Settings.h"
 #include "media/Transcriber.h"
 #include "ui/EditorContext.h"
+#include "ui/PagedWindow.h"
 #include "ui/Widgets.h"
 
 #include <QComboBox>
 #include <QDialog>
-#include <QDialogButtonBox>
 #include <QLabel>
 #include <QMessageBox>
-#include <QProgressDialog>
+#include <QElapsedTimer>
+#include <QProgressBar>
+#include <QStackedWidget>
 #include <QPushButton>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -70,102 +72,160 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
         return;
     }
 
-    // The language: detected, or said (more accurate when known). Remembered.
-    QDialog ask(parent);
-    ask.setWindowTitle("Transcribe Speech");
-    auto* col = new QVBoxLayout(&ask);
-    auto* about = new QLabel(QString("The words spoken in \"%1\" become subtitles, at their time. It runs on this computer.")
+    // One window, two steps: the language (detected, or said: more accurate), then the progress.
+    // It does not block the editor: the captions land when it is done.
+    auto* dialog = new QDialog(parent);
+    dialog->setWindowTitle("Transcribe Speech");
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setMinimumWidth(440);
+    auto* col = new QVBoxLayout(dialog);
+    col->setContentsMargins(24, 20, 24, 18);
+    col->setSpacing(8);
+    auto* title = pageTitle("Subtitles from speech");
+    col->addWidget(title);
+    auto* about = new QLabel(QString("The words spoken in \"%1\" become captions, each at its time. It all runs on this "
+                                     "computer: nothing is sent anywhere.")
                                  .arg(QString::fromStdString(clip->name)));
     about->setWordWrap(true);
+    setTone(about, Tone::TextDim);
     col->addWidget(about);
+    col->addSpacing(6);
+
+    auto* pages = new QStackedWidget;
+    col->addWidget(pages);
+    // Step 1: the language.
+    auto* setup = new QWidget;
+    auto* setupCol = new QVBoxLayout(setup);
+    setupCol->setContentsMargins(0, 0, 0, 0);
+    auto* card = new SettingsCard;
     auto* language = new QComboBox;
     for (const auto& [code, name] : kLanguages) language->addItem(QString::fromUtf8(name), QString(code));
     language->setCurrentIndex(std::max(0, language->findData(QString::fromStdString(settings().speechLanguage))));
-    col->addWidget(new QLabel("Language"));
-    col->addWidget(language);
-    auto* buttons = new QDialogButtonBox;
-    QPushButton* go = buttons->addButton("Transcribe", QDialogButtonBox::AcceptRole);
-    go->setProperty("accent", true);
-    buttons->addButton(QDialogButtonBox::Cancel);
-    QObject::connect(buttons, &QDialogButtonBox::accepted, &ask, &QDialog::accept);
-    QObject::connect(buttons, &QDialogButtonBox::rejected, &ask, &QDialog::reject);
-    col->addWidget(buttons);
-    ask.setMinimumWidth(380);
-    if (ask.exec() != QDialog::Accepted) return;
-    options.language = language->currentData().toString().toStdString();
-    settings().speechLanguage = options.language;
-    saveSettings();
+    language->setMinimumWidth(190);
+    card->addRow("Language", "Choosing it is more accurate than detecting it", language);
+    setupCol->addWidget(card);
+    pages->addWidget(setup);
+    // Step 2: what it is doing, how far, how long.
+    auto* progress = new QWidget;
+    auto* progressCol = new QVBoxLayout(progress);
+    progressCol->setContentsMargins(0, 4, 0, 0);
+    progressCol->setSpacing(8);
+    auto* stage = new QLabel("Loading the speech model...");
+    progressCol->addWidget(stage);
+    auto* bar = new QProgressBar;
+    bar->setRange(0, 1000);
+    bar->setTextVisible(false);
+    bar->setFixedHeight(8);
+    progressCol->addWidget(bar);
+    auto* timing = new QLabel(" ");
+    setTone(timing, Tone::TextFaint);
+    progressCol->addWidget(timing);
+    auto* note = new QLabel("You can keep editing meanwhile.");
+    setTone(note, Tone::TextFaint);
+    progressCol->addWidget(note);
+    pages->addWidget(progress);
 
+    col->addSpacing(10);
+    auto* buttons = new QHBoxLayout;
+    buttons->addStretch();
+    auto* cancel = new QPushButton("Cancel");
+    cancel->setMinimumWidth(100);
+    auto* go = accentButton("Transcribe");
+    go->setMinimumWidth(120);
+    go->setDefault(true);
+    buttons->addWidget(cancel);
+    buttons->addWidget(go);
+    col->addLayout(buttons);
+
+    auto job = std::make_shared<Job>();
+    auto started = std::make_shared<QElapsedTimer>();
+    QObject::connect(cancel, &QPushButton::clicked, dialog, [dialog, job] {
+        job->stop = true; // (nothing to stop before it starts)
+        dialog->close();
+    });
+    QObject::connect(dialog, &QDialog::rejected, dialog, [job] { job->stop = true; });
     // The part of the source the clip plays, and where it sits in the composition.
     const double sourceIn = std::max(0.0, clip->inPoint - clip->media.start), sourceOut = clip->outPoint - clip->media.start;
     const double offset = clip->media.start, clipIn = clip->inPoint, clipOut = clip->outPoint;
     const std::filesystem::path file = platform::fromUtf8(item->path);
 
-    auto job = std::make_shared<Job>();
-    std::thread([job, file, sourceIn, sourceOut, options] {
-        std::vector<Caption> caps;
-        std::string error;
-        const bool ok = media::transcribe(file, sourceIn, sourceOut, options, caps,
-                                          [job](float f) {
-                                              job->progress = f;
-                                              return !job->stop.load();
-                                          },
-                                          &error);
-        std::lock_guard lock(job->mutex);
-        job->ok = ok;
-        job->error = error;
-        job->captions = std::move(caps);
-        job->done = true;
-    }).detach();
+    QObject::connect(go, &QPushButton::clicked, dialog, [=, &ctx]() mutable {
+        options.language = language->currentData().toString().toStdString();
+        settings().speechLanguage = options.language;
+        saveSettings();
+        pages->setCurrentIndex(1);
+        go->hide();
+        cancel->setText("Stop");
+        started->start();
+        std::thread([job, file, sourceIn, sourceOut, options] {
+            std::vector<Caption> caps;
+            std::string error;
+            const bool ok = media::transcribe(file, sourceIn, sourceOut, options, caps,
+                                              [job](float f) {
+                                                  job->progress = f;
+                                                  return !job->stop.load();
+                                              },
+                                              &error);
+            std::lock_guard lock(job->mutex);
+            job->ok = ok;
+            job->error = error;
+            job->captions = std::move(caps);
+            job->done = true;
+        }).detach();
 
-    auto* wait = new QProgressDialog("Listening...", "Stop", 0, 100, parent);
-    wait->setWindowTitle("Transcribe Speech");
-    wait->setWindowModality(Qt::WindowModal);
-    wait->setMinimumDuration(0);
-    wait->setAttribute(Qt::WA_DeleteOnClose);
-    QObject::connect(wait, &QProgressDialog::canceled, wait, [job] { job->stop = true; });
-    auto* timer = new QTimer(wait);
-    QObject::connect(timer, &QTimer::timeout, wait, [&ctx, job, wait, timer, subtitlesId, offset, clipIn, clipOut, parent] {
-        if (!job->done) {
-            const int pct = static_cast<int>(job->progress * 100.0f);
-            wait->setValue(std::min(pct, 99));
-            wait->setLabelText(pct <= 0 ? "Loading the speech model..." : "Listening...");
-            return;
-        }
-        timer->stop();
-        std::lock_guard lock(job->mutex);
-        const bool stopped = job->stop;
-        QObject::disconnect(wait, &QProgressDialog::canceled, nullptr, nullptr); // closing it says "canceled" too
-        wait->close();
-        if (stopped) return;
-        if (!job->ok) {
-            QMessageBox::warning(parent, "Transcribe Speech", QString::fromStdString(job->error));
-            return;
-        }
-        // Source time -> composition time, inside the clip.
-        std::vector<Caption> caps;
-        for (Caption c : job->captions) {
-            c.start = std::max(clipIn, c.start + offset);
-            c.end = std::min(clipOut, c.end + offset);
-            if (c.end > c.start) caps.push_back(std::move(c));
-        }
-        if (caps.empty()) {
-            QMessageBox::information(parent, "Transcribe Speech", "No speech was heard in this clip.");
-            return;
-        }
-        Layer* target = subtitlesId ? ctx.comp().findLayer(subtitlesId) : nullptr;
-        if (!target || target->type != LayerType::Text || !target->text.subtitle) target = &ctx.addSubtitles();
-        // The layer lasts at least as long as its captions.
-        const uint64_t id = target->id;
-        const double first = caps.front().start, last = caps.back().end;
-        target->text.captions = std::move(caps);
-        if (target->outPoint < last) ctx.comp().setOutPoint(id, last);
-        if (Layer* l = ctx.comp().findLayer(id); l && l->inPoint > first) ctx.comp().setInPoint(id, first);
-        ctx.select(id);
-        ctx.touch();
+        auto* timer = new QTimer(dialog);
+        QObject::connect(timer, &QTimer::timeout, dialog, [&ctx, job, dialog, timer, stage, bar, timing, started, subtitlesId, offset,
+                                                           clipIn, clipOut, parent] {
+            if (!job->done) {
+                const float f = job->progress;
+                bar->setValue(std::min(990, static_cast<int>(f * 1000.0f)));
+                stage->setText(f <= 0.0f ? "Loading the speech model..." : QString("Listening...  %1%").arg(static_cast<int>(f * 100.0f)));
+                const double elapsed = started->elapsed() / 1000.0;
+                auto clock = [](double sec) {
+                    const int t = static_cast<int>(std::lround(std::max(0.0, sec)));
+                    return QString("%1:%2").arg(t / 60).arg(t % 60, 2, 10, QChar('0'));
+                };
+                timing->setText(f > 0.02f ? QString("%1 elapsed  ·  about %2 left").arg(clock(elapsed)).arg(clock(elapsed / f * (1.0f - f)))
+                                          : QString("%1 elapsed").arg(clock(elapsed)));
+                return;
+            }
+            timer->stop();
+            std::lock_guard lock(job->mutex);
+            const bool stopped = job->stop;
+            if (stopped) return;
+            dialog->hide();
+            if (!job->ok) {
+                QMessageBox::warning(parent, "Transcribe Speech", QString::fromStdString(job->error));
+                dialog->close();
+                return;
+            }
+            // Source time -> composition time, inside the clip.
+            std::vector<Caption> caps;
+            for (Caption c : job->captions) {
+                c.start = std::max(clipIn, c.start + offset);
+                c.end = std::min(clipOut, c.end + offset);
+                if (c.end > c.start) caps.push_back(std::move(c));
+            }
+            if (caps.empty()) {
+                QMessageBox::information(parent, "Transcribe Speech", "No speech was heard in this clip.");
+                dialog->close();
+                return;
+            }
+            Layer* target = subtitlesId ? ctx.comp().findLayer(subtitlesId) : nullptr;
+            if (!target || target->type != LayerType::Text || !target->text.subtitle) target = &ctx.addSubtitles();
+            // The layer lasts at least as long as its captions.
+            const uint64_t id = target->id;
+            const double first = caps.front().start, last = caps.back().end;
+            target->text.captions = std::move(caps);
+            if (target->outPoint < last) ctx.comp().setOutPoint(id, last);
+            if (Layer* l = ctx.comp().findLayer(id); l && l->inPoint > first) ctx.comp().setInPoint(id, first);
+            ctx.select(id);
+            ctx.touch();
+            dialog->close();
+        });
+        timer->start(100);
     });
-    timer->start(100);
-    wait->show();
+    dialog->show();
 }
 
 } // namespace bemotion::ui

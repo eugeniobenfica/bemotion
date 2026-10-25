@@ -13,7 +13,8 @@ using ui::Rgba;
 using ui::rgba;
 
 // A complete UI color scheme. Themes are plain JSON (see paletteToJson), so
-// users can share and import them.
+// users can share and import them. The colors after `canvas` are optional: 0 means "worked
+// out from the others" (older themes have none of them), so a theme sets only what it wants.
 struct Palette {
     std::string name = "Dark";
     bool light = false;
@@ -30,7 +31,23 @@ struct Palette {
     Rgba snap = rgba(255, 79, 163);   // smart-guide lines
     Rgba guide = rgba(64, 196, 255, 200); // ruler guides
     Rgba canvas = rgba(30, 30, 34);   // around the composition frame
-    float rounding = 5.0f;            // frames and buttons (others derive from it)
+    // Optional roles (0: derived).
+    Rgba header = 0;       // the menu bar and the panels' tab bars
+    Rgba field = 0;        // text fields, number fields, drop-downs: where you type or pick
+    Rgba fieldBorder = 0;
+    Rgba button = 0;       // push buttons: what you press
+    Rgba buttonBorder = 0;
+    Rgba focus = 0;        // the outline of the focused field
+    Rgba selection = 0;    // selected items and text
+    Rgba menu = 0;         // menus, drop-down lists, tooltips
+    Rgba onAccent = 0;     // text on accent-colored buttons
+    Rgba success = 0;
+    Rgba warning = 0;
+    Rgba playhead = 0;
+    Rgba keyframe = 0;
+    float rounding = 5.0f;     // frames and buttons (others derive from it)
+    float borderWidth = 1.0f;  // fields' and buttons' outlines (0 to 2 px)
+    float controlHeight = 28.0f; // buttons, fields and drop-downs in dialogs and Settings
 };
 
 Palette darkPalette();
@@ -48,6 +65,8 @@ inline Rgba kBgDeep, kBgPanel, kBgRaised, kBgHover, kBorder;
 inline Rgba kText, kTextDim, kTextFaint;
 inline Rgba kAccent, kAccentHover, kAccentActive, kAccentSoft, kOnAccent;
 inline Rgba kDanger, kSnap, kGuide, kCanvas;
+inline Rgba kHeader, kField, kFieldBorder, kButton, kButtonBorder, kFocus, kSelection, kMenu;
+inline Rgba kSuccess, kWarning, kPlayhead, kKeyframe;
 
 inline QColor q(Rgba c) { return ui::qcolor(c); }
 Rgba withAlpha(Rgba c, int alpha);
@@ -57,6 +76,8 @@ Rgba ink(int alpha);    // overlay strokes: white on dark themes, black on light
 Rgba shade(int alpha);  // darkening overlays, softened on light themes
 
 const Palette& current();
+// The palette with every optional role worked out (what is on screen).
+Palette resolved(const Palette& palette);
 
 // Colors and rounding for the whole application (Qt palette and style sheet).
 void apply(const Palette& palette);

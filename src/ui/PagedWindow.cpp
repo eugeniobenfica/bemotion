@@ -8,6 +8,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QListWidget>
+#include <QPainter>
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QVBoxLayout>
@@ -79,10 +80,96 @@ void PagedWindow::keyPressEvent(QKeyEvent* e) {
 QWidget* pageWidget(QVBoxLayout*& col) {
     auto* w = new QWidget;
     col = new QVBoxLayout(w);
-    col->setContentsMargins(4, 4, 12, 16);
+    col->setContentsMargins(8, 4, 16, 20);
     col->setSpacing(6);
     col->setAlignment(Qt::AlignTop);
     return w;
+}
+
+// --- SettingsCard ----------------------------------------------------------------------------
+
+SettingsCard::SettingsCard() {
+    col_ = new QVBoxLayout(this);
+    col_->setContentsMargins(0, 0, 0, 0);
+    col_->setSpacing(0);
+}
+
+QWidget* SettingsCard::addRow(const QString& title, const QString& description, QWidget* control, bool below) {
+    auto* row = new QWidget;
+    auto* text = new QVBoxLayout;
+    text->setSpacing(2);
+    auto* t = new QLabel(title);
+    t->setWordWrap(true);
+    text->addWidget(t);
+    if (!description.isEmpty()) {
+        auto* d = new QLabel(description);
+        d->setWordWrap(true);
+        QFont f = d->font();
+        f.setPointSizeF(f.pointSizeF() * 0.92);
+        d->setFont(f);
+        setTone(d, Tone::TextFaint);
+        text->addWidget(d);
+    }
+    if (below) {
+        auto* col = new QVBoxLayout(row);
+        col->setContentsMargins(16, 12, 16, 12);
+        col->setSpacing(8);
+        col->addLayout(text);
+        if (control) col->addWidget(control);
+    } else {
+        auto* h = new QHBoxLayout(row);
+        h->setContentsMargins(16, 10, 16, 10);
+        h->setSpacing(16);
+        h->addLayout(text, 1);
+        if (control) h->addWidget(control, 0, Qt::AlignVCenter | Qt::AlignRight);
+    }
+    row->setMinimumHeight(48);
+    rows_.push_back(row);
+    col_->addWidget(row);
+    return row;
+}
+
+QWidget* SettingsCard::addContent(QWidget* content) {
+    auto* row = new QWidget;
+    auto* h = new QVBoxLayout(row);
+    h->setContentsMargins(16, 12, 16, 12);
+    h->addWidget(content);
+    rows_.push_back(row);
+    col_->addWidget(row);
+    return row;
+}
+
+QWidget* SettingsCard::addLayout(QLayout* content) {
+    auto* row = new QWidget;
+    auto* h = new QVBoxLayout(row);
+    h->setContentsMargins(16, 12, 16, 12);
+    h->addLayout(content);
+    rows_.push_back(row);
+    col_->addWidget(row);
+    return row;
+}
+
+void SettingsCard::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    Draw d(p);
+    const float r = theme::current().rounding + 3.0f;
+    d.rectFilled(Pt(0, 0), Pt(width(), height()), theme::kBgRaised, r);
+    // Thin lines between the visible rows.
+    bool first = true;
+    for (QWidget* row : rows_) {
+        if (!row->isVisible()) continue;
+        if (!first) d.line(Pt(16, row->y() + 0.5f), Pt(width() - 16, row->y() + 0.5f), theme::kBorder, 1.0f);
+        first = false;
+    }
+}
+
+SettingsCard* addSection(QVBoxLayout* col, const QString& title, const QString& hint) {
+    if (col->count() > 1) col->addSpacing(10);
+    if (!title.isEmpty()) col->addWidget(sectionLabel(title));
+    if (!hint.isEmpty()) col->addWidget(hintLabel(hint));
+    auto* card = new SettingsCard;
+    col->addWidget(card);
+    return card;
 }
 
 QLabel* pageTitle(const QString& text) {
@@ -102,6 +189,12 @@ QLabel* paragraph(const QString& text, Rgba color) {
     return l;
 }
 
-QLabel* hintLabel(const QString& text) { return paragraph(text, theme::kTextFaint); }
+QLabel* hintLabel(const QString& text) {
+    auto* l = new QLabel(text);
+    l->setWordWrap(true);
+    l->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    setTone(l, Tone::TextFaint); // follows the theme (a baked color would not)
+    return l;
+}
 
 } // namespace bemotion::ui

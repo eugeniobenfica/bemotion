@@ -62,7 +62,7 @@ constexpr ActionInfo kActions[] = {
     {"zoom_in", "Zoom In", "View", Ctrl | Qt::Key_Equal},
     {"zoom_out", "Zoom Out", "View", Ctrl | Qt::Key_Minus},
     {"full_screen", "Full Screen", "View", Chord(Qt::Key_F11)},
-    {"viewport_fullscreen", "Viewport Fullscreen", "View", Ctrl | Qt::Key_F11},
+    {"viewport_fullscreen", "Maximize Viewport", "View", Ctrl | Qt::Key_F11},
     {"full_screen_preview", "Full Screen Preview", "View", Ctrl | Shift | Qt::Key_F},
 };
 static_assert(std::size(kActions) == static_cast<size_t>(Action::Count));

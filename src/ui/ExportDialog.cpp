@@ -9,6 +9,7 @@
 #include "media/AudioEngine.h"
 #include "media/MediaManager.h"
 #include "ui/EditorContext.h"
+#include "ui/PagedWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -19,6 +20,8 @@
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QGridLayout>
+#include <QPainter>
 #include <QLineEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -45,7 +48,61 @@ struct ScaleOption {
     float scale;
 };
 constexpr ScaleOption kScales[] = {{"Full size", 1.0f}, {"Half size", 0.5f}, {"Quarter size", 0.25f}, {"Double (2x)", 2.0f}};
-constexpr const char* kQualities[] = {"Low (smaller file)", "Medium", "High"};
+constexpr const char* kQualities[] = {"Smaller file", "Balanced", "Best"};
+
+// The formats as tiles, in the order people reach for them: what it is, what it is for.
+struct FormatChoice {
+    int index; // an exporting::Format, or Format::Count for the project package
+    const char* title;
+    const char* use;
+    Icon icon;
+};
+constexpr FormatChoice kFormatChoices[] = {
+    {static_cast<int>(exporting::Format::Mp4), "MP4", "Plays everywhere", Icon::Film},
+    {static_cast<int>(exporting::Format::WebM), "WebM", "Web, transparent", Icon::Film},
+    {static_cast<int>(exporting::Format::MovProRes), "ProRes MOV", "Editing, transparent", Icon::Film},
+    {static_cast<int>(exporting::Format::Gif), "GIF", "Loops, no sound", Icon::Loop},
+    {static_cast<int>(exporting::Format::PngSequence), "PNG Sequence", "An image per frame", Icon::Image},
+    {static_cast<int>(exporting::Format::Count), "Project Package", "Project and files", Icon::Folder},
+};
+
+// One format: its icon, name and use; outlined in the accent when chosen.
+class FormatTile : public QAbstractButton {
+public:
+    FormatTile(const FormatChoice& c, bool available) : choice_(c), available_(available) {
+        setCheckable(true);
+        setEnabled(available);
+        setCursor(Qt::PointingHandCursor);
+        setFixedHeight(58);
+        setMinimumWidth(150);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        if (!available) setToolTip("Not in this build of FFmpeg");
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        Draw d(p);
+        const float w = static_cast<float>(width()), h = static_cast<float>(height()), r = theme::current().rounding + 3.0f;
+        const bool on = isChecked(), hot = underMouse() && isEnabled();
+        d.rectFilled(Pt(0.5f, 0.5f), Pt(w - 0.5f, h - 0.5f), on ? theme::accent(34) : hot ? theme::kBgHover : theme::kBgRaised, r);
+        d.rect(Pt(0.5f, 0.5f), Pt(w - 0.5f, h - 0.5f), on ? theme::kAccent : theme::kBorder, r, on ? 1.6f : 1.0f);
+        const Rgba ink = !available_ ? theme::kTextFaint : on ? theme::kAccent : theme::kTextDim;
+        drawIcon(d, choice_.icon, Pt(24, h * 0.5f), 20, ink);
+        QFont bold = font();
+        bold.setWeight(QFont::DemiBold);
+        p.setFont(bold);
+        d.text(Pt(46, h * 0.5f - d.textHeight() + 1), available_ ? theme::kText : theme::kTextFaint, QString(choice_.title));
+        p.setFont(font());
+        d.text(Pt(46, h * 0.5f + 2), theme::kTextFaint, QString(available_ ? choice_.use : "Not available"));
+    }
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+
+private:
+    FormatChoice choice_;
+    bool available_;
+};
 
 std::string formatDuration(double seconds) {
     const int s = static_cast<int>(std::lround(std::max(0.0, seconds)));
@@ -54,10 +111,10 @@ std::string formatDuration(double seconds) {
     return buf;
 }
 
-QLabel* colored(const QString& text, Rgba color) {
+QLabel* colored(const QString& text, Tone tone) {
     auto* l = new QLabel(text);
     l->setWordWrap(true);
-    l->setStyleSheet(QString("color: %1;").arg(theme::q(color).name()));
+    setTone(l, tone); // follows the theme
     return l;
 }
 
@@ -78,7 +135,7 @@ class ExportDialog : public QDialog {
 public:
     ExportDialog(EditorContext& ctx, QWidget* parent) : QDialog(parent), ctx_(ctx) {
         setWindowTitle("Export");
-        setMinimumWidth(560);
+        setMinimumWidth(620);
         Remembered& r = remembered();
         exporting::Settings& s = r.settings;
         const Composition& comp = ctx.comp();
@@ -130,24 +187,41 @@ private:
     QWidget* buildSettings() {
         using namespace exporting;
         Remembered& r = remembered();
+        const Composition& comp = ctx_.comp();
         auto* page = new QWidget;
         auto* col = new QVBoxLayout(page);
         col->setContentsMargins(0, 0, 0, 0);
-        form_ = new QFormLayout;
-        auto* form = form_;
-        form->setHorizontalSpacing(16);
-        form->setVerticalSpacing(8);
+        col->setSpacing(6);
 
-        format_ = new QComboBox;
-        for (int i = 0; i < static_cast<int>(Format::Count); ++i) {
-            const auto f = static_cast<Format>(i);
-            format_->addItem(QString(formatLabel(f)) + (formatAvailable(f) ? "" : "  (not in this FFmpeg build)"));
-            if (!formatAvailable(f))
-                if (auto* model = qobject_cast<QStandardItemModel*>(format_->model())) model->item(i)->setEnabled(false);
+        // What is exported: the composition, its size, rate and length.
+        auto* title = pageTitle("Export");
+        col->addWidget(title);
+        auto* about = new QLabel(QString("%1  ·  %2 × %3  ·  %4 fps  ·  %5")
+                                     .arg(QString::fromStdString(ctx_.project.name))
+                                     .arg(comp.width)
+                                     .arg(comp.height)
+                                     .arg(comp.fps, 0, 'g', 4)
+                                     .arg(QString::fromStdString(formatDuration(comp.duration))));
+        setTone(about, Tone::TextDim);
+        col->addWidget(about);
+
+        col->addSpacing(8);
+        col->addWidget(sectionLabel("Format"));
+        auto* tiles = new QGridLayout;
+        tiles->setSpacing(8);
+        auto* group = new QButtonGroup(page);
+        const int chosen = r.package ? static_cast<int>(Format::Count) : static_cast<int>(r.settings.format);
+        int n = 0;
+        for (const FormatChoice& c : kFormatChoices) {
+            const bool available = c.index == static_cast<int>(Format::Count) || formatAvailable(static_cast<Format>(c.index));
+            auto* tile = new FormatTile(c, available);
+            tile->setChecked(c.index == chosen);
+            group->addButton(tile, c.index);
+            tiles->addWidget(tile, n / 3, n % 3);
+            ++n;
         }
-        format_->addItem("Project package (.zip)");
-        format_->setCurrentIndex(r.package ? static_cast<int>(Format::Count) : static_cast<int>(r.settings.format));
-        connect(format_, &QComboBox::currentIndexChanged, this, [this](int i) {
+        col->addLayout(tiles);
+        connect(group, &QButtonGroup::idClicked, this, [this](int i) {
             Remembered& r = remembered();
             exporting::Settings& s = r.settings;
             r.package = i == static_cast<int>(Format::Count);
@@ -157,49 +231,46 @@ private:
             if (!r.package && !formatSupportsAlpha(s.format)) s.transparent = false;
             refreshSettings();
         });
-        form->addRow("Format", format_);
 
-        scale_ = new QComboBox;
-        for (const ScaleOption& o : kScales) scale_->addItem(o.label);
-        scale_->setCurrentIndex(r.scaleIndex);
-        connect(scale_, &QComboBox::currentIndexChanged, this, [this](int i) {
-            remembered().scaleIndex = std::max(0, i);
-            refreshSettings();
-        });
-        form->addRow("Size", scale_);
-        sizeInfo_ = colored("", theme::kTextFaint);
-        form->addRow("", sizeInfo_);
-
-        quality_ = new QComboBox;
-        for (const char* q : kQualities) quality_->addItem(q);
-        quality_->setCurrentIndex(static_cast<int>(r.settings.quality));
-        connect(quality_, &QComboBox::currentIndexChanged, this,
-                [](int i) { remembered().settings.quality = static_cast<Quality>(std::max(0, i)); });
-        qualityLabel_ = new QLabel("Quality");
-        form->addRow(qualityLabel_, quality_);
-
-        rangeOptions_ = new QWidget;
-        auto* rangeRow = new QHBoxLayout(rangeOptions_);
-        rangeRow->setContentsMargins(0, 0, 0, 0);
-        auto* entire = new QRadioButton("Entire composition");
-        auto* custom = new QRadioButton("Custom");
-        (r.customRange ? custom : entire)->setChecked(true);
-        rangeRow->addWidget(entire);
-        rangeRow->addWidget(custom);
-        rangeRow->addStretch();
-        form->addRow("Range", rangeOptions_);
+        col->addSpacing(8);
+        videoTitle_ = sectionLabel("Video");
+        col->addWidget(videoTitle_);
+        video_ = new SettingsCard;
+        col->addWidget(video_);
+        QStringList scales;
+        for (const ScaleOption& o : kScales) scales << o.label;
+        sizeRow_ = video_->addRow("Size", " ", segmented(scales, r.scaleIndex, [this](int i) {
+                                      remembered().scaleIndex = std::max(0, i);
+                                      refreshSettings();
+                                  }));
+        sizeInfo_ = sizeRow_->findChildren<QLabel*>().size() > 1 ? sizeRow_->findChildren<QLabel*>()[1] : nullptr;
+        QStringList qualities;
+        for (const char* q : kQualities) qualities << q;
+        qualityRow_ = video_->addRow("Quality", "", segmented(qualities, static_cast<int>(r.settings.quality), [](int i) {
+                                         remembered().settings.quality = static_cast<Quality>(std::max(0, i));
+                                     }));
+        auto* rangeBox = new QWidget;
+        auto* rangeCol = new QHBoxLayout(rangeBox);
+        rangeCol->setContentsMargins(0, 0, 0, 0);
+        rangeCol->setSpacing(8);
         rangeBox_ = new QWidget;
         auto* rb = new QHBoxLayout(rangeBox_);
         rb->setContentsMargins(0, 0, 0, 0);
+        rb->setSpacing(6);
         from_ = new DragValue;
         to_ = new DragValue;
-        const float dur = static_cast<float>(ctx_.comp().duration);
+        const float dur = static_cast<float>(comp.duration);
+        auto* toLabel = new QLabel("to");
+        setTone(toLabel, Tone::TextDim);
         for (DragValue* d : {from_, to_}) {
             d->setRange(0.0f, dur);
             d->setSpeed(0.02f);
             d->setFormat("%.2f s");
-            rb->addWidget(d);
+            d->setFixedSize(76, 28);
         }
+        rb->addWidget(from_);
+        rb->addWidget(toLabel);
+        rb->addWidget(to_);
         from_->setValue(static_cast<float>(r.rangeStart));
         to_->setValue(static_cast<float>(r.rangeEnd));
         connect(from_, &DragValue::valueChanged, this, [this](float v) {
@@ -210,24 +281,30 @@ private:
             remembered().rangeEnd = v;
             if (remembered().rangeStart > v) from_->setValue(v), remembered().rangeStart = v;
         });
-        form->addRow("", rangeBox_);
-        connect(custom, &QRadioButton::toggled, this, [this](bool on) {
-            remembered().customRange = on;
+        rangeCol->addWidget(rangeBox_);
+        rangeCol->addWidget(segmented({"Whole", "Part"}, r.customRange ? 1 : 0, [this](int i) {
+            remembered().customRange = i == 1;
             refreshSettings();
-        });
-
-        transparent_ = new QCheckBox("Transparent (no composition background)");
+        }));
+        rangeRow_ = video_->addRow("Range", "", rangeBox);
+        transparent_ = new QCheckBox;
         transparent_->setChecked(r.settings.transparent);
         connect(transparent_, &QCheckBox::toggled, this, [](bool on) { remembered().settings.transparent = on; });
-        transparentLabel_ = new QLabel("Background");
-        form->addRow(transparentLabel_, transparent_);
+        transparentRow_ = video_->addRow("Transparent background", "Without the composition's background color", transparent_);
 
-        auto* outRow = new QHBoxLayout;
+        col->addSpacing(8);
+        col->addWidget(sectionLabel("Save to"));
+        auto* where = new SettingsCard;
+        col->addWidget(where);
+        auto* outBox = new QWidget;
+        auto* outRow = new QHBoxLayout(outBox);
+        outRow->setContentsMargins(0, 0, 0, 0);
+        outRow->setSpacing(8);
         output_ = new QLineEdit(QString::fromStdString(platform::toUtf8(r.settings.output)));
         connect(output_, &QLineEdit::textEdited, this,
                 [](const QString& t) { remembered().settings.output = platform::fromUtf8(t.toStdString()); });
         outRow->addWidget(output_, 1);
-        auto* browse = new QPushButton("Browse...");
+        auto* browse = new QPushButton("Change...");
         connect(browse, &QPushButton::clicked, this, [this] {
             exporting::Settings& s = remembered().settings;
             const bool package = remembered().package;
@@ -239,22 +316,24 @@ private:
             }
         });
         outRow->addWidget(browse);
-        form->addRow("Save to", outRow);
-        sequenceNote_ = colored("", theme::kTextFaint);
-        form->addRow("", sequenceNote_);
-        col->addLayout(form);
+        where->addContent(outBox);
 
-        error_ = colored("", theme::kDanger);
+        error_ = new QLabel;
+        error_->setWordWrap(true);
+        setTone(error_, Tone::Danger);
         error_->hide();
         col->addWidget(error_);
-        col->addSpacing(10);
+        col->addSpacing(12);
         auto* buttons = new QHBoxLayout;
-        buttons->addStretch();
+        sequenceNote_ = new QLabel;
+        sequenceNote_->setWordWrap(true);
+        setTone(sequenceNote_, Tone::TextFaint);
+        buttons->addWidget(sequenceNote_, 1);
         auto* cancel = new QPushButton("Cancel");
-        cancel->setMinimumSize(120, 34);
+        cancel->setMinimumWidth(110);
         connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
         auto* go = accentButton("Export");
-        go->setMinimumSize(120, 34);
+        go->setMinimumWidth(130);
         go->setDefault(true);
         connect(go, &QPushButton::clicked, this, [this] { startExport(); });
         buttons->addWidget(cancel);
@@ -267,27 +346,23 @@ private:
         auto* page = new QWidget;
         auto* col = new QVBoxLayout(page);
         col->setContentsMargins(0, 0, 0, 0);
-        progressTitle_ = new QLabel("Exporting...");
-        QFont f = progressTitle_->font();
-        f.setPointSizeF(f.pointSizeF() * 1.1);
-        f.setWeight(QFont::DemiBold);
-        progressTitle_->setFont(f);
+        progressTitle_ = pageTitle("Exporting...");
         col->addWidget(progressTitle_);
-        progressFile_ = colored("", theme::kTextDim);
+        progressFile_ = colored("", Tone::TextDim);
         col->addWidget(progressFile_);
         col->addSpacing(6);
         bar_ = new QProgressBar;
         bar_->setRange(0, 1000);
-        bar_->setTextVisible(true);
-        bar_->setFixedHeight(22);
+        bar_->setTextVisible(false);
+        bar_->setFixedHeight(8);
         col->addWidget(bar_);
-        progressInfo_ = colored("", theme::kTextFaint);
+        progressInfo_ = colored("", Tone::TextFaint);
         col->addWidget(progressInfo_);
         col->addSpacing(8);
         auto* buttons = new QHBoxLayout;
         buttons->addStretch();
         auto* cancel = new QPushButton("Cancel");
-        cancel->setMinimumSize(120, 34);
+        cancel->setMinimumWidth(110);
         connect(cancel, &QPushButton::clicked, this, [this] {
             if (packageRunning_) {
                 packageCancel_->store(true);
@@ -306,13 +381,9 @@ private:
         auto* page = new QWidget;
         auto* col = new QVBoxLayout(page);
         col->setContentsMargins(0, 0, 0, 0);
-        resultTitle_ = new QLabel;
-        QFont f = resultTitle_->font();
-        f.setPointSizeF(f.pointSizeF() * 1.1);
-        f.setWeight(QFont::DemiBold);
-        resultTitle_->setFont(f);
+        resultTitle_ = pageTitle("");
         col->addWidget(resultTitle_);
-        resultInfo_ = colored("", theme::kTextDim);
+        resultInfo_ = colored("", Tone::TextDim);
         col->addWidget(resultInfo_);
         resultPath_ = new QLabel;
         resultPath_->setWordWrap(true);
@@ -325,7 +396,7 @@ private:
         play_ = new QPushButton("Play");
         auto* done = accentButton("Done");
         for (QPushButton* b : {reveal_, play_, done}) {
-            b->setMinimumSize(130, 34);
+            b->setMinimumWidth(110);
             buttons->addWidget(b);
         }
         connect(reveal_, &QPushButton::clicked, this, [this] {
@@ -346,24 +417,27 @@ private:
         s.scale = kScales[std::clamp(r.scaleIndex, 0, static_cast<int>(std::size(kScales)) - 1)].scale;
         int w = 0, h = 0;
         outputSize(ctx_.comp(), s, w, h);
-        sizeInfo_->setText(QString("%1 × %2 px  ·  %3 fps").arg(w).arg(h).arg(ctx_.comp().fps, 0, 'g', 4));
         const bool sequence = s.format == Format::PngSequence;
-        form_->setRowVisible(scale_, !r.package);
-        form_->setRowVisible(sizeInfo_, !r.package);
-        form_->setRowVisible(quality_, !r.package && !sequence);
-        form_->setRowVisible(rangeOptions_, !r.package);
-        form_->setRowVisible(rangeBox_, !r.package && r.customRange);
-        const bool alpha = !r.package && formatSupportsAlpha(s.format);
-        form_->setRowVisible(transparent_, alpha);
+        // A package has no picture settings at all.
+        videoTitle_->setVisible(!r.package);
+        video_->setVisible(!r.package);
+        if (sizeInfo_) sizeInfo_->setText(QString("%1 × %2 px").arg(w).arg(h)); // what the choice gives
+        qualityRow_->setVisible(!sequence);
+        rangeBox_->setVisible(r.customRange);
+        transparentRow_->setVisible(!r.package && formatSupportsAlpha(s.format));
         {
             const QSignalBlocker b(transparent_);
             transparent_->setChecked(s.transparent);
         }
         output_->setText(QString::fromStdString(platform::toUtf8(s.output)));
-        form_->setRowVisible(sequenceNote_, r.package || sequence);
-        sequenceNote_->setText(r.package ? QString("Includes the project and its linked media and plugin files. Extract the ZIP to open it on another computer.")
-                                        : QString("Frames are saved as %1_0000.png, _0001.png, ...")
-                                              .arg(QString::fromStdString(platform::toUtf8(s.output.stem()))));
+        const double length = r.customRange ? std::max(0.0, r.rangeEnd - r.rangeStart) : ctx_.comp().duration;
+        const int frames = static_cast<int>(std::lround(length * ctx_.comp().fps));
+        sequenceNote_->setText(r.package ? QString("The project, its media and its plugins' files in one ZIP: extract it to open the project elsewhere.")
+                               : sequence ? QString("%1 images: %2_0000.png, _0001.png, ...")
+                                                .arg(frames)
+                                                .arg(QString::fromStdString(platform::toUtf8(s.output.stem())))
+                                          : QString("%1 frames  ·  %2").arg(frames).arg(QString::fromStdString(formatDuration(length))));
+        video_->update();
         adjustSize();
     }
 
@@ -472,6 +546,7 @@ private:
         bar_->setValue(done * 1000 / total);
         const double elapsed = job_.elapsedSeconds();
         const double remaining = done > 0 ? elapsed / done * (total - done) : 0.0;
+        progressTitle_->setText(QString("Exporting...  %1%").arg(done * 100 / total));
         progressInfo_->setText(QString("Frame %1 of %2  ·  %3 elapsed  ·  about %4 left")
                                    .arg(done)
                                    .arg(total)
@@ -491,7 +566,7 @@ private:
             resultInfo_->setText(QString("%1 frames in %2").arg(job_.framesTotal()).arg(QString::fromStdString(formatDuration(job_.elapsedSeconds()))));
             resultPath_->setText(QString::fromStdString(platform::toUtf8(job_.settings().output)));
         } else if (job_.cancelled()) {
-            resultTitle_->setText("Export cancelled.");
+            resultTitle_->setText("Export cancelled");
             resultTitle_->setStyleSheet("");
             resultInfo_->clear();
             resultPath_->clear();
@@ -523,10 +598,10 @@ private:
     QStackedWidget* pages_;
     QTimer* timer_;
     bool waiting_ = false;
-    QComboBox *format_ = nullptr, *scale_ = nullptr, *quality_ = nullptr;
-    QLabel *sizeInfo_ = nullptr, *qualityLabel_ = nullptr, *transparentLabel_ = nullptr, *sequenceNote_ = nullptr, *error_ = nullptr;
-    QFormLayout* form_ = nullptr;
-    QWidget *rangeBox_ = nullptr, *rangeOptions_ = nullptr;
+    QLabel *sizeInfo_ = nullptr, *videoTitle_ = nullptr, *sequenceNote_ = nullptr, *error_ = nullptr;
+    SettingsCard* video_ = nullptr;
+    QWidget *sizeRow_ = nullptr, *qualityRow_ = nullptr, *rangeRow_ = nullptr, *transparentRow_ = nullptr;
+    QWidget* rangeBox_ = nullptr;
     DragValue *from_ = nullptr, *to_ = nullptr;
     QCheckBox* transparent_ = nullptr;
     QLineEdit* output_ = nullptr;

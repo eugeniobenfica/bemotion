@@ -7,6 +7,7 @@
 #include "core/Serialization.h"
 #include "render/SceneRenderer.h"
 #include "ui/Dialogs.h"
+#include "ui/PagedWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 #include "ui/SkiaQt.h"
@@ -294,9 +295,10 @@ void HomeScreen::buildUi() {
     line->setFrameShape(QFrame::HLine);
     ui::setTone(line, ui::Tone::Border);
     side->addWidget(line);
+    // The projects folder (a button of its own: it needs its words), then the small icons.
     auto* footer = new QHBoxLayout;
     footer->setSpacing(6);
-    auto* folder = new QPushButton("Projects Folder");
+    auto* folder = new QPushButton(ui::makeIcon(ui::Icon::Folder, theme::kTextDim, 16), "Projects Folder");
     folder->setToolTip(projectsFolder().empty() ? QString("Choose where your projects live")
                                                 : QString::fromStdString(platform::toUtf8(projectsFolder())));
     connect(folder, &QPushButton::clicked, this, [this, folder] {
@@ -310,20 +312,16 @@ void HomeScreen::buildUi() {
         menu.addAction("Change Folder...", [this] { chooseProjectsFolder(); });
         menu.exec(folder->mapToGlobal(QPoint(0, folder->height())));
     });
-    footer->addWidget(folder, 1);
+    side->addWidget(folder);
+    side->addSpacing(2);
+    footer->addStretch(1);
     auto* coffee = new ui::IconButton(ui::Icon::Coffee, "Support bemotion: buy a coffee (it stays free thanks to you)", 30);
     connect(coffee, &QAbstractButton::clicked, this, [] { platform::openWithDefaultApp(kSupportUrl); });
     footer->addWidget(coffee);
     auto* gear = new ui::IconButton(ui::Icon::Gear, "Settings (Ctrl+,)", 30);
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
     footer->addWidget(gear);
-    auto* help = new QPushButton("?");
-    help->setFixedSize(30, 30);
-    // Flat like the icon buttons beside it.
-    help->setStyleSheet(QString("QPushButton { background: transparent; padding: 0; border-radius: 5px; color: %1; }"
-                                "QPushButton:hover { background: %2; color: %3; }")
-                            .arg(theme::q(theme::kTextDim).name(), theme::q(theme::kBgHover).name(), theme::q(theme::kText).name()));
-    help->setToolTip("Help, shortcuts, credits and license (F1)");
+    auto* help = new ui::IconButton(ui::Icon::Help, "Help, shortcuts, credits and license (F1)", 30);
     connect(help, &QPushButton::clicked, this, [] { ui::openHelp(ui::HelpTab::About); });
     footer->addWidget(help);
     side->addLayout(footer);
@@ -467,18 +465,18 @@ void HomeScreen::rebuildGrid() {
     grid_ = new QWidget;
     auto* col = new QVBoxLayout(grid_);
     col->setContentsMargins(0, 0, 0, 24);
-    // No projects folder yet: a faint line in the empty space says how to pick one (with the
-    // sidebar's Projects Folder button); it goes as soon as there is a folder.
-    auto folderHint = [&] {
-        if (!projectsFolder().empty()) return;
-        col->addStretch(1);
-        auto* hint = styled("Choose a folder for your projects with Projects Folder, at the bottom left.", theme::kTextFaint);
-        hint->setAlignment(Qt::AlignCenter);
-        col->addWidget(hint);
-        col->addStretch(2);
-    };
+    // No projects folder yet: a banner on top says what it is for, with the button that picks it;
+    // it goes as soon as there is a folder.
+    if (projectsFolder().empty()) {
+        auto* banner = new ui::SettingsCard;
+        auto* choose = ui::accentButton("Choose Folder...");
+        connect(choose, &QPushButton::clicked, this, [this] { chooseProjectsFolder(); });
+        banner->addRow("Choose a folder for your projects", "New projects are saved there, and every project in it shows here", choose);
+        col->addWidget(banner);
+        col->addSpacing(14);
+    }
     if (items.empty() && projectsFolder().empty()) {
-        folderHint();
+        col->addStretch(1);
         scroll_->setWidget(grid_);
         return;
     }
@@ -545,8 +543,7 @@ void HomeScreen::rebuildGrid() {
         ++shown;
     }
     if (shown == 0) col->addWidget(styled(QString("No projects match \"%1\".").arg(search_->text()), theme::kTextDim));
-    if (projectsFolder().empty()) folderHint();
-    else col->addStretch(1);
+    col->addStretch(1);
     scroll_->setWidget(grid_);
 }
 

@@ -206,8 +206,12 @@ does.
 
 ### ✦ Make it yours
 - Dark, Light and Midnight themes, any accent color; *Advanced Options* show
-  every UI color and fine-tuning setting; import / export themes
-  ([example](examples/themes))
+  every color (surfaces, fields, buttons, focus, selection, menus, status,
+  playhead, keyframes...), corner rounding, outline width and control height;
+  save, import and export themes ([example](examples/themes))
+- One look for each kind of control: buttons stand out (raised, outlined),
+  fields sink in (darker, outlined, a chevron on drop-downs), switches for
+  what applies at once, segmented choices
 - Rebind every shortcut, pick the interface font and text size, timeline
   densities, frames per arrow press
 - Dockable panels: drag tabs anywhere, minimize a panel to a handle on the
@@ -275,8 +279,9 @@ does.
   releases the layers keeping their look
 - **New objects** start at the playhead and last 5 seconds (like Premiere's
   default still duration); the playhead may go past the end to add more
-- **Settings** (Ctrl+,): Theme, Interface, Editor, Shortcuts and Plugins pages,
-  each with a reset; the intro animation can be turned off in *Interface*
+- **Settings** (Ctrl+,): Theme, Interface, Editor, Shortcuts (searchable) and
+  Plugins pages, each option a titled, described row, each page with a reset;
+  the intro animation can be turned off in *Interface*
 - **Help** (F1): every shortcut drawn as key caps, plus About, Credits and License
 - **Undo / redo** for everything, unsaved-changes protection
 

@@ -72,9 +72,7 @@ CollapsibleSection::CollapsibleSection(const QString& title, QWidget* parent, QW
     header_->setChecked(!collapsedSections().value(title, false));
     header_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     header_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    header_->setStyleSheet(QString("QToolButton { text-align: left; font-weight: 600; padding: 5px 6px; background: %1; border-radius: 5px; }"
-                                   "QToolButton:hover { background: %2; } QToolButton:checked { background: %1; }")
-                               .arg(theme::q(theme::kBgRaised).name(), theme::q(theme::kBgHover).name()));
+    header_->setProperty("sectionHeader", true); // styled by the theme (ui/Theme.cpp), so it follows theme changes
     auto setArrow = [this] {
         header_->setIcon(ui::makeIcon(header_->isChecked() ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, theme::kTextDim, 14));
     };

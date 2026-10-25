@@ -18,6 +18,8 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPushButton>
+#include <QButtonGroup>
 #include <QPixmap>
 
 #include <algorithm>
@@ -328,6 +330,31 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
             const float x = c.x - h * 0.85f + i * h * 0.45f;
             dl.rectFilled(Pt(x, c.y - s), Pt(x + s, c.y + s), theme::withAlpha(col, 255 - i * 65), 1.5f);
         }
+        break;
+    }
+    case Icon::Help: { // a question mark in a circle
+        dl.circle(c, h * 0.92f, col, th);
+        dl.arc(Pt(c.x, c.y - h * 0.2f), h * 0.3f, kPi * 1.0f, kPi * 2.35f, col, th);
+        dl.line(Pt(c.x + h * 0.04f, c.y + h * 0.06f), Pt(c.x, c.y + h * 0.22f), col, th);
+        dl.circleFilled(Pt(c.x, c.y + h * 0.5f), th * 0.8f, col);
+        break;
+    }
+    case Icon::Keyboard: { // a keyboard: keys and a space bar
+        dl.rect(Pt(c.x - h * 0.95f, c.y - h * 0.6f), Pt(c.x + h * 0.95f, c.y + h * 0.6f), col, size * 0.1f, th);
+        for (int i = 0; i < 4; ++i) {
+            const float x = c.x - h * 0.55f + i * h * 0.37f;
+            dl.circleFilled(Pt(x, c.y - h * 0.22f), th * 0.75f, col);
+        }
+        dl.line(Pt(c.x - h * 0.45f, c.y + h * 0.25f), Pt(c.x + h * 0.45f, c.y + h * 0.25f), col, th);
+        break;
+    }
+    case Icon::Edit: { // a pencil, tip down left
+        const Pt a(c.x + h * 0.55f, c.y - h * 0.85f), b(c.x + h * 0.85f, c.y - h * 0.55f);
+        const Pt tip(c.x - h * 0.85f, c.y + h * 0.85f);
+        const Pt e1(c.x - h * 0.75f, c.y + h * 0.35f), e2(c.x - h * 0.35f, c.y + h * 0.75f);
+        const Pt body[5] = {a, b, e2, tip, e1};
+        dl.polyline(body, 5, col, true, th);
+        dl.line(Pt(c.x + h * 0.3f, c.y - h * 0.6f), Pt(c.x + h * 0.6f, c.y - h * 0.3f), col, th);
         break;
     }
     case Icon::Crop: { // two L shapes crossing, as every crop tool draws it
@@ -869,8 +896,57 @@ void KeyframeButton::setState(bool keyHere, bool animated) {
 void KeyframeButton::paintEvent(QPaintEvent*) {
     QPainter p(this);
     Draw d(p);
-    const Rgba outline = animated_ || keyHere_ ? theme::kAccent : (underMouse() ? theme::kText : theme::kTextFaint);
-    drawDiamond(d, Pt(width() * 0.5f, height() * 0.5f), 5.5f, keyHere_ ? theme::kAccent : 0, outline);
+    const Rgba outline = animated_ || keyHere_ ? theme::kKeyframe : (underMouse() ? theme::kText : theme::kTextFaint);
+    drawDiamond(d, Pt(width() * 0.5f, height() * 0.5f), 5.5f, keyHere_ ? theme::kKeyframe : 0, outline);
+}
+
+// --- Switch ----------------------------------------------------------------------------------
+
+Switch::Switch(QWidget* parent) : QAbstractButton(parent) {
+    setCheckable(true);
+    setCursor(Qt::PointingHandCursor);
+    setFixedSize(38, 22);
+    setFocusPolicy(Qt::TabFocus);
+}
+
+void Switch::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    Draw d(p);
+    const bool on = isChecked(), enabled = isEnabled(), hot = underMouse() && enabled;
+    const float w = static_cast<float>(width()), h = static_cast<float>(height()), r = h * 0.5f;
+    Rgba track = on ? theme::kAccent : theme::kField;
+    if (on && hot) track = theme::kAccentHover;
+    if (!enabled) track = theme::withAlpha(track, 90);
+    d.rectFilled(Pt(0.5f, 0.5f), Pt(w - 0.5f, h - 0.5f), track, r);
+    if (!on) d.rect(Pt(0.5f, 0.5f), Pt(w - 0.5f, h - 0.5f), hot ? theme::mix(theme::kFieldBorder, theme::kText, 0.3f) : theme::kFieldBorder, r, 1.0f);
+    if (hasFocus()) d.rect(Pt(0.5f, 0.5f), Pt(w - 0.5f, h - 0.5f), theme::kFocus, r, 1.5f);
+    const float knob = r - 4.0f;
+    const Pt c(on ? w - r : r, r);
+    d.circleFilled(c, knob, on ? rgba(255, 255, 255) : (enabled ? theme::kTextDim : theme::kTextFaint));
+}
+
+QWidget* segmented(const QStringList& choices, int current, std::function<void(int)> changed, const std::vector<bool>& enabled) {
+    auto* box = new QWidget;
+    auto* row = new QHBoxLayout(box);
+    row->setContentsMargins(0, 0, 0, 0);
+    row->setSpacing(0);
+    auto* group = new QButtonGroup(box);
+    group->setExclusive(true);
+    for (int i = 0; i < choices.size(); ++i) {
+        auto* b = new QPushButton(choices[i]);
+        b->setCheckable(true);
+        b->setChecked(i == current);
+        b->setCursor(Qt::PointingHandCursor);
+        // Where it sits (first, middle, last) rounds the outer corners only.
+        b->setProperty("segment", choices.size() == 1 ? "only" : i == 0 ? "first" : i == choices.size() - 1 ? "last" : "middle");
+        if (i < static_cast<int>(enabled.size()) && !enabled[i]) b->setEnabled(false);
+        group->addButton(b, i);
+        row->addWidget(b);
+    }
+    QObject::connect(group, &QButtonGroup::idClicked, box, [changed](int i) {
+        if (changed) changed(i);
+    });
+    return box;
 }
 
 // --- DragValue -------------------------------------------------------------------------------
@@ -902,7 +978,11 @@ void DragValue::paintEvent(QPaintEvent*) {
     QPainter p(this);
     Draw d(p);
     const bool hot = underMouse() || dragging_;
-    d.rectFilled(Pt(0, 0), Pt(width(), height()), hot ? theme::kBgHover : theme::kBgRaised, theme::current().rounding);
+    // A field, like every other one (Theme: field colors), that also scrubs when dragged.
+    const float r = theme::current().rounding;
+    d.rectFilled(Pt(0, 0), Pt(width(), height()), hot ? theme::mix(theme::kField, theme::kText, 0.06f) : theme::kField, r);
+    if (theme::current().borderWidth > 0.0f)
+        d.rect(Pt(0.5f, 0.5f), Pt(width() - 0.5f, height() - 0.5f), dragging_ ? theme::kFocus : hot ? theme::mix(theme::kFieldBorder, theme::kText, 0.25f) : theme::kFieldBorder, r, 1.0f);
     if (edit_ && edit_->isVisible()) return;
     const QString t = text();
     const float tw = d.textWidth(t);

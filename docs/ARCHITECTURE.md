@@ -377,7 +377,17 @@ Rules:
 - **`Theme`** — palettes (`Palette`) applied as a `QPalette` + style sheet.
   Colors come from the named tokens (`theme::kText`, `kTextDim`, `kAccent`,
   `kBgPanel`, `kDanger`, …), never literals; the default accent is gold
-  `#E8B931` on near-black. Docking widgets get their extra rules from
+  `#E8B931` on near-black. Besides the base colors a palette has optional
+  roles (`header`, `field`, `button`, their outlines, `focus`, `selection`,
+  `menu`, `on_accent`, `success`, `warning`, `playhead`, `keyframe`: 0 =
+  worked out by `theme::resolved`) and sizes (`rounding`, `border_width`,
+  `control_height`); older theme files simply lack them. Controls look one
+  way each: `QPushButton` raised and outlined (`accent` / `danger` / `flat`
+  properties for the main, the dangerous and the quiet ones), fields sunken
+  and outlined (drop-downs with a chevron picture), `ui::Switch` for options
+  that apply at once, `ui::segmented` for a few exclusive choices.
+  Settings pages are made of `SettingsCard`s (`ui/PagedWindow.h`): titled,
+  described rows with the control on the right. Docking widgets get their extra rules from
   `theme::dockStyleSheet()`. **Themes change at run time**: custom-painted
   widgets read the tokens when they paint; a label colored by a token uses
   `ui::setTone(label, Tone::…)` (recolored on `appearanceChanged`), never a

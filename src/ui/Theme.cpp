@@ -1,6 +1,10 @@
 #include "ui/Theme.h"
 
 #include <QApplication>
+#include <QDir>
+#include <QFile>
+#include <QImage>
+#include <QPainter>
 #include <QPalette>
 #include <QString>
 
@@ -35,10 +39,42 @@ void forEachColor(P& p, Fn&& fn) {
     fn("snap", p.snap);
     fn("guide", p.guide);
     fn("canvas", p.canvas);
+    fn("header", p.header);
+    fn("field", p.field);
+    fn("field_border", p.fieldBorder);
+    fn("button", p.button);
+    fn("button_border", p.buttonBorder);
+    fn("focus", p.focus);
+    fn("selection", p.selection);
+    fn("menu", p.menu);
+    fn("on_accent", p.onAccent);
+    fn("success", p.success);
+    fn("warning", p.warning);
+    fn("playhead", p.playhead);
+    fn("keyframe", p.keyframe);
 }
 
 QString css(Rgba c) {
     return QString("rgba(%1,%2,%3,%4)").arg(ui::red(c)).arg(ui::green(c)).arg(ui::blue(c)).arg(ui::alpha(c));
+}
+
+// A chevron for drop-downs and spin boxes, as a picture style sheets can use (they draw no arrow
+// of their own once the control is styled): a small PNG in the temporary folder, per color.
+QString chevron(Rgba c, bool up) {
+    const QString path = QDir(QDir::tempPath()).filePath(
+        QString("bemotion-chevron-%1-%2.png").arg(up ? "up" : "down").arg(QString::fromStdString(toHex(c)).mid(1)));
+    if (!QFile::exists(path)) {
+        QImage image(20, 12, QImage::Format_ARGB32_Premultiplied);
+        image.fill(Qt::transparent);
+        QPainter p(&image);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(ui::qcolor(c), 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const QPointF down[3] = {{3, 3}, {10, 9}, {17, 3}}, upward[3] = {{3, 9}, {10, 3}, {17, 9}};
+        p.drawPolyline(up ? upward : down, 3);
+        p.end();
+        image.save(path, "PNG");
+    }
+    return QDir::fromNativeSeparators(path);
 }
 
 } // namespace
@@ -115,6 +151,8 @@ bool paletteFromJson(const std::string& text, Palette& out, std::string* error) 
         p.name = j.value("name", std::string("Imported"));
         p.light = j.value("light", false);
         p.rounding = std::clamp(j.value("rounding", p.rounding), 0.0f, 12.0f);
+        p.borderWidth = std::clamp(j.value("border_width", p.borderWidth), 0.0f, 2.0f);
+        p.controlHeight = std::clamp(j.value("control_height", p.controlHeight), 22.0f, 40.0f);
         const json colors = j.value("colors", json::object());
         forEachColor(p, [&](const char* key, Rgba& c) {
             if (colors.contains(key) && colors[key].is_string() && !fromHex(colors[key].get<std::string>(), c))
@@ -130,8 +168,12 @@ bool paletteFromJson(const std::string& text, Palette& out, std::string* error) 
 
 std::string paletteToJson(const Palette& palette) {
     json colors = json::object();
-    forEachColor(palette, [&](const char* key, const Rgba& c) { colors[key] = toHex(c); });
-    json j = {{"name", palette.name}, {"light", palette.light}, {"rounding", palette.rounding}, {"colors", colors}};
+    forEachColor(palette, [&](const char* key, const Rgba& c) {
+        if (c) colors[key] = toHex(c); // the optional roles left to be worked out stay out
+    });
+    json j = {{"name", palette.name},           {"light", palette.light},
+              {"rounding", palette.rounding},   {"border_width", palette.borderWidth},
+              {"control_height", palette.controlHeight}, {"colors", colors}};
     return j.dump(2);
 }
 
@@ -141,14 +183,38 @@ Rgba ink(int a) { return g_current.light ? rgba(0, 0, 0, a) : rgba(255, 255, 255
 Rgba shade(int a) { return rgba(0, 0, 0, g_current.light ? a / 3 : a); }
 const Palette& current() { return g_current; }
 
+Palette resolved(const Palette& in) {
+    Palette p = in;
+    auto pick = [](Rgba& field, Rgba derived) {
+        if (!field) field = derived;
+    };
+    const Rgba white = rgba(255, 255, 255), black = rgba(0, 0, 0);
+    pick(p.header, p.bgDeep);
+    // Fields are sunk into the panel (darker on dark themes, white on light ones); buttons stand
+    // out of it: the two never look alike.
+    pick(p.field, p.light ? mix(p.bgRaised, white, 0.6f) : mix(p.bgPanel, p.bgDeep, 0.55f));
+    pick(p.fieldBorder, p.light ? p.border : mix(p.border, p.bgRaised, 0.15f));
+    pick(p.button, p.light ? mix(p.bgRaised, p.bgPanel, 0.35f) : mix(p.bgRaised, p.bgHover, 0.55f));
+    pick(p.buttonBorder, p.light ? mix(p.border, black, 0.06f) : mix(p.border, p.text, 0.08f));
+    pick(p.focus, p.accent);
+    pick(p.selection, withAlpha(p.accent, 90));
+    pick(p.menu, mix(p.bgPanel, p.bgRaised, 0.5f));
+    pick(p.onAccent, luminance(p.accent) > 0.55f ? rgba(20, 18, 12) : white);
+    pick(p.success, p.light ? rgba(40, 150, 80) : rgba(92, 196, 120));
+    pick(p.warning, p.light ? rgba(200, 130, 20) : rgba(238, 172, 64));
+    pick(p.playhead, p.accent);
+    pick(p.keyframe, p.accent);
+    return p;
+}
+
 // Docking (Qt Advanced Docking System): added to its own style sheet, which wins over the application's.
 QString dockStyleSheet() {
     // Named placeholders (filled below): an unused number would shift every color after it.
     const int r = static_cast<int>(std::clamp(g_current.rounding, 0.0f, 12.0f)) + 2;
     QString s = "ads--CDockContainerWidget, ads--CDockManager { background: DEEP; }\n"
                 "ads--CDockAreaWidget { background: PANEL; border: none; }\n"
-                "ads--CDockAreaTitleBar { background: DEEP; border: none; padding: 0 2px 0 0; }\n"
-                "ads--CDockWidgetTab { background: transparent; border: none; margin: 4px 1px 0 1px; padding: 0 10px;"
+                "ads--CDockAreaTitleBar { background: HEADER; border: none; padding: 0 2px 0 0; }\n"
+                "ads--CDockWidgetTab { background: transparent; border: none; margin: 4px 1px 0 1px; padding: 0 8px;"
                 " border-top-left-radius: RADIUSpx; border-top-right-radius: RADIUSpx; }\n"
                 "ads--CDockWidgetTab:hover { background: HOVER; }\n"
                 "ads--CDockWidgetTab[activeTab=\"true\"] { background: PANEL; }\n"
@@ -159,12 +225,13 @@ QString dockStyleSheet() {
                 "ads--CAutoHideTab:hover { color: TEXT; background: HOVER; }\n"
                 "ads--CAutoHideSideBar { background: DEEP; border: none; }\n"
                 "ads--CDockWidget { background: PANEL; }\n";
-    s.replace("DEEP", css(kBgDeep)).replace("PANEL", css(kBgPanel)).replace("HOVER", css(kBgHover));
+    s.replace("DEEP", css(kBgDeep)).replace("PANEL", css(kBgPanel)).replace("HOVER", css(kBgHover)).replace("HEADER", css(kHeader));
     s.replace("DIM", css(kTextDim)).replace("TEXT", css(kText)).replace("RADIUS", QString::number(r));
     return s;
 }
 
-void apply(const Palette& p) {
+void apply(const Palette& given) {
+    const Palette p = resolved(given);
     g_current = p;
     kBgDeep = p.bgDeep;
     kBgPanel = p.bgPanel;
@@ -178,11 +245,23 @@ void apply(const Palette& p) {
     kAccentHover = mix(kAccent, rgba(255, 255, 255), 0.18f);
     kAccentActive = mix(kAccent, rgba(0, 0, 0), 0.12f);
     kAccentSoft = withAlpha(kAccent, 40);
-    kOnAccent = luminance(kAccent) > 0.55f ? rgba(20, 18, 12) : rgba(255, 255, 255);
+    kOnAccent = p.onAccent;
     kDanger = p.danger;
     kSnap = p.snap;
     kGuide = p.guide;
     kCanvas = p.canvas;
+    kHeader = p.header;
+    kField = p.field;
+    kFieldBorder = p.fieldBorder;
+    kButton = p.button;
+    kButtonBorder = p.buttonBorder;
+    kFocus = withAlpha(p.focus, 255);
+    kSelection = p.selection;
+    kMenu = p.menu;
+    kSuccess = p.success;
+    kWarning = p.warning;
+    kPlayhead = withAlpha(p.playhead, 255);
+    kKeyframe = withAlpha(p.keyframe, 255);
 
     auto* app = qobject_cast<QApplication*>(QApplication::instance());
     if (!app) return;
@@ -190,15 +269,15 @@ void apply(const Palette& p) {
     QPalette pal;
     pal.setColor(QPalette::Window, q(kBgPanel));
     pal.setColor(QPalette::WindowText, q(kText));
-    pal.setColor(QPalette::Base, q(kBgRaised));
+    pal.setColor(QPalette::Base, q(kField));
     pal.setColor(QPalette::AlternateBase, q(kBgHover));
     pal.setColor(QPalette::Text, q(kText));
     pal.setColor(QPalette::PlaceholderText, q(kTextFaint));
-    pal.setColor(QPalette::Button, q(kBgRaised));
+    pal.setColor(QPalette::Button, q(kButton));
     pal.setColor(QPalette::ButtonText, q(kText));
-    pal.setColor(QPalette::Highlight, q(accent(150)));
+    pal.setColor(QPalette::Highlight, q(kSelection));
     pal.setColor(QPalette::HighlightedText, q(kText));
-    pal.setColor(QPalette::ToolTipBase, q(kBgRaised));
+    pal.setColor(QPalette::ToolTipBase, q(kMenu));
     pal.setColor(QPalette::ToolTipText, q(kText));
     pal.setColor(QPalette::Link, q(kAccent));
     pal.setColor(QPalette::Mid, q(kBorder));
@@ -212,19 +291,23 @@ void apply(const Palette& p) {
     app->setPalette(pal);
 
     const int r = static_cast<int>(std::clamp(p.rounding, 0.0f, 12.0f));
-    const Rgba pressed = mix(p.bgHover, p.text, 0.08f);
-    const Rgba popup = mix(p.bgPanel, p.bgRaised, 0.5f);
+    const int bw = static_cast<int>(std::lround(std::clamp(p.borderWidth, 0.0f, 2.0f)));
+    // Height inside the outline and padding (Qt's min-height is the content box).
+    const int inner = std::max(12, static_cast<int>(std::lround(std::clamp(p.controlHeight, 22.0f, 40.0f))) - 2 * bw - 8);
+    const Rgba buttonHover = mix(p.button, p.text, 0.07f);
+    const Rgba pressed = mix(p.button, p.text, 0.13f);
+    const Rgba popup = p.menu;
     QString s;
     s += QString("QWidget { color: %1; }\n").arg(css(kText));
     s += QString("QMainWindow, QDialog { background: %1; }\n").arg(css(kBgPanel));
     s += QString("QToolTip { background: %1; color: %2; border: 1px solid %3; padding: 4px 6px; border-radius: %4px; }\n")
-             .arg(css(kBgRaised), css(kText), css(kBorder))
+             .arg(css(kMenu), css(kText), css(kBorder))
              .arg(r);
     // Menus.
     s += QString("QMenuBar { background: %1; padding: 2px; }\n"
                  "QMenuBar::item { padding: 6px 10px; border-radius: %3px; background: transparent; }\n"
                  "QMenuBar::item:selected, QMenuBar::item:pressed { background: %2; }\n")
-             .arg(css(kBgDeep), css(kBgHover))
+             .arg(css(kHeader), css(kBgHover))
              .arg(r);
     s += QString("QMenu { background: %1; border: 1px solid %2; padding: 4px; border-radius: %5px; }\n"
                  "QMenu::item { padding: 6px 28px 6px 14px; border-radius: %6px; }\n"
@@ -234,19 +317,54 @@ void apply(const Palette& p) {
              .arg(css(popup), css(kBorder), css(kBgHover), css(kTextFaint))
              .arg(r + 2)
              .arg(r);
-    // Buttons.
-    s += QString("QPushButton { background: %1; border: none; border-radius: %4px; padding: 6px 14px; }\n"
-                 "QPushButton:hover { background: %2; }\n"
-                 "QPushButton:pressed { background: %3; }\n"
-                 "QPushButton:disabled { color: %5; }\n"
-                 "QPushButton[accent=\"true\"] { background: %6; color: %7; font-weight: 600; }\n"
-                 "QPushButton[accent=\"true\"]:hover { background: %8; }\n"
-                 "QPushButton[accent=\"true\"]:pressed { background: %9; }\n")
-             .arg(css(kBgRaised), css(kBgHover), css(pressed))
-             .arg(r)
-             .arg(css(kTextFaint), css(kAccent), css(kOnAccent), css(kAccentHover), css(kAccentActive));
-    s += QString("QPushButton[danger=\"true\"] { background: %1; color: white; }\n").arg(css(kDanger));
-    s += QString("QPushButton:checked { background: %1; color: %2; }\n").arg(css(accent(70)), css(kText));
+    // Buttons: raised, outlined, centered text; the accent one is the main action of a window.
+    // (Named placeholders: an unused number would shift every value after it.)
+    QString buttons = "QPushButton { background: BUTTON; border: BWpx solid BBORDER; border-radius: Rpx; padding: 4px 14px;"
+                      " min-height: INNERpx; }\n"
+                      "QPushButton:hover { background: BHOVER; }\n"
+                      "QPushButton:pressed { background: BPRESSED; }\n"
+                      "QPushButton:focus { border-color: FOCUS; }\n"
+                      "QPushButton:disabled { color: FAINT; background: DISABLED; }\n"
+                      "QPushButton[accent=\"true\"] { background: ACCENT; color: ONACCENT; font-weight: 600; border-color: ACCENT; }\n"
+                      "QPushButton[accent=\"true\"]:hover { background: AHOVER; border-color: AHOVER; }\n"
+                      "QPushButton[accent=\"true\"]:pressed { background: AACTIVE; }\n"
+                      "QPushButton[accent=\"true\"]:disabled { background: ADISABLED; color: ONACCENT; border-color: transparent; }\n"
+                      "QPushButton[danger=\"true\"] { background: DANGER; color: white; border-color: DANGER; }\n"
+                      "QPushButton:checked { background: ACHECKED; color: TEXT; border-color: ACHECKEDB; }\n"
+                      // A quiet button: text in the accent, no box until hovered (links, minor actions).
+                      "QPushButton[flat=\"true\"] { background: transparent; border-color: transparent; color: ACCENT; padding: 4px 8px; }\n"
+                      "QPushButton[flat=\"true\"]:hover { background: HOVER; }\n";
+    buttons.replace("BUTTON", css(kButton)).replace("BBORDER", css(kButtonBorder)).replace("BHOVER", css(buttonHover));
+    buttons.replace("BPRESSED", css(pressed)).replace("FOCUS", css(kFocus)).replace("FAINT", css(kTextFaint));
+    buttons.replace("ADISABLED", css(withAlpha(kAccent, 90))).replace("DISABLED", css(mix(p.button, p.bgPanel, 0.5f)));
+    buttons.replace("AHOVER", css(kAccentHover)).replace("AACTIVE", css(kAccentActive)).replace("ONACCENT", css(kOnAccent));
+    buttons.replace("ACHECKEDB", css(accent(140))).replace("ACHECKED", css(accent(70))).replace("ACCENT", css(kAccent));
+    buttons.replace("DANGER", css(kDanger)).replace("TEXT", css(kText)).replace("HOVER", css(kBgHover));
+    buttons.replace("INNER", QString::number(inner)).replace("BW", QString::number(bw)).replace("Rpx", QString::number(r) + "px");
+    s += buttons;
+    // Segmented controls (ui::segmented): one outlined strip; the chosen part in the accent.
+    QString seg = "QPushButton[segment] { background: FIELD; border: BWpx solid FBORDER; border-radius: 0; padding: 4px 12px; color: DIM; }\n"
+                  "QPushButton[segment]:hover { color: TEXT; background: FHOVER; }\n"
+                  "QPushButton[segment]:checked { background: SOFT; color: TEXT; border-color: ABORDER; }\n"
+                  "QPushButton[segment]:disabled { color: FAINT; }\n"
+                  "QPushButton[segment=\"first\"] { border-top-left-radius: Rpx; border-bottom-left-radius: Rpx; }\n"
+                  "QPushButton[segment=\"last\"] { border-top-right-radius: Rpx; border-bottom-right-radius: Rpx; }\n"
+                  "QPushButton[segment=\"only\"] { border-radius: Rpx; }\n"
+                  "QPushButton[segment=\"middle\"], QPushButton[segment=\"last\"] { margin-left: -1px; }\n"
+                  // A key shortcut shown as a field you click to change (Settings › Shortcuts).
+                  "QPushButton[keycap=\"true\"] { background: FIELD; border-color: FBORDER; font-weight: 600; }\n";
+    seg.replace("FIELD", css(kField)).replace("FBORDER", css(kFieldBorder)).replace("FHOVER", css(mix(p.field, p.text, 0.06f)));
+    seg.replace("DIM", css(kTextDim)).replace("TEXT", css(kText)).replace("SOFT", css(accent(55))).replace("ABORDER", css(accent(170)));
+    seg.replace("FAINT", css(kTextFaint)).replace("BW", QString::number(std::max(1, bw))).replace("Rpx", QString::number(r) + "px");
+    s += seg;
+    // The collapsible sections of Properties and Effects (ui::CollapsibleSection).
+    s += QString("QToolButton[sectionHeader=\"true\"] { text-align: left; font-weight: 600; padding: 5px 6px; background: %1;"
+                 " border-radius: %3px; }\n"
+                 "QToolButton[sectionHeader=\"true\"]:hover { background: %2; }\n"
+                 "QToolButton[sectionHeader=\"true\"]:checked { background: %1; }\n"
+                 "QToolButton[sectionHeader=\"true\"]:checked:hover { background: %2; }\n")
+             .arg(css(kBgRaised), css(kBgHover))
+             .arg(r);
     s += QString("QToolButton { background: transparent; border: none; border-radius: %2px; padding: 3px; }\n"
                  "QToolButton:hover { background: %1; }\n"
                  "QToolButton:checked { background: %3; }\n"
@@ -255,21 +373,47 @@ void apply(const Palette& p) {
              .arg(css(kBgHover))
              .arg(r)
              .arg(css(accent(45)));
-    // Inputs.
-    s += QString("QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QKeySequenceEdit {"
-                 " background: %1; border: 1px solid transparent; border-radius: %4px; padding: 4px 6px;"
-                 " selection-background-color: %3; }\n"
-                 "QLineEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus { border-color: %2; }\n"
-                 "QComboBox::drop-down { border: none; width: 18px; }\n"
-                 "QComboBox QAbstractItemView { background: %5; border: 1px solid %6; selection-background-color: %7; }\n")
-             .arg(css(kBgRaised), css(accent(160)), css(accent(90)))
-             .arg(r)
-             .arg(css(popup), css(kBorder), css(kBgHover));
+    // Fields: sunken, outlined, text from the left; the outline lights up on hover and focus. A
+    // drop-down is a field with a chevron (ui::Style draws it).
+    QString fields = "QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QKeySequenceEdit {"
+                     " background: FIELD; border: BWpx solid FBORDER; border-radius: Rpx; padding: 3px 8px;"
+                     " selection-background-color: SELECTION; }\n"
+                     "QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox { min-height: INNERpx; }\n"
+                     "QLineEdit:hover, QPlainTextEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover, QComboBox:hover { border-color: FHOVER; }\n"
+                     "QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus,"
+                     " QComboBox:on { border-color: FOCUS; }\n"
+                     "QLineEdit:disabled, QComboBox:disabled { color: FAINT; }\n"
+                     "QLineEdit[readOnly=\"true\"] { color: DIM; }\n"
+                     "QComboBox { padding-right: 26px; }\n"
+                     "QComboBox::drop-down { subcontrol-origin: padding; subcontrol-position: center right; border: none; width: 24px; }\n"
+                     "QComboBox::down-arrow { image: url(CHEVRON); width: 10px; height: 6px; }\n"
+                     "QComboBox::down-arrow:disabled { image: url(FCHEVRON); }\n"
+                     "QAbstractSpinBox { padding-right: 22px; }\n"
+                     "QAbstractSpinBox::up-button, QAbstractSpinBox::down-button { subcontrol-origin: border; width: 20px; border: none;"
+                     " background: transparent; }\n"
+                     "QAbstractSpinBox::up-button { subcontrol-position: top right; }\n"
+                     "QAbstractSpinBox::down-button { subcontrol-position: bottom right; }\n"
+                     "QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover { background: HOVER; }\n"
+                     "QAbstractSpinBox::up-arrow { image: url(UCHEVRON); width: 8px; height: 5px; }\n"
+                     "QAbstractSpinBox::down-arrow { image: url(CHEVRON); width: 8px; height: 5px; }\n"
+                     "QComboBox QAbstractItemView { background: POPUP; border: 1px solid BORDER; selection-background-color: HOVER;"
+                     " outline: none; padding: 4px; }\n";
+    fields.replace("FCHEVRON", chevron(kTextFaint, false)).replace("UCHEVRON", chevron(kTextDim, true)).replace("CHEVRON", chevron(kTextDim, false));
+    fields.replace("FIELD", css(kField)).replace("FBORDER", css(kFieldBorder)).replace("SELECTION", css(kSelection));
+    fields.replace("FHOVER", css(mix(p.fieldBorder, p.text, 0.25f))).replace("FOCUS", css(kFocus)).replace("FAINT", css(kTextFaint));
+    fields.replace("DIM", css(kTextDim)).replace("POPUP", css(popup)).replace("BORDER", css(kBorder)).replace("HOVER", css(kBgHover));
+    fields.replace("INNER", QString::number(inner)).replace("BW", QString::number(bw)).replace("Rpx", QString::number(r) + "px");
+    s += fields;
+    s += QString("QProgressBar { background: %1; border: none; border-radius: %3px; text-align: center; color: %4; min-height: 8px; }\n"
+                 "QProgressBar::chunk { background: %2; border-radius: %3px; }\n")
+             .arg(css(kField), css(kAccent))
+             .arg(std::max(2, r))
+             .arg(css(kText));
     // Check boxes and radio buttons are drawn by ui::Style (a check mark, not an accent-filled box).
     s += QString("QSlider::groove:horizontal { height: 4px; background: %1; border-radius: 2px; }\n"
                  "QSlider::sub-page:horizontal { background: %2; border-radius: 2px; }\n"
                  "QSlider::handle:horizontal { width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; background: %2; }\n")
-             .arg(css(kBgRaised), css(kAccent));
+             .arg(css(kField), css(kAccent));
     // Scroll bars: thin, no arrows.
     s += QString("QScrollBar:vertical { width: 10px; background: transparent; margin: 0; }\n"
                  "QScrollBar:horizontal { height: 10px; background: transparent; margin: 0; }\n"
@@ -291,6 +435,7 @@ void apply(const Palette& p) {
                  "QListWidget::item, QTreeWidget::item { padding: 6px; border-radius: %3px; }\n"
                  "QListWidget::item:hover, QTreeWidget::item:hover { background: %1; }\n"
                  "QListWidget::item:selected, QTreeWidget::item:selected { background: %2; color: %4; }\n"
+                 "QListWidget::item:selected:hover, QTreeWidget::item:selected:hover { background: %2; }\n"
                  "QHeaderView::section { background: %5; border: none; padding: 4px 6px; color: %6; }\n")
              .arg(css(kBgHover), css(accent(50)))
              .arg(r)
