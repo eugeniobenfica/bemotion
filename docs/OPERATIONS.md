@@ -35,6 +35,7 @@ layer and then animate it.
 | shapes | `size`, `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end` |
 | text, subtitle, counter | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness`; counter also has `counter_from` and `counter_to` (it counts between them) and `counter_value` (keyframes on it replace the count) |
 | camera | `position`, `position_z`, `rotation_x` (looks down), `rotation_y` (looks left), `rotation`, `camera_zoom` |
+| media with a picture (video, image) | `crop_left`, `crop_top`, `crop_right`, `crop_bottom` (percent of the picture cut away from that side) |
 | media with sound | `volume` |
 | plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
 | effects | `fx<index>.<param>` (e.g. `fx0.size`; `effect.add` lists the params) |

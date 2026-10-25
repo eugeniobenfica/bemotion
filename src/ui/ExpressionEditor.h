@@ -34,9 +34,12 @@ public:
     bool editing() const;              // the text has the focus
     void focusText();
     void setProblem(const QString& problem); // shown under it (empty: none)
+    void setRowButtons(bool shown);          // close and remove (not in a dialog, which has its own)
 
 signals:
     void edited(const QString& text); // as typed
+    void closeRequested();            // its close button, or Esc
+    void removeRequested();           // its remove button
 
 private:
     void insert(const QString& snippet); // at the cursor; "|" marks where the cursor goes
@@ -47,6 +50,7 @@ private:
     bool vector_;
     ExpressionText* text_ = nullptr;
     QLabel* problem_ = nullptr;
+    QWidget* rowButtons_ = nullptr;
 };
 
 } // namespace ui

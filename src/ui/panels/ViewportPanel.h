@@ -36,6 +36,8 @@ class IconButton;
 //   corner / top handle           scale (Shift: uniform) / rotate (Shift: 15° steps)
 //   double-click a text           edit it in place; a compound: enter it
 //   red / green / blue arrows      move a 3D layer (or, in the 3D view, the camera) along X / Y / Z
+// Crop tool (Shift+C): a selected video or image shows its whole picture, and its edges, corners
+//   or inside (the shown part moves) drag the crop (Shift: whole percents).
 // 3D view (the cube button): the layers and cameras in space, seen from an eye of its own:
 //   drag empty space               turn around      right / middle drag  pan      wheel  closer / farther
 // Camera tools (a camera selected, looking through it): Orbit, Pan, Dolly move the camera by dragging.
@@ -83,7 +85,7 @@ protected:
     bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle, Guide, Axis, Orbit, OrbitPan, CameraTool };
+    enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle, Guide, Axis, Orbit, OrbitPan, CameraTool, Crop };
 
     void layout(); // zoom, origin and camera for the current size and time
     void press(QMouseEvent* e, bool doubleClick);
@@ -161,6 +163,16 @@ private:
     float toolStartRx_ = 0.0f, toolStartRy_ = 0.0f;
     void moveCamera(Vec2 mouse);
     render::View sceneView() const { return {origin_, zoom_, world_}; }
+
+    // --- crop (the Crop tool) ----------------------------------------------------------
+    Layer* cropLayer() const; // the single selected video / image, with the Crop tool on
+    // Layer -> screen, and the whole picture's and the shown part's corners on screen (TL, TR, BR, BL).
+    bool cropFrame(const Layer& layer, Projective& m, Vec2 full[4], Vec2 shown[4]) const;
+    int cropHit(Vec2 screen) const; // the edges under the mouse: 1 left, 2 top, 4 right, 8 bottom; 15 inside
+    void drawCrop(QPainter& p);
+    int cropEdges_ = 0;
+    float cropStart_[4] = {}; // left, top, right, bottom when the drag started
+    Vec2 cropStartLocal_;
     bool autoFit_ = true;
     bool spaceHeld_ = false, spaceUsed_ = false;
     Vec2 mouse_{-1e6f, -1e6f};
@@ -223,6 +235,7 @@ private:
         std::vector<uint64_t> selection;
         uint64_t scope = 0;
         bool snapping = false, guides = false, rulers = false, playing = false;
+        int tool = 0;
         bool operator==(const Signature&) const = default;
     } drawn_;
     struct FrameKey {
@@ -235,6 +248,7 @@ private:
         bool throughCamera = true;
         bool orbit = false;
         Orbit orbitView;
+        uint64_t uncropped = 0; // the layer being cropped shows its whole picture
         bool operator==(const FrameKey&) const = default;
     } frameKey_;
     bool frameValid_ = false;

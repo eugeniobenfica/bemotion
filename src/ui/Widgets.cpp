@@ -330,6 +330,19 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         }
         break;
     }
+    case Icon::Crop: { // two L shapes crossing, as every crop tool draws it
+        const Pt a[3] = {Pt(c.x - h * 0.45f, c.y - h * 0.9f), Pt(c.x - h * 0.45f, c.y + h * 0.45f), Pt(c.x + h * 0.9f, c.y + h * 0.45f)};
+        const Pt b[3] = {Pt(c.x - h * 0.9f, c.y - h * 0.45f), Pt(c.x + h * 0.45f, c.y - h * 0.45f), Pt(c.x + h * 0.45f, c.y + h * 0.9f)};
+        dl.polyline(a, 3, col, false, th);
+        dl.polyline(b, 3, col, false, th);
+        break;
+    }
+    case Icon::Expression: { // an italic f, as After Effects marks expressions
+        dl.bezier(Pt(c.x + h * 0.62f, c.y - h * 0.7f), Pt(c.x + h * 0.05f, c.y - h * 1.05f), Pt(c.x + h * 0.05f, c.y + h * 1.05f),
+                  Pt(c.x - h * 0.6f, c.y + h * 0.72f), col, th);
+        dl.line(Pt(c.x - h * 0.42f, c.y - h * 0.18f), Pt(c.x + h * 0.48f, c.y - h * 0.18f), col, th);
+        break;
+    }
     case Icon::Subtitles: { // a frame with two lines of text at its bottom
         dl.rect(Pt(c.x - h * 0.85f, c.y - h * 0.65f), Pt(c.x + h * 0.85f, c.y + h * 0.65f), col, size * 0.1f, th);
         dl.line(Pt(c.x - h * 0.5f, c.y + h * 0.05f), Pt(c.x + h * 0.5f, c.y + h * 0.05f), col, th);

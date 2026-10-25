@@ -1038,6 +1038,39 @@ void testLetters() {
     CHECK(!run(p, R"({"op":"layer.set","layer":"T","fit_captions":true})").ok);
 }
 
+void testCrop() {
+    Project p;
+    MediaItem image;
+    image.name = "photo.png";
+    image.path = "C:/footage/photo.png";
+    image.kind = MediaKind::Image;
+    image.width = 400;
+    image.height = 200;
+    image.hasVideo = true;
+    const uint64_t media = p.comp.addMedia(image);
+    p.comp.addLayer(makeMediaLayer(*p.comp.findMedia(media), {0, 0}, 0.0, 5.0)).name = "Photo";
+    Layer& l = p.comp.layers.front();
+    auto props = l.properties();
+    CHECK(l.findProperty(props, "crop_left") && l.findProperty(props, "crop_bottom"));
+    CHECK(defaultPropertyValue(l, "crop_top", p.comp.center()) == std::vector<float>{0.0f});
+    Vec2 mn, mx;
+    l.media.cropRect(0.0, mn, mx);
+    CHECK(near(mn.x, -200.0f) && near(mx.y, 100.0f) && !l.media.cropped(0.0));
+    // A quarter off the left, half off the top: what is left stays where it was.
+    CHECK(run(p, R"({"op":"property.set","layer":"Photo","prop":"crop_left","value":25})").ok);
+    CHECK(run(p, R"({"op":"property.set","layer":"Photo","prop":"crop_top","value":50})").ok);
+    const Layer& c = p.comp.layers.front();
+    c.media.cropRect(0.0, mn, mx);
+    CHECK(near(mn.x, -100.0f) && near(mn.y, 0.0f) && near(mx.x, 200.0f) && near(mx.y, 100.0f) && c.media.cropped(0.0));
+    // Opposite sides never meet: at least 1% of the picture stays.
+    CHECK(run(p, R"({"op":"property.set","layer":"Photo","prop":"crop_right","value":90})").ok);
+    p.comp.layers.front().media.cropRect(0.0, mn, mx);
+    CHECK(mx.x - mn.x >= 400.0f * 0.0099f);
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back) && validate(back).empty());
+    CHECK(near(back.comp.layers.front().media.cropTop.valueAt(0.0), 50.0f));
+}
+
 void testLens() {
     Project p;
     CHECK(run(p, R"([{"op": "layer.add", "type": "rectangle", "name": "Flat", "position": [1060, 540]},
@@ -1113,6 +1146,9 @@ void testExpressions() {
     CHECK(checkExpression(lines.expression).empty() && near(lines.valueAt(2.0), 100.0f));
     CHECK(!checkExpression("a = 1").empty() && !checkExpression("var b 2").empty());
     CHECK(checkExpression("value; ").empty());
+    // A word on its way to a call is not an expression yet; names from earlier lines are.
+    CHECK(!checkExpression("wiggle").empty() && !checkExpression("speed * 2").empty());
+    CHECK(checkExpression("var speed = 90\nspeed * time").empty());
     // A broken one falls back to the keyframes and says why.
     AnimFloat broken(7.0f);
     broken.expression = "layer(\"Nobody\").opacity";
@@ -1175,6 +1211,7 @@ int main() {
         {"subtitles", testSubtitles},
         {"counter", testCounter},
         {"letters and fit", testLetters},
+        {"crop", testCrop},
         {"lens", testLens},
         {"expressions", testExpressions},
     };

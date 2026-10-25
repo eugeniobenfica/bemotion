@@ -586,25 +586,15 @@ QWidget* editorPage() {
         st.autosaveMinutes = d.autosaveMinutes;
     });
     col->addWidget(sectionLabel("SAVING"));
-    auto* autosave = new QCheckBox("Save open projects automatically");
+    auto* autosave = new QCheckBox("Save open projects after every change");
     autosave->setChecked(s.autosaveMinutes > 0);
     col->addWidget(autosave);
-    static int minutes;
-    minutes = s.autosaveMinutes > 0 ? s.autosaveMinutes : 5;
-    QWidget* every = intSliderRow("Every (minutes)", minutes, 1, 30);
-    every->setEnabled(s.autosaveMinutes > 0);
-    for (QSlider* sl : every->findChildren<QSlider*>())
-        QObject::connect(sl, &QSlider::valueChanged, sl, [](int) {
-            settings().autosaveMinutes = minutes;
-            saveSettings();
-        });
-    QObject::connect(autosave, &QCheckBox::toggled, every, [every](bool on) {
-        settings().autosaveMinutes = on ? minutes : 0;
-        every->setEnabled(on);
+    QObject::connect(autosave, &QCheckBox::toggled, autosave, [](bool on) {
+        settings().autosaveMinutes = on ? 5 : 0; // any value but 0 is on (the setting's older name)
         saveSettings();
     });
-    col->addWidget(every);
-    col->addWidget(hintLabel("Unsaved changes are also kept aside every few seconds: if bemotion closes unexpectedly, "
+    col->addWidget(hintLabel("A project saves itself a moment after each change, once it has a file (the first Save picks it). "
+                             "Unsaved changes are also kept aside every few seconds: if bemotion closes unexpectedly, "
                              "it offers them back the next time it opens."));
     if (!s.advanced) return page;
     col->addSpacing(8);

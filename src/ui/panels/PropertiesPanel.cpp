@@ -585,6 +585,19 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                     default: break;
                     }
                 }
+            } else if (group == "Crop" && layer.type == LayerType::Media) {
+                // The four sides below; the tool drags them in the viewport.
+                auto* tool = new QPushButton("Crop in Viewport");
+                tool->setCheckable(true);
+                tool->setToolTip("The Crop tool: drag the picture's edges, corners or inside (Shift+C; Esc: done)");
+                connect(tool, &QPushButton::clicked, this, [this](bool on) {
+                    ctx_.tool = on ? Tool::Crop : Tool::Select;
+                });
+                section->addPlainRow("Tool", tool);
+                refreshers_.push_back([this, tool] {
+                    const QSignalBlocker b(tool);
+                    tool->setChecked(ctx_.tool == Tool::Crop);
+                });
             } else if (group == "Counter" && layer.type == LayerType::Text && layer.text.counter) {
                 buildCountRows(section, layer);
             } else if (group == "Shape") {

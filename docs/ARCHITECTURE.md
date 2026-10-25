@@ -114,6 +114,10 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
 - **Media** — `Composition::media` lists imported files (`core/Media.h`); a
   media layer refers to one by id and stores where the source's first frame
   sits in composition time (`MediaProps::start`, moved by `shiftTime`).
+  Its crop (`crop_left` … `crop_bottom`, percents of the picture) leaves the
+  shown part where it was (`MediaProps::cropRect`, used by drawing and
+  bounds); the viewport's Crop tool (`Tool::Crop`) drags it, showing the
+  whole picture with the cut-away part dimmed.
 - **Cameras** — the top-most active camera frames the scene (`cameraAt`).
   **3D layers** (`Layer::threeD`, top level only) have a Z position
   (`transform.depth`, `position_z`) and X / Y rotation (`rotation_x`,
@@ -328,8 +332,9 @@ Rules:
   panels in Qt Advanced Docking System docks (layout saved in
   `layout.ads`; a saved layout missing a newer panel is replaced by the
   default), and a **16 ms timer** (`tick()`) that drives playback, media,
-  audio, undo commits and every panel's `sync()`. A slower
-  timer keeps crash-recovery copies and autosaves (`app/Recovery`).
+  audio, undo commits, autosave (a moment after each change, once the
+  document's revision stops moving) and every panel's `sync()`. A slower
+  timer keeps crash-recovery copies (`app/Recovery`).
   - Panel headers have only tabs and a **minimize** button (no close, undock,
     tabs-menu or pin buttons): a minimized panel hides and leaves a handle on
     the window edge that brings it back at its size. View > Panels shows or
@@ -361,9 +366,13 @@ Rules:
   - Custom-painted panels (viewport, timeline) compute their layout from the
     document in paint / mouse handlers and repaint on `revision()` / time
     changes.
-- **`PropertyRow`** — the editor of one property (keyframe toggle, label,
-  drag-to-scrub value, reset, context menu), used by Properties, Effects and the
-  timeline rows.
+- **`PropertyRow`** — the editor of one property (keyframe toggle, its ƒ
+  expression button, label, drag-to-scrub value, reset, context menu), used by
+  Properties, Effects and the timeline rows; the expression is written in a
+  `ui::ExpressionEditor` under the row (open ones stay open when the panel
+  rebuilds).
+- **`PreviewWindow`** — the full screen preview: the composition alone on
+  black, driven by the editor's tick (playback, audio) and its own keys.
 - **Drag and drop** between panels uses the MIME types of `ui/Mime.h`.
 - **`Theme`** — palettes (`Palette`) applied as a `QPalette` + style sheet.
   Colors come from the named tokens (`theme::kText`, `kTextDim`, `kAccent`,

@@ -19,11 +19,11 @@ enum class Action {
     // Playback & time
     PlayPause, PrevFrame, NextFrame, PrevFrames, NextFrames, GoToStart, GoToEnd, PrevKeyframe, NextKeyframe,
     // Tools
-    SelectTool, CutTool, Split, ToggleSnapping, AddText,
+    SelectTool, CutTool, Split, ToggleSnapping, AddText, CropTool,
     // Keyframes
     EasyEase, EaseIn, EaseOut,
     // View
-    FitView, ActualSize, ZoomIn, ZoomOut, FullScreen, ViewportFullscreen,
+    FitView, ActualSize, ZoomIn, ZoomOut, FullScreen, ViewportFullscreen, FullScreenPreview,
     Count
 };
 

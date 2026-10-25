@@ -270,13 +270,35 @@ struct Compiled {
 std::mutex g_cacheMutex;
 std::unordered_map<std::string, std::shared_ptr<Compiled>> g_cache;
 
+// Every name is known, or named by an earlier line: a word half typed ("wiggle" on the way to
+// "wiggle(2, 10)") is not an expression yet.
+void checkNames(const Node& n, std::vector<std::string>& named) {
+    static const char* const kKnown[] = {"time",  "value", "pi",       "fps",      "frame", "width", "height",
+                                         "center", "start", "end", "duration", "progress", "index"};
+    if (n.op == Op::Seq) {
+        for (size_t k = 0; k + 1 < n.kids.size(); ++k) {
+            checkNames(*n.kids[k]->kids[0], named);
+            named.push_back(n.kids[k]->name);
+        }
+        checkNames(*n.kids.back(), named);
+        return;
+    }
+    if (n.op == Op::Var && std::find(named.begin(), named.end(), n.name) == named.end() &&
+        std::none_of(std::begin(kKnown), std::end(kKnown), [&](const char* k) { return n.name == k; }))
+        throw Error("unknown name \"" + n.name + "\"");
+    for (const NodeP& k : n.kids) checkNames(*k, named);
+}
+
 std::shared_ptr<Compiled> compile(const std::string& text) {
     std::lock_guard lock(g_cacheMutex);
     if (auto it = g_cache.find(text); it != g_cache.end()) return it->second;
     auto c = std::make_shared<Compiled>();
     try {
         c->root = Parser(text).parse();
+        std::vector<std::string> named;
+        checkNames(*c->root, named);
     } catch (const Error& e) {
+        c->root.reset();
         c->error = e.what();
     }
     if (g_cache.size() > 4096) g_cache.clear();

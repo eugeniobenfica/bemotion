@@ -53,6 +53,7 @@ constexpr ActionInfo kActions[] = {
     {"split", "Split at Playhead", "Tools", Ctrl | Qt::Key_K},
     {"toggle_snapping", "Snapping On / Off", "Tools", Chord(Qt::Key_S)},
     {"add_text", "Add Text", "Tools", Chord(Qt::Key_T)},
+    {"crop_tool", "Crop Tool", "Tools", Shift | Qt::Key_C},
     {"easy_ease", "Easy Ease", "Keyframes", Chord(Qt::Key_F9)},
     {"ease_in", "Ease In", "Keyframes", Shift | Qt::Key_F9},
     {"ease_out", "Ease Out", "Keyframes", Ctrl | Shift | Qt::Key_F9},
@@ -62,6 +63,7 @@ constexpr ActionInfo kActions[] = {
     {"zoom_out", "Zoom Out", "View", Ctrl | Qt::Key_Minus},
     {"full_screen", "Full Screen", "View", Chord(Qt::Key_F11)},
     {"viewport_fullscreen", "Viewport Fullscreen", "View", Ctrl | Qt::Key_F11},
+    {"full_screen_preview", "Full Screen Preview", "View", Ctrl | Shift | Qt::Key_F},
 };
 static_assert(std::size(kActions) == static_cast<size_t>(Action::Count));
 

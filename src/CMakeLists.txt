@@ -73,6 +73,7 @@ add_executable(bemotion WIN32
     ui/PagedWindow.cpp
     ui/PropertyRow.cpp
     ui/ExpressionEditor.cpp
+    ui/PreviewWindow.cpp
     ui/SettingsWindow.cpp
     ui/Theme.cpp
     ui/Tools.cpp

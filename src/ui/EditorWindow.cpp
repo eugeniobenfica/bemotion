@@ -19,6 +19,7 @@
 #include "ui/Keymap.h"
 #include "ui/Mime.h"
 #include "ui/Theme.h"
+#include "ui/PreviewWindow.h"
 #include "ui/Tools.h"
 #include "ui/Widgets.h"
 #include "ui/panels/EffectsPanel.h"
@@ -58,6 +59,7 @@
 #include <QPointer>
 #include <QSplitter>
 #include <QPushButton>
+#include <QScreen>
 #include <QTimer>
 #include <QUrl>
 
@@ -172,13 +174,10 @@ EditorWindow::EditorWindow(Project project, std::filesystem::path path, RecentPr
     connect(timer_, &QTimer::timeout, this, &EditorWindow::tick);
     timer_->start(16);
     clock_.start();
-    sinceSave_.start();
-    // Unsaved changes are kept aside (crash recovery) and, if the user wants, saved regularly.
+    sinceChange_.start();
+    // Unsaved changes are kept aside (crash recovery); autosave() saves them after each change.
     auto* keeper = new QTimer(this);
-    connect(keeper, &QTimer::timeout, this, [this] {
-        keepRecoveryCopy();
-        autosave();
-    });
+    connect(keeper, &QTimer::timeout, this, [this] { keepRecoveryCopy(); });
     keeper->start(20000);
 }
 
@@ -254,7 +253,11 @@ void EditorWindow::buildDocks() {
         settings().previewQuality = divisor;
         saveSettings();
     });
-    connect(viewport_, &ViewportPanel::viewportFullscreenRequested, this, &EditorWindow::toggleViewportFullscreen);
+    // The viewport's full screen button: the preview (or, in the viewport-only layout, back).
+    connect(viewport_, &ViewportPanel::viewportFullscreenRequested, this, [this] {
+        if (viewportFullscreen_) toggleViewportFullscreen();
+        else openPreview();
+    });
     connect(viewport_, &ViewportPanel::layerMenuRequested, timeline_, &TimelinePanel::showTrackMenu);
     connect(timeline_, &TimelinePanel::toolbarMoveRequested, this, moveToolbar);
     connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] { QTimer::singleShot(0, this, [this] { placeToolbar(); }); });
@@ -748,6 +751,7 @@ void EditorWindow::buildMenus() {
     });
     layer->addSeparator();
     layer->addAction(action(Action::CutTool, "Cut Tool", [this] { ctx_.tool = Tool::Razor; }));
+    layer->addAction(action(Action::CropTool, "Crop Tool", [this] { ctx_.tool = ctx_.tool == Tool::Crop ? Tool::Select : Tool::Crop; }));
     layer->addAction(action(Action::SelectTool, "Selection Tool", [this] { ctx_.tool = Tool::Select; }));
     layer->addSeparator();
     layer->addAction(action(Action::BringToFront, "Bring to Front", [this] { ctx_.shiftSelected(-1000); }));
@@ -770,6 +774,8 @@ void EditorWindow::buildMenus() {
         actions_[Action::ReleaseCompound]->setEnabled(ctx_.selectionHasCompound());
         actions_[Action::CutTool]->setCheckable(true);
         actions_[Action::CutTool]->setChecked(ctx_.tool == Tool::Razor);
+        actions_[Action::CropTool]->setCheckable(true);
+        actions_[Action::CropTool]->setChecked(ctx_.tool == Tool::Crop);
         actions_[Action::SelectTool]->setCheckable(true);
         actions_[Action::SelectTool]->setChecked(ctx_.tool == Tool::Select);
     });
@@ -829,6 +835,7 @@ void EditorWindow::buildMenus() {
     view->addAction(action(Action::ActualSize, "Actual Size (100%)", [this] { viewport_->setZoom(1.0f); }));
     view->addAction(action(Action::ZoomIn, "Zoom In", [this] { viewport_->zoomBy(1.25f); }));
     view->addAction(action(Action::ZoomOut, "Zoom Out", [this] { viewport_->zoomBy(1.0f / 1.25f); }));
+    view->addAction(action(Action::FullScreenPreview, "Full Screen Preview", [this] { openPreview(); }));
     view->addAction(action(Action::ViewportFullscreen, "Viewport Fullscreen", [this] { toggleViewportFullscreen(); }));
     view->addSeparator();
     QAction* snap = action(Action::ToggleSnapping, "Snapping", [this] { ctx_.snapping = !ctx_.snapping; });
@@ -1045,8 +1052,10 @@ void EditorWindow::tick() {
     transitions_->sync();
     animations_->sync();
     timeline_->sync();
+    if (preview_) preview_->sync();
 
     ctx_.commitIfIdle(interacting());
+    autosave();
     updateMinimizeHandles();
     const QString t = title();
     if (t != lastTitle_) {
@@ -1088,7 +1097,6 @@ void EditorWindow::save() {
     setStatus({});
     recents_.touch(ctx_.path, ctx_.project.name);
     recovery::discard(ctx_.path, ctx_.project.name);
-    sinceSave_.restart();
 }
 
 void EditorWindow::saveAs() {
@@ -1105,7 +1113,6 @@ void EditorWindow::saveAs() {
     setStatus({});
     recents_.touch(ctx_.path, ctx_.project.name);
     recovery::discard(ctx_.path, ctx_.project.name);
-    sinceSave_.restart();
 }
 
 bool EditorWindow::confirmClose() {
@@ -1186,11 +1193,35 @@ void EditorWindow::keepRecoveryCopy() {
 }
 
 void EditorWindow::autosave() {
-    const int minutes = settings().autosaveMinutes;
-    if (minutes <= 0 || ctx_.path.empty() || !ctx_.isDirty() || interacting()) return;
-    if (sinceSave_.isValid() && sinceSave_.elapsed() < minutes * 60000LL) return;
-    platform::log("autosaving");
+    if (ctx_.revision() != seenRevision_) { // a change: wait for the next pause
+        seenRevision_ = ctx_.revision();
+        sinceChange_.restart();
+        return;
+    }
+    // Every change, once it is done (not mid-drag, not mid-word: a short pause after it). A
+    // project never saved has no file yet: recovery keeps it until the user saves it.
+    if (settings().autosaveMinutes <= 0 || ctx_.path.empty() || !ctx_.isDirty() || interacting() || ctx_.playing ||
+        media::Recorder::get().recording() || sinceChange_.elapsed() < 700 || triedRevision_ == ctx_.revision())
+        return;
+    triedRevision_ = ctx_.revision();
     save();
+}
+
+void EditorWindow::openPreview() {
+    if (preview_) {
+        preview_->close();
+        return;
+    }
+    if (viewportFullscreen_) toggleViewportFullscreen();
+    preview_ = new ui::PreviewWindow(ctx_, this);
+    // On the screen the editor is on; from the playhead (from the start when it is at the end).
+    if (QScreen* screen = window()->screen()) preview_->setGeometry(screen->geometry());
+    const Composition& c = ctx_.comp();
+    if (ctx_.time >= c.timeOfFrame(c.frameCount() - 1) - 1e-6) ctx_.setTime(0.0);
+    preview_->showFullScreen();
+    preview_->activateWindow();
+    preview_->setFocus();
+    ctx_.playing = true;
 }
 
 void EditorWindow::markRecovered() {

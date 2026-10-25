@@ -252,10 +252,16 @@ struct MediaProps {
     double start = 0.0;       // composition time of the source's first frame (moves with the layer;
                               // trimming the in point reveals later source frames, like After Effects)
     AnimFloat volume{100.0f}; // percent, layers with audio
+    // Crop: how much of each side of the picture is cut away, percent of the source.
+    AnimFloat cropLeft{0.0f}, cropTop{0.0f}, cropRight{0.0f}, cropBottom{0.0f};
     bool hasVideo = false;
     bool hasAudio = false;
 
     double sourceTime(double t) const { return t - start; }
+    // The part of the picture shown, in layer space (the source is centered on 0, 0); at least
+    // 1% of it on each axis.
+    void cropRect(double t, Vec2& mn, Vec2& mx) const;
+    bool cropped(double t) const;
 };
 
 // Timeline-facing record of a transition. Its animation remains compatible

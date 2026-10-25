@@ -20,6 +20,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <functional>
 
 namespace bemotion::ui {
 
@@ -96,6 +97,8 @@ public:
         fitHeight();
     }
 
+    std::function<void()> onEscape;
+
     void fitHeight() {
         const int lines = std::clamp(document()->blockCount(), 1, 10);
         int visual = 0;
@@ -105,6 +108,14 @@ public:
     }
 
 protected:
+    bool event(QEvent* e) override {
+        // Esc belongs to the editor (it closes), not to the window's Deselect.
+        if (e->type() == QEvent::ShortcutOverride && static_cast<QKeyEvent*>(e)->key() == Qt::Key_Escape) {
+            e->accept();
+            return true;
+        }
+        return QPlainTextEdit::event(e);
+    }
     void keyPressEvent(QKeyEvent* e) override {
         if (completer_->popup()->isVisible()) {
             switch (e->key()) {
@@ -118,6 +129,7 @@ protected:
         }
         if (e->key() == Qt::Key_Escape) { // done writing
             clearFocus();
+            if (onEscape) onEscape();
             return;
         }
         if (e->key() == Qt::Key_Tab) {
@@ -203,26 +215,39 @@ ExpressionEditor::ExpressionEditor(EditorContext& ctx, uint64_t layerId, bool ve
     auto* col = new QVBoxLayout(this);
     col->setContentsMargins(0, 0, 0, 4);
     col->setSpacing(2);
-    auto* row = new QHBoxLayout;
-    row->setSpacing(4);
     text_ = new ExpressionText(ctx, layerId, this);
     text_->setPlaceholderText(vector ? "= an expression, e.g. wiggle(2, 25)" : "= an expression, e.g. time * 90");
     text_->setToolTip("Worked out every frame. Several lines: name = ... first, the result last.\n"
                       "Names complete as you type; ƒ inserts functions and other layers' properties. Esc: done.");
     connect(text_, &QPlainTextEdit::textChanged, this, [this] { emit edited(text()); });
-    row->addWidget(text_, 1);
-    auto* fx = new QToolButton;
-    fx->setText(QString::fromUtf8("ƒ"));
-    fx->setToolTip("Insert a function, a value of this clip, or a property of another layer");
-    fx->setFixedSize(26, 26);
-    connect(fx, &QToolButton::clicked, this, [this] { showMenu(); });
-    row->addWidget(fx, 0, Qt::AlignTop);
-    col->addLayout(row);
+    col->addWidget(text_);
+    // Under the text: the problem (if it does not read), then insert, close and remove.
+    auto* footer = new QHBoxLayout;
+    footer->setSpacing(2);
     problem_ = new QLabel;
     problem_->setWordWrap(true);
     ui::setTone(problem_, ui::Tone::Danger);
-    problem_->hide();
-    col->addWidget(problem_);
+    footer->addWidget(problem_, 1);
+    auto* fx = new QToolButton;
+    fx->setText(QString::fromUtf8("ƒ"));
+    fx->setToolTip("Insert a function, a value of this clip, or a property of another layer");
+    fx->setFixedSize(24, 22);
+    connect(fx, &QToolButton::clicked, this, [this] { showMenu(); });
+    footer->addWidget(fx, 0, Qt::AlignTop);
+    // Close (the expression stays: the fx button by the diamond opens it again) and remove.
+    rowButtons_ = new QWidget;
+    auto* buttons = new QHBoxLayout(rowButtons_);
+    buttons->setContentsMargins(0, 0, 0, 0);
+    buttons->setSpacing(2);
+    auto* close = new ui::IconButton(ui::Icon::ChevronUp, "Close (the expression stays; fx opens it again)  Esc", 22);
+    connect(close, &QAbstractButton::clicked, this, [this] { emit closeRequested(); });
+    buttons->addWidget(close);
+    auto* remove = new ui::IconButton(ui::Icon::Trash, "Remove the expression", 22);
+    connect(remove, &QAbstractButton::clicked, this, [this] { emit removeRequested(); });
+    buttons->addWidget(remove);
+    footer->addWidget(rowButtons_, 0, Qt::AlignTop);
+    col->addLayout(footer);
+    text_->onEscape = [this] { emit closeRequested(); };
 }
 
 QString ExpressionEditor::text() const { return text_->toPlainText(); }
@@ -235,6 +260,11 @@ void ExpressionEditor::setText(const QString& text) {
     text_->fitHeight();
 }
 
+void ExpressionEditor::setRowButtons(bool shown) {
+    rowButtons_->setVisible(shown);
+    text_->onEscape = shown ? std::function<void()>([this] { emit closeRequested(); }) : std::function<void()>();
+}
+
 bool ExpressionEditor::editing() const { return text_->hasFocus(); }
 
 void ExpressionEditor::focusText() {
@@ -242,10 +272,7 @@ void ExpressionEditor::focusText() {
     text_->moveCursor(QTextCursor::End);
 }
 
-void ExpressionEditor::setProblem(const QString& problem) {
-    problem_->setText(problem);
-    problem_->setVisible(!problem.isEmpty());
-}
+void ExpressionEditor::setProblem(const QString& problem) { problem_->setText(problem); }
 
 void ExpressionEditor::insert(const QString& snippet) {
     const int caret = static_cast<int>(snippet.indexOf('|'));

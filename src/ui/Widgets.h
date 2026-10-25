@@ -114,6 +114,8 @@ enum class Icon {
     Wave,      // float
     Bounce,    // a ball over the floor
     Fade,      // squares fading out
+    Expression, // an italic f: a property's expression
+    Crop,       // two crossing corners
 };
 
 Icon iconForLayer(const Layer& layer);

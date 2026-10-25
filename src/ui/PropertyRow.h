@@ -73,6 +73,8 @@ private:
     void showMenu(QPoint at);
     void openExpression(const QString& text); // shows the editor with `text` (applied when it reads)
     void applyExpression(const QString& text);
+    void closeExpression();  // hides the editor (the expression stays)
+    void removeExpression(); // no expression any more
 
     EditorContext& ctx_;
     uint64_t layerId_;
@@ -80,6 +82,7 @@ private:
     int effectIndex_;
     PropertyKind kind_;
     ui::KeyframeButton* key_ = nullptr;
+    ui::IconButton* fx_ = nullptr; // opens / closes the expression
     QLabel* label_ = nullptr;
     ui::DragValue* x_ = nullptr;
     ui::DragValue* y_ = nullptr;
@@ -88,7 +91,8 @@ private:
     ui::IconButton* reset_ = nullptr;
     QWidget* container_ = nullptr;
     QString labelText_;
-    // The expression (core/Expressions.h): an editor under the row in Properties.
+    // The expression (core/Expressions.h): an editor under the row in Properties, opened by
+    // fx_ (or Alt+click on the diamond) and closed by it, its own buttons or Esc.
     QWidget* exprBox_ = nullptr;
     ui::ExpressionEditor* expr_ = nullptr;
     bool exprOpen_ = false;

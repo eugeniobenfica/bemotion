@@ -3,13 +3,16 @@
 bemotion has two kinds of code, like After Effects:
 
 - **Expressions** — a short formula on one property, worked out every frame.
-  **Alt+click** a property's keyframe diamond (as in After Effects), or
-  right-click it › *Add Expression* (or one of the *Expression Examples*).
+  The **ƒ** button next to a property's keyframe diamond, **Alt+click** the
+  diamond (as in After Effects), or right-click it › *Add Expression* (or
+  one of the *Expression Examples*).
   It is written right there, under the property in *Properties* (in a small
   window from the timeline): several lines, colored as you type, names
   completed (functions, the clip's times, other layers and their
   properties), and **ƒ** inserts any of them — *Layers* lists every layer's
-  properties, what After Effects' pick whip does. Alt+click again removes it.
+  properties, what After Effects' pick whip does. Esc, the arrow under it or
+  the ƒ button close the editor (the expression keeps working, the ƒ button
+  stays lit); its bin, or Alt+click again, removes it.
   The property's name turns into `= Name` and shows the result. An expression that does not read is not applied (the error shows
   under it); one that fails while running (a layer that is gone) falls back to
   the keyframes. Keyframes stay: `value` is what they say.

@@ -9,6 +9,7 @@ const std::vector<ToolInfo>& toolCatalog() {
     static const std::vector<ToolInfo> tools = {
         {"select", "Selection", Icon::Pointer, "Select, move and trim layers", Action::SelectTool, true},
         {"razor", "Cut", Icon::Razor, "Click a clip to split it there", Action::CutTool, true},
+        {"crop", "Crop", Icon::Crop, "Drag the edges of a video or image to crop it (Esc: done)", Action::CropTool, true},
         {"split", "Split at Playhead", Icon::SplitPlayhead, "Split the selected layers at the playhead", Action::Split},
         {"compound", "Create Compound", Icon::Compound, "Combine the selected layers; double-click it to open its timeline",
          Action::CreateCompound},
@@ -32,7 +33,7 @@ int toolIndex(std::string_view id) {
     return -1;
 }
 
-std::vector<std::string> defaultToolbar() { return {"select", "razor", "split", "compound", "delete"}; }
+std::vector<std::string> defaultToolbar() { return {"select", "razor", "crop", "split", "compound", "delete"}; }
 
 std::string toolTooltip(const ToolInfo& tool) {
     std::string tip = tool.label;
@@ -52,13 +53,15 @@ bool toolEnabled(EditorContext& ctx, const ToolInfo& tool) {
 
 bool toolActive(const EditorContext& ctx, const ToolInfo& tool) {
     const std::string_view id = tool.id;
-    return (id == "select" && ctx.tool == Tool::Select) || (id == "razor" && ctx.tool == Tool::Razor);
+    return (id == "select" && ctx.tool == Tool::Select) || (id == "razor" && ctx.tool == Tool::Razor) ||
+           (id == "crop" && ctx.tool == Tool::Crop);
 }
 
 void runTool(EditorContext& ctx, const ToolInfo& tool) {
     const std::string_view id = tool.id;
     if (id == "select") ctx.tool = Tool::Select;
     else if (id == "razor") ctx.tool = Tool::Razor;
+    else if (id == "crop") ctx.tool = ctx.tool == Tool::Crop ? Tool::Select : Tool::Crop;
     else if (id == "split") ctx.splitSelectedAtPlayhead();
     else if (id == "compound") ctx.createCompound();
     else if (id == "release") ctx.releaseSelectedCompounds();

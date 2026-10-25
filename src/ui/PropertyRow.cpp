@@ -21,6 +21,8 @@
 
 #include <cfloat>
 #include <cmath>
+#include <set>
+#include <tuple>
 
 namespace bemotion {
 
@@ -119,12 +121,26 @@ void CollapsibleSection::addPlainRow(const QString& label, QWidget* editor) {
 
 // --- PropertyRow -------------------------------------------------------------------------------
 
+namespace {
+// The expression editors left open: the panel rebuilds its rows now and then, and they stay so.
+std::set<std::tuple<uint64_t, std::string, int>>& openEditors() {
+    static std::set<std::tuple<uint64_t, std::string, int>> open;
+    return open;
+}
+} // namespace
+
 PropertyRow::PropertyRow(EditorContext& ctx, uint64_t layerId, const PropertyRef& prop, CollapsibleSection* section)
     : QObject(section), ctx_(ctx), layerId_(layerId), id_(prop.id), effectIndex_(prop.effectIndex), kind_(prop.kind) {
     QGridLayout* g = section->grid();
     const int row = section->gridRows_++;
     QWidget* values = buildEditors(prop);
-    g->addWidget(key_, row, 0);
+    auto* keys = new QWidget; // the diamond and fx, side by side
+    auto* keyRow = new QHBoxLayout(keys);
+    keyRow->setContentsMargins(0, 0, 0, 0);
+    keyRow->setSpacing(0);
+    keyRow->addWidget(key_);
+    keyRow->addWidget(fx_);
+    g->addWidget(keys, row, 0);
     g->addWidget(label_, row, 1);
     g->addWidget(values, row, 2);
     g->addWidget(reset_, row, 3);
@@ -135,10 +151,14 @@ PropertyRow::PropertyRow(EditorContext& ctx, uint64_t layerId, const PropertyRef
     col->setSpacing(2);
     expr_ = new ui::ExpressionEditor(ctx_, layerId, prop.kind == PropertyKind::Vec2);
     connect(expr_, &ui::ExpressionEditor::edited, this, [this](const QString& t) { applyExpression(t); });
+    connect(expr_, &ui::ExpressionEditor::closeRequested, this, [this] { closeExpression(); });
+    connect(expr_, &ui::ExpressionEditor::removeRequested, this, [this] { removeExpression(); });
     col->addWidget(expr_);
     const int exprRow = section->gridRows_++;
     g->addWidget(exprBox_, exprRow, 1, 1, 3);
-    exprBox_->setVisible(prop.anim->hasExpression());
+    // Closed at first: "= Label" and a lit fx say there is one.
+    exprOpen_ = openEditors().count({layerId_, id_, effectIndex_}) > 0;
+    exprBox_->setVisible(exprOpen_);
     refresh();
 }
 
@@ -151,6 +171,7 @@ PropertyRow::PropertyRow(EditorContext& ctx, uint64_t layerId, const PropertyRef
     QWidget* values = buildEditors(prop);
     values->setFixedWidth(kind_ == PropertyKind::Vec2 ? 132 : kind_ == PropertyKind::Color ? 112 : 72);
     row->addWidget(key_);
+    row->addWidget(fx_);
     row->addWidget(label_, 1);
     row->addWidget(values);
     row->addWidget(reset_);
@@ -169,9 +190,7 @@ QWidget* PropertyRow::buildEditors(const PropertyRef& prop) {
         // Alt+click, as in After Effects: an expression (or none any more).
         if (QApplication::keyboardModifiers() & Qt::AltModifier) {
             if (anim.hasExpression()) {
-                exprOpen_ = false;
-                applyExpression({});
-                if (expr_) expr_->setText({});
+                removeExpression();
             } else {
                 openExpression({});
             }
@@ -184,6 +203,15 @@ QWidget* PropertyRow::buildEditors(const PropertyRef& prop) {
         else if (inClip) anim.addKeyAt(ctx_.time);
         ctx_.touch();
         refresh();
+    });
+
+    fx_ = new ui::IconButton(ui::Icon::Expression, "Expression: a formula worked out every frame", 18);
+    fx_->setFixedSize(18, 24);
+    connect(fx_, &QAbstractButton::clicked, this, [this] {
+        auto p = this->prop();
+        if (!p) return;
+        if (exprOpen_) closeExpression();
+        else openExpression(QString::fromStdString(p->anim->expression));
     });
 
     labelText_ = QString::fromUtf8(prop.label);
@@ -262,11 +290,14 @@ void PropertyRow::refresh() {
                                             : "Keyframe at the playhead\nAlt+click: expression");
     // Driven by an expression: "= Label" in the accent, the expression's value shown.
     const bool driven = anim.hasExpression();
+    fx_->setActive(driven);
+    fx_->setToolTip(driven ? QString(exprOpen_ ? "Close the expression" : "Show the expression") + "\n" + QString::fromStdString(anim.expression)
+                           : "Add an expression: a formula worked out every frame");
     label_->setText(driven ? "= " + labelText_ : labelText_);
     label_->setToolTip(driven ? QString::fromStdString("Expression: " + anim.expression) : QString());
     label_->setStyleSheet(QString("color: %1;").arg(theme::q(driven ? theme::kAccent : anim.isAnimated() ? theme::kText : theme::kTextDim).name()));
     if (exprBox_) {
-        exprBox_->setVisible(driven || exprOpen_);
+        exprBox_->setVisible(exprOpen_);
         if (!expr_->editing() && expr_->text().toStdString() != anim.expression && driven)
             expr_->setText(QString::fromStdString(anim.expression));
         // What is being typed first (it is not applied while it does not read), then how the
@@ -316,11 +347,7 @@ void PropertyRow::showMenu(QPoint at) {
     // Expressions: a formula instead of (or on top of) keyframes.
     if (anim.hasExpression()) {
         menu.addAction("Edit Expression", [this] { openExpression(QString::fromStdString(prop()->anim->expression)); });
-        menu.addAction("Remove Expression", [this] {
-            exprOpen_ = false;
-            applyExpression({});
-            if (expr_) expr_->setText({});
-        });
+        menu.addAction("Remove Expression", [this] { removeExpression(); });
     } else {
         menu.addAction("Add Expression", [this] { openExpression({}); });
     }
@@ -364,6 +391,7 @@ void PropertyRow::openExpression(const QString& text) {
         ui::setTone(head, ui::Tone::TextDim);
         col->addWidget(head);
         auto* editor = new ui::ExpressionEditor(ctx_, layerId_, kind_ == PropertyKind::Vec2);
+        editor->setRowButtons(false);
         editor->setText(text);
         connect(editor, &ui::ExpressionEditor::edited, &dialog, [editor](const QString& t) {
             const std::string e = t.trimmed().toStdString();
@@ -376,13 +404,35 @@ void PropertyRow::openExpression(const QString& text) {
         col->addWidget(buttons);
         editor->focusText();
         if (dialog.exec() == QDialog::Accepted) applyExpression(editor->text());
+        refresh();
         return;
     }
     exprOpen_ = true;
+    openEditors().insert({layerId_, id_, effectIndex_});
     exprBox_->setVisible(true);
     expr_->setText(text);
     expr_->focusText();
     if (!text.isEmpty()) applyExpression(text);
+    refresh();
+}
+
+void PropertyRow::closeExpression() {
+    exprOpen_ = false;
+    openEditors().erase({layerId_, id_, effectIndex_});
+    if (expr_) {
+        // What did not read is dropped: the editor shows the applied expression next time.
+        auto p = prop();
+        expr_->setText(p ? QString::fromStdString(p->anim->expression) : QString());
+        expr_->clearFocus();
+    }
+    refresh();
+}
+
+void PropertyRow::removeExpression() {
+    exprOpen_ = false;
+    openEditors().erase({layerId_, id_, effectIndex_});
+    applyExpression({});
+    if (expr_) expr_->setText({});
     refresh();
 }
 

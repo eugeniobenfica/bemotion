@@ -120,7 +120,9 @@ does.
   large-v3-turbo) and fast on the GPU, offline, the model built in — nothing
   to download or set up
 - **Media**: import images, video and audio (Ctrl+I or drop files on the
-  window) into the *Media* panel; media layers animate like everything else
+  window) into the *Media* panel; media layers animate like everything else;
+  the **Crop** tool (Shift+C) drags a video's or image's edges (four
+  animatable sides in *Properties › Crop*)
   and get an animatable *Volume*
 - **Background**: a color, a gradient or a picture / video that always fills
   the frame (cover, contain, zoom, darken), under everything
@@ -143,9 +145,10 @@ does.
   center or at random; one click from *Animate › Letters*
 - **Auto fit**: long text shrinks to fit its lines (subtitles: two), and
   *Auto Fit* gives captions time to be read
-- **Expressions** typed under any property (Alt+click its diamond, as in
-  After Effects): several lines, completion, a ƒ menu of functions and of
-  other layers' properties
+- **Expressions** typed under any property (its *ƒ* button, next to the
+  keyframe diamond, or Alt+click the diamond, as in After Effects): several
+  lines, completion, a ƒ menu of functions and of other layers' properties;
+  close it and it keeps working
 - **Quick Animations** in their own panel (*Animate*): Fade, Pop, Slide,
   Drop, Zoom, Rise, Shake, Heartbeat, Float, Bounce, Wobble, Blink, Spin,
   Typewriter, Draw On… click one for the selection or drag it onto a clip;
@@ -173,8 +176,9 @@ does.
 - **No fixed length**: the composition ends where its last clip ends and grows
   as you add objects — or set a length limit (15 s ads, 60 s shorts)
 - **Arrange**: distribute layers evenly, stagger their start times
-- **Autosave and recovery**: projects save themselves every few minutes, and
-  changes a crash would lose are offered back the next time
+- **Autosave and recovery**: projects save themselves after every change, and
+  changes a crash would lose (a project not saved yet) are offered back the
+  next time
 - **Viewport** with box selection, rulers, guides and smart snapping
 - **3D controls like After Effects**: a *3D view* (the cube button) shows the
   layers and the camera in space, with what the camera sees; drag to turn
@@ -208,6 +212,8 @@ does.
   densities, frames per arrow press
 - Dockable panels: drag tabs anywhere, minimize a panel to a handle on the
   window edge, double-click a tab to maximize it; full screen with F11
+- **Full Screen Preview** (Ctrl+Shift+F, or the viewport's full screen
+  button): only the picture, playing, on the whole screen; Esc returns
 
 </td>
 <td valign="top">

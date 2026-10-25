@@ -137,6 +137,10 @@ std::vector<PropertyRef> Layer::properties() {
     } else if (type == LayerType::Compound) {
         // Only a transform: its contents are other layers.
     } else if (type == LayerType::Media) {
+        p.push_back({"crop_left", "Crop", "Left", PropertyKind::Float, &media.cropLeft, 0.2f, 0, 100, "%.1f%%"});
+        p.push_back({"crop_top", "Crop", "Top", PropertyKind::Float, &media.cropTop, 0.2f, 0, 100, "%.1f%%"});
+        p.push_back({"crop_right", "Crop", "Right", PropertyKind::Float, &media.cropRight, 0.2f, 0, 100, "%.1f%%"});
+        p.push_back({"crop_bottom", "Crop", "Bottom", PropertyKind::Float, &media.cropBottom, 0.2f, 0, 100, "%.1f%%"});
         if (media.hasAudio)
             p.push_back({"volume", "Audio", "Volume", PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
     } else if (type == LayerType::Plugin) {
@@ -423,8 +427,29 @@ Layer makeBackgroundLayer(double duration) {
     return l;
 }
 
+void MediaProps::cropRect(double t, Vec2& mn, Vec2& mx) const {
+    // Fractions of the source cut from each side; opposite sides leave at least 1% between them.
+    auto cut = [&](const AnimFloat& a) { return std::clamp(a.valueAt(t), 0.0f, 100.0f) * 0.01f; };
+    float l = cut(cropLeft), r = cut(cropRight), tp = cut(cropTop), b = cut(cropBottom);
+    if (l + r > 0.99f) {
+        const float k = 0.99f / (l + r);
+        l *= k, r *= k;
+    }
+    if (tp + b > 0.99f) {
+        const float k = 0.99f / (tp + b);
+        tp *= k, b *= k;
+    }
+    mn = {size.x * (l - 0.5f), size.y * (tp - 0.5f)};
+    mx = {size.x * (0.5f - r), size.y * (0.5f - b)};
+}
+
+bool MediaProps::cropped(double t) const {
+    return cropLeft.valueAt(t) > 0.0f || cropTop.valueAt(t) > 0.0f || cropRight.valueAt(t) > 0.0f || cropBottom.valueAt(t) > 0.0f;
+}
+
 std::vector<float> defaultPropertyValue(const Layer& layer, const char* propertyId, Vec2 compCenter) {
     if (layer.type == LayerType::Media && std::strcmp(propertyId, "volume") == 0) return {100.0f};
+    if (layer.type == LayerType::Media && std::strncmp(propertyId, "crop_", 5) == 0) return {0.0f};
     if (layer.type == LayerType::Background) {
         Layer fresh = makeBackgroundLayer(1.0);
         fresh.background.fill = layer.background.fill;

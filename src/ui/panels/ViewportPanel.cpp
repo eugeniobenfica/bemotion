@@ -25,6 +25,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QToolButton>
@@ -250,8 +251,8 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
         connect(action, &QAction::triggered, this, [this, divisor] { setPreviewQuality(divisor); });
     }
     qualityButton_->setMenu(qualityMenu);
-    fullscreenButton_ = new ui::IconButton(ui::Icon::Fullscreen, "Show only the viewport in fullscreen (Esc to return)", 26, this);
-    fullscreenButton_->setToolTip("Show only the viewport in fullscreen (Esc to return)");
+    fullscreenButton_ = new ui::IconButton(ui::Icon::Fullscreen, "", 26, this);
+    fullscreenButton_->setToolTip("Full screen preview: only the picture, playing (Esc to return)");
     connect(fullscreenButton_, &QPushButton::clicked, this, &ViewportPanel::viewportFullscreenRequested);
     connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
         frameValid_ = false;
@@ -336,7 +337,7 @@ void ViewportPanel::setPreviewQuality(int divisor) {
 
 void ViewportPanel::setViewportFullscreen(bool fullscreen) {
     fullscreenButton_->setActive(fullscreen);
-    fullscreenButton_->setToolTip(fullscreen ? "Exit fullscreen (Esc)" : "Show only the viewport in fullscreen (Esc to return)");
+    fullscreenButton_->setToolTip(fullscreen ? "Exit fullscreen (Esc)" : "Full screen preview: only the picture, playing (Esc to return)");
     positionHud();
 }
 
@@ -349,7 +350,8 @@ bool ViewportPanel::setSpaceHeld(bool held) {
 
 void ViewportPanel::sync() {
     if (!isVisible()) return;
-    Signature s{ctx_.revision(), ctx_.time, ctx_.selection, ctx_.scope, ctx_.snapping, ctx_.showGuides, ctx_.showRulers, ctx_.playing};
+    Signature s{ctx_.revision(), ctx_.time,       ctx_.selection, ctx_.scope,  ctx_.snapping,
+                ctx_.showGuides, ctx_.showRulers, ctx_.playing,   static_cast<int>(ctx_.tool)};
     if (s == drawn_) return;
     drawn_ = std::move(s);
     update();
@@ -412,7 +414,8 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     const qreal rasterScale = devicePixelRatioF() / previewDivisor_;
     const QSize px(std::max(1, static_cast<int>(std::ceil(width() * rasterScale))),
                    std::max(1, static_cast<int>(std::ceil(height() * rasterScale))));
-    const FrameKey key{ctx_.revision(), t, px, origin_, zoom_, rasterScale, throughCamera_, orbit_, orbitView_};
+    const Layer* cropping = cropLayer();
+    const FrameKey key{ctx_.revision(), t, px, origin_, zoom_, rasterScale, throughCamera_, orbit_, orbitView_, cropping ? cropping->id : 0};
     if (!frameValid_ || key != frameKey_ || !c.media.empty()) {
         if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
         frame_.fill(Qt::transparent);
@@ -421,8 +424,15 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
         frameValid_ = static_cast<bool>(surface);
         if (surface) {
             const float z = static_cast<float>(rasterScale);
-            render::drawComposition(surface->getCanvas(), c, t, render::View{origin_ * z, zoom_ * z, world_}, true, throughCamera_,
-                                    orbit_ ? &orbitLens_ : nullptr);
+            // Cropping: the layer's whole picture, the part cut away dimmed over it (drawCrop).
+            Composition uncropped;
+            if (cropping) {
+                uncropped = c;
+                if (Layer* l = uncropped.findLayer(cropping->id))
+                    l->media.cropLeft = l->media.cropTop = l->media.cropRight = l->media.cropBottom = AnimFloat{0.0f};
+            }
+            render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, t, render::View{origin_ * z, zoom_ * z, world_}, true,
+                                    throughCamera_, orbit_ ? &orbitLens_ : nullptr);
             frameKey_ = key;
         }
     }
@@ -731,7 +741,8 @@ void ViewportPanel::drawOverlay(QPainter& p) {
 
     // Handles for a single selection.
     const bool cameraView = selected.size() == 1 && selected[0]->type == LayerType::Camera && (throughCamera_ || orbit_);
-    if (selected.size() == 1 && selected[0]->activeAt(t) && !cameraView) {
+    if (cropLayer()) drawCrop(p); // its handles instead of the transform's
+    else if (selected.size() == 1 && selected[0]->activeAt(t) && !cameraView) {
         const Layer* sel = selected[0];
         Handles h{};
         if (computeHandles(*sel, t, view, h)) {
@@ -793,6 +804,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
                       : dropKind_ == ui::kDropCamera ? makeCameraLayer(compSize_, comp.duration)
                       : dropKind_ == ui::kDropBackground ? makeBackgroundLayer(comp.duration)
                       : dropKind_ == ui::kDropSubtitles ? makeSubtitleLayer(compSize_, comp.duration)
+                      : dropKind_ == ui::kDropCounter ? makeCounterLayer(scenePos, comp.duration)
                       : type                       ? makePluginLayer(type->name, type->prototype, scenePos, comp.duration)
                       : dropKind_ < 0              ? makeTextLayer("Your text", scenePos, comp.duration)
                                                    : makeShapeLayer(static_cast<ShapeKind>(dropKind_), scenePos, comp.duration);
@@ -933,6 +945,92 @@ bool ViewportPanel::pathHit(Vec2 screen, int& key, int& part) const {
     return false;
 }
 
+// --- crop ---------------------------------------------------------------------------------------
+
+Layer* ViewportPanel::cropLayer() const {
+    if (ctx_.tool != Tool::Crop || orbit_ || ctx_.selection.size() != 1) return nullptr;
+    Layer* l = const_cast<EditorContext&>(ctx_).selected();
+    if (!l || l->type != LayerType::Media || !l->media.hasVideo || l->locked || !l->activeAt(ctx_.time)) return nullptr;
+    return l;
+}
+
+bool ViewportPanel::cropFrame(const Layer& layer, Projective& m, Vec2 full[4], Vec2 shown[4]) const {
+    const double t = ctx_.time;
+    Projective camera;
+    if (!cameraOf(layer, t, camera)) return false;
+    m = parentView(sceneView(), layer, t).matrix() * layer.matrixAt(t);
+    const Vec2 h = layer.media.size * 0.5f;
+    Vec2 mn, mx;
+    layer.media.cropRect(t, mn, mx);
+    const Vec2 whole[4] = {{-h.x, -h.y}, {h.x, -h.y}, {h.x, h.y}, {-h.x, h.y}};
+    const Vec2 part[4] = {mn, {mx.x, mn.y}, mx, {mn.x, mx.y}};
+    for (int i = 0; i < 4; ++i) {
+        if (!m.inFront(whole[i])) return false;
+        full[i] = m.apply(whole[i]);
+        shown[i] = m.apply(part[i]);
+    }
+    return true;
+}
+
+int ViewportPanel::cropHit(Vec2 s) const {
+    const Layer* l = cropLayer();
+    Projective m;
+    Vec2 full[4], q[4];
+    if (!l || !cropFrame(*l, m, full, q)) return 0;
+    const int corners[4] = {1 | 2, 4 | 2, 4 | 8, 1 | 8};
+    for (int i = 0; i < 4; ++i)
+        if (near(s, q[i], kHandleRadius + 4)) return corners[i];
+    auto distance = [](Vec2 p, Vec2 a, Vec2 b) {
+        const Vec2 ab = b - a;
+        const float len2 = ab.x * ab.x + ab.y * ab.y;
+        const float u = len2 > 0.0f ? std::clamp(((p.x - a.x) * ab.x + (p.y - a.y) * ab.y) / len2, 0.0f, 1.0f) : 0.0f;
+        return (p - (a + ab * u)).length();
+    };
+    const int edges[4] = {2, 4, 8, 1}; // top, right, bottom, left
+    for (int i = 0; i < 4; ++i)
+        if (distance(s, q[i], q[(i + 1) % 4]) <= 6.0f) return edges[i];
+    Vec2 mn, mx;
+    l->media.cropRect(ctx_.time, mn, mx);
+    const Vec2 p = m.inverse().apply(s);
+    return p.x >= mn.x && p.x <= mx.x && p.y >= mn.y && p.y <= mx.y ? 15 : 0;
+}
+
+void ViewportPanel::drawCrop(QPainter& p) {
+    const Layer* l = cropLayer();
+    Projective m;
+    Vec2 full[4], q[4];
+    if (!l || !cropFrame(*l, m, full, q)) return;
+    auto polygon = [](const Vec2* v) {
+        QPolygonF poly;
+        for (int i = 0; i < 4; ++i) poly << QPointF(v[i].x, v[i].y);
+        return poly;
+    };
+    // What is cut away, dimmed; the whole picture's outline faint; the shown part's edges strong.
+    QPainterPath away;
+    away.setFillRule(Qt::OddEvenFill);
+    away.addPolygon(polygon(full));
+    away.addPolygon(polygon(q));
+    p.fillPath(away, theme::q(theme::withAlpha(theme::kCanvas, 175)));
+    Draw d(p);
+    const Pt whole[4] = {pt(full[0]), pt(full[1]), pt(full[2]), pt(full[3])};
+    d.polyline(whole, 4, theme::withAlpha(theme::kTextFaint, 200), true, 1.0f);
+    const Pt shown[4] = {pt(q[0]), pt(q[1]), pt(q[2]), pt(q[3])};
+    // Thirds, to compose with.
+    for (float u : {1.0f / 3.0f, 2.0f / 3.0f}) {
+        d.line(pt(q[0] + (q[1] - q[0]) * u), pt(q[3] + (q[2] - q[3]) * u), theme::accent(60), 1.0f);
+        d.line(pt(q[0] + (q[3] - q[0]) * u), pt(q[1] + (q[2] - q[1]) * u), theme::accent(60), 1.0f);
+    }
+    d.polyline(shown, 4, theme::kAccent, true, 1.5f);
+    // Corners (both edges) and edge middles (one).
+    for (int i = 0; i < 4; ++i) {
+        for (const Vec2 c : {q[i], (q[i] + q[(i + 1) % 4]) * 0.5f}) {
+            const Pt a(c.x - kHandleRadius, c.y - kHandleRadius), b(c.x + kHandleRadius, c.y + kHandleRadius);
+            d.rectFilled(a, b, theme::kBgPanel, 2.0f);
+            d.rect(a, b, theme::kAccent, 2.0f, 1.5f);
+        }
+    }
+}
+
 // --- input ------------------------------------------------------------------------------------
 
 void ViewportPanel::updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods) {
@@ -953,7 +1051,14 @@ void ViewportPanel::updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods) {
             Layer* single = ctx_.selection.size() == 1 ? ctx_.selected() : nullptr;
             if (single && (single->locked || !single->activeAt(t) || (single->type == LayerType::Camera && throughCamera_))) single = nullptr;
             Handles h{};
-            if (single && computeHandles(*single, t, sceneView(), h)) {
+            if (single && cropLayer()) {
+                const int edges = cropHit(mouse);
+                if (edges == 15) shape = Qt::SizeAllCursor;
+                else if (edges == 1 || edges == 4) shape = Qt::SizeHorCursor;
+                else if (edges == 2 || edges == 8) shape = Qt::SizeVerCursor;
+                else if (edges == 3 || edges == 12) shape = Qt::SizeFDiagCursor;
+                else if (edges) shape = Qt::SizeBDiagCursor;
+            } else if (single && computeHandles(*single, t, sceneView(), h)) {
                 for (int i = 0; i < 4; ++i)
                     if (single->type != LayerType::Camera && near(mouse, h.screen[i], kHandleRadius + 3))
                         shape = i % 2 == 0 ? Qt::SizeFDiagCursor : Qt::SizeBDiagCursor;
@@ -1044,8 +1149,27 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
         return;
     }
 
+    // The Crop tool: the selected picture's edges.
+    if (!additive && !spaceHeld_ && !(e->modifiers() & Qt::AltModifier))
+        if (const int edges = cropHit(mouse)) {
+            Layer* l = cropLayer();
+            Projective m;
+            Vec2 full[4], shown[4];
+            cropFrame(*l, m, full, shown);
+            drag_ = Drag::Crop;
+            cropEdges_ = edges;
+            dragLayer_ = l->id;
+            const MediaProps& md = l->media;
+            cropStart_[0] = md.cropLeft.valueAt(t), cropStart_[1] = md.cropTop.valueAt(t);
+            cropStart_[2] = md.cropRight.valueAt(t), cropStart_[3] = md.cropBottom.valueAt(t);
+            cropStartLocal_ = m.inverse().apply(mouse);
+            update();
+            return;
+        }
+
     // Scale/rotate handles exist only for a single editable layer.
     Layer* single = ctx_.selection.size() == 1 ? ctx_.selected() : nullptr;
+    if (single && single == cropLayer()) single = nullptr; // cropping, not scaling
     if (single && (single->locked || !single->activeAt(t))) single = nullptr;
     // Looking through a camera, the camera itself is not grabbed (it would drag the view along).
     if (single && single->type == LayerType::Camera && throughCamera_) single = nullptr;
@@ -1238,6 +1362,32 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
         break;
     }
     case Drag::CameraTool: moveCamera(mouse); break;
+    case Drag::Crop: {
+        Layer* l = ctx_.comp().findLayer(dragLayer_);
+        Projective m;
+        Vec2 full[4], shown[4];
+        if (!l || l->media.size.x <= 0 || l->media.size.y <= 0 || !cropFrame(*l, m, full, shown)) break;
+        const Vec2 size = l->media.size;
+        const Vec2 q = m.inverse().apply(mouse); // in the layer, the picture centered on 0, 0
+        float v[4] = {cropStart_[0], cropStart_[1], cropStart_[2], cropStart_[3]};
+        if (cropEdges_ == 15) { // the shown part moves, its size kept
+            const float dx = std::clamp((q.x - cropStartLocal_.x) / size.x * 100.0f, -v[0], v[2]);
+            const float dy = std::clamp((q.y - cropStartLocal_.y) / size.y * 100.0f, -v[1], v[3]);
+            v[0] += dx, v[2] -= dx, v[1] += dy, v[3] -= dy;
+        } else { // percents from the left / top of the picture
+            const float x = (q.x / size.x + 0.5f) * 100.0f, y = (q.y / size.y + 0.5f) * 100.0f;
+            if (cropEdges_ & 1) v[0] = std::clamp(x, 0.0f, 99.0f - v[2]);
+            if (cropEdges_ & 4) v[2] = std::clamp(100.0f - x, 0.0f, 99.0f - v[0]);
+            if (cropEdges_ & 2) v[1] = std::clamp(y, 0.0f, 99.0f - v[3]);
+            if (cropEdges_ & 8) v[3] = std::clamp(100.0f - y, 0.0f, 99.0f - v[1]);
+            if (mods & Qt::ShiftModifier)
+                for (float& c : v) c = std::round(c);
+        }
+        AnimFloat* sides[4] = {&l->media.cropLeft, &l->media.cropTop, &l->media.cropRight, &l->media.cropBottom};
+        for (int i = 0; i < 4; ++i)
+            if (std::fabs(sides[i]->valueAt(t) - v[i]) > 1e-4f) sides[i]->set(t, v[i]); // a keyframe when animated
+        break;
+    }
     case Drag::Move: {
         Vec2 delta = mouseComp - dragStartMouse_;
         if (mods & Qt::ShiftModifier) (std::fabs(delta.x) > std::fabs(delta.y) ? delta.y : delta.x) = 0.0f;
@@ -1436,6 +1586,7 @@ void ViewportPanel::dropEvent(QDropEvent* e) {
     else if (dropKind_ == ui::kDropCamera) ctx_.addCamera();
     else if (dropKind_ == ui::kDropBackground) ctx_.addBackground();
     else if (dropKind_ == ui::kDropSubtitles) ctx_.addSubtitles();
+    else if (dropKind_ == ui::kDropCounter) ctx_.addCounter(scenePos);
     else if (const PluginObjectType* type = droppedPluginType()) ctx_.addPluginObject(*type, scenePos);
     else if (dropKind_ < 0) ctx_.addText(scenePos);
     else ctx_.addShape(static_cast<ShapeKind>(dropKind_), scenePos);

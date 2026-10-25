@@ -30,7 +30,7 @@ struct Settings {
     std::string uiFont = "Inter";      // interface font family (any installed one)
     int arrowFrames = 1;               // frames stepped by the arrow keys
     int bigArrowFrames = 10;           // ... with Shift (big step)
-    int autosaveMinutes = 5;           // saves open projects this often (0: off)
+    int autosaveMinutes = 5;           // 0: off; else open projects save after every change (the name is older)
     bool showIntro = true;             // the opening animation at startup
     bool showRulers = false;           // the viewport's rulers (View > Rulers)
     int previewQuality = 1;            // raster preview divisor: 1, 2 or 4 (export is unaffected)

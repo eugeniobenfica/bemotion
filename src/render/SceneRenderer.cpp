@@ -139,8 +139,9 @@ MediaProvider& mediaProvider() {
 
 void drawMedia(SkCanvas* canvas, const Composition* comp, const Layer& layer, double t, float opacity) {
     if (!layer.media.hasVideo) return; // audio only
-    const Vec2 half = layer.media.size * 0.5f;
-    const SkRect dst = SkRect::MakeLTRB(-half.x, -half.y, half.x, half.y);
+    Vec2 mn, mx; // cropped: only that part of the picture, where it was
+    layer.media.cropRect(t, mn, mx);
+    const SkRect dst = SkRect::MakeLTRB(mn.x, mn.y, mx.x, mx.y);
     sk_sp<SkImage> image = comp && mediaProvider() ? mediaProvider()(*comp, layer, t) : nullptr;
     if (!image) { // not loaded or missing: a placeholder frame
         SkPaint p(SkColor4f{0.24f, 0.24f, 0.28f, 0.8f * opacity});
@@ -154,7 +155,13 @@ void drawMedia(SkCanvas* canvas, const Composition* comp, const Layer& layer, do
     }
     SkPaint p;
     p.setAlphaf(std::clamp(opacity, 0.0f, 1.0f));
-    canvas->drawImageRect(image, dst, SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kLinear), &p);
+    // The same part of the image (it may not have the layer's size: a scaled-down preview frame).
+    const Vec2 size = layer.media.size;
+    const float sx = size.x > 0 ? image->width() / size.x : 1.0f, sy = size.y > 0 ? image->height() / size.y : 1.0f;
+    const SkRect src = SkRect::MakeLTRB((mn.x + size.x * 0.5f) * sx, (mn.y + size.y * 0.5f) * sy, (mx.x + size.x * 0.5f) * sx,
+                                        (mx.y + size.y * 0.5f) * sy);
+    canvas->drawImageRect(image, src, dst, SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kLinear), &p,
+                          SkCanvas::kStrict_SrcRectConstraint);
 }
 
 // A background: the whole composition frame (local space = composition space).
@@ -584,8 +591,7 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
     }
     if (layer.type == LayerType::Media) { // audio has no picture to pick
         if (!layer.media.hasVideo) return false;
-        outMin = layer.media.size * -0.5f;
-        outMax = layer.media.size * 0.5f;
+        layer.media.cropRect(time, outMin, outMax);
         return true;
     }
     if (layer.type == LayerType::Background) { // the frame

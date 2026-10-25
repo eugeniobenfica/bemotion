@@ -24,7 +24,7 @@ struct KeySelection {
 };
 
 // Active editing tool. Razor cuts layers where you click in the timeline.
-enum class Tool { Select, Razor };
+enum class Tool { Select, Razor, Crop }; // Crop: the viewport crops videos and images
 
 class EditorContext {
 public:
