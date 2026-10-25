@@ -128,8 +128,8 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
   invert it. A layer's position moves in its unturned plane (`viewFor` with
   `tilted` = false), as does its motion path. `drawOrder` is the stacking
   order with each run of neighboring 3D layers sorted by camera distance,
-  farthest first. The free view shows 3D layers from the front, turned but
-  without perspective. A `Lens` is any point of view (eye position, turn,
+  farthest first. The free view shows 3D layers as without a camera (the
+  default one, `defaultLens`, in perspective). A `Lens` is any point of view (eye position, turn,
   focal length): `lensAt` / `lensOf` give a camera's, `viewThrough` sees a
   layer from one (with `all`, 2D layers too, as planes at Z 0), `project`
   places a 3D point. The renderer sorts by `render::depthOrder`: the far end of
@@ -169,8 +169,14 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
   `PropertyRef` holds pointers into the layer: **use it immediately, never
   store it** across edits. Store the layer id + property id instead
   (`findProperty`).
+- **Letter animation** (`TextProps::letterIn` / `letterOut` / `letterLoop`,
+  by letter, word or line) is drawn by `render/Text.cpp` glyph by glyph
+  (`Animator`); the clip's in / out come with `TextClip`. `fitLines` shrinks
+  the font in the layout until the wrapped text fits.
 - **Counter text** is a text layer with an optional `counter` flag and an animated
-  `counter_value` property, shown by `formatCounter` (decimals, thousands
+  `counter_value` property, which keyframes drive; without keyframes it counts
+  by itself from `counter_from` to `counter_to` over `counterDuration` from
+  the clip's start (`TextProps::textAt(t, in, out)`), shown by `formatCounter` (decimals, thousands
   separator, prefix and suffix: `text.decimals` / `separator` / `prefix` /
   `suffix` in the file). It uses the regular text renderer and file format;
   older text layers keep their existing behavior.

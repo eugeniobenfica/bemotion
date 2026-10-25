@@ -152,9 +152,14 @@ std::vector<PropertyRef> Layer::properties() {
         }
     } else {
         auto& t = text;
-        if (t.counter)
-            p.push_back({"counter_value", "Counter", "Value", PropertyKind::Float, &t.counterValue, 1.0f, -1000000000, 1000000000,
-                         kDecimalFormats[std::clamp(t.counterDecimals, 0, 6)]});
+        if (t.counter) {
+            const char* format = kDecimalFormats[std::clamp(t.counterDecimals, 0, 6)];
+            p.push_back({"counter_from", "Counter", "Start", PropertyKind::Float, &t.counterFrom, 1.0f, -1e12f, 1e12f, format});
+            p.push_back({"counter_to", "Counter", "End", PropertyKind::Float, &t.counterTo, 1.0f, -1e12f, 1e12f, format});
+            PropertyRef value{"counter_value", "Counter", "Value", PropertyKind::Float, &t.counterValue, 1.0f, -1e12f, 1e12f, format};
+            value.whileAnimated = true; // keyframes on it replace the count
+            p.push_back(value);
+        }
         p.push_back({"font_size", "Text", "Font Size", PropertyKind::Float, &t.fontSize, 0.5f, 1, 2000, "%.0f px"});
         p.push_back({"text_color", "Text", "Color", PropertyKind::Color, &t.color});
         p.push_back({"tracking", "Text", "Tracking", PropertyKind::Float, &t.tracking, 0.25f, -200, 1000});
@@ -302,8 +307,20 @@ std::string formatCounter(double value, int decimals, const std::string& separat
     return out;
 }
 
-std::string TextProps::textAt(double t) const {
-    if (counter) return counterPrefix + formatCounter(counterValue.valueAt(t), counterDecimals, counterSeparator) + counterSuffix;
+std::string TextProps::textAt(double t, double in, double out) const {
+    if (counter) {
+        double v = counterValue.valueAt(t);
+        if (!counterValue.isAnimated()) { // counts by itself, from the clip's start
+            const double span = counterDuration > 0.0f ? counterDuration : std::max(1e-6, out - in);
+            const double u = std::clamp((t - in) / span, 0.0, 1.0);
+            const double e = counterEasing == CountEasing::Linear ? u
+                           : counterEasing == CountEasing::EaseOut ? 1.0 - std::pow(1.0 - u, 3.0)
+                                                                   : (u < 0.5 ? 4.0 * u * u * u : 1.0 - std::pow(-2.0 * u + 2.0, 3.0) * 0.5);
+            const double from = counterFrom.valueAt(t), to = counterTo.valueAt(t);
+            v = from + (to - from) * e;
+        }
+        return counterPrefix + formatCounter(v, counterDecimals, counterSeparator) + counterSuffix;
+    }
     if (!subtitle || captions.empty()) return text;
     // The last caption starting at or before t (they are sorted), if it still covers t.
     auto it = std::upper_bound(captions.begin(), captions.end(), t, [](double v, const Caption& c) { return v < c.start; });
@@ -314,9 +331,7 @@ std::string TextProps::textAt(double t) const {
 
 Layer makeCounterLayer(Vec2 position, double duration) {
     Layer l = makeTextLayer("Counter", position, duration);
-    l.text.counter = true;
-    l.text.counterValue.setKey(0.0, 0.0f, Easing::Linear);
-    l.text.counterValue.setKey(duration, 100.0f);
+    l.text.counter = true; // counts 0 to 100 in its first 2 seconds, by itself
     return l;
 }
 
@@ -330,6 +345,7 @@ Layer makeSubtitleLayer(Vec2 compSize, double duration) {
     t.fontSize.base = std::max(16.0f, compSize.y * 0.055f);
     t.lineHeight.base = 125.0f;
     t.wrapWidth.base = compSize.x * 0.78f;
+    t.fitLines = 2; // long captions get smaller rather than taller
     t.outlineEnabled = true;
     t.outlineWidth.base = std::max(2.0f, t.fontSize.base * 0.045f);
     t.boxEnabled = true;

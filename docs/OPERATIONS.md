@@ -33,7 +33,7 @@ layer and then animate it.
 | --- | --- |
 | every layer | `anchor`, `position`, `scale`, `rotation`, `opacity`; 3D layers `position_z`, `rotation_x` (the top tips away), `rotation_y` (the right side turns away) |
 | shapes | `size`, `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end` |
-| text, subtitle, counter | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness`; counter also has `counter_value` |
+| text, subtitle, counter | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness`; counter also has `counter_from` and `counter_to` (it counts between them) and `counter_value` (keyframes on it replace the count) |
 | camera | `position`, `position_z`, `rotation_x` (looks down), `rotation_y` (looks left), `rotation`, `camera_zoom` |
 | media with sound | `volume` |
 | plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
@@ -50,7 +50,8 @@ the content: it ends with the last clip, but never passes `max_duration`.
 ## Layers
 
 **`layer.add`** → `{"layer": id, "name": name}`
-- `type`: `text`, `counter` (text that counts from 0 to 100 across its duration;
+- `type`: `text`, `counter` (a number that counts by itself from its clip's
+  start, 0 to 100 in 2 s; `from`, `to`, `count_duration`, `count_easing`,
   `decimals`, `prefix`, `suffix` and `separator` as in `layer.set`), `rectangle`, `ellipse`, `polygon`, `star`, `line`, `camera`,
   `media` (with `"media": id` from `media.import`), `background` (fills the
   whole frame; goes to the bottom; `fill`: `solid`, `linear`, `radial` or
@@ -71,8 +72,19 @@ the content: it ends with the last clip, but never passes `max_duration`.
 `label` (0–7), `start` (moves the clip and its keyframes), `in`, `out` (trim,
 kept between neighbors on its track), and for text `text`, `font`, `style`,
 `align` (`left`, `center`, `right`), `outline`, `box` (booleans); for
-counters `decimals` (0–6), `prefix` and `suffix` (`"R$ "`, `"%"`), `separator`
-(thousands: `""`, `","`, `"."` with a decimal comma, or `" "`); for
+counters `from` and `to` (it counts between them), `count_duration` (seconds
+from the clip's start, `0` = the whole clip), `count_easing` (`linear`,
+`ease_out`, `ease_in_out`), `decimals` (0–6), `prefix` and `suffix` (`"R$ "`,
+`"%"`), `separator` (thousands: `""`, `","`, `"."` with a decimal comma, or
+`" "`); for any text the letter animation `letter_in` / `letter_out` (`none`,
+`fade`, `rise`, `drop`, `pop`, `slide`, `spin`, `blur`: from the clip's start /
+until its end), `letter_loop` (`none`, `wave`, `jitter`, `pulse`), `letter_by`
+(`letter`, `word`, `line`), `letter_order` (`forward`, `backward`, `center`,
+`random`), `letter_delay` and `letter_duration` (seconds), and `fit_lines`
+(auto fit: with a `wrap_width`, the font shrinks so the text takes at most
+that many lines; `0` = off, subtitles start with 2); for subtitles
+`"fit_captions": true` (long captions split, each shown long enough to be
+read, tiny gaps closed); for
 subtitles `captions` (`[{"start": s, "end": s, "text": "..."}]`, composition
 seconds; replaces them, sorted, overlaps cut) or `srt` (SubRip text); for shapes `shape` (kind), `fill`,
 `stroke` (booleans); for backgrounds `fill`, `media`, `fit`.

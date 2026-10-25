@@ -28,7 +28,8 @@ struct Error : std::runtime_error {
 
 // --- syntax ---------------------------------------------------------------------------
 
-enum class Op { Num, Str, Var, Call, Vec, Neg, Not, Add, Sub, Mul, Div, Mod, Pow, Lt, Gt, Le, Ge, Eq, Ne, And, Or, Cond, Member, Index, Apply };
+enum class Op { Num, Str, Var, Call, Vec, Neg, Not, Add, Sub, Mul, Div, Mod, Pow, Lt, Gt, Le, Ge, Eq, Ne, And, Or, Cond, Member, Index, Apply,
+                Let, Seq }; // Let: name = kids[0]; Seq: Lets, then the result
 
 struct Node {
     Op op = Op::Num;
@@ -49,17 +50,57 @@ NodeP make(Op op, std::vector<NodeP> kids = {}, std::string name = {}) {
 class Parser {
 public:
     explicit Parser(const std::string& s) : s_(s) {}
+    // Lines (or ;) of `name = ...` (var / let / const allowed, as in After Effects), then the result.
     NodeP parse() {
-        NodeP e = expr();
-        skip();
-        if (i_ < s_.size()) fail(std::string("unexpected \"") + s_[i_] + "\"");
-        return e;
+        std::vector<NodeP> steps;
+        for (;;) {
+            skip();
+            while (eat(";")) skip();
+            if (i_ >= s_.size()) fail(steps.empty() ? "nothing to work out" : "the last line must be the result (not a name = ...)");
+            const size_t at = i_;
+            const bool declared = keyword("var") || keyword("let") || keyword("const");
+            skip();
+            if (i_ < s_.size() && (std::isalpha(static_cast<unsigned char>(s_[i_])) || s_[i_] == '_')) {
+                const std::string name = ident();
+                skip();
+                if (i_ < s_.size() && s_[i_] == '=' && (i_ + 1 >= s_.size() || s_[i_ + 1] != '=')) {
+                    ++i_;
+                    std::vector<NodeP> k;
+                    k.push_back(expr());
+                    steps.push_back(make(Op::Let, std::move(k), name));
+                    continue;
+                }
+                if (declared) fail("expected \"=\" after \"" + name + "\"");
+            }
+            i_ = at;
+            NodeP e = expr();
+            skip();
+            while (eat(";")) skip();
+            if (i_ < s_.size()) fail(std::string("unexpected \"") + s_[i_] + "\"");
+            if (steps.empty()) return e;
+            steps.push_back(std::move(e));
+            return make(Op::Seq, std::move(steps));
+        }
     }
 
 private:
     [[noreturn]] void fail(const std::string& what) const { throw Error(what + " (at " + std::to_string(i_ + 1) + ")"); }
-    void skip() {
-        while (i_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[i_]))) ++i_;
+    void skip() { // spaces, line breaks and // comments
+        for (;;) {
+            while (i_ < s_.size() && std::isspace(static_cast<unsigned char>(s_[i_]))) ++i_;
+            if (i_ + 1 < s_.size() && s_[i_] == '/' && s_[i_ + 1] == '/') {
+                while (i_ < s_.size() && s_[i_] != '\n') ++i_;
+                continue;
+            }
+            return;
+        }
+    }
+    bool keyword(const char* word) { // the word, then a space
+        skip();
+        const size_t n = std::strlen(word);
+        if (s_.compare(i_, n, word) != 0 || i_ + n >= s_.size() || !std::isspace(static_cast<unsigned char>(s_[i_ + n]))) return false;
+        i_ += n;
+        return true;
     }
     bool eat(const char* token) {
         skip();
@@ -299,6 +340,7 @@ struct Eval {
     Owner owner;
     double t;
     Val value; // the keyframed value
+    mutable std::vector<std::pair<std::string, Val>> vars; // name = ... lines, in order
 
     float noise(float x, uint32_t seed) const { // smooth 1D value noise in [-1, 1]
         auto hash = [seed](int32_t i) {
@@ -495,8 +537,15 @@ struct Eval {
         switch (n.op) {
         case Op::Num: return v(Val::num(n.number));
         case Op::Str: throw Error("a name in quotes goes in layer(\"...\")");
+        case Op::Seq: {
+            for (size_t k = 0; k + 1 < n.kids.size(); ++k) vars.emplace_back(n.kids[k]->name, value_(run(*n.kids[k]->kids[0])));
+            return run(*n.kids.back());
+        }
+        case Op::Let: throw Error("cannot work that out");
         case Op::Var: {
             const std::string& x = n.name;
+            for (auto it = vars.rbegin(); it != vars.rend(); ++it)
+                if (it->first == x) return v(it->second);
             const Composition* comp = t_ctx.comp;
             const Layer* l = owner.layer;
             if (x == "time") return v(Val::num(static_cast<float>(t)));

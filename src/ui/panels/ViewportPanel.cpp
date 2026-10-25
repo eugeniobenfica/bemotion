@@ -265,6 +265,11 @@ void ViewportPanel::layout() {
     Composition& c = ctx_.comp();
     g_comp = &c;
     compSize_ = {static_cast<float>(c.width), static_cast<float>(c.height)};
+    // Views that need what was deleted fall back (their buttons are gone): without a camera, the
+    // default one (3D layers in perspective, as rendered); without anything 3D, no 3D view.
+    const bool hasCamera = std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.type == LayerType::Camera; });
+    if (!hasCamera) throughCamera_ = true;
+    if (orbit_ && !hasCamera && std::none_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.threeD; })) orbit_ = false;
     const float w = static_cast<float>(width()), h = static_cast<float>(height());
     if (autoFit_) {
         zoom_ = std::clamp(std::min((w - 64.0f) / c.width, (h - 64.0f) / c.height), kMinZoom, kMaxZoom);

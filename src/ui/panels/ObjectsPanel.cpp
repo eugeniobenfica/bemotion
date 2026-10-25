@@ -17,7 +17,7 @@ namespace bemotion {
 
 namespace {
 
-constexpr int kTileWidth = 72;
+constexpr int kTileWidth = 84; // narrowest tile that fits "Background"
 
 // A grid of tiles under a section title.
 struct Section {

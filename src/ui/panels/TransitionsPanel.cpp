@@ -55,11 +55,11 @@ TransitionsPanel::TransitionsPanel(EditorContext& ctx, QWidget* parent) : QScrol
 
 void TransitionsPanel::resizeEvent(QResizeEvent* e) {
     QScrollArea::resizeEvent(e);
-    if (std::max(2, (viewport()->width() - 16) / 80) != columns_) rebuild();
+    if (std::max(2, (viewport()->width() - 16) / 92) != columns_) rebuild();
 }
 
 void TransitionsPanel::rebuild() {
-    columns_ = std::max(2, (viewport()->width() - 16) / 80);
+    columns_ = std::max(2, (viewport()->width() - 16) / 92);
     const int tileW = std::max(56, (viewport()->width() - 16 - 8 * (columns_ - 1)) / columns_);
     const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.78f), 50, 66));
 

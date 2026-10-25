@@ -80,11 +80,12 @@ struct Composition {
     // (`tilted` = false: the plane at that Z, unturned, where its position moves). `out` keeps
     // w as the distance from the camera in near-plane units: w < 1 is too close or behind.
     // False when the whole layer is behind the camera. Without a camera, 3D layers are seen by
-    // a default one (center, Z 0, zoom 100%). throughCamera = false: the free view, from the
-    // front without perspective (2D layers as they are, 3D layers only turned).
+    // a default one (center, Z 0, zoom 100%). throughCamera = false: the free view, the frame
+    // as if there were no camera (2D layers as they are, 3D layers seen by the default camera).
     bool viewFor(const Layer& layer, double t, Projective& out, bool throughCamera = true, bool tilted = true) const;
     // The active camera as a point of view (a default one without a camera).
     Lens lensAt(double t) const;
+    Lens defaultLens() const; // the camera there is without one
     Lens lensOf(const Layer& camera, double t) const; // a given camera's
     // `layer` as seen from `lens` (as viewFor, for any point of view). `all`: 2D layers too, as
     // planes at Z 0 (the viewport's 3D view); else they get cameraAt. Backgrounds and cameras:

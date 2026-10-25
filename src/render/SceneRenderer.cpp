@@ -408,7 +408,7 @@ void drawContent(SkCanvas* canvas, const Layer& layer, double t, float opacity, 
         }
         return;
     case LayerType::Media: drawMedia(canvas, comp, layer, t, opacity); return;
-    case LayerType::Text: drawText(canvas, layer.text, t, opacity); return;
+    case LayerType::Text: drawText(canvas, layer.text, t, opacity, {layer.inPoint, layer.outPoint}); return;
     case LayerType::Plugin: drawPlugin(canvas, layer, t, opacity); return;
     case LayerType::Background: drawBackground(canvas, comp, layer, t, opacity); return;
     case LayerType::Camera: return;
@@ -600,7 +600,7 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
         return true;
     }
     if (layer.type == LayerType::Text) {
-        textBounds(layer.text, time, outMin, outMax);
+        textBounds(layer.text, time, outMin, outMax, {layer.inPoint, layer.outPoint});
         return true;
     }
     const ShapeProps& s = layer.shape;

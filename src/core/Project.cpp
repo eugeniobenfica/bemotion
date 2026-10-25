@@ -381,15 +381,19 @@ void lensAxes(const Lens& lens, float right[3], float down[3], float forward[3])
     for (int i = 0; i < 3; ++i) right[i] = r.m[i][0], down[i] = r.m[i][1], forward[i] = r.m[i][2];
 }
 
-Lens Composition::lensAt(double t) const {
+Lens Composition::defaultLens() const {
     // The camera stands `focal` in front of its own Z position (where layers show at their size).
     const float focal = focalLength();
     Lens lens;
     lens.x = center().x, lens.y = center().y, lens.z = -focal;
     lens.focal = focal;
     lens.center = center();
-    if (const Layer* cam = activeCamera(*this, t)) return lensOf(*cam, t);
     return lens;
+}
+
+Lens Composition::lensAt(double t) const {
+    if (const Layer* cam = activeCamera(*this, t)) return lensOf(*cam, t);
+    return defaultLens();
 }
 
 Lens Composition::lensOf(const Layer& camera, double t) const {
@@ -411,15 +415,8 @@ bool Composition::viewFor(const Layer& layer, double t, Projective& out, bool th
         out = throughCamera && top->type != LayerType::Background ? Projective(cameraAt(t)) : Projective();
         return true;
     }
-    if (throughCamera) return viewThrough(lensAt(t), layer, t, out, tilted);
-    // From the front, without perspective: only turned around the position.
-    const Vec2 p = top->transform.position.valueAt(t);
-    const Mat3 turn = tilted ? rotX(top->transform.rotationX.valueAt(t)) * rotY(top->transform.rotationY.valueAt(t)) : Mat3{};
-    Affine a;
-    a.a = turn.m[0][0], a.c = turn.m[0][1], a.b = turn.m[1][0], a.d = turn.m[1][1];
-    a.tx = p.x - (a.a * p.x + a.c * p.y), a.ty = p.y - (a.b * p.x + a.d * p.y);
-    out = a;
-    return true;
+    // The free view: as if there were no camera (2D layers untouched, 3D ones in perspective).
+    return viewThrough(throughCamera ? lensAt(t) : defaultLens(), layer, t, out, tilted);
 }
 
 bool Composition::viewThrough(const Lens& lens, const Layer& layer, double t, Projective& out, bool tilted, bool all) const {

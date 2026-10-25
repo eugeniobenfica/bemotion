@@ -26,7 +26,17 @@ namespace {
 // A picture for a preset, from its name (imported ones too).
 ui::Icon iconOf(const std::string& name) {
     auto has = [&](const char* word) { return name.find(word) != std::string::npos; };
-    if (has("Type")) return ui::Icon::Text;
+    if (has("Type") || has("Still")) return ui::Icon::Text;
+    if (has("Blur")) return ui::Icon::FxBlur;
+    if (has("Wave")) return ui::Icon::Wave;
+    if (has("Jitter")) return ui::Icon::Zigzag;
+    if (has("Random")) return ui::Icon::Fade;
+    if (has("Jelly")) return ui::Icon::Bounce;
+    if (has("Swing")) return ui::Icon::Reset;
+    if (has("Glide")) return ui::Icon::ArrowDown;
+    if (has("Grow")) return ui::Icon::ZoomIn;
+    if (has("Shrink") || has("Zoom Out")) return ui::Icon::ZoomOut;
+    if (has("Letters Out")) return ui::Icon::Fade;
     if (has("Draw")) return ui::Icon::Line;
     if (has("Spin") || has("Wobble")) return ui::Icon::Reset;
     if (has("Pop")) return ui::Icon::Burst;
@@ -55,11 +65,11 @@ AnimationsPanel::AnimationsPanel(EditorContext& ctx, QWidget* parent) : QScrollA
 
 void AnimationsPanel::resizeEvent(QResizeEvent* e) {
     QScrollArea::resizeEvent(e);
-    if (std::max(2, (viewport()->width() - 16) / 80) != columns_) rebuild();
+    if (std::max(2, (viewport()->width() - 16) / 92) != columns_) rebuild();
 }
 
 void AnimationsPanel::rebuild() {
-    columns_ = std::max(2, (viewport()->width() - 16) / 80);
+    columns_ = std::max(2, (viewport()->width() - 16) / 92);
     const int tileW = std::max(56, (viewport()->width() - 16 - 8 * (columns_ - 1)) / columns_);
     const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.78f), 50, 66));
     presetCount_ = PresetLibrary::all().size();
@@ -75,7 +85,7 @@ void AnimationsPanel::rebuild() {
     col->addWidget(about);
 
     // Built-in categories first, then whatever imported presets use.
-    std::vector<std::string> categories = {"Entrance", "Emphasis", "Exit"};
+    std::vector<std::string> categories = {"Entrance", "Emphasis", "Exit", "Letters"};
     for (const auto& lp : PresetLibrary::all())
         if (std::find(categories.begin(), categories.end(), lp.preset.category) == categories.end()) categories.push_back(lp.preset.category);
     for (const std::string& category : categories) {

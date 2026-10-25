@@ -1017,6 +1017,9 @@ int bmRegisterObject(lua_State* L) {
     lua_getfield(L, 1, "import_csv");
     if (lua_isfunction(L, -1)) t.importRef = luaL_ref(L, LUA_REGISTRYINDEX);
     else lua_pop(L, 1);
+    lua_getfield(L, 1, "row_labels");
+    if (lua_isfunction(L, -1)) t.labelsRef = luaL_ref(L, LUA_REGISTRYINDEX);
+    else lua_pop(L, 1);
 
     lua_getfield(L, 1, "draw");
     if (!lua_isfunction(L, -1)) return luaL_error(L, "register_object '%s': draw must be a function", id.c_str());
@@ -1056,7 +1059,7 @@ lua_State* newSandbox(const std::string& pluginId) {
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);
     luaL_newlib(L, api);
-    lua_pushinteger(L, 6); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone; 6: include
+    lua_pushinteger(L, 7); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone; 6: include; 7: row_labels
     lua_setfield(L, -2, "api_version");
     const luaL_Reg mic[] = {{"start", micStart}, {"stop", micStop}, {"recording", micRecording}, {"level", micLevel},
                             {"cancel", micCancel}, {nullptr, nullptr}};
@@ -1520,6 +1523,42 @@ void PluginHost::reconcile(Layer& layer) const {
 
 void PluginHost::reconcile(Composition& comp) const {
     for (Layer& l : comp.layers) reconcile(l);
+}
+
+std::vector<std::string> PluginHost::rowLabels(const Layer& layer, std::vector<int>* unknownRows) {
+    std::vector<std::string> names;
+    if (unknownRows) unknownRows->clear();
+    const PluginObjectType* type = findType(layer.plugin.objectType);
+    Plugin* plugin = type ? findPlugin(type->pluginId) : nullptr;
+    if (!type || type->labelsRef < 0 || !plugin || !plugin->L || !plugin->enabled) return names;
+    // row_labels(o) returns { "name", ... } and, optionally, { row index, ... } (1-based) not found.
+    lua_State* L = plugin->L;
+    const int top = lua_gettop(L);
+    lua_rawgeti(L, LUA_REGISTRYINDEX, type->labelsRef);
+    pushParams(L, layer, layer.inPoint);
+    g_budget = kCommandBudget;
+    if (lua_pcall(L, 1, 2, 0) == LUA_OK) {
+        if (lua_istable(L, -2)) {
+            const lua_Integer n = luaL_len(L, -2);
+            for (lua_Integer i = 1; i <= n; ++i) {
+                lua_rawgeti(L, -2, i);
+                if (lua_type(L, -1) == LUA_TSTRING) names.emplace_back(lua_tostring(L, -1));
+                lua_pop(L, 1);
+            }
+        }
+        if (unknownRows && lua_istable(L, -1)) {
+            const lua_Integer n = luaL_len(L, -1);
+            for (lua_Integer i = 1; i <= n; ++i) {
+                lua_rawgeti(L, -1, i);
+                if (lua_isinteger(L, -1)) unknownRows->push_back(static_cast<int>(lua_tointeger(L, -1)) - 1);
+                lua_pop(L, 1);
+            }
+        }
+    } else {
+        platform::log(std::string("plugin row_labels failed: ") + (lua_tostring(L, -1) ? lua_tostring(L, -1) : "?"));
+    }
+    lua_settop(L, top);
+    return names;
 }
 
 bool PluginHost::importCsv(Layer& layer, const std::string& csv, std::string& error) {

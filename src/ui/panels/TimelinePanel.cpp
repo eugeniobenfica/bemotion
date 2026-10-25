@@ -929,7 +929,7 @@ void TimelinePanel::computeItems() {
             return !collapsedGroups_.count(g.groupKey);
         };
         for (const PropertyRef& prop : focus->properties()) {
-            if (animatedOnly_ && !prop.anim->isAnimated()) continue;
+            if ((animatedOnly_ || prop.whileAnimated) && !prop.anim->isAnimated()) continue;
             if (prop.effectIndex >= 0 && !effectsHeader) {
                 effectsHeader = true;
                 effectsOpen = addGroup("Effects", 0.0f);

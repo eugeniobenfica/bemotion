@@ -237,6 +237,91 @@ void PropertiesPanel::buildComposition(QVBoxLayout* col) {
 
 // --- layer -----------------------------------------------------------------------------------
 
+// A combo box of `labels`, at `current`; picking one runs `pick` with its index.
+template <size_t N>
+QComboBox* choiceCombo(const char* const (&labels)[N], int current, std::function<void(int)> pick) {
+    auto* combo = newCombo();
+    for (const char* label : labels) combo->addItem(label);
+    combo->setCurrentIndex(current);
+    QObject::connect(combo, &QComboBox::activated, combo, [pick = std::move(pick)](int i) {
+        if (i >= 0) pick(i);
+    });
+    return combo;
+}
+
+// How a counter counts: for how long from its clip's start, and how it eases (Start / End follow).
+void PropertiesPanel::buildCountRows(CollapsibleSection* section, const Layer& layer) {
+    auto apply = [this](auto&& change) {
+        for (Layer* l : ctx_.selectedLayers())
+            if (l->type == LayerType::Text && l->text.counter) change(l->text);
+        ctx_.touch();
+    };
+    const uint64_t id = layer.id;
+    auto* length = new ui::DragValue;
+    length->setRange(0.0f, 3600.0f);
+    length->setSpeed(0.02f);
+    length->setFormat("%.1f s");
+    length->setToolTip("How long it counts, from the start of its clip (0: the whole clip)");
+    connect(length, &ui::DragValue::valueChanged, this, [apply](float v) { apply([&](TextProps& p) { p.counterDuration = v; }); });
+    section->addPlainRow("Counts For", length);
+    auto* easing = choiceCombo(kCountEasingLabels, static_cast<int>(layer.text.counterEasing),
+                               [apply](int i) { apply([&](TextProps& p) { p.counterEasing = static_cast<CountEasing>(i); }); });
+    section->addPlainRow("Easing", easing);
+    refreshers_.push_back([this, id, length, easing] {
+        if (const Layer* l = ctx_.comp().findLayer(id)) {
+            length->setValue(l->text.counterDuration);
+            const QSignalBlocker b(easing);
+            easing->setCurrentIndex(static_cast<int>(l->text.counterEasing));
+        }
+    });
+}
+
+// Letter Animation: letters (words, lines) coming in one after another, leaving, moving all along.
+void PropertiesPanel::buildLetterRows(QVBoxLayout* col, const Layer& layer) {
+    auto* s = new CollapsibleSection("Letter Animation");
+    const TextProps& t = layer.text;
+    auto apply = [this](auto&& change, bool rebuild) {
+        for (Layer* l : ctx_.selectedLayers())
+            if (l->type == LayerType::Text) change(l->text);
+        if (rebuild) key_.clear(); // the timing rows come and go
+        ctx_.touch();
+    };
+    s->addPlainRow("In", choiceCombo(kLetterAnimLabels, static_cast<int>(t.letterIn), [apply](int i) {
+        apply([&](TextProps& p) { p.letterIn = static_cast<LetterAnim>(i); }, true);
+    }));
+    s->addPlainRow("Out", choiceCombo(kLetterAnimLabels, static_cast<int>(t.letterOut), [apply](int i) {
+        apply([&](TextProps& p) { p.letterOut = static_cast<LetterAnim>(i); }, true);
+    }));
+    s->addPlainRow("Loop", choiceCombo(kLetterLoopLabels, static_cast<int>(t.letterLoop), [apply](int i) {
+        apply([&](TextProps& p) { p.letterLoop = static_cast<LetterLoop>(i); }, true);
+    }));
+    if (t.lettersAnimated()) {
+        s->addPlainRow("By", choiceCombo(kLetterUnitLabels, static_cast<int>(t.letterUnit), [apply](int i) {
+            apply([&](TextProps& p) { p.letterUnit = static_cast<LetterUnit>(i); }, false);
+        }));
+        s->addPlainRow("Order", choiceCombo(kLetterOrderLabels, static_cast<int>(t.letterOrder), [apply](int i) {
+            apply([&](TextProps& p) { p.letterOrder = static_cast<LetterOrder>(i); }, false);
+        }));
+        auto seconds = [&](float TextProps::*field, float lo, const QString& label, const QString& tip) {
+            auto* v = new ui::DragValue;
+            v->setRange(lo, 10.0f);
+            v->setSpeed(0.005f);
+            v->setFormat("%.2f s");
+            v->setValue(t.*field);
+            v->setToolTip(tip);
+            connect(v, &ui::DragValue::valueChanged, this, [apply, field](float x) { apply([&](TextProps& p) { p.*field = x; }, false); });
+            s->addPlainRow(label, v);
+        };
+        seconds(&TextProps::letterDelay, 0.0f, "Delay", "Seconds between one and the next");
+        seconds(&TextProps::letterDuration, 0.01f, "Duration", "Seconds each one takes to come in or leave");
+    }
+    auto* about = new QLabel("In starts with the clip, Out ends with it; Loop moves them all along.");
+    about->setWordWrap(true);
+    ui::setTone(about, ui::Tone::TextFaint);
+    s->body()->addWidget(about);
+    col->addWidget(s);
+}
+
 // A counter's look, in place of a text's content: prefix, suffix, decimals, thousands.
 void PropertiesPanel::buildCounterRows(CollapsibleSection* section, const Layer& layer) {
     const uint64_t id = layer.id;
@@ -413,6 +498,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
     std::string group;
     for (const PropertyRef& prop : layer.properties()) {
         if (prop.effectIndex >= 0) continue; // shown in the Effects tab
+        if (prop.whileAnimated && !prop.anim->isAnimated()) continue;
         if (!section || group != prop.group) {
             if (layer.type == LayerType::Plugin) addLoneGroupsBefore(prop.group);
             group = prop.group;
@@ -499,6 +585,8 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                     default: break;
                     }
                 }
+            } else if (group == "Counter" && layer.type == LayerType::Text && layer.text.counter) {
+                buildCountRows(section, layer);
             } else if (group == "Shape") {
                 auto* kind = newCombo();
                 for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) kind->addItem(shapeKindLabel(static_cast<ShapeKind>(i)));
@@ -618,6 +706,21 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                     buttons.push_back(b);
                 }
                 section->addPlainRow("Align", alignRow);
+                auto* fitLines = newCombo();
+                for (const char* label : {"Off", "1 line", "2 lines", "3 lines", "4 lines"}) fitLines->addItem(label);
+                fitLines->setToolTip("With a Wrap Width: the text gets smaller so it fits in that many lines");
+                connect(fitLines, &QComboBox::activated, this, [this](int i) {
+                    for (Layer* l : ctx_.selectedLayers())
+                        if (l->type == LayerType::Text) l->text.fitLines = std::max(0, i);
+                    ctx_.touch();
+                });
+                section->addPlainRow("Auto Fit", fitLines);
+                refreshers_.push_back([this, id, fitLines] {
+                    if (const Layer* l = ctx_.comp().findLayer(id)) {
+                        const QSignalBlocker b(fitLines);
+                        fitLines->setCurrentIndex(std::clamp(l->text.fitLines, 0, 4));
+                    }
+                });
                 refreshers_.push_back([this, id, buttons] {
                     if (const Layer* l = ctx_.comp().findLayer(id))
                         for (int i = 0; i < 3; ++i) buttons[i]->setChecked(static_cast<int>(l->text.align) == i);
@@ -626,6 +729,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         }
         rows_.push_back(new PropertyRow(ctx_, id, prop, section));
     }
+    if (layer.type == LayerType::Text) buildLetterRows(col, layer);
 
     if (layer.type == LayerType::Plugin) {
         for (const PluginParam& p : layer.plugin.params) addLoneGroup(p.group); // the ones after the last property group
@@ -843,6 +947,14 @@ void PropertiesPanel::buildCaptions(QVBoxLayout* col, Layer& layer) {
             if (r < static_cast<int>(caps->size())) caps->erase(caps->begin() + r);
         if (!rows.empty()) ctx_.touch();
     });
+    auto* fit = new QPushButton("Auto Fit");
+    fit->setToolTip("Split long captions, give each one time to be read and close tiny gaps");
+    connect(fit, &QPushButton::clicked, this, [this, captionsOf] {
+        if (std::vector<Caption>* caps = captionsOf(); caps && !caps->empty()) {
+            fitCaptions(*caps);
+            ctx_.touch();
+        }
+    });
     auto* import = new QPushButton("Import .srt...");
     connect(import, &QPushButton::clicked, this, [this, captionsOf] {
         const auto file = platform::openFileDialog("Import Subtitles", "Subtitles", ".srt");
@@ -868,6 +980,7 @@ void PropertiesPanel::buildCaptions(QVBoxLayout* col, Layer& layer) {
     });
     row->addWidget(add);
     row->addWidget(remove);
+    row->addWidget(fit);
     row->addStretch();
     s->body()->addLayout(row);
     auto* row2 = new QHBoxLayout;
@@ -905,6 +1018,19 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
         Layer* l = ctx_.comp().findLayer(id);
         return l ? &l->plugin.rows : nullptr;
     };
+    // The names a label can take (a map's regions): typed with completion, picked to add a row.
+    std::vector<int> unknown;
+    const std::vector<std::string> names = PluginHost::get().rowLabels(layer, &unknown);
+    QStringList nameList;
+    for (const std::string& n : names) nameList << QString::fromStdString(n);
+    auto completerFor = [&](QLineEdit* edit) {
+        auto* c = new QCompleter(nameList, edit);
+        c->setCaseSensitivity(Qt::CaseInsensitive);
+        c->setFilterMode(Qt::MatchContains);
+        c->setCompletionMode(QCompleter::PopupCompletion);
+        edit->setCompleter(c);
+        return c;
+    };
     auto* grid = new QGridLayout;
     grid->setHorizontalSpacing(4);
     grid->setVerticalSpacing(4);
@@ -921,13 +1047,23 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
             }
         });
         auto* label = new QLineEdit(QString::fromStdString(r.label));
-        label->setPlaceholderText("Label");
+        label->setPlaceholderText(names.empty() ? "Label" : "Type a name");
         connect(label, &QLineEdit::textEdited, this, [this, rowsOf, i](const QString& t) {
             if (auto* rows = rowsOf(); rows && i < static_cast<int>(rows->size())) {
                 (*rows)[i].label = t.toStdString();
                 ctx_.touch();
             }
         });
+        if (!names.empty()) {
+            QCompleter* c = completerFor(label);
+            connect(c, qOverload<const QString&>(&QCompleter::activated), this, [this, rowsOf, i](const QString& t) {
+                if (auto* rows = rowsOf(); rows && i < static_cast<int>(rows->size())) {
+                    (*rows)[i].label = t.toStdString();
+                    ctx_.touch();
+                    key_.clear(); // the list of unknown names changes
+                }
+            });
+        }
         auto* value = new ui::DragValue;
         value->setFormat("%g");
         value->setValue(r.value);
@@ -959,8 +1095,71 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
         grid->addWidget(del, i, 4);
     }
     s->body()->addLayout(grid);
+    if (!unknown.empty()) {
+        QStringList wrong;
+        for (int i : unknown)
+            if (i >= 0 && i < static_cast<int>(layer.plugin.rows.size())) wrong << QString::fromStdString(layer.plugin.rows[i].label);
+        auto* warn = new QLabel(QString("Not found, shown nowhere: %1. Type a few letters and pick a name.").arg(wrong.join(", ")));
+        warn->setWordWrap(true);
+        ui::setTone(warn, ui::Tone::Danger);
+        s->body()->addWidget(warn);
+    }
+    if (!names.empty()) {
+        // Add by name: type a few letters, pick one (Enter takes the first match).
+        auto* row = new QHBoxLayout;
+        auto* pick = new QLineEdit;
+        pick->setPlaceholderText("Add: type a name...");
+        pick->setClearButtonEnabled(true);
+        QCompleter* c = completerFor(pick);
+        auto addNamed = [this, rowsOf, pick, nameList](QString name) {
+            name = name.trimmed();
+            if (name.isEmpty()) return;
+            if (!nameList.contains(name, Qt::CaseInsensitive)) { // the first name containing it
+                for (const QString& n : nameList)
+                    if (n.contains(name, Qt::CaseInsensitive)) {
+                        name = n;
+                        break;
+                    }
+            }
+            if (auto* rows = rowsOf()) {
+                DataRow r;
+                r.label = name.toStdString();
+                r.value = rows->empty() ? 50.0f : rows->back().value;
+                r.color = labelColor(static_cast<int>(rows->size()));
+                rows->push_back(std::move(r));
+                ctx_.touch();
+                key_.clear();
+            }
+            QMetaObject::invokeMethod(pick, [pick] { pick->clear(); }, Qt::QueuedConnection);
+        };
+        connect(c, qOverload<const QString&>(&QCompleter::activated), this, addNamed);
+        connect(pick, &QLineEdit::returnPressed, this, [pick, addNamed] { addNamed(pick->text()); });
+        auto* all = new QPushButton("Add All");
+        all->setToolTip("A row for every name not in the data yet (value 0)");
+        connect(all, &QPushButton::clicked, this, [this, rowsOf, nameList] {
+            auto* rows = rowsOf();
+            if (!rows) return;
+            for (const QString& n : nameList) {
+                const bool present = std::any_of(rows->begin(), rows->end(), [&](const DataRow& r) {
+                    return QString::fromStdString(r.label).compare(n, Qt::CaseInsensitive) == 0;
+                });
+                if (present) continue;
+                DataRow r;
+                r.label = n.toStdString();
+                r.value = 0.0f;
+                r.color = labelColor(static_cast<int>(rows->size()));
+                rows->push_back(std::move(r));
+            }
+            ctx_.touch();
+            key_.clear();
+        });
+        row->addWidget(pick, 1);
+        row->addWidget(all);
+        s->body()->addLayout(row);
+    }
     auto* buttons = new QHBoxLayout;
     auto* add = new QPushButton("+ Add Row");
+    add->setVisible(names.empty()); // named rows are added by name, above
     connect(add, &QPushButton::clicked, this, [this, rowsOf] {
         if (auto* rows = rowsOf()) {
             DataRow r;
@@ -998,7 +1197,7 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
     csv->setToolTip("Replace the data with a CSV file (comma, semicolon or tab separated)");
     const uint64_t layerId = layer.id;
     connect(csv, &QPushButton::clicked, this, [this, layerId] { importCsv(layerId); });
-    buttons->addWidget(add);
+    if (names.empty()) buttons->addWidget(add);
     buttons->addWidget(paste);
     buttons->addWidget(copy);
     buttons->addWidget(csv);

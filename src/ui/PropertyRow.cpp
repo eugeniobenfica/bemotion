@@ -1,14 +1,17 @@
 #include "ui/PropertyRow.h"
 
 #include "core/Expressions.h"
+#include "ui/ExpressionEditor.h"
 #include "ui/EditorContext.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
+#include <QApplication>
 #include <QContextMenuEvent>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMap>
@@ -62,7 +65,7 @@ CollapsibleSection::CollapsibleSection(const QString& title, QWidget* parent, QW
     auto* headRow = new QHBoxLayout;
     headRow->setContentsMargins(0, 0, 0, 0);
     header_ = new QToolButton;
-    header_->setText(title);
+    header_->setText(QString(title).replace("&", "&&")); // an & is not a shortcut here ("Sorting & Highlight")
     header_->setCheckable(true);
     header_->setChecked(!collapsedSections().value(title, false));
     header_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -130,19 +133,9 @@ PropertyRow::PropertyRow(EditorContext& ctx, uint64_t layerId, const PropertyRef
     auto* col = new QVBoxLayout(exprBox_);
     col->setContentsMargins(0, 0, 0, 4);
     col->setSpacing(2);
-    expr_ = new QLineEdit;
-    expr_->setPlaceholderText("= an expression, e.g. wiggle(2, 30)");
-    QFont mono("Consolas");
-    mono.setStyleHint(QFont::Monospace);
-    expr_->setFont(mono);
-    expr_->setToolTip("Computed every frame. time, value, wiggle(f, a), loop(), layer(\"Name\").position, sin(), clamp()...\n"
-                      "Numbers and [x, y] vectors mix; docs/EXPRESSIONS.md has it all. Empty: none.");
-    connect(expr_, &QLineEdit::textEdited, this, [this](const QString& t) { applyExpression(t); });
+    expr_ = new ui::ExpressionEditor(ctx_, layerId, prop.kind == PropertyKind::Vec2);
+    connect(expr_, &ui::ExpressionEditor::edited, this, [this](const QString& t) { applyExpression(t); });
     col->addWidget(expr_);
-    exprError_ = new QLabel;
-    exprError_->setWordWrap(true);
-    ui::setTone(exprError_, ui::Tone::Danger);
-    col->addWidget(exprError_);
     const int exprRow = section->gridRows_++;
     g->addWidget(exprBox_, exprRow, 1, 1, 3);
     exprBox_->setVisible(prop.anim->hasExpression());
@@ -173,6 +166,17 @@ QWidget* PropertyRow::buildEditors(const PropertyRef& prop) {
         Layer* layer = ctx_.comp().findLayer(layerId_);
         if (!p || !layer) return;
         AnimatedBase& anim = *p->anim;
+        // Alt+click, as in After Effects: an expression (or none any more).
+        if (QApplication::keyboardModifiers() & Qt::AltModifier) {
+            if (anim.hasExpression()) {
+                exprOpen_ = false;
+                applyExpression({});
+                if (expr_) expr_->setText({});
+            } else {
+                openExpression({});
+            }
+            return;
+        }
         const int keyHere = anim.findKey(ctx_.time);
         // Keyframes only make sense where the clip exists.
         const bool inClip = ctx_.time >= layer->inPoint - kTimeEpsilon && ctx_.time <= layer->outPoint + kTimeEpsilon;
@@ -254,7 +258,8 @@ void PropertyRow::refresh() {
     key_->setState(keyHere >= 0, anim.isAnimated());
     const bool inClip = t >= layer->inPoint - kTimeEpsilon && t <= layer->outPoint + kTimeEpsilon;
     key_->setEnabled(inClip || keyHere >= 0);
-    key_->setToolTip(!inClip && keyHere < 0 ? "The playhead is outside this clip" : "Keyframe at the playhead");
+    key_->setToolTip(!inClip && keyHere < 0 ? "The playhead is outside this clip\nAlt+click: expression"
+                                            : "Keyframe at the playhead\nAlt+click: expression");
     // Driven by an expression: "= Label" in the accent, the expression's value shown.
     const bool driven = anim.hasExpression();
     label_->setText(driven ? "= " + labelText_ : labelText_);
@@ -262,17 +267,14 @@ void PropertyRow::refresh() {
     label_->setStyleSheet(QString("color: %1;").arg(theme::q(driven ? theme::kAccent : anim.isAnimated() ? theme::kText : theme::kTextDim).name()));
     if (exprBox_) {
         exprBox_->setVisible(driven || exprOpen_);
-        if (!expr_->hasFocus() && expr_->text().toStdString() != anim.expression && driven) {
+        if (!expr_->editing() && expr_->text().toStdString() != anim.expression && driven)
             expr_->setText(QString::fromStdString(anim.expression));
-            expr_->setCursorPosition(0); // its start, where it says what it does
-        }
         // What is being typed first (it is not applied while it does not read), then how the
         // applied one ran.
         const std::string typed = expr_->text().trimmed().toStdString();
         std::string problem = typed.empty() ? std::string() : checkExpression(typed);
         if (problem.empty() && driven) problem = expressionError(anim);
-        exprError_->setText(QString::fromStdString(problem));
-        exprError_->setVisible(!problem.empty() && !expr_->text().isEmpty());
+        expr_->setProblem(expr_->text().trimmed().isEmpty() ? QString() : QString::fromStdString(problem));
     }
 
     const std::vector<float> cur = propertyValue(*p, t);
@@ -317,7 +319,7 @@ void PropertyRow::showMenu(QPoint at) {
         menu.addAction("Remove Expression", [this] {
             exprOpen_ = false;
             applyExpression({});
-            if (expr_) expr_->clear();
+            if (expr_) expr_->setText({});
         });
     } else {
         menu.addAction("Add Expression", [this] { openExpression({}); });
@@ -352,16 +354,34 @@ void PropertyRow::showMenu(QPoint at) {
 }
 
 void PropertyRow::openExpression(const QString& text) {
-    if (!expr_) { // the timeline's compact rows: a small dialog
-        bool ok = false;
-        const QString t = QInputDialog::getText(label_, "Expression", labelText_ + " =", QLineEdit::Normal, text, &ok);
-        if (ok) applyExpression(t);
+    if (!expr_) { // the timeline's compact rows: the same editor, in a small window
+        QDialog dialog(label_->window());
+        dialog.setWindowTitle(labelText_ + " Expression");
+        dialog.setMinimumWidth(520);
+        auto* col = new QVBoxLayout(&dialog);
+        col->setContentsMargins(18, 16, 18, 14);
+        auto* head = new QLabel(labelText_ + " =");
+        ui::setTone(head, ui::Tone::TextDim);
+        col->addWidget(head);
+        auto* editor = new ui::ExpressionEditor(ctx_, layerId_, kind_ == PropertyKind::Vec2);
+        editor->setText(text);
+        connect(editor, &ui::ExpressionEditor::edited, &dialog, [editor](const QString& t) {
+            const std::string e = t.trimmed().toStdString();
+            editor->setProblem(e.empty() ? QString() : QString::fromStdString(checkExpression(e)));
+        });
+        col->addWidget(editor);
+        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        col->addWidget(buttons);
+        editor->focusText();
+        if (dialog.exec() == QDialog::Accepted) applyExpression(editor->text());
         return;
     }
     exprOpen_ = true;
     exprBox_->setVisible(true);
     expr_->setText(text);
-    expr_->setFocus();
+    expr_->focusText();
     if (!text.isEmpty()) applyExpression(text);
     refresh();
 }

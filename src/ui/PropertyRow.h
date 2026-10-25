@@ -28,6 +28,7 @@ class ColorButton;
 class DragValue;
 class IconButton;
 class KeyframeButton;
+class ExpressionEditor;
 }
 
 // The property `id` of layer `layerId` (effect parameters: `effectIndex` >= 0).
@@ -87,10 +88,9 @@ private:
     ui::IconButton* reset_ = nullptr;
     QWidget* container_ = nullptr;
     QString labelText_;
-    // The expression (core/Expressions.h): a line under the row in Properties.
+    // The expression (core/Expressions.h): an editor under the row in Properties.
     QWidget* exprBox_ = nullptr;
-    QLineEdit* expr_ = nullptr;
-    QLabel* exprError_ = nullptr;
+    ui::ExpressionEditor* expr_ = nullptr;
     bool exprOpen_ = false;
 };
 

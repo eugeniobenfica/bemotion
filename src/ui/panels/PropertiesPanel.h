@@ -40,6 +40,8 @@ private:
     QWidget* filePicker(uint64_t layerId, const std::string& paramId);
     void buildBackgroundRows(CollapsibleSection* section, Layer& layer); // fill, picture, fit
     void buildCounterRows(CollapsibleSection* section, const Layer& layer); // prefix, suffix, decimals
+    void buildCountRows(CollapsibleSection* section, const Layer& layer);   // how long, easing
+    void buildLetterRows(QVBoxLayout* col, const Layer& layer);              // letters in, out, loop
 
     EditorContext& ctx_;
     std::string key_;

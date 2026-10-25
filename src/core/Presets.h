@@ -40,6 +40,13 @@ struct PresetTrack {
     std::vector<PresetKey> keys;
 };
 
+// Text: letters animated one by one (TextProps::letterIn...); empty ids are left as they are.
+struct PresetLetters {
+    bool set = false;
+    std::string in, out, loop, by, order; // ids (kLetterAnimIds...)
+    double delay = -1.0, duration = -1.0; // < 0: unchanged
+};
+
 struct AnimationPreset {
     std::string name;
     std::string category = "Custom";
@@ -48,6 +55,7 @@ struct AnimationPreset {
     double perGlyph = 0.0;         // text: extra seconds per character (typewriter)
     bool enableStroke = false;     // shapes: turn the stroke on (draw-on effects)
     std::vector<PresetTrack> tracks;
+    PresetLetters letters; // "letters": {"in": "rise", "by": "word", "delay": 0.1, ...}
 };
 
 std::vector<AnimationPreset> builtinPresets();

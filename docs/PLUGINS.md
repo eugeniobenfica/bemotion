@@ -142,6 +142,18 @@ end,
 
 Without `import_csv`, charts take the first text column as labels and the
 first numeric column as values, and tables take the first line as the header.
+
+`row_labels(o)` (API 7, optional) tells which labels a row can take — a map's
+regions. The Properties panel then completes labels as they are typed, adds a
+row by typing part of a name (*Add: type a name…*, or *Add All*), and points
+out the rows naming none of them, which the object returns as a second list
+(1-based row numbers):
+
+```lua
+row_labels = function(o)
+  return { "Acre", "Alagoas", ... }, { 3 } -- the names; row 3 is none of them
+end,
+```
 The bundled Charts plugin does both, plus a **Table** object.
 
 ## Commands: editing the project (API 2)

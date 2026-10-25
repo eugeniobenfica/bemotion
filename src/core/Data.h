@@ -37,5 +37,9 @@ std::string toSrt(const std::vector<Caption>& captions);
 // Captions longer than `maxChars` become several in a row, at word boundaries, sharing its
 // time in proportion to their length (comfortable to read).
 void splitLongCaptions(std::vector<Caption>& captions, size_t maxChars);
+// Auto fit: long captions split (two lines of about 42 characters), each shown long enough to
+// be read (about 15 characters a second, at least 0.8 s, without reaching the next), tiny gaps
+// closed, overlaps cut. Sorted.
+void fitCaptions(std::vector<Caption>& captions);
 
 } // namespace bemotion

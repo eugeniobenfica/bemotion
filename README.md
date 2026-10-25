@@ -108,7 +108,8 @@ does.
   line, camera, background and plugin objects — click to add (or the *Add*
   menu), or drag onto the canvas or the timeline; right-click one on the
   canvas for its menu
-- **Counter**: a number that animates (0 → 100 by default), with decimals,
+- **Counter**: a number that counts up by itself from its clip's start
+  (Start → End, for how long, eased; digits that do not shake), with decimals,
   thousands separators (1,234.5 or 1.234,5), a prefix and a suffix (R$, %)
 - **Text** with an outline, a box behind it and automatic line wrapping
 - **Subtitles**: captions one after another at the bottom of the frame, on a
@@ -136,6 +137,15 @@ does.
 - Every property keyframable, with a reset button and live values
 - **Graph Editor**, motion paths with bezier handles, easing presets and a
   custom cubic-bezier curve editor; Easy Ease with F9
+- **Letter Animation** for any text: letters, words or lines come in one
+  after another (Fade, Rise, Drop, Pop, Slide, Spin, Blur), leave before the
+  end, or keep moving (Wave, Jitter, Pulse), in order, backwards, from the
+  center or at random; one click from *Animate › Letters*
+- **Auto fit**: long text shrinks to fit its lines (subtitles: two), and
+  *Auto Fit* gives captions time to be read
+- **Expressions** typed under any property (Alt+click its diamond, as in
+  After Effects): several lines, completion, a ƒ menu of functions and of
+  other layers' properties
 - **Quick Animations** in their own panel (*Animate*): Fade, Pop, Slide,
   Drop, Zoom, Rise, Shake, Heartbeat, Float, Bounce, Wobble, Blink, Spin,
   Typewriter, Draw On… click one for the selection or drag it onto a clip;

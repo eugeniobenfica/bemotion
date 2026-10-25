@@ -3,9 +3,14 @@
 bemotion has two kinds of code, like After Effects:
 
 - **Expressions** — a short formula on one property, worked out every frame.
-  Right-click a property in *Properties* › *Add Expression* (or pick one of the
-  *Expression Examples*). The property's name turns into `= Name` and shows
-  the result. An expression that does not read is not applied (the error shows
+  **Alt+click** a property's keyframe diamond (as in After Effects), or
+  right-click it › *Add Expression* (or one of the *Expression Examples*).
+  It is written right there, under the property in *Properties* (in a small
+  window from the timeline): several lines, colored as you type, names
+  completed (functions, the clip's times, other layers and their
+  properties), and **ƒ** inserts any of them — *Layers* lists every layer's
+  properties, what After Effects' pick whip does. Alt+click again removes it.
+  The property's name turns into `= Name` and shows the result. An expression that does not read is not applied (the error shows
   under it); one that fails while running (a layer that is gone) falls back to
   the keyframes. Keyframes stay: `value` is what they say.
 - **Scripts** — Lua programs that edit the project, one undo step each:
@@ -32,6 +37,16 @@ loop()                                  plays its keyframes again and again
 pingpong()                              ... back and forth
 progress < 0.5 ? 0 : 100                a choice (progress: 0 at the clip's start, 1 at its end)
 lerp(value, value * 2, smooth(progress)) grows smoothly over the clip
+```
+
+**Several lines**: lines (or `;`) of `name = ...` first — `var`, `let` or
+`const` before the name are fine, as in After Effects — and the result last.
+`//` starts a comment.
+
+```text
+var speed = 90          // degrees a second
+var turns = time * speed
+turns + wiggle(1, 5)
 ```
 
 **Values** are numbers or vectors: `[x, y]` for positions, scales and sizes,

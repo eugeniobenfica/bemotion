@@ -17,6 +17,30 @@ enum class ShapeKind { Rectangle, Ellipse, Polygon, Star, Line, Count };
 
 enum class TextAlign { Left, Center, Right };
 
+// Text: how a counter eases, and how letters animate (ids: the file format and operations).
+enum class CountEasing { Linear, EaseOut, EaseInOut };
+enum class LetterAnim { None, Fade, Rise, Drop, Pop, Slide, Spin, Blur };
+enum class LetterLoop { None, Wave, Jitter, Pulse };
+enum class LetterUnit { Letter, Word, Line };
+enum class LetterOrder { Forward, Backward, Center, Random };
+inline constexpr const char* kCountEasingIds[] = {"linear", "ease_out", "ease_in_out"};
+inline constexpr const char* kCountEasingLabels[] = {"Linear", "Ease Out", "Ease In Out"};
+inline constexpr const char* kLetterAnimIds[] = {"none", "fade", "rise", "drop", "pop", "slide", "spin", "blur"};
+inline constexpr const char* kLetterAnimLabels[] = {"None", "Fade", "Rise", "Drop", "Pop", "Slide", "Spin", "Blur"};
+inline constexpr const char* kLetterLoopIds[] = {"none", "wave", "jitter", "pulse"};
+inline constexpr const char* kLetterLoopLabels[] = {"None", "Wave", "Jitter", "Pulse"};
+inline constexpr const char* kLetterUnitIds[] = {"letter", "word", "line"};
+inline constexpr const char* kLetterUnitLabels[] = {"Letters", "Words", "Lines"};
+inline constexpr const char* kLetterOrderIds[] = {"forward", "backward", "center", "random"};
+inline constexpr const char* kLetterOrderLabels[] = {"First to Last", "Last to First", "From the Center", "Random"};
+// The index of `id` in `ids`, or -1.
+template <size_t N>
+int indexOfId(const char* const (&ids)[N], const std::string& id) {
+    for (size_t i = 0; i < N; ++i)
+        if (id == ids[i]) return static_cast<int>(i);
+    return -1;
+}
+
 enum class FontWeight { Regular, Medium, SemiBold, Bold, Count };
 
 const char* shapeKindLabel(ShapeKind kind);
@@ -40,6 +64,7 @@ struct PropertyRef {
     float max = 0.0f; // min == max means unbounded
     const char* format = "%.1f";
     int effectIndex = -1; // >= 0: parameter of Layer::effects[effectIndex]
+    bool whileAnimated = false; // shown in the panels only once it has keyframes (kept for scripts)
 
     AnimFloat& asFloat() const { return *static_cast<AnimFloat*>(anim); }
     AnimVec2& asVec2() const { return *static_cast<AnimVec2*>(anim); }
@@ -117,13 +142,32 @@ struct TextProps {
     // A counter shows `counterValue` as a number: `counterDecimals` digits after the decimal
     // mark (0 to 6), thousands grouped by `counterSeparator` ("", ",", "." or " "; with "." the
     // decimal mark is ","), between `counterPrefix` and `counterSuffix` ("R$ ", "%").
+    // It counts by itself from `counterFrom` to `counterTo` over `counterDuration` seconds from
+    // the clip's start (0: the whole clip), eased; keyframes on `counterValue` (older counters,
+    // or animated by hand) take over.
     bool counter = false;
     AnimFloat counterValue{0.0f};
+    AnimFloat counterFrom{0.0f};
+    AnimFloat counterTo{100.0f};
+    float counterDuration = 2.0f;
+    CountEasing counterEasing = CountEasing::EaseOut;
     int counterDecimals = 0;
     std::string counterPrefix, counterSuffix, counterSeparator;
+    // Letters (or words, or lines) come in one after another from the clip's start, leave one
+    // after another before its end, and may move all along (a loop).
+    LetterAnim letterIn = LetterAnim::None, letterOut = LetterAnim::None;
+    LetterLoop letterLoop = LetterLoop::None;
+    LetterUnit letterUnit = LetterUnit::Letter;
+    LetterOrder letterOrder = LetterOrder::Forward;
+    float letterDelay = 0.04f;    // seconds between one and the next
+    float letterDuration = 0.5f;  // seconds each takes
+    // Auto fit: with a Wrap Width, the font shrinks (down to 40%) so the text fits in that many
+    // lines (0: off). Subtitles start with 2.
+    int fitLines = 0;
 
-    // What the layer shows at `t`.
-    std::string textAt(double t) const;
+    // What the layer shows at `t`; `in` / `out`: the clip's (a counter counts from `in`).
+    std::string textAt(double t, double in = 0.0, double out = 0.0) const;
+    bool lettersAnimated() const { return letterIn != LetterAnim::None || letterOut != LetterAnim::None || letterLoop != LetterLoop::None; }
 };
 
 // --- plugin objects ---------------------------------------------------------------

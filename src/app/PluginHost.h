@@ -40,6 +40,7 @@ struct PluginObjectType {
     std::vector<PluginIntro> intro;
     int drawRef = -1;   // Lua registry reference of the draw function
     int importRef = -1; // ... of import_csv (optional): CSV cells -> rows / table / params
+    int labelsRef = -1; // ... of row_labels (optional, API 7): the labels rows can name (a map's regions)
 };
 
 // An action a plugin adds to the Plugins menu: Lua that edits the project
@@ -111,6 +112,9 @@ public:
     // Fills a plugin object's data (rows / table) from CSV text: through the object's own
     // import_csv when it has one, else the standard reading (core/Data.h).
     bool importCsv(Layer& layer, const std::string& csv, std::string& error);
+    // row_labels(o): the names a row's label can take (searched while typing), and the rows whose
+    // label is none of them (0-based). Empty without one.
+    std::vector<std::string> rowLabels(const Layer& layer, std::vector<int>* unknownRows = nullptr);
 
     // Commands of enabled plugins, in load order.
     std::vector<const PluginCommand*> commands() const;

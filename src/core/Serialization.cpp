@@ -256,7 +256,20 @@ json encodeLayer(const Layer& constLayer) {
             if (!layer.text.counterPrefix.empty()) j["text"]["prefix"] = layer.text.counterPrefix;
             if (!layer.text.counterSuffix.empty()) j["text"]["suffix"] = layer.text.counterSuffix;
             if (!layer.text.counterSeparator.empty()) j["text"]["separator"] = layer.text.counterSeparator;
+            j["text"]["count_duration"] = layer.text.counterDuration;
+            j["text"]["count_easing"] = kCountEasingIds[static_cast<int>(layer.text.counterEasing)];
         }
+        const TextProps& tp = layer.text;
+        if (tp.letterIn != LetterAnim::None) j["text"]["letter_in"] = kLetterAnimIds[static_cast<int>(tp.letterIn)];
+        if (tp.letterOut != LetterAnim::None) j["text"]["letter_out"] = kLetterAnimIds[static_cast<int>(tp.letterOut)];
+        if (tp.letterLoop != LetterLoop::None) j["text"]["letter_loop"] = kLetterLoopIds[static_cast<int>(tp.letterLoop)];
+        if (tp.lettersAnimated()) {
+            j["text"]["letter_by"] = kLetterUnitIds[static_cast<int>(tp.letterUnit)];
+            j["text"]["letter_order"] = kLetterOrderIds[static_cast<int>(tp.letterOrder)];
+            j["text"]["letter_delay"] = tp.letterDelay;
+            j["text"]["letter_duration"] = tp.letterDuration;
+        }
+        if (tp.fitLines) j["text"]["fit_lines"] = tp.fitLines;
         if (layer.text.subtitle) {
             json captions = json::array();
             for (const Caption& c : layer.text.captions) captions.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
@@ -355,6 +368,17 @@ Layer decodeLayer(const json& j) {
         layer.text.counterPrefix = t.value("prefix", std::string());
         layer.text.counterSuffix = t.value("suffix", std::string());
         layer.text.counterSeparator = t.value("separator", std::string());
+        // Counters from before counting by themselves had keyframes on their value (kept).
+        layer.text.counterDuration = t.value("count_duration", 2.0f);
+        layer.text.counterEasing = enumFromId(kCountEasingIds, t.value("count_easing", std::string()), CountEasing::EaseOut);
+        layer.text.letterIn = enumFromId(kLetterAnimIds, t.value("letter_in", std::string()), LetterAnim::None);
+        layer.text.letterOut = enumFromId(kLetterAnimIds, t.value("letter_out", std::string()), LetterAnim::None);
+        layer.text.letterLoop = enumFromId(kLetterLoopIds, t.value("letter_loop", std::string()), LetterLoop::None);
+        layer.text.letterUnit = enumFromId(kLetterUnitIds, t.value("letter_by", std::string()), LetterUnit::Letter);
+        layer.text.letterOrder = enumFromId(kLetterOrderIds, t.value("letter_order", std::string()), LetterOrder::Forward);
+        layer.text.letterDelay = t.value("letter_delay", 0.04f);
+        layer.text.letterDuration = t.value("letter_duration", 0.5f);
+        layer.text.fitLines = t.value("fit_lines", 0);
         if (const auto cj = t.find("captions"); cj != t.end() && cj->is_array())
             for (const json& c : *cj)
                 if (c.is_object())

@@ -386,6 +386,7 @@ private:
                  suggest(type, {"text", "counter", "subtitle", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "background", "plugin"}));
         }
         if (has(op, "name")) l.name = text(op["name"], "name");
+        if (l.type == LayerType::Text) setLetters(l, op);
         // A 3D layer ("three_d": true) at Z position "z" (a "z" alone makes it 3D; a camera's own Z).
         if (has(op, "three_d") || has(op, "z")) {
             const bool on = has(op, "three_d") ? boolean(op["three_d"], "three_d") : l.type != LayerType::Camera;
@@ -427,6 +428,48 @@ private:
             const std::string sep = text(op["separator"], "separator");
             if (!isCounterSeparator(sep)) fail("\"separator\" must be \"\", \",\", \".\" or \" \"");
             l.text.counterSeparator = sep;
+        }
+        if (has(op, "from")) l.text.counterFrom.base = static_cast<float>(number(op["from"], "from"));
+        if (has(op, "to")) l.text.counterTo.base = static_cast<float>(number(op["to"], "to"));
+        if (has(op, "count_duration")) {
+            const double v = number(op["count_duration"], "count_duration");
+            if (v < 0 || v > 3600) fail("\"count_duration\" must be 0 (the whole clip) to 3600 seconds");
+            l.text.counterDuration = static_cast<float>(v);
+        }
+        if (has(op, "count_easing")) l.text.counterEasing = static_cast<CountEasing>(idOf(kCountEasingIds, op, "count_easing"));
+    }
+
+    // The index of op[key] among `ids`, or a helpful failure.
+    template <size_t N>
+    int idOf(const char* const (&ids)[N], const json& op, const char* key) {
+        const std::string v = text(op[key], key);
+        const int i = indexOfId(ids, v);
+        if (i < 0) fail("unknown " + std::string(key) + " \"" + v + "\"" + suggest(v, std::vector<std::string>(std::begin(ids), std::end(ids))));
+        return i;
+    }
+
+    // Letters coming in, leaving, moving; auto fit.
+    void setLetters(Layer& l, const json& op) {
+        TextProps& t = l.text;
+        if (has(op, "letter_in")) t.letterIn = static_cast<LetterAnim>(idOf(kLetterAnimIds, op, "letter_in"));
+        if (has(op, "letter_out")) t.letterOut = static_cast<LetterAnim>(idOf(kLetterAnimIds, op, "letter_out"));
+        if (has(op, "letter_loop")) t.letterLoop = static_cast<LetterLoop>(idOf(kLetterLoopIds, op, "letter_loop"));
+        if (has(op, "letter_by")) t.letterUnit = static_cast<LetterUnit>(idOf(kLetterUnitIds, op, "letter_by"));
+        if (has(op, "letter_order")) t.letterOrder = static_cast<LetterOrder>(idOf(kLetterOrderIds, op, "letter_order"));
+        if (has(op, "letter_delay")) {
+            const double v = number(op["letter_delay"], "letter_delay");
+            if (v < 0 || v > 10) fail("\"letter_delay\" must be 0 to 10 seconds");
+            t.letterDelay = static_cast<float>(v);
+        }
+        if (has(op, "letter_duration")) {
+            const double v = number(op["letter_duration"], "letter_duration");
+            if (v < 0.01 || v > 30) fail("\"letter_duration\" must be 0.01 to 30 seconds");
+            t.letterDuration = static_cast<float>(v);
+        }
+        if (has(op, "fit_lines")) {
+            const double v = number(op["fit_lines"], "fit_lines");
+            if (v < 0 || v > 20 || v != std::floor(v)) fail("\"fit_lines\" must be 0 (off) to 20");
+            t.fitLines = static_cast<int>(v);
         }
     }
 
@@ -515,9 +558,15 @@ private:
             l.label = static_cast<int>(v);
         }
         if (has(op, "text")) requireType(l.type == LayerType::Text && !l.text.counter, "text", "text"), l.text.text = text(op["text"], "text");
-        if (has(op, "decimals") || has(op, "prefix") || has(op, "suffix") || has(op, "separator")) {
-            requireType(l.type == LayerType::Text && l.text.counter, has(op, "decimals") ? "decimals" : has(op, "prefix") ? "prefix" : has(op, "suffix") ? "suffix" : "separator", "counter");
-            setCounter(l, op);
+        for (const char* key : {"decimals", "prefix", "suffix", "separator", "from", "to", "count_duration", "count_easing"})
+            if (has(op, key)) requireType(l.type == LayerType::Text && l.text.counter, key, "counter");
+        setCounter(l, op);
+        for (const char* key : {"letter_in", "letter_out", "letter_loop", "letter_by", "letter_order", "letter_delay", "letter_duration", "fit_lines"})
+            if (has(op, key)) requireType(l.type == LayerType::Text, key, "text");
+        setLetters(l, op);
+        if (has(op, "fit_captions")) {
+            requireType(l.type == LayerType::Text && l.text.subtitle, "fit_captions", "subtitle");
+            if (boolean(op["fit_captions"], "fit_captions")) fitCaptions(l.text.captions);
         }
         if (has(op, "outline")) requireType(l.type == LayerType::Text, "outline", "text"), l.text.outlineEnabled = boolean(op["outline"], "outline");
         if (has(op, "box")) requireType(l.type == LayerType::Text, "box", "text"), l.text.boxEnabled = boolean(op["box"], "box");

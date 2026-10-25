@@ -340,6 +340,15 @@ void testPresetJsonRoundTrip() {
         CHECK(parsePreset(presetToJson(p), q));
         CHECK(presetToJson(q) == presetToJson(p));
     }
+    CHECK(builtinPresets().size() == 43); // none failed to parse
+    // Letter presets set the text's Letter Animation (and only text takes them).
+    for (const auto& p : builtinPresets())
+        if (p.name == "Words Slide") {
+            Layer t = makeTextLayer("Two words", {0, 0}, 5.0), r = makeShapeLayer(ShapeKind::Rectangle, {0, 0}, 5.0);
+            CHECK(presetAppliesTo(p, t) && !presetAppliesTo(p, r));
+            applyPreset(p, t, 0.0);
+            CHECK(t.text.letterIn == LetterAnim::Slide && t.text.letterUnit == LetterUnit::Word && near(t.text.letterDelay, 0.12f));
+        }
     AnimationPreset bad;
     std::string err;
     CHECK(!parsePreset("{\"name\":\"x\"}", bad, &err) && !err.empty());
@@ -902,8 +911,9 @@ void testCamera3DTilt() {
     const float right = m.apply({1060, 540}).x - 960, left = 960 - m.apply({860, 540}).x;
     CHECK(right > 0 && left > right && right < 100 && left > 50);
     CHECK(near(m.apply({960, 540}).x, 960) && near(m.apply({960, 540}).y, 540)); // turns around its position
-    // The free view: from the front, no perspective (cos 60° = half as wide).
-    CHECK(c.viewFor(c.layers[0], 0, m, false) && near(m.apply({1060, 540}).x, 1010));
+    // The free view: as without a camera, in perspective (never flat).
+    Projective f;
+    CHECK(c.viewFor(c.layers[0], 0, f, false) && near(f.apply({1060, 540}).x, m.apply({1060, 540}).x));
     // Unturned plane (where the position moves): as if facing the camera.
     CHECK(c.viewFor(c.layers[0], 0, m, true, false) && near(m.apply({1060, 540}).x, 1060));
     // Turned 90° it is seen edge-on; far enough to the side, points are behind the camera.
@@ -958,12 +968,22 @@ void testSubtitles() {
 
 void testCounter() {
     Project p;
-    CHECK(run(p, R"({"op":"layer.add","type":"counter","duration":4})").ok);
+    CHECK(run(p, R"({"op":"layer.add","type":"counter","duration":4,"start":1})").ok);
+    auto shown = [&p](double t) {
+        const Layer& c = p.comp.layers.front();
+        return c.text.textAt(t, c.inPoint, c.outPoint);
+    };
     const Layer& l = p.comp.layers.front();
-    CHECK(layerTypeName(l) == "counter" && l.text.counter && !l.text.subtitle);
-    CHECK(l.text.textAt(0) == "0" && l.text.textAt(2) == "50" && l.text.textAt(4) == "100");
-    CHECK(l.text.counterValue.keyCount() == 2);
-    CHECK(run(p, R"({"op":"property.set","layer":"Counter","prop":"counter_value","time":4,"value":250})").ok);
+    CHECK(layerTypeName(l) == "counter" && l.text.counter && !l.text.subtitle && !l.text.counterValue.isAnimated());
+    // It counts by itself from its clip's start: 0 to 100 in 2 s, easing out, then stays.
+    CHECK(shown(1) == "0" && shown(2) == "88" && shown(3) == "100" && shown(4.5) == "100");
+    CHECK(run(p, R"({"op":"layer.set","layer":"Counter","from":10,"to":20,"count_duration":0,"count_easing":"linear"})").ok);
+    CHECK(shown(1) == "10" && shown(3) == "15" && shown(5) == "20"); // over the whole clip
+    CHECK(!run(p, R"({"op":"layer.set","layer":"Counter","count_easing":"wobbly"})").ok);
+    CHECK(run(p, R"({"op":"layer.set","layer":"Counter","start":2})").ok);
+    CHECK(shown(2) == "10" && shown(4) == "15"); // moved: counts from its new start
+    // Keyframes on its value take over.
+    CHECK(run(p, R"({"op":"key.add","layer":"Counter","prop":"counter_value","time":4,"value":250})").ok);
     CHECK(p.comp.layers.front().text.textAt(4) == "250");
     Project loaded;
     CHECK(deserializeProject(serializeProject(p), loaded) && validate(loaded).empty());
@@ -984,6 +1004,38 @@ void testCounter() {
     CHECK(again.comp.layers.front().text.textAt(4) == "R$ 250,0 mil");
     CHECK(run(p, R"({"op":"layer.add","type":"text","name":"Plain"})").ok);
     CHECK(!run(p, R"({"op":"layer.set","layer":"Plain","suffix":"%"})").ok);
+}
+
+void testLetters() {
+    Project p;
+    CHECK(run(p, R"({"op":"layer.add","type":"text","name":"T","text":"Hello world","letter_in":"rise","letter_by":"word",
+                     "letter_order":"center","letter_delay":0.1,"letter_duration":0.4,"letter_loop":"wave","fit_lines":2})").ok);
+    const TextProps& t = p.comp.layers.front().text;
+    CHECK(t.letterIn == LetterAnim::Rise && t.letterUnit == LetterUnit::Word && t.letterOrder == LetterOrder::Center);
+    CHECK(t.letterLoop == LetterLoop::Wave && near(t.letterDelay, 0.1f) && t.fitLines == 2 && t.lettersAnimated());
+    CHECK(!run(p, R"({"op":"layer.set","layer":"T","letter_in":"explode"})").ok);
+    CHECK(!run(p, R"({"op":"layer.set","layer":"T","letter_delay":-1})").ok);
+    CHECK(run(p, R"({"op":"layer.set","layer":"T","letter_out":"fade","letter_in":"none"})").ok);
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back) && validate(back).empty());
+    const TextProps& b = back.comp.layers.front().text;
+    CHECK(b.letterIn == LetterAnim::None && b.letterOut == LetterAnim::Fade && b.letterUnit == LetterUnit::Word && b.fitLines == 2);
+    CHECK(run(p, R"({"op":"layer.add","type":"rectangle","name":"R"})").ok);
+    CHECK(!run(p, R"({"op":"layer.set","layer":"R","letter_in":"fade"})").ok);
+
+    // Subtitles fit by themselves: two lines at most, and time to read each caption.
+    CHECK(run(p, R"({"op":"layer.add","type":"subtitle","captions":[{"start":0,"end":0.2,"text":"Hi"},
+                     {"start":0.5,"end":3,"text":"A much longer caption that keeps on going well past what two lines of subtitles can hold, really"}]})").ok);
+    for (Layer& l : p.comp.layers)
+        if (l.text.subtitle) CHECK(l.text.fitLines == 2);
+    CHECK(run(p, R"({"op":"layer.set","layer":"Subtitles","fit_captions":true})").ok);
+    for (const Layer& l : p.comp.layers)
+        if (l.text.subtitle) {
+            const auto& c = l.text.captions;
+            CHECK(c.size() == 3 && near(static_cast<float>(c[0].end), 0.5f)); // lengthened up to the next one
+            for (size_t i = 0; i + 1 < c.size(); ++i) CHECK(c[i].end <= c[i + 1].start + 1e-9 && c[i].text.size() <= 84);
+        }
+    CHECK(!run(p, R"({"op":"layer.set","layer":"T","fit_captions":true})").ok);
 }
 
 void testLens() {
@@ -1055,6 +1107,12 @@ void testExpressions() {
     AnimVec2 v(Vec2{1, 2});
     v.expression = "value * 2 + [10, 20]";
     CHECK(near(v.valueAt(0).x, 12.0f) && near(v.valueAt(0).y, 24.0f));
+    // Several lines: names (var / let as in After Effects, or none), // comments, the last line is the result.
+    AnimFloat lines(10.0f);
+    lines.expression = "var speed = 90; // degrees a second\nlet turns = time * speed\nhalf = turns / 2\nhalf + value";
+    CHECK(checkExpression(lines.expression).empty() && near(lines.valueAt(2.0), 100.0f));
+    CHECK(!checkExpression("a = 1").empty() && !checkExpression("var b 2").empty());
+    CHECK(checkExpression("value; ").empty());
     // A broken one falls back to the keyframes and says why.
     AnimFloat broken(7.0f);
     broken.expression = "layer(\"Nobody\").opacity";
@@ -1116,6 +1174,7 @@ int main() {
         {"cut transitions", testCutTransitions},
         {"subtitles", testSubtitles},
         {"counter", testCounter},
+        {"letters and fit", testLetters},
         {"lens", testLens},
         {"expressions", testExpressions},
     };

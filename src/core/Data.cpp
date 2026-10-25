@@ -318,4 +318,19 @@ void splitLongCaptions(std::vector<Caption>& captions, size_t maxChars) {
     captions = std::move(out);
 }
 
+void fitCaptions(std::vector<Caption>& captions) {
+    std::stable_sort(captions.begin(), captions.end(), [](const Caption& a, const Caption& b) { return a.start < b.start; });
+    splitLongCaptions(captions, 84);
+    constexpr double kCharsPerSecond = 15.0, kMinimum = 0.8, kGap = 0.25;
+    for (size_t i = 0; i < captions.size(); ++i) {
+        Caption& c = captions[i];
+        const double next = i + 1 < captions.size() ? captions[i + 1].start : 1e18;
+        const double wanted = std::max(kMinimum, static_cast<double>(c.text.size()) / kCharsPerSecond);
+        if (c.end - c.start < wanted) c.end = c.start + wanted;
+        if (next - c.end < kGap) c.end = next; // nearly touching: no flicker between them
+        c.end = std::min(c.end, next);
+        if (c.end <= c.start) c.end = c.start + 0.05;
+    }
+}
+
 } // namespace bemotion

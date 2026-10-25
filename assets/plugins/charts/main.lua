@@ -798,6 +798,18 @@ end
 bemotion.register_object {
   id = "map",
   import_csv = import_chart,
+  -- The regions a row can name (searched while typing a label), and the rows naming none.
+  row_labels = function(o)
+    local m = map_of(o.map)
+    local names = {}
+    for _, region in ipairs(m.regions) do names[#names + 1] = region.name end
+    table.sort(names)
+    local unknown = {}
+    for i, r in ipairs(o.rows) do
+      if r.label ~= "" and not m.index[plain_name(r.label)] then unknown[#unknown + 1] = i end
+    end
+    return names, unknown
+  end,
   name = "Map",
   description = "Countries or states colored by their value, coming in one after another.",
   icon = "map",
@@ -808,19 +820,19 @@ bemotion.register_object {
       { id = "low_color", label = "Low Color", type = "color", default = "#3A4A72", group = "Map" },
       { id = "high_color", label = "High Color", type = "color", default = "#E8B931", group = "Map" },
       { id = "scale", label = "Color Scale", type = "choice", choices = { "Linear", "Logarithmic", "By Rank" },
-        default = "Linear", group = "Map" },
+        default = "Logarithmic", group = "Map" },
       { id = "row_colors", label = "Use Row Colors", type = "toggle", default = false, group = "Map" },
       { id = "empty_color", label = "No Data Color", type = "color", default = "#FFFFFF1A", group = "Map" },
       { id = "border_color", label = "Border Color", type = "color", default = "#0E1018", group = "Map" },
       { id = "border", label = "Border Width", type = "number", default = 0.8, min = 0, max = 10, step = 0.05,
         format = "%.1f px", group = "Map" },
       { id = "legend", label = "Legend", type = "toggle", default = true, group = "Map" },
+      { id = "background", label = "Background", type = "color", default = "#00000000", group = "Map" },
       { id = "zoom", label = "Zoom", type = "number", default = 100, min = 50, max = 2000, format = "%.0f%%", group = "View" },
       { id = "center_x", label = "Center X", type = "number", default = 50, min = 0, max = 100, step = 0.1,
         format = "%.1f%%", group = "View" },
       { id = "center_y", label = "Center Y", type = "number", default = 50, min = 0, max = 100, step = 0.1,
-        format = "%.1f%%", group = "View" },
-      { id = "background", label = "Background", type = "color", default = "#00000000", group = "Map" } },
+        format = "%.1f%%", group = "View" } },
     animation_params(), data_params(),
     text_params()),
   draw = function(o, g)

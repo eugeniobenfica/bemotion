@@ -4,7 +4,9 @@
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkFont.h"
+#include "include/core/SkBlurTypes.h"
 #include "include/core/SkFontMetrics.h"
+#include "include/core/SkMaskFilter.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkTextBlob.h"
 #include "modules/skshaper/include/SkShaper.h"
@@ -19,6 +21,7 @@
 #include <list>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 
 namespace bemotion::render {
@@ -96,7 +99,8 @@ int utf8Length(unsigned char lead) {
     return 1;
 }
 
-std::shared_ptr<const Shaped> shapeUncached(const std::string& text, const sk_sp<SkTypeface>& typeface) {
+// `tabular`: digits all as wide (a counting number does not shake).
+std::shared_ptr<const Shaped> shapeUncached(const std::string& text, const sk_sp<SkTypeface>& typeface, bool tabular) {
     auto out = std::make_shared<Shaped>();
     SkFont font(typeface, kRef);
     font.setSubpixel(true);
@@ -140,7 +144,8 @@ std::shared_ptr<const Shaped> shapeUncached(const std::string& text, const sk_sp
             std::unique_ptr<SkShaper::ScriptRunIterator> script = SkShapers::HB::ScriptRunIterator(utf8, n);
             if (!script) script = std::make_unique<SkShaper::TrivialScriptRunIterator>(SkSetFourByteTag('Z', 'y', 'y', 'y'), n);
             std::unique_ptr<SkShaper::LanguageRunIterator> lang = SkShaper::MakeStdLanguageRunIterator(utf8, n);
-            sh.shaper->shape(utf8, n, *fontIt, *bidi, *script, *lang, nullptr, 0, FLT_MAX, &collector);
+            const SkShaper::Feature tnum{SkSetFourByteTag('t', 'n', 'u', 'm'), 1, 0, n};
+            sh.shaper->shape(utf8, n, *fontIt, *bidi, *script, *lang, tabular ? &tnum : nullptr, tabular ? 1 : 0, FLT_MAX, &collector);
             line.width = collector.width();
             // Visual cluster slots, for even letter spacing.
             int slot = -1;
@@ -168,11 +173,11 @@ std::shared_ptr<const Shaped> shapeUncached(const std::string& text, const sk_sp
 }
 
 // Small LRU cache of shaped texts.
-std::shared_ptr<const Shaped> shape(const std::string& text, const std::string& family, const std::string& style) {
+std::shared_ptr<const Shaped> shape(const std::string& text, const std::string& family, const std::string& style, bool tabular = false) {
     static std::mutex mutex;
     static std::list<std::pair<std::string, std::shared_ptr<const Shaped>>> lru;
     static std::unordered_map<std::string, decltype(lru)::iterator> index;
-    const std::string key = family + '\x1f' + style + '\x1f' + text;
+    const std::string key = family + '\x1f' + style + (tabular ? "\x1ft\x1f" : "\x1f") + text;
     {
         std::lock_guard lock(mutex);
         if (auto it = index.find(key); it != index.end()) {
@@ -180,7 +185,7 @@ std::shared_ptr<const Shaped> shape(const std::string& text, const std::string& 
             return it->second->second;
         }
     }
-    auto shaped = shapeUncached(text, Fonts::typeface(family, style));
+    auto shaped = shapeUncached(text, Fonts::typeface(family, style), tabular);
     std::lock_guard lock(mutex);
     lru.emplace_front(key, shaped);
     index[key] = lru.begin();
@@ -224,7 +229,156 @@ Placement place(const Shaped& s, float size, float tracking, float lineHeightPer
     return p;
 }
 
-void drawShaped(SkCanvas* canvas, const Shaped& s, const Placement& p, const SkPaint& paint, int visibleChars) {
+// How one letter (or word, or line) looks at a moment of its animation.
+struct Look {
+    float alpha = 1.0f, dx = 0.0f, dy = 0.0f, scale = 1.0f, rotate = 0.0f, blur = 0.0f;
+};
+
+// Letters coming in, leaving and moving (TextProps::letterIn / letterOut / letterLoop).
+class Animator {
+public:
+    Animator(const TextProps& text, const std::string& shown, double t, TextClip clip, float size)
+        : text_(text), local_(t - clip.in), left_(clip.out > clip.in ? clip.out - t : 1e9), size_(size) {
+        // The unit of every character (line breaks are not characters, as in the shaping).
+        int letter = 0, word = -1, line = 0;
+        bool space = true;
+        for (size_t i = 0; i < shown.size();) {
+            const unsigned char ch = static_cast<unsigned char>(shown[i]);
+            const int len = std::min<int>(utf8Length(ch), static_cast<int>(shown.size() - i));
+            i += len;
+            if (ch == '\n') {
+                ++line;
+                space = true;
+                continue;
+            }
+            if (ch == '\r') continue;
+            const bool blank = ch == ' ' || ch == '\t';
+            if (!blank && space) ++word;
+            space = blank;
+            const int unit = text.letterUnit == LetterUnit::Letter ? letter : text.letterUnit == LetterUnit::Word ? std::max(0, word) : line;
+            unitOf_.push_back(unit);
+            if (!blank) ++letter; // spaces take no time
+        }
+        const int units = 1 + (unitOf_.empty() ? 0 : *std::max_element(unitOf_.begin(), unitOf_.end()));
+        rank_.resize(units);
+        for (int u = 0; u < units; ++u) {
+            switch (text.letterOrder) {
+            case LetterOrder::Forward: rank_[u] = static_cast<float>(u); break;
+            case LetterOrder::Backward: rank_[u] = static_cast<float>(units - 1 - u); break;
+            case LetterOrder::Center: rank_[u] = std::fabs(u - (units - 1) * 0.5f); break;
+            case LetterOrder::Random: rank_[u] = 0.0f; break;
+            }
+        }
+        if (text.letterOrder == LetterOrder::Random) { // a fixed shuffle
+            std::vector<int> order(units);
+            for (int u = 0; u < units; ++u) order[u] = u;
+            std::stable_sort(order.begin(), order.end(), [](int a, int b) { return hash(a, 7) < hash(b, 7); });
+            for (int k = 0; k < units; ++k) rank_[order[k]] = static_cast<float>(k);
+        }
+        maxRank_ = rank_.empty() ? 0.0f : *std::max_element(rank_.begin(), rank_.end());
+    }
+
+    Look look(int charIndex) const {
+        Look l;
+        const int unit = charIndex >= 0 && charIndex < static_cast<int>(unitOf_.size()) ? unitOf_[charIndex] : 0;
+        const float r = unit < static_cast<int>(rank_.size()) ? rank_[unit] : 0.0f;
+        const double delay = text_.letterDelay, length = std::max(0.01f, text_.letterDuration);
+        if (text_.letterIn != LetterAnim::None)
+            apply(l, text_.letterIn, static_cast<float>(std::clamp((local_ - r * delay) / length, 0.0, 1.0)));
+        if (text_.letterOut != LetterAnim::None)
+            apply(l, text_.letterOut, static_cast<float>(std::clamp((left_ - (maxRank_ - r) * delay) / length, 0.0, 1.0)));
+        const float phase = static_cast<float>(local_);
+        constexpr float kTau = 6.2831853f;
+        switch (text_.letterLoop) {
+        case LetterLoop::None: break;
+        case LetterLoop::Wave: l.dy += std::sin((phase * 1.4f - r * 0.12f) * kTau) * size_ * 0.1f; break;
+        case LetterLoop::Jitter: {
+            const int step = static_cast<int>(std::floor(phase * 12.0f));
+            l.dx += (hash(unit, step) - 0.5f) * size_ * 0.06f;
+            l.dy += (hash(unit + 9973, step) - 0.5f) * size_ * 0.06f;
+            l.rotate += (hash(unit + 19, step) - 0.5f) * 8.0f;
+            break;
+        }
+        case LetterLoop::Pulse: l.scale *= 1.0f + 0.14f * std::max(0.0f, std::sin((phase * 1.2f - r * 0.08f) * kTau)); break;
+        }
+        return l;
+    }
+
+private:
+    static float hash(int a, int b) {
+        uint32_t h = static_cast<uint32_t>(a) * 374761393u + static_cast<uint32_t>(b) * 668265263u;
+        h = (h ^ (h >> 13)) * 1274126177u;
+        return static_cast<float>((h ^ (h >> 16)) & 0xFFFF) / 65535.0f;
+    }
+    // `p`: 0 not there yet (or gone), 1 settled.
+    void apply(Look& l, LetterAnim kind, float p) const {
+        const float q = 1.0f - std::pow(1.0f - p, 3.0f);
+        switch (kind) {
+        case LetterAnim::None: break;
+        case LetterAnim::Fade: l.alpha *= q; break;
+        case LetterAnim::Rise: l.dy += (1.0f - q) * size_ * 0.5f, l.alpha *= q; break;
+        case LetterAnim::Drop: l.dy -= (1.0f - q) * size_ * 0.5f, l.alpha *= q; break;
+        case LetterAnim::Slide: l.dx += (1.0f - q) * size_ * 0.8f, l.alpha *= q; break;
+        case LetterAnim::Pop: { // grows past its size and settles
+            const float c1 = 1.70158f, c3 = c1 + 1.0f, u = p - 1.0f;
+            l.scale *= std::max(0.0f, 1.0f + c3 * u * u * u + c1 * u * u);
+            l.alpha *= std::min(1.0f, p * 4.0f);
+            break;
+        }
+        case LetterAnim::Spin: l.rotate += (1.0f - q) * -120.0f, l.scale *= 0.4f + 0.6f * q, l.alpha *= q; break;
+        case LetterAnim::Blur: l.blur += (1.0f - q) * size_ * 0.12f, l.alpha *= q; break;
+        }
+    }
+
+    const TextProps& text_;
+    double local_, left_;
+    float size_;
+    std::vector<int> unitOf_;
+    std::vector<float> rank_;
+    float maxRank_ = 0.0f;
+};
+
+// One glyph at a time, each with its own look.
+void drawAnimated(SkCanvas* canvas, const Shaped& s, const Placement& p, const SkPaint& paint, int visibleChars, const Animator& anim) {
+    const float size = kRef * p.scale;
+    for (size_t li = 0; li < s.lines.size(); ++li) {
+        for (const Run& r : s.lines[li].runs) {
+            SkFont font = r.font;
+            font.setSize(size);
+            for (size_t i = 0; i < r.glyphs.size(); ++i) {
+                if (r.charIndex[i] >= visibleChars) continue;
+                const Look look = anim.look(r.charIndex[i]);
+                if (look.alpha <= 0.002f || look.scale <= 0.001f) continue;
+                const SkPoint at{p.lineX[li] + r.pos[i].fX * p.scale + p.tracking * static_cast<float>(r.slot[i]),
+                                 p.baseline[li] + r.pos[i].fY * p.scale};
+                SkScalar advance = 0;
+                font.getWidths(SkSpan<const SkGlyphID>(&r.glyphs[i], 1), SkSpan<SkScalar>(&advance, 1));
+                const SkPoint pivot{at.fX + advance * 0.5f, at.fY - size * 0.35f};
+                canvas->save();
+                canvas->translate(pivot.fX + look.dx, pivot.fY + look.dy);
+                canvas->rotate(look.rotate);
+                canvas->scale(look.scale, look.scale);
+                canvas->translate(-pivot.fX, -pivot.fY);
+                SkPaint glyphPaint = paint;
+                glyphPaint.setAlphaf(paint.getAlphaf() * std::clamp(look.alpha, 0.0f, 1.0f));
+                if (look.blur > 0.05f) glyphPaint.setMaskFilter(SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, look.blur * 0.5f));
+                SkTextBlobBuilder builder;
+                const auto& buf = builder.allocRunPos(font, 1);
+                buf.glyphs[0] = r.glyphs[i];
+                buf.points()[0] = at;
+                canvas->drawTextBlob(builder.make(), 0, 0, glyphPaint);
+                canvas->restore();
+            }
+        }
+    }
+}
+
+void drawShaped(SkCanvas* canvas, const Shaped& s, const Placement& p, const SkPaint& paint, int visibleChars,
+                const Animator* anim = nullptr) {
+    if (anim) {
+        drawAnimated(canvas, s, p, paint, visibleChars, *anim);
+        return;
+    }
     for (size_t li = 0; li < s.lines.size(); ++li) {
         for (const Run& r : s.lines[li].runs) {
             int count = 0;
@@ -294,13 +448,35 @@ std::string wrapped(const std::string& text, const std::string& family, const st
 struct Laid {
     std::shared_ptr<const Shaped> shaped;
     Placement place;
+    std::string shown; // with the breaks wrapping put in
+    float size = 0.0f; // after auto fit
 };
 
-Laid layOut(const TextProps& text, double t) {
-    const float size = text.fontSize.valueAt(t), tracking = text.tracking.valueAt(t);
-    const std::string shown = wrapped(text.textAt(t), text.fontFamily, text.fontStyle, size, tracking, text.wrapWidth.valueAt(t));
+Laid layOut(const TextProps& text, double t, TextClip clip) {
+    float size = text.fontSize.valueAt(t);
+    const float tracking = text.tracking.valueAt(t), width = text.wrapWidth.valueAt(t);
+    const std::string raw = text.textAt(t, clip.in, clip.out);
+    std::string shown = wrapped(raw, text.fontFamily, text.fontStyle, size, tracking, width);
+    if (text.fitLines > 0 && width > 0.0f && !raw.empty()) {
+        // Auto fit: smaller until it takes at most fitLines lines, none wider than the width.
+        const float smallest = size * 0.4f;
+        auto fits = [&] {
+            const auto sh = shape(shown, text.fontFamily, text.fontStyle, text.counter);
+            if (static_cast<int>(sh->lines.size()) > text.fitLines) return false;
+            const float scale = std::max(1.0f, size) / kRef;
+            for (const Line& line : sh->lines)
+                if (line.width * scale + tracking * static_cast<float>(std::max(0, line.clusters - 1)) > width * 1.001f) return false;
+            return true;
+        };
+        while (size > smallest && !fits()) {
+            size = std::max(smallest, size * 0.93f);
+            shown = wrapped(raw, text.fontFamily, text.fontStyle, size, tracking, width);
+        }
+    }
     Laid l;
-    l.shaped = shape(shown, text.fontFamily, text.fontStyle);
+    l.size = size;
+    l.shown = shown;
+    l.shaped = shape(shown, text.fontFamily, text.fontStyle, text.counter);
     l.place = place(*l.shaped, size, tracking, text.lineHeight.valueAt(t), text.align);
     if (text.subtitle) { // the last line stays put at the position: more lines grow upwards
         const float shift = -l.place.height * 0.5f;
@@ -319,28 +495,29 @@ void linesBox(const TextProps& text, const Placement& p, float size, Vec2& mn, V
 
 } // namespace
 
-void textBounds(const TextProps& text, double t, Vec2& outMin, Vec2& outMax) {
-    const Laid l = layOut(text, t);
-    linesBox(text, l.place, text.fontSize.valueAt(t), outMin, outMax);
+void textBounds(const TextProps& text, double t, Vec2& outMin, Vec2& outMax, TextClip clip) {
+    const Laid l = layOut(text, t, clip);
+    linesBox(text, l.place, l.size, outMin, outMax);
     float grow = text.outlineEnabled ? std::max(0.0f, text.outlineWidth.valueAt(t)) : 0.0f;
     if (text.boxEnabled) grow = std::max(grow, std::max(0.0f, text.boxPadding.valueAt(t)));
     outMin = outMin - Vec2{grow, grow};
     outMax = outMax + Vec2{grow, grow};
 }
 
-void drawText(SkCanvas* canvas, const TextProps& text, double t, float opacity) {
-    const std::string shownText = text.textAt(t);
-    if (shownText.empty()) return;
-    const Laid l = layOut(text, t);
+void drawText(SkCanvas* canvas, const TextProps& text, double t, float opacity, TextClip clip) {
+    const Laid l = layOut(text, t, clip);
+    if (l.shown.empty()) return;
     const Shaped& s = *l.shaped;
     const Placement& p = l.place;
+    std::optional<Animator> anim;
+    if (text.lettersAnimated()) anim.emplace(text, l.shown, t, clip, l.size);
     const float reveal = std::clamp(text.reveal.valueAt(t), 0.0f, 100.0f) * 0.01f;
     const int visible = static_cast<int>(std::floor(reveal * static_cast<float>(s.charCount) + 1e-4f));
     if (text.boxEnabled) { // behind everything, around the lines
         const SkColor4f bc = color4(text.boxColor.valueAt(t), opacity);
         if (bc.fA > 0.0f && visible > 0) {
             Vec2 mn, mx;
-            linesBox(text, p, text.fontSize.valueAt(t), mn, mx);
+            linesBox(text, p, l.size, mn, mx);
             const float pad = std::max(0.0f, text.boxPadding.valueAt(t));
             const SkRect r = SkRect::MakeLTRB(mn.x - pad, mn.y - pad, mx.x + pad, mx.y + pad);
             const float round = std::clamp(text.boxRoundness.valueAt(t), 0.0f, std::min(r.width(), r.height()) * 0.5f);
@@ -358,14 +535,14 @@ void drawText(SkCanvas* canvas, const TextProps& text, double t, float opacity) 
             stroke.setStyle(SkPaint::kStroke_Style);
             stroke.setStrokeWidth(w * 2.0f);
             stroke.setStrokeJoin(SkPaint::kRound_Join);
-            drawShaped(canvas, s, p, stroke, visible);
+            drawShaped(canvas, s, p, stroke, visible, anim ? &*anim : nullptr);
         }
     }
     const SkColor4f c = color4(text.color.valueAt(t), opacity);
     if (c.fA <= 0.0f) return;
     SkPaint paint(c);
     paint.setAntiAlias(true);
-    drawShaped(canvas, s, p, paint, visible);
+    drawShaped(canvas, s, p, paint, visible, anim ? &*anim : nullptr);
 }
 
 float measurePlainText(const std::string& str, float size, bool bold) {

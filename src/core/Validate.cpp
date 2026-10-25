@@ -149,6 +149,19 @@ private:
                 report(where, "counter decimals must be 0 to 6");
                 l.text.counterDecimals = std::clamp(l.text.counterDecimals, 0, 6);
             }
+            if (l.type == LayerType::Text) {
+                TextProps& tp = l.text;
+                const auto fix = [&](auto& v, auto lo, auto hi, const char* what) {
+                    if (!(v >= lo && v <= hi)) {
+                        report(where, std::string(what) + " out of range");
+                        v = std::clamp(v == v ? v : lo, lo, hi);
+                    }
+                };
+                fix(tp.counterDuration, 0.0f, 3600.0f, "counter duration");
+                fix(tp.letterDelay, 0.0f, 10.0f, "letter delay");
+                fix(tp.letterDuration, 0.01f, 30.0f, "letter duration");
+                fix(tp.fitLines, 0, 20, "fit lines");
+            }
             if (l.type == LayerType::Text && !isCounterSeparator(l.text.counterSeparator)) {
                 report(where, "counter separator must be \"\", \",\", \".\" or \" \" (none kept)");
                 l.text.counterSeparator.clear();

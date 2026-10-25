@@ -305,6 +305,9 @@ void EditorWindow::buildDocks() {
         bool complete = !saved.empty();
         for (const auto& [name, d] : dockWidgets_) complete = complete && saved.find("\"" + name + "\"") != std::string::npos;
         if (complete) docks_->restoreState(QByteArray(saved.data(), static_cast<qsizetype>(saved.size())));
+        // The side panels stay wide enough for their tabs (a narrower saved layout widens).
+        for (const char* name : {"Objects", "Properties"})
+            if (ads::CDockAreaWidget* area = dockWidgets_[name]->dockAreaWidget()) area->setMinimumWidth(275);
     });
 }
 
