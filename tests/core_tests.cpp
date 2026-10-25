@@ -19,11 +19,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -1149,7 +1151,7 @@ void testExpressions() {
     CHECK(!checkExpression("a = 1").empty() && !checkExpression("var b 2").empty());
     CHECK(checkExpression("value; ").empty());
     // A word on its way to a call is not an expression yet; names from earlier lines are.
-    CHECK(!checkExpression("wiggle").empty() && !checkExpression("speed * 2").empty());
+    CHECK(!checkExpression("wiggle").empty() && !checkExpression("turns * 2").empty());
     CHECK(checkExpression("var speed = 90\nspeed * time").empty());
     // A broken one falls back to the keyframes and says why.
     AnimFloat broken(7.0f);
@@ -1161,6 +1163,91 @@ void testExpressions() {
     CHECK(deserializeProject(serializeProject(p), back));
     for (const Layer& l : back.comp.layers)
         if (l.name == "Box") CHECK(l.transform.rotation.expression == "time * 90");
+}
+
+// Scripts, AI tools and the command line reach expressions through operations: they read the
+// batch's own copy, try a formula without setting it, turn one into keyframes.
+void testExpressionsThroughOperations() {
+    Project p;
+    OpsResult r = run(p, R"j([{"op": "layer.add", "type": "ellipse", "name": "Ball", "position": [400, 300]},
+                             {"op": "effect.add", "layer": "Ball", "effect": "gaussian_blur", "params": {"size": 12}},
+                             {"op": "layer.add", "type": "rectangle", "name": "Box"},
+                             {"op": "expression.set", "layer": "Box", "prop": "opacity", "expression": "layer(\"Ball\").position.x / 8"},
+                             {"op": "expression.set", "layer": "Box", "prop": "rotation", "expression": "layer(\"Ball\").fx0.size * 2"},
+                             {"op": "query.layer", "layer": "Box"}])j");
+    CHECK(r.ok);
+    if (r.ok) { // no scope open: the operations bring their own
+        const nlohmann::json& props = r.results[5]["props"];
+        CHECK(props["opacity"]["value"] == 50.0 && props["opacity"]["expression"] == "layer(\"Ball\").position.x / 8");
+        CHECK(props["rotation"]["value"] == 24.0 && !props["rotation"].contains("expression_error"));
+    }
+    // Tried, not set: values at several times, or what is wrong (with a suggestion), never a failure.
+    r = run(p, R"j([{"op": "query.expression", "layer": "Box", "prop": "rotation", "expression": "time * 90", "times": [0, 1, 2]},
+                   {"op": "query.expression", "layer": "Box", "prop": "rotation", "expression": "wigle(2, 3)"},
+                   {"op": "query.expression", "layer": "Box", "prop": "opacity"},
+                   {"op": "query.expression", "layer": "Box", "prop": "position", "expression": "layer(\"Nobody\").position"}])j");
+    CHECK(r.ok && !r.changed);
+    if (r.ok) {
+        CHECK(r.results[0]["values"] == nlohmann::json::array({0.0, 90.0, 180.0}));
+        CHECK(r.results[1]["ok"] == false && r.results[1]["error"].get<std::string>().find("did you mean \"wiggle\"") != std::string::npos);
+        CHECK(r.results[2]["value"] == 50.0);
+        CHECK(r.results[3]["ok"] == false);
+    }
+    CHECK(!run(p, R"j({"op": "expression.set", "layer": "Box", "prop": "scale", "expression": "wigle(2, 3)"})j").ok); // checked when set
+    // velocity, speed and valueAt read the property's own keyframes.
+    CHECK(run(p, R"j([{"op": "key.add", "layer": "Box", "prop": "position", "time": 0, "value": [0, 0], "easing": "linear"},
+                     {"op": "key.add", "layer": "Box", "prop": "position", "time": 2, "value": [200, 0]}])j").ok);
+    r = run(p, R"j([{"op": "query.expression", "layer": "Box", "prop": "position", "expression": "velocity", "time": 1},
+                   {"op": "query.expression", "layer": "Box", "prop": "rotation", "expression": "layer(\"Box\").position.x + speed", "time": 1},
+                   {"op": "query.expression", "layer": "Box", "prop": "position", "expression": "valueAt(time - 1)", "time": 2}])j");
+    CHECK(r.ok);
+    if (r.ok) {
+        CHECK(near(r.results[0]["value"][0].get<float>(), 100.0f) && near(r.results[0]["value"][1].get<float>(), 0.0f));
+        CHECK(near(r.results[1]["value"].get<float>(), 100.0f)); // rotation has no keys: speed 0
+        CHECK(near(r.results[2]["value"][0].get<float>(), 100.0f));
+    }
+    // Baked: keyframes a frame (or `step` frames) apart, the same values, no expression.
+    CHECK(run(p, R"j({"op": "expression.set", "layer": "Box", "prop": "rotation", "expression": "time * 90"})j").ok);
+    r = run(p, R"j([{"op": "expression.bake", "layer": "Box", "prop": "rotation", "from": 0, "to": 1, "step": 15},
+                   {"op": "query.layer", "layer": "Box", "time": 0.5}])j");
+    CHECK(r.ok && r.results[0]["keys"] == 3);
+    if (r.ok) {
+        const nlohmann::json& rot = r.results[1]["props"]["rotation"];
+        CHECK(!rot.contains("expression") && rot["keys"].size() == 3 && rot["value"] == 45.0);
+    }
+    CHECK(!run(p, R"j({"op": "expression.bake", "layer": "Box", "prop": "rotation"})j").ok); // none left to bake
+    // The description says what a formula drives.
+    CHECK(describeProject(p).find("expression: opacity = layer(\"Ball\").position.x / 8") != std::string::npos);
+    // Every operation has a name in the list AI tools get.
+    const std::vector<std::string> names = operationNames();
+    CHECK(std::find(names.begin(), names.end(), "query.expression") != names.end() &&
+          std::find(names.begin(), names.end(), "expression.bake") != names.end());
+}
+
+// The docs list every word of the expression language and every operation.
+void testReferencesComplete() {
+    auto read = [](const char* file) {
+        std::ifstream in(std::filesystem::path(BEMOTION_SOURCE_DIR) / file, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(in), {});
+    };
+    const std::string expressions = read("docs/EXPRESSIONS.md"), operations = read("docs/OPERATIONS.md");
+    CHECK(!expressions.empty() && !operations.empty());
+    for (const std::string& w : expressionNames())
+        if (expressions.find("`" + w) == std::string::npos && expressions.find(" " + w + "`") == std::string::npos) {
+            std::printf("  docs/EXPRESSIONS.md does not mention the name %s\n", w.c_str());
+            CHECK(false);
+        }
+    for (const std::string& w : expressionFunctions())
+        if (expressions.find(w + "(") == std::string::npos && expressions.find(" " + w + " ") == std::string::npos &&
+            expressions.find("`" + w) == std::string::npos && expressions.find(" " + w + "`") == std::string::npos) {
+            std::printf("  docs/EXPRESSIONS.md does not mention the function %s\n", w.c_str());
+            CHECK(false);
+        }
+    for (const std::string& op : operationNames())
+        if (operations.find("`" + op + "`") == std::string::npos) {
+            std::printf("  docs/OPERATIONS.md does not describe %s\n", op.c_str());
+            CHECK(false);
+        }
 }
 
 // The official plugin catalog: only plugins whose every file has a safe path and a hash.
@@ -1265,6 +1352,8 @@ int main() {
         {"lens", testLens},
         {"expressions", testExpressions},
         {"expressions across projects", testExpressionsAcrossProjects},
+        {"expressions through operations", testExpressionsThroughOperations},
+        {"references complete", testReferencesComplete},
         {"plugin catalog", testPluginCatalog},
     };
     for (const auto& [name, fn] : tests) {

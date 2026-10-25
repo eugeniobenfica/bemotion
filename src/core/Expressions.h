@@ -18,6 +18,7 @@
 #include "core/Project.h"
 
 #include <string>
+#include <vector>
 
 namespace bemotion {
 
@@ -41,5 +42,14 @@ void setExpressionComposition(const Composition* comp);
 std::string checkExpression(const std::string& expression);
 // The last problem `property`'s expression had when it ran (empty: none).
 std::string expressionError(const AnimatedBase& property);
+
+// Works `expression` out for `prop` of `layer` at `t` without setting it: its value in `out`
+// (the property's components), or what went wrong. Other layers are read from the scope.
+std::string evaluateExpressionFor(const std::string& expression, const Layer& layer, const PropertyRef& prop, double t,
+                                  std::vector<float>& out);
+
+// The language's words, the one list editors, checks and docs follow.
+const std::vector<std::string>& expressionNames();     // time, value, progress...
+const std::vector<std::string>& expressionFunctions(); // sin, wiggle, layer...
 
 } // namespace bemotion

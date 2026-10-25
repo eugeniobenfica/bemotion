@@ -338,6 +338,7 @@ struct CommandRun {
     bool mayImport = false;
     int ops = 0;
     int play = -1; // doc.play()
+    double time = 0; // doc.time
 };
 CommandRun* g_run = nullptr;
 
@@ -378,6 +379,24 @@ int docLayer(lua_State* L) {
     return docQuery(L, op);
 }
 
+// doc.expression(layer, prop[, expression[, time]]): works an expression out without setting
+// it (query.expression; default: the property's own, at doc.time). The value, or nil and why not.
+int docExpression(lua_State* L) {
+    if (!g_run) return 0;
+    json op = {{"op", "query.expression"}, {"layer", layerRef(L, 1)}, {"prop", luaL_checkstring(L, 2)}};
+    if (lua_type(L, 3) == LUA_TSTRING) op["expression"] = lua_tostring(L, 3);
+    op["time"] = lua_isnumber(L, 4) ? lua_tonumber(L, 4) : g_run->time;
+    const OpsResult r = applyOps(g_run->work, op, *g_run->env);
+    if (!r.ok) return luaL_error(L, "%s", r.error.c_str());
+    if (!r.results[0].value("ok", false)) {
+        lua_pushnil(L);
+        lua_pushstring(L, r.results[0].value("error", std::string()).c_str());
+        return 2;
+    }
+    pushJson(L, r.results[0]["value"]);
+    return 1;
+}
+
 // doc.play(true | false): start or stop playback when the command ends (e.g. while recording).
 int docPlay(lua_State* L) {
     if (!g_run) return luaL_error(L, "doc can only be used while the command runs");
@@ -387,7 +406,7 @@ int docPlay(lua_State* L) {
 
 void pushDoc(lua_State* L, double time, const std::vector<uint64_t>& selection, bool pressed = false) {
     const luaL_Reg fns[] = {{"apply", docApply}, {"layers", docLayers}, {"layer", docLayer}, {"composition", docComposition},
-                            {"play", docPlay}, {nullptr, nullptr}};
+                            {"expression", docExpression}, {"play", docPlay}, {nullptr, nullptr}};
     luaL_newlib(L, fns);
     lua_pushboolean(L, pressed);
     lua_setfield(L, -2, "pressed");
@@ -1319,6 +1338,7 @@ bool runWithDoc(lua_State* L, Project& project, double time, const std::vector<u
     run.work = project;
     run.env = &env;
     run.mayImport = mayImport;
+    run.time = time;
     g_run = &run;
     pushDoc(L, time, selection, pressed);
     g_budget = kCommandBudget;

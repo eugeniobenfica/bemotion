@@ -111,7 +111,8 @@ FetchContent_Declare(ads
 # --- nlohmann/json -----------------------------------------------------------
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 FetchContent_Declare(json
-    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+    URL_HASH SHA256=42f6e95cad6ec532fd372391373363b62a14af6d771056dbfc86160e6dfff7aa
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 
 # --- stb (image import, PNG writing) ------------------------------------------------
@@ -121,14 +122,14 @@ FetchContent_Declare(stb
 
 # --- Lua (plugin scripting) ---------------------------------------------------
 FetchContent_Declare(lua
-    URL      https://www.lua.org/ftp/lua-5.4.7.tar.gz
-    URL_HASH SHA256=9fbf5e28ef86c69858f6d3d34eccc32e911c1a28b4120ff3e84aaa70cfbf1e30
+    URL      https://www.lua.org/ftp/lua-5.4.9.tar.gz
+    URL_HASH SHA256=2335b6c582a52654f94612bf10d2f4672805d05329aa6568b1d8cd9e5c6fb8e6
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 
 # --- miniaudio (audio output) ------------------------------------------------------
 FetchContent_Declare(miniaudio
     GIT_REPOSITORY https://github.com/mackron/miniaudio.git
-    GIT_TAG        0.11.23
+    GIT_TAG        0.11.25
     GIT_SHALLOW    TRUE
     SOURCE_SUBDIR  no-cmake) # only the header is needed: download without configuring its project
 

@@ -1,5 +1,7 @@
 #include "ui/ExpressionEditor.h"
 
+#include "core/Expressions.h"
+
 #include "ui/EditorContext.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -26,13 +28,14 @@ namespace bemotion::ui {
 
 namespace {
 
-// The language's own words (core/Expressions.cpp, docs/EXPRESSIONS.md).
-const QStringList kFunctions = {"sin", "cos", "tan", "asin", "acos", "atan", "atan2", "degrees", "radians", "abs", "floor",
-                                "ceil", "round", "fract", "sign", "sqrt", "pow", "exp", "log", "min", "max", "clamp", "lerp",
-                                "mix", "map", "smooth", "ease", "length", "distance", "wiggle", "noise", "random", "loop",
-                                "pingpong", "vec", "rgb", "rgba", "layer"};
-const QStringList kNames = {"time", "frame", "fps", "value", "start", "end", "duration", "progress", "index", "width",
-                            "height", "center", "pi"};
+// The language's own words, from the core (core/Expressions.h, docs/EXPRESSIONS.md).
+QStringList words(const std::vector<std::string>& list) {
+    QStringList out;
+    for (const std::string& w : list) out << QString::fromStdString(w);
+    return out;
+}
+const QStringList kFunctions = words(expressionFunctions());
+const QStringList kNames = words(expressionNames());
 const QStringList kKeywords = {"var", "let", "const", "and", "or"};
 
 class Highlighter final : public QSyntaxHighlighter {
@@ -304,6 +307,8 @@ void ExpressionEditor::showMenu() {
     add(motion, "wiggle(times a second, amount)", vector_ ? "wiggle(2, 25|)" : "wiggle(2, 10|)", "The value, shaken smoothly");
     add(motion, "loop()", "loop()", "The keyframes again and again");
     add(motion, "pingpong()", "pingpong()", "The keyframes back and forth");
+    add(motion, "valueAt(t)", "valueAt(time - 0.2|)", "This property's keyframes at another time");
+    add(motion, "velocity / speed", "velocity", "How fast the keyframes change, per second");
     add(motion, "noise(x)", "noise(time|)", "Smooth noise, -1 to 1");
     add(motion, "random(min, max)", "random(0, 100|)", "A fixed random number for this property");
     add(motion, "lerp(a, b, t)", "lerp(|value, value * 2, progress)", "From a to b as t goes 0 to 1");

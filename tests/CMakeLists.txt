@@ -1,5 +1,6 @@
 add_executable(bemotion_core_tests core_tests.cpp)
 target_link_libraries(bemotion_core_tests PRIVATE bemotion_core)
+target_compile_definitions(bemotion_core_tests PRIVATE BEMOTION_SOURCE_DIR="${PROJECT_SOURCE_DIR}") # the docs it checks
 add_test(NAME core_tests COMMAND bemotion_core_tests)
 
 # The official plugin catalog matches the plugin folders (tools/plugin-index.py).

@@ -14,8 +14,11 @@ bemotion has two kinds of code, like After Effects:
   the ƒ button close the editor (the expression keeps working, the ƒ button
   stays lit); its bin, or Alt+click again, removes it.
   The property's name turns into `= Name` and shows the result. An expression that does not read is not applied (the error shows
-  under it); one that fails while running (a layer that is gone) falls back to
-  the keyframes. Keyframes stay: `value` is what they say.
+  under it, with the closest name when one is mistyped: `wigle` → *did you
+  mean "wiggle"?*); one that fails while running (a layer that is gone) falls
+  back to the keyframes. Keyframes stay: `value` is what they say.
+  Right-click › *Convert to Keyframes* turns it into a keyframe a frame across
+  the clip (as After Effects does), then removes it.
 - **Scripts** — Lua programs that edit the project, one undo step each:
   *Plugins* › *Scripts*. The bundled ones and your own (*Open Scripts Folder*)
   are listed; *Run Script File...* runs any `.lua`. They use the plugin `doc`
@@ -23,6 +26,14 @@ bemotion has two kinds of code, like After Effects:
   `doc.apply { op = ... }` with the operations of `docs/OPERATIONS.md`, and
   `print()` shows in the status bar. From the command line:
   `bemotion script project.bemotion file.lua --select 3,7`.
+
+**Both together.** Scripts and AI assistants set expressions with
+`expression.set`, try one first with `query.expression` (its value at a few
+times, or what is wrong — nothing changes) or `doc.expression(layer, prop,
+"time * 90", 1)` in Lua, and bake one into keyframes with `expression.bake`.
+`query.layer` shows each property's expression and, when it fails, why;
+`bemotion describe` lists them. The MCP server offers the same as
+`test_expression`, and this page as `get_expressions_reference`.
 
 ## The expression language
 
@@ -64,6 +75,7 @@ a position sets both x and y; `[r, g, b]` on a color is opaque.
 | --- | --- |
 | `time`, `frame`, `fps` | the moment (seconds), its frame number, frames per second |
 | `value` | what the property's keyframes (or static value) say now |
+| `velocity`, `speed` | how fast the keyframes change, per second (a vector / its length) |
 | `start`, `end`, `duration`, `progress` | the layer's clip: in and out (seconds), length, 0 → 1 across it |
 | `index` | the layer's row, 1 at the top |
 | `width`, `height`, `center` | the composition |
@@ -72,7 +84,8 @@ a position sets both x and y; `[r, g, b]` on a color is opaque.
 **Other layers**: `layer("Name")`, `layer(2)` (the second row) or `layer()`
 (this one), then a property id from `docs/OPERATIONS.md`: `.position`,
 `.scale`, `.rotation`, `.opacity`, `.position_z` (or `.z`), `.fill_color`,
-`.font_size`, `.p.<param>` for plugin parameters… Add `(t)` to read it at
+`.font_size`, `.p.<param>` for plugin parameters, `.fx0.size` for an
+effect's (the first effect's size)… Add `(t)` to read it at
 another time: `layer("Ball").position(time - 0.2)`. `.start` and `.end` are
 the clip's times. A vector's parts: `.x .y .z .w` or `.r .g .b .a`, or `[0]`.
 
@@ -94,6 +107,7 @@ the clip's times. A vector's parts: `.x .y .z .w` or `.r .g .b .a`, or `[0]`.
 | `noise(x[, seed])` | smooth noise, −1 to 1 |
 | `random()`, `random(max)`, `random(min, max[, seed])` | a fixed random number for this property (not a new one each frame) |
 | `loop()`, `pingpong()` | the keyframes again after the last one |
+| `valueAt(t)` | this property's keyframes at another time: `valueAt(time - 0.2)` trails them |
 | `vec(…)`, `rgb(r, g, b)`, `rgba(r, g, b, a)` | build vectors / colors |
 
 Expressions are saved with the project (`"expression"` next to the

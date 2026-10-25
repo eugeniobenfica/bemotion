@@ -3,6 +3,7 @@
 #include "app/Settings.h"
 
 #include "core/Expressions.h"
+#include "core/Ops.h"
 #include "ui/ExpressionEditor.h"
 #include "ui/EditorContext.h"
 #include "ui/Theme.h"
@@ -18,6 +19,7 @@
 #include <QLineEdit>
 #include <QMap>
 #include <QMenu>
+#include <QMessageBox>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -349,6 +351,7 @@ void PropertyRow::showMenu(QPoint at) {
     if (anim.hasExpression()) {
         menu.addAction("Edit Expression", [this] { openExpression(QString::fromStdString(prop()->anim->expression)); });
         menu.addAction("Remove Expression", [this] { removeExpression(); });
+        menu.addAction("Convert to Keyframes", [this] { bakeExpression(); })->setToolTip("A keyframe a frame across the clip, then no expression");
     } else {
         menu.addAction("Add Expression", [this] { openExpression({}); });
     }
@@ -434,6 +437,21 @@ void PropertyRow::removeExpression() {
     openEditors().erase({layerId_, id_, effectIndex_});
     applyExpression({});
     if (expr_) expr_->setText({});
+    refresh();
+}
+
+void PropertyRow::bakeExpression() {
+    auto p = prop();
+    if (!p) return;
+    const nlohmann::json op = {{"op", "expression.bake"}, {"layer", layerId_}, {"prop", p->id}};
+    if (const OpsResult r = applyOps(ctx_.project, op); !r.ok) {
+        QMessageBox::warning(label_->window(), "Convert to Keyframes", QString::fromStdString(r.error.substr(r.error.find(": ") + 2)));
+        return;
+    }
+    exprOpen_ = false;
+    openEditors().erase({layerId_, id_, effectIndex_});
+    if (expr_) expr_->setText({});
+    ctx_.touch(); // one undo step
     refresh();
 }
 

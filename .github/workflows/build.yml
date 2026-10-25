@@ -13,7 +13,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -31,7 +31,7 @@ jobs:
 
       - name: Cache Skia
         id: skia
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/skia
           key: skia-windows-${{ hashFiles('tools/skia/**') }}
@@ -59,7 +59,7 @@ jobs:
         run: tools/smoke-test.sh dist/bemotion smoke-package
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bemotion-windows
           path: |
@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload smoke test output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bemotion-windows-smoke
           path: |
@@ -80,7 +80,7 @@ jobs:
     name: linux
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: |
@@ -93,7 +93,7 @@ jobs:
 
       - name: Cache Skia
         id: skia
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/skia
           key: skia-linux-${{ hashFiles('tools/skia/**') }}
@@ -121,14 +121,14 @@ jobs:
         run: tools/smoke-test.sh dist/AppDir/usr/bin smoke-package
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bemotion-linux
           path: dist/bemotion-x86_64.AppImage
 
       - name: Upload smoke test output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bemotion-linux-smoke
           path: |
@@ -140,7 +140,7 @@ jobs:
     name: macos
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: |
@@ -149,7 +149,7 @@ jobs:
 
       - name: Cache Skia
         id: skia
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: third_party/skia
           key: skia-macos-${{ hashFiles('tools/skia/**') }}
@@ -177,14 +177,14 @@ jobs:
         run: tools/smoke-test.sh dist/bemotion.app/Contents/MacOS smoke-package
 
       - name: Upload package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bemotion-macos
           path: dist/bemotion.dmg
 
       - name: Upload smoke test output
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bemotion-macos-smoke
           path: |

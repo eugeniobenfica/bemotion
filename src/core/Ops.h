@@ -21,6 +21,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace bemotion {
 
@@ -45,6 +46,9 @@ struct OpsResult {
 
 // "text", "rectangle", "camera", "compound", "media", "plugin:charts.bar"... (as in layer.add).
 std::string layerTypeName(const Layer& layer);
+
+// Every operation's name ("layer.add", "query.layer"...), in the reference's order.
+std::vector<std::string> operationNames();
 
 // Applies one operation or a batch. On failure `project` is left untouched.
 OpsResult applyOps(Project& project, const nlohmann::json& ops, const OpEnvironment& env = {});

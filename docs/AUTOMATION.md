@@ -33,7 +33,9 @@ that speak the Model Context Protocol (Claude Desktop, Claude Code, and many
 others) get bemotion's tools directly — no terminal needed. Its tools:
 `describe_project`, `create_project`, `query_layer`, `apply_operations`,
 `run_lua`, `render_frames` (returns the image, so the assistant sees its work),
-`validate_project`, `export_video` and `get_operations_reference`.
+`validate_project`, `export_video`, `test_expression` (an
+[expression](EXPRESSIONS.md)'s values without setting it),
+`get_operations_reference` and `get_expressions_reference`.
 
 With the installer, the program is
 `%LOCALAPPDATA%\Programs\bemotion\bemotion.exe` (or wherever you unzipped the
@@ -71,6 +73,8 @@ files you name, with the same checks as everywhere else; `bemotion.log` (in
 1. **Read**: `bemotion describe <project>` — a few lines per layer: id, name,
    type, timing, position, what is animated. For one layer's details:
    `bemotion apply <project> --ops '{"op":"query.layer","layer":"Title"}' --dry-run`.
+   An expression before setting it: `--ops '{"op":"query.expression",
+   "layer":"Title","prop":"rotation","expression":"wiggle(2, 5)","times":[0,1]}'`.
 2. **Edit**: write operations (JSON) and `apply` them. Refer to layers by the
    ids or names from the description. Read the error if it fails: it says which
    operation and why, usually with the right name.

@@ -222,7 +222,14 @@ operations. Effect ids (`effectId`) are stable strings.
   its own with `setExpressionComposition`); which layer a property belongs to
   is found by address and cached. A failing expression falls back to the
   keyframes and leaves `expressionError`. Saved beside the keys
-  (`"expression"`), set with `expression.set`.
+  (`"expression"`), set with `expression.set`. `expressionNames()` /
+  `expressionFunctions()` are the language's one word list (the check, the
+  editor's colors and completion, a test against `docs/EXPRESSIONS.md`);
+  `evaluateExpressionFor` tries a formula on a property without setting it
+  (`query.expression`, `doc.expression`, MCP `test_expression`), and
+  `expression.bake` turns one into keyframes. `applyOps` opens a scope on its
+  working copy, so values in queries and scripts are what renders.
+  Mistyped names get `core/Suggest.h`'s "did you mean", as operations do.
 - **`Presets`** — Quick Animations: they write ordinary keyframes. The
   *Animate* panel (`ui/panels/AnimationsPanel`) lists them; dragged onto a
   clip (`kAnimationMime`, the preset as JSON) one plays from the drop point.

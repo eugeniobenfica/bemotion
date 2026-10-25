@@ -1,4 +1,5 @@
 #include "core/Expressions.h"
+#include "core/Suggest.h"
 
 #include <algorithm>
 #include <cctype>
@@ -273,8 +274,7 @@ std::unordered_map<std::string, std::shared_ptr<Compiled>> g_cache;
 // Every name is known, or named by an earlier line: a word half typed ("wiggle" on the way to
 // "wiggle(2, 10)") is not an expression yet.
 void checkNames(const Node& n, std::vector<std::string>& named) {
-    static const char* const kKnown[] = {"time",  "value", "pi",       "fps",      "frame", "width", "height",
-                                         "center", "start", "end", "duration", "progress", "index"};
+    const std::vector<std::string>& known = expressionNames();
     if (n.op == Op::Seq) {
         for (size_t k = 0; k + 1 < n.kids.size(); ++k) {
             checkNames(*n.kids[k]->kids[0], named);
@@ -284,8 +284,13 @@ void checkNames(const Node& n, std::vector<std::string>& named) {
         return;
     }
     if (n.op == Op::Var && std::find(named.begin(), named.end(), n.name) == named.end() &&
-        std::none_of(std::begin(kKnown), std::end(kKnown), [&](const char* k) { return n.name == k; }))
-        throw Error("unknown name \"" + n.name + "\"");
+        std::find(known.begin(), known.end(), n.name) == known.end())
+        throw Error("unknown name \"" + n.name + "\"" + suggest(n.name, known, false));
+    if (n.op == Op::Call) {
+        const std::vector<std::string>& functions = expressionFunctions();
+        if (std::find(functions.begin(), functions.end(), n.name) == functions.end())
+            throw Error("unknown function \"" + n.name + "\"" + suggest(n.name, functions, false));
+    }
     for (const NodeP& k : n.kids) checkNames(*k, named);
 }
 
@@ -386,6 +391,13 @@ struct Eval {
         }
         mix(&extra, sizeof extra);
         return h;
+    }
+
+    Val keyed(double at) const {
+        Val out;
+        out.n = self.components();
+        self.keyedValue(at, out.v);
+        return out;
     }
 
     Val propertyAt(const Layer& layer, const std::string& id, double at) const {
@@ -541,6 +553,10 @@ struct Eval {
             self.keyedValue(at, out.v);
             return out;
         }
+        if (f == "valueAt") { // this property's keyframes at another time
+            need(1);
+            return keyed(scalar(*k[0]));
+        }
         if (f == "vec" || f == "rgb" || f == "rgba") {
             Val out;
             out.n = static_cast<int>(std::min<size_t>(4, k.size()));
@@ -581,6 +597,14 @@ struct Eval {
                 c.n = 2;
                 c.v[0] = comp ? comp->width * 0.5f : 960.0f, c.v[1] = comp ? comp->height * 0.5f : 540.0f;
                 return v(c);
+            }
+            if (x == "velocity" || x == "speed") { // how fast the keyframes change, per second
+                const double h = 0.5 / (comp && comp->fps > 0 ? comp->fps : 30.0);
+                const double a = std::max(0.0, t - h), b = t + h;
+                Val d = each(keyed(b), keyed(a), [](float p, float q) { return p - q; });
+                float s = 0;
+                for (int i = 0; i < d.n; ++i) d.v[i] /= static_cast<float>(b - a), s += d.v[i] * d.v[i];
+                return v(x == "speed" ? Val::num(std::sqrt(s)) : d);
             }
             if (x == "start" || x == "end" || x == "duration" || x == "progress" || x == "index") {
                 if (!l) throw Error("\"" + x + "\" needs the layer (not known here)");
@@ -637,6 +661,14 @@ struct Eval {
                 if (n.name == "start") return v(Val::num(static_cast<float>(obj.layer->inPoint)));
                 if (n.name == "end") return v(Val::num(static_cast<float>(obj.layer->outPoint)));
                 if (n.name == "z") r.prop = "position_z";
+                return r;
+            }
+            // layer("Ball").p.progress, layer("Ball").fx0.size: ids with a dot.
+            if (obj.kind == Ref::PropRef && obj.prop.find('.') == std::string::npos &&
+                (obj.prop == "p" || (obj.prop.size() > 2 && obj.prop.compare(0, 2, "fx") == 0 &&
+                                     std::all_of(obj.prop.begin() + 2, obj.prop.end(), [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; })))) {
+                Ref r = obj;
+                r.prop += "." + n.name;
                 return r;
             }
             const Val x = value_(obj);
@@ -713,25 +745,61 @@ std::string expressionError(const AnimatedBase& property) {
     return it == t_ctx.errors.end() ? std::string() : it->second;
 }
 
-bool evaluateExpression(const AnimatedBase& property, double t, float out[4]) {
-    const auto compiled = compile(property.expression);
-    if (!compiled->root) return false;
-    Eval e{property, ownerOf(property), t, {}};
-    e.value.n = property.components();
-    property.keyedValue(t, e.value.v);
+namespace {
+
+// Runs `compiled` as `property`'s expression: its value in `out`, or the problem.
+std::string run(const Compiled& compiled, const AnimatedBase& property, const Owner& owner, double t, float out[4]) {
+    if (!compiled.root) return compiled.error;
+    Eval e{property, owner, t, {}};
+    e.value = e.keyed(t);
     try {
-        const Val r = e.value_(e.run(*compiled->root));
+        const Val r = e.value_(e.run(*compiled.root));
         const int n = property.components();
         for (int i = 0; i < n; ++i) out[i] = r.v[r.n == 1 ? 0 : std::min(i, r.n - 1)];
         if (n == 4 && r.n == 3) out[3] = 1.0f; // [r, g, b]: opaque
         for (int i = 0; i < n; ++i)
             if (!std::isfinite(out[i])) throw Error("the result is not a number (a division by zero?)");
-        t_ctx.errors.erase(&property);
-        return true;
+        return {};
     } catch (const Error& err) {
-        t_ctx.errors[&property] = err.what();
-        return false;
+        return err.what();
     }
 }
+
+} // namespace
+
+bool evaluateExpression(const AnimatedBase& property, double t, float out[4]) {
+    const auto compiled = compile(property.expression);
+    if (!compiled->root) return false;
+    if (std::string problem = run(*compiled, property, ownerOf(property), t, out); !problem.empty()) {
+        t_ctx.errors[&property] = std::move(problem);
+        return false;
+    }
+    t_ctx.errors.erase(&property);
+    return true;
+}
+
+std::string evaluateExpressionFor(const std::string& expression, const Layer& layer, const PropertyRef& prop, double t,
+                                  std::vector<float>& out) {
+    float v[4] = {0, 0, 0, 0};
+    const std::string problem = run(*compile(expression), *prop.anim, {&layer, prop.id}, t, v);
+    out.assign(v, v + prop.anim->components());
+    return problem;
+}
+
+const std::vector<std::string>& expressionNames() {
+    static const std::vector<std::string> names = {"time",     "frame",    "fps",   "value", "velocity", "speed",  "start", "end",
+                                                   "duration", "progress", "index", "width", "height",   "center", "pi"};
+    return names;
+}
+
+const std::vector<std::string>& expressionFunctions() {
+    static const std::vector<std::string> functions = {
+        "sin",   "cos",   "tan",    "asin",   "acos",     "atan",   "atan2", "degrees", "radians", "abs",      "floor",   "ceil",
+        "round", "fract", "sign",   "sqrt",   "pow",      "exp",    "log",   "min",     "max",     "clamp",    "lerp",    "mix",
+        "map",   "smooth", "ease",  "length", "distance", "wiggle", "noise", "random",  "loop",    "pingpong", "valueAt", "vec",
+        "rgb",   "rgba",  "layer"};
+    return functions;
+}
+
 
 } // namespace bemotion

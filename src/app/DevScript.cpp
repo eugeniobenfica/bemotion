@@ -3,6 +3,7 @@
 #include "app/Platform.h"
 
 #include <QApplication>
+#include <QContextMenuEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QTest>
@@ -110,6 +111,10 @@ void DevScript::mouseButton(QWidget* window, int button, bool down) {
         QMouseEvent e(QEvent::MouseButtonRelease, local, global, b, Qt::MouseButtons(buttons_), Qt::KeyboardModifiers(modifiers_));
         QApplication::sendEvent(w, &e);
         if (!buttons_) grabbed_ = nullptr;
+        // A right click also asks for the context menu, as the system does. Posted: a menu's own
+        // event loop then runs after this step, and later steps can drive it.
+        if (b == Qt::RightButton)
+            QApplication::postEvent(w, new QContextMenuEvent(QContextMenuEvent::Mouse, local, global, Qt::KeyboardModifiers(modifiers_)));
     }
 }
 

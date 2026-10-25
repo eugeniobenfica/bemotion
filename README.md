@@ -150,7 +150,7 @@ does.
 - **Expressions** typed under any property (its *ƒ* button, next to the
   keyframe diamond, or Alt+click the diamond, as in After Effects): several
   lines, completion, a ƒ menu of functions and of other layers' properties;
-  close it and it keeps working
+  close it and it keeps working; *Convert to Keyframes* bakes it
 - **Quick Animations** in their own panel (*Animate*): Fade, Pop, Slide,
   Drop, Zoom, Rise, Shake, Heartbeat, Float, Bounce, Wobble, Blink, Spin,
   Typewriter, Draw On… click one for the selection or drag it onto a clip;
@@ -245,9 +245,12 @@ does.
 ### ✦ Extend
 - **Expressions**, like After Effects', in a small safe language: `wiggle(2,
   30)`, `time * 90`, `loop()`, `layer("Ball").position(time - 0.2)`… on any
-  property ([docs/EXPRESSIONS.md](docs/EXPRESSIONS.md))
+  property ([docs/EXPRESSIONS.md](docs/EXPRESSIONS.md)); scripts and AI
+  assistants set them, try them first and bake them through the same
+  operations
 - **Scripts** in Lua (*Plugins › Scripts*): bundled ones (Stagger, Wiggle,
-  Grid of Copies, Random Colors) and your own, one undo step each
+  Follow the Leader, Grid of Copies, Random Colors) and your own, one undo
+  step each
 - **Plugins** are sandboxed Lua scripts that add new kinds of objects
 - The bundled **Charts** plugin draws animated column / bar, line / area and
   donut charts, **tables** and **maps** (world by country; Brazil, USA,

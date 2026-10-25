@@ -123,7 +123,13 @@ Removes every keyframe.
 
 **`expression.set`** — `layer`, `prop`, `expression` (`""` removes it): a
 formula worked out every frame (`docs/EXPRESSIONS.md`), e.g. `"wiggle(2, 30)"`
-or `"layer(\"Ball\").position + [0, -120]"`. One that does not read fails.
+or `"layer(\"Ball\").position + [0, -120]"`. One that does not read fails
+(with the closest name when one is mistyped).
+
+**`expression.bake`** → `{"keys": n}` — `layer`, `prop`, `from` / `to`
+(seconds, default the clip), `step` (frames, default 1): the expression becomes
+linear keyframes that many frames apart (the same values), and is removed —
+After Effects' *Convert Expression to Keyframes*.
 
 ## Effects
 
@@ -184,4 +190,10 @@ lists an object's `params`.
 **`query.composition`** — size, frame rate, duration, background, media items.
 **`query.layers`** — every layer, top first: id, name, type, in, out, track
 row, parent. **`query.layer`** — `layer`, `time`: everything about one layer,
-with each property's value at `time` and its keyframes.
+with each property's value at `time` and its keyframes; a property driven by an
+expression also has `expression` and, when it fails there, `expression_error`.
+**`query.expression`** — `layer`, `prop`, `expression` (default: the
+property's own), `time` (default 0) or `times` (a list): works it out without
+setting it → `{"ok": true, "value": ...}` (`"values": [...]` for `times`), or
+`{"ok": false, "error": "...", "time": t}` — a wrong expression is an answer,
+not a failure, so a script or an AI can try one before `expression.set`.

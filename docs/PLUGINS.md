@@ -199,6 +199,11 @@ bemotion.register_command {
   id). A failing operation raises an error with the reason.
 - `doc.layers()`, `doc.layer(id_or_name[, time])`, `doc.composition()` read it
   (the `query.*` operations).
+- `doc.expression(layer, prop[, expression[, time]])` works an
+  [expression](EXPRESSIONS.md) out without setting it (`query.expression`; by
+  default the property's own, at `doc.time`): the value (a number or a list),
+  or `nil` and what is wrong — `local v, err = doc.expression(id, "rotation",
+  "time * 90")`.
 - `doc.time` is the playhead, `doc.selection` the selected layer ids.
 
 A command is **one undo step**, and it runs on a copy: if it raises an error

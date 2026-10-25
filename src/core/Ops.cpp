@@ -3,6 +3,7 @@
 #include "core/Arrange.h"
 #include "core/Data.h"
 #include "core/Expressions.h"
+#include "core/Suggest.h"
 #include "core/Transitions.h"
 #include "core/Validate.h"
 
@@ -58,36 +59,7 @@ bool boolean(const json& v, const char* name) {
     return v.get<bool>();
 }
 
-// --- names and suggestions -------------------------------------------------------------------
-
-size_t editDistance(const std::string& a, const std::string& b) {
-    std::vector<size_t> row(b.size() + 1);
-    for (size_t j = 0; j <= b.size(); ++j) row[j] = j;
-    for (size_t i = 1; i <= a.size(); ++i) {
-        size_t diag = row[0];
-        row[0] = i;
-        for (size_t j = 1; j <= b.size(); ++j) {
-            const size_t up = row[j];
-            row[j] = std::min({row[j] + 1, row[j - 1] + 1, diag + (std::tolower(a[i - 1]) == std::tolower(b[j - 1]) ? 0 : 1)});
-            diag = up;
-        }
-    }
-    return row[b.size()];
-}
-
-// "; did you mean "x"?" for the closest candidate, or "; valid: a, b, c".
-std::string suggest(const std::string& wrong, const std::vector<std::string>& candidates) {
-    if (candidates.empty()) return "";
-    std::string best;
-    size_t bestD = SIZE_MAX;
-    for (const auto& c : candidates)
-        if (const size_t d = editDistance(wrong, c); d < bestD) bestD = d, best = c;
-    if (bestD <= std::max<size_t>(2, wrong.size() / 3)) return "; did you mean \"" + best + "\"?";
-    std::string list;
-    for (size_t i = 0; i < candidates.size() && i < 40; ++i) list += (i ? ", " : "") + candidates[i];
-    return "; valid: " + list;
-}
-
+// --- names (suggestions: core/Suggest.h) ------------------------------------------------------
 
 std::string typeName(const Layer& l) { return layerTypeName(l); }
 
@@ -187,7 +159,7 @@ std::string hexOf(Color c) {
     return buf;
 }
 
-float round3(float v) { return std::round(v * 1000.0f) / 1000.0f; }
+double round3(float v) { return std::round(static_cast<double>(v) * 1000.0) / 1000.0; }
 
 json valueJson(PropertyKind kind, const std::vector<float>& v) {
     switch (kind) {
@@ -205,10 +177,26 @@ public:
     Applier(Project& p, const OpEnvironment& env) : p_(p), c_(p.comp), env_(env) {}
     bool changed = false;
 
+    using Handler = json (Applier::*)(const json&);
+
     json apply(const json& op) {
         if (!op.is_object()) fail("an operation must be an object like {\"op\": \"layer.add\", ...}");
         const std::string name = text(field(op, "op"), "op");
-        static const std::vector<std::pair<std::string, json (Applier::*)(const json&)>> kOps = {
+        std::vector<std::string> names;
+        for (const auto& [n, fn] : ops()) {
+            if (n == name) {
+                const bool query = name.rfind("query.", 0) == 0;
+                json r = (this->*fn)(op);
+                if (!query) changed = true;
+                return r;
+            }
+            names.push_back(n);
+        }
+        fail("unknown operation \"" + name + "\"" + suggest(name, names));
+    }
+
+    static const std::vector<std::pair<std::string, Handler>>& ops() {
+        static const std::vector<std::pair<std::string, Handler>> kOps = {
             {"composition.set", &Applier::compositionSet},
             {"layer.add", &Applier::layerAdd},
             {"layer.remove", &Applier::layerRemove},
@@ -221,6 +209,7 @@ public:
             {"property.set", &Applier::propertySet},
             {"key.add", &Applier::keyAdd},
             {"expression.set", &Applier::expressionSet},
+            {"expression.bake", &Applier::expressionBake},
             {"key.remove", &Applier::keyRemove},
             {"key.clear", &Applier::keyClear},
             {"key.easing", &Applier::keyEasing},
@@ -236,18 +225,9 @@ public:
             {"query.composition", &Applier::queryComposition},
             {"query.layers", &Applier::queryLayers},
             {"query.layer", &Applier::queryLayer},
+            {"query.expression", &Applier::queryExpression},
         };
-        std::vector<std::string> names;
-        for (const auto& [n, fn] : kOps) {
-            if (n == name) {
-                const bool query = name.rfind("query.", 0) == 0;
-                json r = (this->*fn)(op);
-                if (!query) changed = true;
-                return r;
-            }
-            names.push_back(n);
-        }
-        fail("unknown operation \"" + name + "\"" + suggest(name, names));
+        return kOps;
     }
 
 private:
@@ -715,6 +695,37 @@ private:
         return json::object();
     }
 
+    // The expression turned into keyframes, one a frame (After Effects' Convert Expression to
+    // Keyframes): `from` / `to` default to the clip, `step` (frames, default 1).
+    json expressionBake(const json& op) {
+        Layer& l = layer(op);
+        const PropertyRef p = property(l, op);
+        if (!p.anim->hasExpression()) fail("\"" + std::string(p.id) + "\" of \"" + l.name + "\" has no expression");
+        if (const std::string problem = expressionError(*p.anim); !problem.empty()) fail("the expression does not work: " + problem);
+        const double from = time(op, "from", l.inPoint), to = has(op, "to") ? time(op, "to") : l.outPoint;
+        if (to <= from) fail("\"to\" must be after \"from\"");
+        const int step = static_cast<int>(number(op, "step", 1.0));
+        if (step < 1 || step > 1000) fail("\"step\" is a number of frames, from 1 to 1000");
+        const double dt = step / std::max(1.0, c_.fps);
+        std::vector<std::pair<double, std::vector<float>>> samples;
+        for (int i = 0;; ++i) {
+            const double at = std::min(to, from + i * dt);
+            std::vector<float> v;
+            if (const std::string problem = evaluateExpressionFor(p.anim->expression, l, p, at, v); !problem.empty())
+                fail("the expression does not work at " + std::to_string(at) + " s: " + problem);
+            samples.emplace_back(at, std::move(v));
+            if (at >= to || samples.size() > 100000) break;
+        }
+        p.anim->expression.clear();
+        p.anim->clearKeys(from);
+        for (const auto& [at, v] : samples) switch (p.kind) {
+            case PropertyKind::Float: addKey<float>(p, at, v, Easing::Linear); break;
+            case PropertyKind::Vec2: addKey<Vec2>(p, at, v, Easing::Linear); break;
+            case PropertyKind::Color: addKey<Color>(p, at, v, Easing::Linear); break;
+            }
+        return {{"keys", samples.size()}};
+    }
+
     json keyRemove(const json& op) {
         Layer& l = layer(op);
         const PropertyRef p = property(l, op);
@@ -991,6 +1002,36 @@ private:
         return list;
     }
 
+    // Works an expression out without setting it: `expression` (default: the property's own) at
+    // `time` or each of `times`. Never fails for the expression's sake: `error` says what is wrong.
+    json queryExpression(const json& op) {
+        Layer& l = layer(op);
+        const PropertyRef p = property(l, op);
+        const std::string e = has(op, "expression") ? text(op["expression"], "expression") : p.anim->expression;
+        if (e.empty()) fail("\"" + std::string(p.id) + "\" of \"" + l.name + "\" has no expression: give one in \"expression\"");
+        std::vector<double> times;
+        if (has(op, "times")) {
+            if (!op["times"].is_array() || op["times"].empty() || op["times"].size() > 1000) fail("\"times\" must be a list of 1 to 1000 seconds");
+            for (const json& x : op["times"]) {
+                if (!x.is_number() || x.get<double>() < 0.0) fail("\"times\" must hold seconds (0 or more)");
+                times.push_back(x.get<double>());
+            }
+        } else {
+            times.push_back(time(op));
+        }
+        json values = json::array();
+        for (double at : times) {
+            std::vector<float> v;
+            if (const std::string problem = evaluateExpressionFor(e, l, p, at, v); !problem.empty())
+                return {{"ok", false}, {"error", problem}, {"time", at}};
+            values.push_back(valueJson(p.kind, v));
+        }
+        json out = {{"ok", true}};
+        if (has(op, "times")) out["values"] = values;
+        else out["value"] = values[0];
+        return out;
+    }
+
     json queryLayer(const json& op) {
         Layer& l = layer(op);
         const double t = time(op);
@@ -1032,6 +1073,10 @@ private:
         json props = json::object();
         for (const PropertyRef& p : l.properties()) {
             json pj = {{"value", valueJson(p.kind, propertyValue(p, t))}};
+            if (p.anim->hasExpression()) {
+                pj["expression"] = p.anim->expression;
+                if (const std::string problem = expressionError(*p.anim); !problem.empty()) pj["expression_error"] = problem;
+            }
             if (p.anim->isAnimated()) {
                 json keys = json::array();
                 for (int k = 0; k < p.anim->keyCount(); ++k) {
@@ -1057,6 +1102,12 @@ private:
 
 } // namespace
 
+std::vector<std::string> operationNames() {
+    std::vector<std::string> names;
+    for (const auto& [name, fn] : Applier::ops()) names.push_back(name);
+    return names;
+}
+
 OpsResult applyOps(Project& project, const json& ops, const OpEnvironment& env) {
     OpsResult r;
     const json* list = &ops;
@@ -1077,6 +1128,7 @@ OpsResult applyOps(Project& project, const json& ops, const OpEnvironment& env) 
     }
 
     Project work = project; // atomic: the original changes only if everything succeeds
+    const ExpressionScope expressions(work.comp); // what expressions read: the copy being edited
     Applier applier(work, env);
     r.results = json::array();
     for (size_t i = 0; i < list->size(); ++i) {

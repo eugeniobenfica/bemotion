@@ -9,7 +9,8 @@
 //   wait N                 let N frames (~16 ms each) pass
 //   move X Y [N]           move the mouse there (over N frames, default 1)
 //   down B / up B          press / release mouse button B (0 left, 1 right, 2 middle);
-//                          a second press soon after at the same spot is a double click
+//                          a second press soon after at the same spot is a double click;
+//                          releasing the right one opens the context menu there
 //   wheel DY               scroll (positive = up)
 //   key NAME down|up       NAME: Space, Delete, Escape, Enter, Ctrl, Shift, Alt, A..Z, 0..9, F1..F12,
 //                          Left, Right, Up, Down, Home, End, Tab, Backspace, Comma

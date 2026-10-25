@@ -21,13 +21,14 @@
 
 namespace bemotion {
 
-extern const char* const kOperationsReference; // docs/OPERATIONS.md, built in (OperationsReference.cpp)
+extern const char* const kOperationsReference;  // docs/OPERATIONS.md, built in (OperationsReference.cpp)
+extern const char* const kExpressionsReference; // docs/EXPRESSIONS.md, the same way
 
 namespace {
 
 using json = nlohmann::json;
 
-constexpr const char* kProtocolVersions[] = {"2025-06-18", "2025-03-26", "2024-11-05"};
+constexpr const char* kProtocolVersions[] = {"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"};
 
 constexpr const char* kInstructions =
     "bemotion is a video editor with a focus on 2D animation. Projects are .bemotion files; pass their full path in "
@@ -102,6 +103,13 @@ json toolList() {
     };
     json ops = {{"description", "One operation object, or a list of them (run in order, atomically). "
                                 "Example: {\"op\": \"layer.add\", \"type\": \"text\", \"text\": \"Hi\"}"}};
+    // Every operation, from the table that runs them (core/Ops.cpp): never out of date.
+    static const std::string applyDescription = [] {
+        std::string list;
+        for (const std::string& n : operationNames()) list += (list.empty() ? "" : ", ") + n;
+        return "Edits a project with operations (see get_operations_reference): " + list +
+               ". Atomic: on failure nothing changes and the error explains it. Saves the project.";
+    }();
     return json::array({
         tool("describe_project", "Summary of a project: size, frame rate, duration and every layer (id, name, type, "
                                  "time range, position, animated properties, effects). Start here.",
@@ -117,11 +125,7 @@ json toolList() {
               {"layer", {{"description", "Layer id (number) or unique name"}}},
               {"time", {{"type", "number"}, {"description", "Seconds (default 0)"}}}},
              {"project", "layer"}),
-        tool("apply_operations",
-             "Edits a project with operations (see get_operations_reference): layer.add / layer.set / layer.remove / "
-             "layer.move / layer.split / layer.duplicate / group / ungroup / property.set / key.add / key.remove / "
-             "key.clear / key.easing / effect.add / effect.remove / effect.set / media.import / composition.set and "
-             "query.*. Atomic: on failure nothing changes and the error explains it. Saves the project.",
+        tool("apply_operations", applyDescription.c_str(),
              {{"project", projectProp()},
               {"operations", ops},
               {"dry_run", {{"type", "boolean"}, {"description", "Check without saving"}}}},
@@ -129,7 +133,8 @@ json toolList() {
         tool("run_lua",
              "Runs Lua with the bemotion `doc` API (shorter than operations for loops and layouts): the code receives doc "
              "as `...` (local doc = ...). doc.apply(op or {ops}) returns results; doc.layers(), doc.layer(id), "
-             "doc.composition() read. Atomic; print() output is returned. Saves the project.",
+             "doc.composition() read; doc.expression(layer, prop, expression, time) tries an expression. Atomic; "
+             "print() output is returned. Saves the project.",
              {{"project", projectProp()},
               {"code", {{"type", "string"}}},
               {"time", {{"type", "number"}, {"description", "doc.time (seconds)"}}},
@@ -153,13 +158,25 @@ json toolList() {
               {"scale", {{"type", "number"}, {"description", "Output size relative to the composition (default 1)"}}},
               {"transparent", {{"type", "boolean"}, {"description", "No background (MOV, WebM, PNG)"}}}},
              {"project", "output"}),
+        tool("test_expression",
+             "Works an expression out on a layer's property without setting it (see get_expressions_reference): its "
+             "value at each time, or what is wrong. Try one here, then set it with the expression.set operation.",
+             {{"project", projectProp()},
+              {"layer", {{"description", "Layer id (number) or unique name"}}},
+              {"prop", {{"type", "string"}, {"description", "Property id: position, rotation, opacity, fx0.size, p.progress..."}}},
+              {"expression", {{"type", "string"}, {"description", "Default: the property's own expression"}}},
+              {"times", {{"type", "array"}, {"items", {{"type", "number"}}}, {"description", "Seconds (default 0)"}}}},
+             {"project", "layer", "prop"}),
         tool("get_operations_reference", "The full reference of operations: every field, property ids, units, easings.", json::object(), {}),
+        tool("get_expressions_reference",
+             "The expression language (expression.set, test_expression): names, functions, other layers, examples.", json::object(), {}),
     });
 }
 
 json callTool(const std::string& name, const json& args) {
     platform::log("mcp tool " + name);
     if (name == "get_operations_reference") return toolResult({textContent(kOperationsReference)});
+    if (name == "get_expressions_reference") return toolResult({textContent(kExpressionsReference)});
 
     if (name == "create_project") {
         const std::string file = stringArg(args, "project");
@@ -188,6 +205,18 @@ json callTool(const std::string& name, const json& args) {
         const OpsResult r = applyOps(p, op);
         if (!r.ok) throw ToolError(r.error);
         return toolResult({textContent(r.results[0].dump(2))});
+    }
+
+    if (name == "test_expression") {
+        if (!args.contains("layer")) throw ToolError("missing argument \"layer\"");
+        json op = {{"op", "query.expression"}, {"layer", args["layer"]}, {"prop", stringArg(args, "prop")}};
+        if (args.contains("expression")) op["expression"] = args["expression"];
+        op["times"] = args.contains("times") && args["times"].is_array() && !args["times"].empty() ? args["times"] : json::array({0});
+        const OpsResult r = applyOps(p, op);
+        if (!r.ok) throw ToolError(r.error);
+        const json& out = r.results[0];
+        if (!out.value("ok", false)) throw ToolError("the expression does not work: " + out.value("error", std::string()));
+        return toolResult({textContent(out.dump(2))});
     }
 
     if (name == "apply_operations") {

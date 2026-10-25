@@ -75,6 +75,7 @@ private:
     void applyExpression(const QString& text);
     void closeExpression();  // hides the editor (the expression stays)
     void removeExpression(); // no expression any more
+    void bakeExpression();   // the expression becomes keyframes (expression.bake)
 
     EditorContext& ctx_;
     uint64_t layerId_;
