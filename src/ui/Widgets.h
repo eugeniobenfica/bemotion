@@ -142,6 +142,9 @@ enum class Icon {
     FxKeying,       // keying effects: a square with a hole
     Scopes,         // the Scopes panel: a waveform trace on a grid
     Proxy,          // proxies: a small film frame
+    AlignLeft,      // text alignment: lines of text against the left edge
+    AlignCenter,    // ... centered
+    AlignRight,     // ... against the right edge
 };
 
 Icon iconForLayer(const Layer& layer);

@@ -515,16 +515,20 @@ QWidget* interfacePage() {
         for (const LanguageInfo& l : availableLanguages())
             combo->addItem(QString::fromStdString(l.name), QString::fromStdString(l.code));
         combo->setCurrentIndex(std::max(0, combo->findData(QString::fromStdString(s.language))));
-        auto* note = hintLabel(tr("bemotion shows the new language the next time it opens."));
-        note->setVisible(false);
-        QObject::connect(combo, &QComboBox::activated, combo, [combo, note](int i) {
-            settings().language = combo->itemData(i).toString().toStdString();
+        QObject::connect(combo, &QComboBox::activated, combo, [combo](int i) {
+            const std::string code = combo->itemData(i).toString().toStdString();
+            if (code == settings().language) return;
+            settings().language = code;
             saveSettings();
-            note->setVisible(true);
+            // At once: every window builds itself again in the new language (this one too, so
+            // after this handler).
+            QTimer::singleShot(0, [code] {
+                installLanguage(code);
+                emit AppSignals::get().languageChanged();
+            });
         });
         language->addRow(tr("Interface language"),
                          tr("Languages are JSON files: add your own to the languages folder in bemotion's data"), combo);
-        language->addRow({}, {}, note);
     }
     SettingsCard* experience = addSection(col, tr("Experience"));
     const int which = s.experience == "friendly" ? 0 : s.experience == "expert" ? 2 : 1;
@@ -1299,9 +1303,24 @@ void openSettings(SettingsTab tab) {
         QObject::connect(&AppSignals::get(), &AppSignals::pluginsChanged, g_window, [] {
             if (g_window) QTimer::singleShot(0, g_window, [] { if (g_window) g_window->rebuild(); });
         });
+        // Its page names and footer are read as it is built: another language builds it again,
+        // on the same page and in the same place.
+        QObject::connect(&AppSignals::get(), &AppSignals::languageChanged, g_window, [] {
+            PagedWindow* old = g_window;
+            const bool shown = old->isVisible();
+            const int page = old->currentPage();
+            const QRect geometry = old->geometry();
+            g_window = nullptr;
+            old->hide();
+            old->deleteLater();
+            if (!shown) return;
+            openSettings(static_cast<SettingsTab>(page));
+            g_window->setGeometry(geometry);
+        });
         QObject::connect(resetAll, &QPushButton::clicked, g_window, [] {
             if (QMessageBox::question(g_window, tr("Reset All"), tr("Reset every setting to its default?")) != QMessageBox::Yes) return;
             const bool keepAdvanced = settings().advanced; // a view choice, not a preference
+            const std::string language = settings().language;
             settings() = Settings{};
             settings().advanced = keepAdvanced;
             loadKeymap("{}");
@@ -1309,6 +1328,10 @@ void openSettings(SettingsTab tab) {
             emit AppSignals::get().shortcutsChanged();
             emit AppSignals::get().toolbarChanged();
             changed(true);
+            if (settings().language != language) QTimer::singleShot(0, [] { // as the Language row does
+                    installLanguage(settings().language);
+                    emit AppSignals::get().languageChanged();
+                });
         });
     }
     g_window->showPage(static_cast<int>(tab));

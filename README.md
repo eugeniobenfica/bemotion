@@ -119,7 +119,9 @@ does.
   Subtract / Intersect / Difference, inverted
 - **Track mattes and blending modes**, as in After Effects: a layer shows
   only through another one's alpha or brightness (inverted too), and mixes
-  with what is under it (Multiply, Screen, Overlay, Add, Color… 17 modes)
+  with what is under it (Multiply, Screen, Overlay, Add, Color… 17 modes,
+  grouped as in After Effects; the one under the mouse shows on the picture
+  before you pick it)
 - **Counter**: a number that counts up by itself from its clip's start
   (Start → End, for how long, eased; digits that do not shake), with decimals,
   thousands separators (1,234.5 or 1.234,5), a prefix and a suffix (R$, %)
@@ -272,8 +274,9 @@ does.
 - **Audio meters**: left and right levels beside the timeline, with peak hold
   and a clip light (View › Audio Meters, or Settings › Interface)
 - **In your language**: English and Portuguese (Brazil) built in
-  (Settings › Interface › Language); a language is one JSON file anyone can
-  translate and drop into bemotion's `languages` folder
+  (Settings › Interface › Language, switched at once, no restart); a
+  language is one JSON file anyone can translate and drop into bemotion's
+  `languages` folder
 - **Smooth with big footage**: **proxies** (Media panel › right-click ›
   *Create Proxy*: a small copy the editor plays, exports use the original),
   frames kept in memory as they are shown (a green line on the timeline's

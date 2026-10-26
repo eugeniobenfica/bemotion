@@ -16,7 +16,8 @@
 //                          Left, Right, Up, Down, Home, End, Tab, Backspace, Comma
 //   type TEXT              types the text into the focused field
 //   capture FILE           save the window (format from the extension: .png, .bmp, ...);
-//                          other open windows go to FILE-<window title>.<ext>
+//                          other open windows go to FILE-<window title>.<ext> (menus: "menu",
+//                          an open list: "popup")
 //   drop FILE...           drop files on the window (as from the file manager)
 //   window TITLE           later mouse commands go to that open window ("Settings", a dialog...);
 //                          "window main" (or any title not open) goes back to the main window

@@ -19,6 +19,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFileSystemWatcher>
+#include <QFontMetrics>
 #include <QFormLayout>
 #include <QGridLayout>
 #include <QHBoxLayout>
@@ -171,9 +172,11 @@ protected:
         QFont bold = font();
         bold.setWeight(QFont::DemiBold);
         p.setFont(bold);
-        d.text({14, thumbH + 12}, theme::kText, name_);
+        // Too long for the card: an ellipsis, not a cut (a longer language, a long name).
+        const int room = static_cast<int>(w) - 28;
+        d.text({14, thumbH + 12}, theme::kText, QFontMetrics(bold).elidedText(name_, Qt::ElideRight, room));
         p.setFont(font());
-        d.text({14, thumbH + 34}, theme::kTextFaint, meta_);
+        d.text({14, thumbH + 34}, theme::kTextFaint, fontMetrics().elidedText(meta_, Qt::ElideRight, room));
     }
     void mouseMoveEvent(QMouseEvent*) override { update(); }
     void enterEvent(QEnterEvent*) override { update(); }
@@ -511,8 +514,9 @@ void HomeScreen::rebuildGrid() {
         std::string meta;
         if (pv && pv->project) {
             char buf[128];
-            std::snprintf(buf, sizeof(buf), "%d × %d  ·  %.4g fps  ·  %s", pv->project->comp.width, pv->project->comp.height,
-                          pv->project->comp.fps, relativeTime(item.lastOpened).c_str());
+            // When first: what the list is about; the size goes first if the card is narrow.
+            std::snprintf(buf, sizeof(buf), "%s  ·  %d × %d  ·  %.4g fps", relativeTime(item.lastOpened).c_str(), pv->project->comp.width,
+                          pv->project->comp.height, pv->project->comp.fps);
             meta = buf;
         } else {
             meta = tr("Unreadable file").toStdString() + "  ·  " + relativeTime(item.lastOpened);

@@ -534,7 +534,13 @@ Rules:
   and translated where shown (`tr(label)`, `trLabel` for numbered labels;
   sections, rows, tiles and icon buttons translate theirs). Language files are
   JSON (`assets/languages/<code>.json`, the user's in `<app data>/languages`,
-  `core/Language.h`); the `language` setting picks one at startup. Every new
+  `core/Language.h`); the `language` setting picks one. A text is read as its
+  window is built, so changing the language (Settings › Interface) emits
+  `AppSignals::languageChanged`: the home screen, the editor (the same
+  `EditorContext`: project, undo history, selection, playhead; the dock layout
+  through its file), Settings and Help are built again; a recording holds the
+  editor back until it ends. A window that keeps its own texts follows that
+  signal too. Every new
   text needs its translation in each bundled file: `tools/languages.py
   --missing pt-BR` lists them and ctest fails until they are there. Names
   saved anywhere (dock objects, settings, theme files) stay English.

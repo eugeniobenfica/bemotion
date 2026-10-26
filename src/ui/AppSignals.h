@@ -22,6 +22,7 @@ signals:
     void interfaceResetRequested(); // restore the editor's dock layout
     void pluginsChanged();    // enabled / installed plugins
     void projectsChanged();   // the home screen's list (the Welcome project shown again...)
+    void languageChanged();   // another language installed: windows build themselves again
 };
 
 } // namespace bemotion::ui

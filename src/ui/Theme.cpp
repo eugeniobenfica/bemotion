@@ -214,7 +214,7 @@ QString dockStyleSheet() {
     QString s = "ads--CDockContainerWidget, ads--CDockManager { background: DEEP; }\n"
                 "ads--CDockAreaWidget { background: PANEL; border: none; }\n"
                 "ads--CDockAreaTitleBar { background: HEADER; border: none; padding: 0 2px 0 0; }\n"
-                "ads--CDockWidgetTab { background: transparent; border: none; margin: 4px 1px 0 1px; padding: 0 8px;"
+                "ads--CDockWidgetTab { background: transparent; border: none; margin: 4px 1px 0 1px; padding: 0 6px;"
                 " border-top-left-radius: RADIUSpx; border-top-right-radius: RADIUSpx; }\n"
                 "ads--CDockWidgetTab:hover { background: HOVER; }\n"
                 "ads--CDockWidgetTab[activeTab=\"true\"] { background: PANEL; }\n"

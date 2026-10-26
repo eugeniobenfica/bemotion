@@ -53,6 +53,8 @@ class EditorWindow : public QMainWindow {
     Q_OBJECT
 public:
     EditorWindow(Project project, std::filesystem::path path, RecentProjects& recents, QWidget* parent = nullptr);
+    // Goes on with an open project (the window built again, as for another language).
+    EditorWindow(EditorContext context, RecentProjects& recents, QWidget* parent = nullptr);
     ~EditorWindow() override;
 
     const Project& project() const { return ctx_.project; }
@@ -67,6 +69,8 @@ public:
     void applyShortcuts(); // after the keymap changed
     // Opened from a crash-recovery copy: the changes count as unsaved.
     void markRecovered();
+    // Closing because a new window takes the project over: its crash-recovery copy stays.
+    void handOver() { handedOver_ = true; }
 
 signals:
     void goHome();
@@ -162,6 +166,7 @@ private:
     double recordingStart_ = -1.0;
     uint64_t recordingScope_ = 0;
     bool spaceDown_ = false;
+    bool handedOver_ = false;
 };
 
 } // namespace bemotion

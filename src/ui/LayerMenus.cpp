@@ -8,9 +8,12 @@
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
+#include <QAbstractItemView>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QEvent>
 #include <QFormLayout>
 #include <QLabel>
 #include <QMenu>
@@ -18,6 +21,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <utility>
 
 namespace bemotion::ui {
 
@@ -32,7 +37,80 @@ std::vector<Layer*> footage(EditorContext& ctx) {
 
 bool takesMatte(const Layer& l) { return l.type != LayerType::Camera; }
 
+// The blending modes as lists show them: in families, as After Effects and Photoshop group them
+// (darken, lighten, contrast, difference, color); kSep: a separator.
+constexpr BlendMode kSep = BlendMode::Count;
+constexpr BlendMode kBlendOrder[] = {BlendMode::Normal,     kSep,
+                                     BlendMode::Darken,     BlendMode::Multiply,   BlendMode::ColorBurn, kSep,
+                                     BlendMode::Lighten,    BlendMode::Screen,     BlendMode::ColorDodge, BlendMode::Add, kSep,
+                                     BlendMode::Overlay,    BlendMode::SoftLight,  BlendMode::HardLight, kSep,
+                                     BlendMode::Difference, BlendMode::Exclusion,  kSep,
+                                     BlendMode::Hue,        BlendMode::Saturation, BlendMode::Color,     BlendMode::Luminosity};
+
+// A blending mode under the mouse (or the arrow keys) in a list shows on the picture before it
+// is picked: the selected layers take it for a look, with no undo step, and get theirs back when
+// the list closes (before a pick is applied, which then sets it for good).
+class BlendPreview {
+public:
+    explicit BlendPreview(EditorContext& ctx) : ctx_(ctx) {}
+    void show(int mode) {
+        if (saved_.empty())
+            for (Layer* l : ctx_.selectedLayers())
+                if (takesMatte(*l)) saved_.emplace_back(l->id, l->blend);
+        for (const auto& [id, blend] : saved_)
+            if (Layer* l = ctx_.comp().findLayer(id)) l->blend = static_cast<BlendMode>(mode);
+        ctx_.redraw();
+    }
+    void restore() {
+        if (saved_.empty()) return;
+        for (const auto& [id, blend] : saved_)
+            if (Layer* l = ctx_.comp().findLayer(id)) l->blend = blend;
+        saved_.clear();
+        ctx_.redraw();
+    }
+
+private:
+    EditorContext& ctx_;
+    std::vector<std::pair<uint64_t, BlendMode>> saved_;
+};
+
 } // namespace
+
+QComboBox* blendModeCombo(EditorContext& ctx) {
+    auto* combo = new QComboBox;
+    combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+    combo->setMinimumContentsLength(6);
+    combo->setMaxVisibleItems(30); // the whole list, no scrolling
+    for (BlendMode m : kBlendOrder) {
+        if (m == kSep) combo->insertSeparator(combo->count());
+        else combo->addItem(tr(kBlendModeLabels[static_cast<int>(m)]), static_cast<int>(m));
+    }
+    QObject::connect(combo, &QComboBox::activated, combo, [&ctx, combo](int i) {
+        if (i < 0) return;
+        const auto mode = static_cast<BlendMode>(combo->itemData(i).toInt());
+        for (Layer* l : ctx.selectedLayers())
+            if (takesMatte(*l)) l->blend = mode;
+        ctx.touch();
+    });
+    auto preview = std::make_shared<BlendPreview>(ctx);
+    QObject::connect(combo, &QComboBox::highlighted, combo, [preview, combo](int i) {
+        if (i >= 0 && combo->view()->isVisible() && combo->itemData(i).isValid()) preview->show(combo->itemData(i).toInt());
+    });
+    struct Closing : QObject {
+        std::shared_ptr<BlendPreview> preview;
+        bool eventFilter(QObject*, QEvent* e) override {
+            if (e->type() == QEvent::Hide) preview->restore();
+            return false;
+        }
+    };
+    auto* closing = new Closing;
+    closing->setParent(combo);
+    closing->preview = preview;
+    combo->view()->window()->installEventFilter(closing);
+    return combo;
+}
+
+void showBlendMode(QComboBox* combo, BlendMode mode) { combo->setCurrentIndex(combo->findData(static_cast<int>(mode))); }
 
 void fillTimeMenu(QMenu* menu, EditorContext& ctx, QWidget* parent) {
     menu->setToolTipsVisible(true);
@@ -67,8 +145,14 @@ void fillBlendMenu(QMenu* menu, EditorContext& ctx) {
     for (Layer* l : ctx.selectedLayers())
         if (takesMatte(*l)) layers.push_back(l);
     const int current = layers.empty() ? -1 : static_cast<int>(layers.front()->blend);
-    for (int i = 0; i < static_cast<int>(BlendMode::Count); ++i) {
-        if (i == 1 || i == 3 || i == 5 || i == 10 || i == 12 || i == 16) menu->addSeparator(); // as After Effects groups them
+    auto preview = std::make_shared<BlendPreview>(ctx);
+    bool first = true;
+    for (BlendMode m : kBlendOrder) {
+        if (m == kSep) {
+            menu->addSeparator();
+            continue;
+        }
+        const int i = static_cast<int>(m);
         QAction* a = menu->addAction(tr(kBlendModeLabels[i]), [&ctx, i] {
             for (Layer* l : ctx.selectedLayers())
                 if (takesMatte(*l)) l->blend = static_cast<BlendMode>(i);
@@ -77,6 +161,10 @@ void fillBlendMenu(QMenu* menu, EditorContext& ctx) {
         a->setCheckable(true);
         a->setChecked(i == current);
         a->setEnabled(!layers.empty());
+        QObject::connect(a, &QAction::hovered, a, [preview, i] { preview->show(i); });
+        // The menu hides before the picked action runs. (Its actions go with the next fill: so
+        // does this connection.)
+        if (std::exchange(first, false)) QObject::connect(menu, &QMenu::aboutToHide, a, [preview] { preview->restore(); });
     }
 }
 

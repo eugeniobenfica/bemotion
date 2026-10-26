@@ -365,6 +365,15 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.circleFilled(Pt(c.x, c.y + h * 0.3f), h * 0.13f, col);
         break;
     }
+    case Icon::AlignLeft:
+    case Icon::AlignCenter:
+    case Icon::AlignRight: // three lines of text, long and short, against an edge or centered
+        for (int i = 0; i < 3; ++i) {
+            const float w = h * (i == 1 ? 1.0f : 1.6f), y = c.y + h * (-0.6f + 0.6f * i);
+            const float x0 = icon == Icon::AlignLeft ? c.x - h * 0.8f : icon == Icon::AlignRight ? c.x + h * 0.8f - w : c.x - w * 0.5f;
+            dl.line(Pt(x0, y), Pt(x0 + w, y), col, th);
+        }
+        break;
     case Icon::Meter:
         dl.rectFilled(Pt(c.x - h * 0.6f, c.y - h * 0.2f), Pt(c.x - h * 0.1f, c.y + h * 0.75f), col, 1.0f);
         dl.rectFilled(Pt(c.x + h * 0.1f, c.y - h * 0.7f), Pt(c.x + h * 0.6f, c.y + h * 0.75f), col, 1.0f);

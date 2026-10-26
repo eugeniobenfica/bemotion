@@ -88,6 +88,9 @@ public:
     // Changes whenever the document changes (touch, undo, redo, open): views compare it to know
     // when to redraw.
     uint64_t revision() const { return revision_; }
+    // Views redraw, but nothing is recorded: a look at a change before it is made (a blending
+    // mode under the mouse), put back afterwards.
+    void redraw() { ++revision_; }
     void commitIfIdle(bool interacting);
 
     void undo();

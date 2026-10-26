@@ -4,6 +4,9 @@
 // (speed, reverse, time remap, freeze), its blending mode, its track matte and its masks,
 // and the Speed / Duration dialog.
 
+#include "core/Layer.h"
+
+class QComboBox;
 class QMenu;
 class QWidget;
 
@@ -14,7 +17,11 @@ class EditorContext;
 namespace ui {
 
 void fillTimeMenu(QMenu* menu, EditorContext& ctx, QWidget* parent);
-void fillBlendMenu(QMenu* menu, EditorContext& ctx);
+void fillBlendMenu(QMenu* menu, EditorContext& ctx); // the mode under the mouse shows on the picture
+// The blending modes of the selected layers, in families as the menu has them; the one under the
+// mouse shows on the picture while the list is open. showBlendMode() sets what it shows.
+QComboBox* blendModeCombo(EditorContext& ctx);
+void showBlendMode(QComboBox* combo, BlendMode mode);
 void fillMatteMenu(QMenu* menu, EditorContext& ctx);
 void fillMaskMenu(QMenu* menu, EditorContext& ctx);
 // Rectangle / ellipse masks fitted to the selected layers.

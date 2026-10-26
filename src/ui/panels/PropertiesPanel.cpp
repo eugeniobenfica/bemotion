@@ -758,8 +758,14 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                 align->setContentsMargins(0, 0, 0, 0);
                 align->setSpacing(4);
                 std::vector<QPushButton*> buttons;
+                // Icons, as in After Effects: three words did not fit a narrow panel (or a longer language).
                 for (int i = 0; i < 3; ++i) {
-                    auto* b = new QPushButton(i == 0 ? tr("Left") : i == 1 ? tr("Center") : tr("Right"));
+                    const ui::Icon icon = i == 0 ? ui::Icon::AlignLeft : i == 1 ? ui::Icon::AlignCenter : ui::Icon::AlignRight;
+                    auto* b = new QPushButton(ui::makeIcon(icon, theme::kText, 32), {});
+                    b->setToolTip(i == 0 ? tr("Left") : i == 1 ? tr("Center") : tr("Right"));
+                    b->setAccessibleName(b->toolTip());
+                    b->setIconSize(QSize(18, 18));
+                    b->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
                     b->setCheckable(true);
                     connect(b, &QPushButton::clicked, this, [this, id, i] {
                         if (Layer* l = ctx_.comp().findLayer(id)) {
@@ -1054,12 +1060,9 @@ void PropertiesPanel::buildMediaTime(QVBoxLayout* col, Layer& layer) {
 void PropertiesPanel::buildBlending(QVBoxLayout* col, Layer& layer) {
     auto* s = new CollapsibleSection(tr("Blending"));
     const uint64_t id = layer.id;
-    auto* mode = choiceCombo(kBlendModeLabels, static_cast<int>(layer.blend), [this](int i) {
-        for (Layer* l : ctx_.selectedLayers())
-            if (l->type != LayerType::Camera) l->blend = static_cast<BlendMode>(i);
-        ctx_.touch();
-    });
-    mode->setToolTip(tr("How its colors mix with the layers under it"));
+    auto* mode = ui::blendModeCombo(ctx_);
+    ui::showBlendMode(mode, layer.blend);
+    mode->setToolTip(tr("How its colors mix with the layers under it (the one under the mouse shows on the picture)"));
     s->addPlainRow(tr("Mode"), mode);
     // The track matte: a mode, and the layer beside it whose picture decides.
     std::vector<uint64_t> candidates;
@@ -1114,7 +1117,7 @@ void PropertiesPanel::buildBlending(QVBoxLayout* col, Layer& layer) {
         const Layer* l = ctx_.comp().findLayer(id);
         if (!l) return;
         const QSignalBlocker a(mode), b(matte), c(source);
-        if (!mode->view()->isVisible()) mode->setCurrentIndex(static_cast<int>(l->blend));
+        if (!mode->view()->isVisible()) ui::showBlendMode(mode, l->blend);
         if (!matte->view()->isVisible()) matte->setCurrentIndex(static_cast<int>(l->matte));
         source->setEnabled(l->matte != MatteMode::None);
         if (!source->view()->isVisible()) source->setCurrentIndex(l->matte == MatteMode::None ? -1 : source->findData(QVariant::fromValue<qulonglong>(l->matteLayer)));

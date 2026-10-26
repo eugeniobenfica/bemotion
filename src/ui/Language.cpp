@@ -89,6 +89,12 @@ std::vector<LanguageInfo> availableLanguages() {
 
 void installLanguage(const std::string& setting) {
     g_language = "en";
+    static JsonTranslator* translator = nullptr; // the one installed; replaced on a change
+    if (translator) {
+        QCoreApplication::removeTranslator(translator);
+        delete translator;
+        translator = nullptr;
+    }
     if (setting == "en") return;
     const std::vector<LanguageInfo> languages = availableLanguages();
     std::vector<std::string> codes;
@@ -97,8 +103,6 @@ void installLanguage(const std::string& setting) {
     if (i < 0) return;
     LanguageFile file;
     if (!readLanguage(languages[i].file, file)) return;
-    static JsonTranslator* translator = nullptr; // installed once, for the app's whole life
-    if (translator) return;
     translator = new JsonTranslator(file);
     QCoreApplication::installTranslator(translator);
     g_language = file.code;

@@ -53,6 +53,10 @@ private:
     int runCommandLineExport(const std::filesystem::path& projectPath, exporting::Settings settings);
     void initShared(); // settings, fonts, plugins, media (GUI and command line)
     void buildWindow();
+    void buildHome();
+    void retranslate();   // another language: the home screen and the editor built again
+    void rebuildEditor(); // the same project, undo history, selection and playhead
+    void attachEditor();  // into the window, its signals connected
     void frame(); // developer aids, once per ~16 ms
     void scriptStep();
     void showFirstRun(); // the experience choice, over the window
@@ -73,6 +77,7 @@ private:
     std::unique_ptr<DevScript> script_; // BEMOTION_SCRIPT developer aid
     std::unique_ptr<DevScript> retiredScript_; // the script after its quit
     int frameIndex_ = 0;
+    bool editorLanguagePending_ = false; // a recording held the editor's new language back
 };
 
 } // namespace bemotion

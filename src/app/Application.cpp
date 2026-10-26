@@ -11,6 +11,7 @@
 #include "media/AudioEngine.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
+#include "media/Recorder.h"
 #include "render/Fonts.h"
 #include "render/SceneRenderer.h"
 #include "ui/AppSignals.h"
@@ -46,6 +47,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <map>
 #include <optional>
 #include <thread>
 
@@ -219,6 +221,30 @@ void Application::buildWindow() {
     stack_ = new QStackedWidget;
     window_->setCentralWidget(stack_);
     recents_.load(); // the Welcome project joins the projects folder when the user picks one (HomeScreen)
+    buildHome();
+    home_->refresh();
+    // Every text is read as a window is built: another language builds them again.
+    connect(&ui::AppSignals::get(), &ui::AppSignals::languageChanged, this, [this] { QTimer::singleShot(0, this, [this] { retranslate(); }); });
+
+    intro_ = new IntroScreen(window_);
+    window_->overlay = intro_;
+    intro_->hide();
+    connect(intro_, &IntroScreen::finished, this, [this] {
+        if (editor_) editor_->setFocus();
+        else home_->setFocus();
+    });
+
+    window_->canClose = [this] { return !editor_ || editor_->confirmClose(); };
+    window_->onDrop = [this](const std::vector<std::filesystem::path>& files) {
+        if (editor_) editor_->dropFiles(files, false);
+        else if (files.size() == 1 && files[0].extension() == kProjectExtension) openProject(files[0]);
+    };
+    window_->resize(1440, 900);
+    window_->showMaximized();
+    intro_->setGeometry(window_->rect());
+}
+
+void Application::buildHome() {
     home_ = new HomeScreen(recents_);
     home_->onOpen = [this](const std::filesystem::path& p) { openProject(p); };
     home_->onCreate = [this](const std::filesystem::path& p, Project project) { createProject(std::move(project), p); };
@@ -239,30 +265,43 @@ void Application::buildWindow() {
         fullAction->setShortcut(ui::sequenceOf(ui::Action::FullScreen));
     };
     bindHome();
-    connect(&ui::AppSignals::get(), &ui::AppSignals::shortcutsChanged, this, bindHome);
-    stack_->addWidget(home_);
+    connect(&ui::AppSignals::get(), &ui::AppSignals::shortcutsChanged, home_, bindHome);
+    stack_->insertWidget(0, home_);
+}
+
+void Application::retranslate() {
+    HomeScreen* old = home_;
+    const bool homeShown = stack_->currentWidget() == old;
+    buildHome();
     home_->refresh();
+    if (homeShown) stack_->setCurrentWidget(home_);
+    stack_->removeWidget(old);
+    old->deleteLater();
+    // A recording keeps its window: the editor follows once it ends (frame()).
+    if (editor_) {
+        if (media::Recorder::get().recording()) editorLanguagePending_ = true;
+        else rebuildEditor();
+    }
+    updateTitle();
+}
 
-    intro_ = new IntroScreen(window_);
-    window_->overlay = intro_;
-    intro_->hide();
-    connect(intro_, &IntroScreen::finished, this, [this] {
-        if (editor_) editor_->setFocus();
-        else home_->setFocus();
-    });
-
-    window_->canClose = [this] { return !editor_ || editor_->confirmClose(); };
-    window_->onDrop = [this](const std::vector<std::filesystem::path>& files) {
-        if (editor_) editor_->dropFiles(files, false);
-        else if (files.size() == 1 && files[0].extension() == kProjectExtension) openProject(files[0]);
-    };
-    window_->resize(1440, 900);
-    window_->showMaximized();
-    intro_->setGeometry(window_->rect());
+void Application::rebuildEditor() {
+    editorLanguagePending_ = false;
+    // The project, its undo history, selection and playhead go on in the new window; the old one
+    // closes first (it saves the dock layout the new one opens with).
+    EditorContext context = editor_->context();
+    stack_->removeWidget(editor_);
+    editor_->handOver();
+    delete editor_;
+    editor_ = new EditorWindow(std::move(context), recents_);
+    attachEditor();
+    // Its shortcuts work once the window is back in front (the old focus went with the old one).
+    editor_->setFocus();
 }
 
 void Application::frame() {
     ++frameIndex_;
+    if (editorLanguagePending_ && editor_ && !media::Recorder::get().recording()) rebuildEditor();
     PluginHost::get().processPendingReload(); // Settings also manages plugins from the home screen.
     // Each step runs on its own: a step that opens a modal dialog (exec) must not hold up the
     // next ones, which drive that dialog.
@@ -289,11 +328,16 @@ void Application::scriptStep() {
         const QString file = QString::fromStdString(shot);
         window_->grab().save(file);
         const int dot = file.lastIndexOf('.');
+        std::map<QString, int> seen; // a submenu beside its menu: "menu", "menu2"
         for (QWidget* w : QApplication::topLevelWidgets()) {
             if (w == window_ || !w->isVisible()) continue;
-            QString title = qobject_cast<QMenu*>(w) ? QString("menu") : w->windowTitle().replace(' ', '_');
+            QString title = qobject_cast<QMenu*>(w)                   ? QString("menu")
+                            : w == QApplication::activePopupWidget() ? QString("popup") // a list's drop-down
+                                                                     : w->windowTitle().replace(' ', '_');
             for (const QChar c : QString("/\\:*?\"<>|")) title.replace(c, '-'); // a file name ("Speed / Duration")
-            if (!title.isEmpty()) w->grab().save(file.left(dot) + "-" + title + file.mid(dot));
+            if (title.isEmpty()) continue;
+            if (const int n = ++seen[title]; n > 1) title += QString::number(n);
+            w->grab().save(file.left(dot) + "-" + title + file.mid(dot));
         }
     }
     if (script_->wantsQuit()) {
@@ -367,10 +411,18 @@ void Application::createProject(Project project, const std::filesystem::path& pa
 
 void Application::showEditor(Project project, const std::filesystem::path& path) {
     if (editor_) {
+        // Now, not later: its closing (the layout it saves, the preview it lets go) comes before
+        // the new window opens.
         stack_->removeWidget(editor_);
-        editor_->deleteLater();
+        delete editor_;
     }
     editor_ = new EditorWindow(std::move(project), path, recents_);
+    attachEditor();
+    if (intro_->isVisible()) intro_->raise();
+    else editor_->setFocus();
+}
+
+void Application::attachEditor() {
     stack_->addWidget(editor_);
     stack_->setCurrentWidget(editor_);
     connect(editor_, &EditorWindow::goHome, this, [this] { QTimer::singleShot(0, this, [this] { goHome(); }); });
@@ -386,8 +438,6 @@ void Application::showEditor(Project project, const std::filesystem::path& path)
     connect(editor_, &EditorWindow::quitRequested, window_, &QWidget::close);
     connect(editor_, &EditorWindow::titleChanged, this, [this] { updateTitle(); });
     updateTitle();
-    if (intro_->isVisible()) intro_->raise();
-    else editor_->setFocus();
 }
 
 void Application::goHome() {

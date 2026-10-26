@@ -144,6 +144,7 @@ constexpr const char* kLayersMime = "application/x-bemotion-layers";
 // True while the user is in the middle of an edit: mouse held, or typing in a field.
 bool interacting() {
     if (QApplication::mouseButtons() != Qt::NoButton) return true;
+    if (QApplication::activePopupWidget()) return true; // a menu or list open (it may be previewing)
     QWidget* f = QApplication::focusWidget();
     return f && (qobject_cast<QLineEdit*>(f) || qobject_cast<QPlainTextEdit*>(f));
 }
@@ -201,12 +202,20 @@ private:
     int edge_;
 };
 
+// A project opened in a new context (history from its saved state).
+EditorContext opened(Project project, std::filesystem::path path) {
+    EditorContext ctx;
+    ctx.open(std::move(project), std::move(path));
+    return ctx;
+}
 } // namespace
 
 EditorWindow::EditorWindow(Project project, std::filesystem::path path, RecentProjects& recents, QWidget* parent)
-    : QMainWindow(parent), recents_(recents) {
+    : EditorWindow(opened(std::move(project), std::move(path)), recents, parent) {}
+
+EditorWindow::EditorWindow(EditorContext context, RecentProjects& recents, QWidget* parent)
+    : QMainWindow(parent), ctx_(std::move(context)), recents_(recents) {
     setWindowFlags(Qt::Widget); // lives inside the application window
-    ctx_.open(std::move(project), std::move(path));
     ctx_.showRulers = settings().showRulers;
 
     buildDocks();
@@ -231,7 +240,7 @@ EditorWindow::~EditorWindow() {
     qApp->removeEventFilter(this);
     media::MediaManager::get().setPreview(nullptr);
     while (!minimized_.empty()) restoreMinimized(0); // minimized panels come back with the next project
-    recovery::discard(ctx_.path, ctx_.project.name); // closed normally: nothing to recover
+    if (!handedOver_) recovery::discard(ctx_.path, ctx_.project.name); // closed normally: nothing to recover
     if (media::Recorder::get().recording()) media::Recorder::get().cancel(); // a recording left running ends with the project
     // The layout is remembered for the next project: the whole one, not the viewport alone (the
     // window comes back from full screen too) or a panel maximized.
@@ -384,9 +393,10 @@ void EditorWindow::buildDocks() {
         bool complete = !saved.empty();
         for (const auto& [name, d] : dockWidgets_) complete = complete && saved.find("\"" + name + "\"") != std::string::npos;
         if (complete) docks_->restoreState(QByteArray(saved.data(), static_cast<qsizetype>(saved.size())));
-        // The side panels stay wide enough for their tabs (a narrower saved layout widens).
+        // The side panels stay wide enough for their tabs' whole names (a narrower saved layout
+        // widens): "Objects  Media  Animate" with the minimize and maximize buttons.
         for (const char* name : {"Objects", "Properties"})
-            if (ads::CDockAreaWidget* area = dockWidgets_[name]->dockAreaWidget()) area->setMinimumWidth(275);
+            if (ads::CDockAreaWidget* area = dockWidgets_[name]->dockAreaWidget()) area->setMinimumWidth(285);
     });
 }
 

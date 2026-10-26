@@ -169,9 +169,14 @@ void DevScript::step(QWidget* mainWindow) {
         if (c.op == "wheel") {
             QPoint local;
             QWidget* w = target(window, local);
-            QWheelEvent e(local, w->mapToGlobal(local), QPoint(), QPoint(0, static_cast<int>(num(0) * 120)), Qt::MouseButtons(buttons_),
-                          Qt::KeyboardModifiers(modifiers_), Qt::NoScrollPhase, false);
-            QApplication::sendEvent(w, &e);
+            // Up the parents until one takes it, as the system's wheel goes (a sent event does not).
+            for (QWidget* t = w; t; t = t->isWindow() ? nullptr : t->parentWidget()) {
+                const QPoint at = t->mapFromGlobal(w->mapToGlobal(local));
+                QWheelEvent e(at, t->mapToGlobal(at), QPoint(), QPoint(0, static_cast<int>(num(0) * 120)), Qt::MouseButtons(buttons_),
+                              Qt::KeyboardModifiers(modifiers_), Qt::NoScrollPhase, false);
+                e.setAccepted(false);
+                if (QApplication::sendEvent(t, &e) && e.isAccepted()) break;
+            }
             return;
         }
         if (c.op == "key" && c.args.size() >= 2) {

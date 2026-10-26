@@ -20,6 +20,7 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <memory>
@@ -406,6 +407,20 @@ void openHelp(HelpTab tab) {
         });
         QObject::connect(&AppSignals::get(), &AppSignals::appearanceChanged, window, [] {
             if (window) window->rebuild();
+        });
+        // Built again in another language, on the same page and in the same place.
+        QObject::connect(&AppSignals::get(), &AppSignals::languageChanged, window, [] {
+            PagedWindow* old = window;
+            const bool shown = old->isVisible();
+            const int page = old->currentPage();
+            const QRect geometry = old->geometry();
+            window = nullptr;
+            old->hide();
+            old->deleteLater();
+            if (!shown) return;
+            const HelpTab tabs[] = {HelpTab::Shortcuts, HelpTab::Learn, HelpTab::About, HelpTab::Credits, HelpTab::License};
+            openHelp(tabs[std::clamp(page, 0, 4)]);
+            window->setGeometry(geometry);
         });
     }
     window->showPage(pageOf(tab));

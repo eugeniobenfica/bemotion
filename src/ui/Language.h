@@ -33,7 +33,8 @@ struct LanguageInfo {
 // The bundled languages (assets/languages) and the user's own (<app data>/languages), by name.
 std::vector<LanguageInfo> availableLanguages();
 // Installs the language of the "language" setting ("auto": the system's, when there is a file
-// for it; "en": none). Once, at startup: the interface reads its texts as it is built.
+// for it; "en": none), replacing the one in use. The interface reads its texts as it is built:
+// after a change, AppSignals::languageChanged has the windows build themselves again.
 void installLanguage(const std::string& setting);
 std::string currentLanguage(); // the code in use, "en" for English
 

@@ -2,8 +2,12 @@
 
 #include "ui/Theme.h"
 
+#include <QAbstractSlider>
+#include <QAbstractSpinBox>
+#include <QEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QScrollBar>
 #include <QStyleFactory>
 #include <QStyleOption>
 
@@ -11,7 +15,39 @@
 
 namespace bemotion::ui {
 
+namespace {
+
+// Sliders and number fields take the wheel once clicked (focused); until then it goes on to the
+// page under them, which scrolls.
+class WheelGuard : public QObject {
+public:
+    bool eventFilter(QObject* watched, QEvent* e) override {
+        if (e->type() != QEvent::Wheel || static_cast<QWidget*>(watched)->hasFocus()) return false;
+        e->ignore(); // passed on to the parents
+        return true;
+    }
+};
+
+} // namespace
+
 Style::Style() : QProxyStyle(QStyleFactory::create("Fusion")) {}
+
+void Style::polish(QWidget* widget) {
+    QProxyStyle::polish(widget);
+    const bool slider = qobject_cast<QAbstractSlider*>(widget) && !qobject_cast<QScrollBar*>(widget); // scroll bars: always
+    if (qobject_cast<QAbstractSpinBox*>(widget) || slider) {
+        static WheelGuard guard;
+        widget->setFocusPolicy(Qt::StrongFocus); // not focused by the wheel passing over it
+        widget->installEventFilter(&guard);
+    }
+}
+
+int Style::styleHint(StyleHint hint, const QStyleOption* option, const QWidget* widget, QStyleHintReturn* data) const {
+    // The wheel scrolls the panel under it: it never changes a list's choice on the way (a layer's
+    // shape turned into a polygon while scrolling its properties), as on macOS.
+    if (hint == SH_ComboBox_AllowWheelScrolling) return 0;
+    return QProxyStyle::styleHint(hint, option, widget, data);
+}
 
 int Style::pixelMetric(PixelMetric metric, const QStyleOption* option, const QWidget* widget) const {
     if (metric == PM_IndicatorWidth || metric == PM_IndicatorHeight || metric == PM_ExclusiveIndicatorWidth ||
