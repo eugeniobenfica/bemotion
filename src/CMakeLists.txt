@@ -16,10 +16,12 @@ add_library(bemotion_core STATIC
     core/Validate.cpp
     core/Language.cpp
     core/Layer.cpp
+    core/Lottie.cpp
     core/Presets.cpp
     core/Project.cpp
     core/Serialization.cpp
     core/Snapping.cpp
+    core/Svg.cpp
     core/Transitions.cpp
     core/PluginCatalog.cpp)
 target_include_directories(bemotion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -99,7 +101,6 @@ add_executable(bemotion WIN32
     ui/panels/TimelineGraph.cpp
     ui/panels/TimelinePanel.cpp
     ui/panels/ToolsPanel.cpp
-    ui/panels/TransitionsPanel.cpp
     ui/panels/AnimationsPanel.cpp
     ui/panels/ColorPanel.cpp
     ui/Transcribe.cpp

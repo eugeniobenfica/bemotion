@@ -1,6 +1,7 @@
 #include "ui/EditorWindow.h"
 
 #include "core/Expressions.h"
+#include "core/Lottie.h"
 
 #include "app/Automation.h"
 #include "app/Platform.h"
@@ -31,7 +32,6 @@
 #include "ui/panels/PropertiesPanel.h"
 #include "ui/panels/TimelinePanel.h"
 #include "ui/panels/ToolsPanel.h"
-#include "ui/panels/TransitionsPanel.h"
 #include "ui/panels/AnimationsPanel.h"
 #include "ui/panels/ViewportPanel.h"
 
@@ -288,7 +288,6 @@ void EditorWindow::buildDocks() {
     viewport_->setPreviewQuality(settings().previewQuality);
     properties_ = new PropertiesPanel(ctx_);
     effects_ = new EffectsPanel(ctx_);
-    transitions_ = new TransitionsPanel(ctx_);
     color_ = new ColorPanel(ctx_);
     animations_ = new AnimationsPanel(ctx_);
     scopes_ = new ScopesPanel(ctx_);
@@ -328,11 +327,7 @@ void EditorWindow::buildDocks() {
     connect(viewport_, &ViewportPanel::layerMenuRequested, timeline_, &TimelinePanel::showTrackMenu);
     connect(viewport_, &ViewportPanel::snapshotRequested, this, [this] { exportFrame(); });
     connect(properties_, &PropertiesPanel::panelRequested, this, [this](const QString& name) {
-        // Transitions live in Animate (its first page).
-        if (name == "Transitions") {
-            motionPages_->setCurrentIndex(0);
-            if (const auto parts = motionSwitch_->findChildren<QPushButton*>(Qt::FindDirectChildrenOnly); !parts.isEmpty()) parts[0]->setChecked(true);
-        }
+        // Transitions live in Animate.
         auto it = dockWidgets_.find(name == "Transitions" ? std::string("Motion") : name.toStdString());
         if (it == dockWidgets_.end()) return;
         if (it->second->isClosed()) it->second->toggleView(true); // (a minimized panel comes back too)
@@ -373,25 +368,9 @@ void EditorWindow::buildDocks() {
     left->setCurrentIndex(0);
     auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock(TR_NOOP("Properties"), properties_));
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Effects"), effects_), right);
-    // Animate: transitions and Quick Animations in one panel (both are keyframes made for you),
-    // a switch between their pages; picking one on the timeline shows its page. ("Motion": a
-    // layout saved with the two panels apart comes back as the default one.)
-    motion_ = new QWidget;
-    {
-        auto* col = new QVBoxLayout(motion_);
-        col->setContentsMargins(0, 8, 0, 0);
-        col->setSpacing(6);
-        motionPages_ = new QStackedWidget;
-        motionPages_->addWidget(transitions_);
-        motionPages_->addWidget(animations_);
-        motionSwitch_ = ui::segmented({TR_NOOP("Transitions"), TR_NOOP("Animations")}, 0, [this](int i) { motionPages_->setCurrentIndex(i); });
-        auto* bar = new QHBoxLayout;
-        bar->setContentsMargins(8, 0, 8, 0);
-        bar->addWidget(motionSwitch_, 1);
-        col->addLayout(bar);
-        col->addWidget(motionPages_, 1);
-    }
-    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Animate"), motion_, "Motion"), right);
+    // Animate: transitions and Quick Animations as one thing (keyframes made for you). ("Motion":
+    // a layout saved with the two panels apart comes back as the default one.)
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Animate"), animations_, "Motion"), right);
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Color"), color_), right); // grading: LUT, curves, correction
     connect(color_, &ColorPanel::showScopesRequested, this, [this] {
         ads::CDockWidget* scopes = dockWidgets_["Scopes"];
@@ -942,12 +921,17 @@ void EditorWindow::buildMenus() {
     });
     file->addSeparator();
     file->addAction(action(Action::ImportMedia, tr("Import Media..."), [this] { media_->openImportDialog(); }));
+    file->addAction(ui::menuIcon(ui::Icon::Pen, theme::kTextDim), tr("Import SVG..."), this, [this] {
+        // A drawing: shape layers at the playhead, each outline a path (core/Svg.h).
+        if (auto f = platform::openFileDialog(TR_NOOP("Import SVG"), TR_NOOP("SVG drawing"), ".svg")) media_->importFiles({*f}, true);
+    });
     file->addAction(tr("Show in Folder"), this, [this] {
         if (!ctx_.path.empty()) platform::revealInFileManager(ctx_.path);
     });
     file->addSeparator();
     file->addAction(action(Action::Export, tr("Export Video..."), [this] { ui::showExportDialog(ctx_, this); }));
     file->addAction(action(Action::ExportFrame, tr("Export Frame..."), [this] { exportFrame(); }));
+    file->addAction(tr("Export Lottie (JSON)..."), this, [this] { exportLottieFile(); });
     file->addAction(tr("Copy Frame"), this, [this] { exportFrame(true); });
     file->addSeparator();
     file->addAction(action(Action::CloseProject, tr("Close Project"), [this] {
@@ -1369,19 +1353,12 @@ void EditorWindow::tick() {
     viewport_->sync();
     properties_->sync();
     effects_->sync();
-    // A transition or a Quick Animation just picked on the timeline: its page of Animate.
+    // A transition or a Quick Animation just picked on the timeline: Animate in front (what it
+    // is and a way to take it off; Properties has nothing to show).
     if (const std::pair<uint64_t, uint64_t> picked{ctx_.transitionLayer, ctx_.animationLayer}; picked != motionPicked_) {
         motionPicked_ = picked;
-        const int page = ctx_.animationLayer ? 1 : ctx_.transitionLayer ? 0 : -1;
-        if (page >= 0 && page != motionPages_->currentIndex()) {
-            motionPages_->setCurrentIndex(page);
-            const auto parts = motionSwitch_->findChildren<QPushButton*>(Qt::FindDirectChildrenOnly);
-            if (page < parts.size()) parts[page]->setChecked(true);
-        }
-        // Its tab in front: what it is and a way to take it off (Properties has nothing to show).
-        if (ads::CDockWidget* motion = dockWidgets_["Motion"]; page >= 0 && !motion->isClosed()) motion->setAsCurrentTab();
+        if (ads::CDockWidget* motion = dockWidgets_["Motion"]; (picked.first || picked.second) && !motion->isClosed()) motion->setAsCurrentTab();
     }
-    transitions_->sync();
     color_->sync();
     animations_->sync();
     scopes_->sync();
@@ -1560,6 +1537,28 @@ void EditorWindow::openPreview() {
     preview_->activateWindow();
     preview_->setFocus();
     ctx_.playing = true;
+}
+
+void EditorWindow::exportLottieFile() {
+    const std::string stem = ctx_.project.name.empty() ? std::string("animation") : ctx_.project.name;
+    const std::filesystem::path folder = ctx_.path.empty() ? std::filesystem::path() : ctx_.path.parent_path();
+    const auto file = platform::saveFileDialog(TR_NOOP("Export Lottie"), folder / platform::fromUtf8(stem + ".json"), TR_NOOP("Lottie animation"), "json");
+    if (!file) return;
+    std::vector<std::string> leftOut;
+    std::string error;
+    if (!exportLottie(ctx_.comp(), *file, &leftOut, &error)) {
+        QMessageBox::warning(this, tr("Export Lottie"), QString::fromStdString(error));
+        return;
+    }
+    if (leftOut.empty()) {
+        setStatus(tr("Exported %1").arg(QString::fromStdString(platform::toUtf8(file->filename()))));
+        return;
+    }
+    // What Lottie has no place for, said once.
+    QString list;
+    for (const std::string& what : leftOut) list += QStringLiteral("\n•  ") + QString::fromStdString(what);
+    QMessageBox::information(this, tr("Export Lottie"),
+                             tr("Exported %1. Lottie has no place for these, left out:%2").arg(QString::fromStdString(platform::toUtf8(file->filename())), list));
 }
 
 void EditorWindow::exportFrame(bool toClipboard) {

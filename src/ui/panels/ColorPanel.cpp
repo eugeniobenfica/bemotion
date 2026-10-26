@@ -234,7 +234,7 @@ bool lutOfChoice(QComboBox* combo, int index, std::string& file) {
 ColorPanel::ColorPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(parent), ctx_(ctx) {
     setWidgetResizable(true);
     setFrameShape(QFrame::NoFrame);
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded); // only when narrower than its narrowest (rows wrap and shorten first)
     rebuild();
 }
 

@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstring>
 #include <cmath>
 #include <deque>
 #include <future>
@@ -37,19 +38,39 @@ sk_sp<SkImage> toImage(int w, int h, const std::vector<uint8_t>& rgba, bool mipm
     return img && mipmaps ? img->withDefaultMipmaps() : img;
 }
 
+// What a filmstrip being made has so far (the job writes, the editor reads).
+struct FilmstripProgress {
+    std::mutex mutex;
+    std::shared_ptr<const Filmstrip> latest;
+};
+
+// ... taking the pixels over instead of copying them (video frames: one a frame, 8 MB at 1080p).
+sk_sp<SkImage> toImage(int w, int h, std::vector<uint8_t>&& rgba) {
+    if (w <= 0 || h <= 0 || rgba.size() < static_cast<size_t>(w) * h * 4) return nullptr;
+    auto* pixels = new std::vector<uint8_t>(std::move(rgba));
+    sk_sp<SkData> data = SkData::MakeWithProc(
+        pixels->data(), pixels->size(), [](const void*, void* owner) { delete static_cast<std::vector<uint8_t>*>(owner); }, pixels);
+    const SkImageInfo info = SkImageInfo::Make(w, h, kRGBA_8888_SkColorType, kUnpremul_SkAlphaType);
+    return SkImages::RasterFromData(info, std::move(data), static_cast<size_t>(w) * 4);
+}
+
 } // namespace
 
-// Scrubbing: a video's far frames decoded on a thread of its own, the newest wish only (the ones
-// passed over are skipped), so dragging the playhead over a long-GOP video never waits for a
-// keyframe and the frames after it; the editor shows the last frame meanwhile.
+// The editor's video frames, decoded on a thread of their own (per clip): the frame asked for
+// (the newest wish only: frames passed over while scrubbing are skipped, so dragging the
+// playhead over a long-GOP video never waits), then the next few, read ahead while playing, so
+// the interface never waits for a decoder. The editor shows the last frame until one arrives.
 class Seeker {
 public:
     struct Frame {
-        double time = -1.0, start = -1.0; // asked for; where the frame starts
+        double start = -1.0, duration = 0.0; // where the frame starts, how long it shows
         int w = 0, h = 0;
         std::vector<uint8_t> rgba;
     };
-    Seeker(std::string file, std::atomic<uint64_t>* arrivals) : file_(std::move(file)), arrivals_(arrivals), thread_([this] { run(); }) {}
+    static constexpr int kAhead = 8; // frames read past the playhead
+
+    Seeker(std::string file, double scale, double frameDuration, std::atomic<uint64_t>* arrivals)
+        : file_(std::move(file)), scale_(scale), frameDuration_(frameDuration), arrivals_(arrivals), thread_([this] { run(); }) {}
     ~Seeker() {
         {
             std::lock_guard lock(mutex_);
@@ -58,56 +79,75 @@ public:
         wake_.notify_all();
         thread_.join();
     }
+    double scale() const { return scale_; }
+    // The playhead is at `t` (source seconds): decode it unless it is on its way (read on from
+    // where it is), and keep a few frames ahead of it.
     void want(double t) {
         {
             std::lock_guard lock(mutex_);
-            if (pending_ && wanted_ == t) return;
-            wanted_ = t;
-            pending_ = true;
+            playhead_ = t;
+            const bool onTheWay = rangeStart_ >= 0 && t >= rangeStart_ - 1e-6 && t < next_ + frameDuration_ * 2.0;
+            if (!onTheWay && !(pending_ && wanted_ == t)) {
+                wanted_ = t;
+                pending_ = true;
+            }
         }
         wake_.notify_one();
     }
-    bool take(Frame& out) {
+    // The frames made since the last call.
+    std::vector<Frame> take() {
         std::lock_guard lock(mutex_);
-        if (!ready_) return false;
-        out = std::move(done_);
-        ready_ = false;
-        return true;
+        return std::exchange(done_, {});
     }
 
 private:
     void run() {
         std::unique_ptr<VideoReader> reader = VideoReader::open(pathOf(file_));
+        if (reader) reader->setOutputScale(scale_);
         std::unique_lock lock(mutex_);
         for (;;) {
-            wake_.wait(lock, [this] { return quit_ || pending_; });
+            // Something asked, or the playhead not far enough behind what is read.
+            wake_.wait(lock, [this] { return quit_ || pending_ || (rangeStart_ >= 0 && !atEnd_ && next_ < playhead_ + kAhead * frameDuration_); });
             if (quit_) return;
-            Frame f;
-            f.time = wanted_;
+            const bool jump = pending_;
+            const double t = jump ? wanted_ : next_;
             pending_ = false;
             lock.unlock();
-            const bool ok = reader && reader->frameAt(f.time, f.rgba);
+            Frame f;
+            const bool ok = reader && reader->frameAt(t, f.rgba);
             if (ok) {
                 f.w = reader->width();
                 f.h = reader->height();
                 f.start = reader->frameTime();
+                f.duration = frameDuration_;
             }
             lock.lock();
-            if (ok) {
-                done_ = std::move(f);
-                ready_ = true;
-                arrivals_->fetch_add(1); // the views draw again
+            if (!ok || f.start < 0) { // past the end (or unreadable): nothing more ahead
+                atEnd_ = true;
+                if (jump) rangeStart_ = -1.0;
+                continue;
             }
+            if (pending_) continue; // asked elsewhere meanwhile: this one is not wanted any more
+            atEnd_ = false;
+            if (jump) rangeStart_ = f.start;
+            next_ = std::max(next_, f.start + frameDuration_ * 1.01);
+            if (jump) next_ = f.start + frameDuration_ * 1.01;
+            const bool asked = jump || std::fabs(f.start - playhead_) < frameDuration_;
+            done_.push_back(std::move(f));
+            if (done_.size() > static_cast<size_t>(kAhead) * 2) done_.erase(done_.begin()); // not collected: the oldest goes
+            if (asked) arrivals_->fetch_add(1); // the views draw again (frames read ahead wait for their time)
         }
     }
 
     std::string file_;
+    double scale_, frameDuration_;
     std::atomic<uint64_t>* arrivals_;
     std::mutex mutex_;
     std::condition_variable wake_;
-    double wanted_ = 0.0;
-    bool pending_ = false, quit_ = false, ready_ = false;
-    Frame done_;
+    double wanted_ = 0.0, playhead_ = 0.0;
+    double rangeStart_ = -1.0, next_ = 0.0; // what was read since the last jump: [rangeStart_, next_)
+    bool pending_ = false, quit_ = false, atEnd_ = false;
+    std::vector<Frame> done_;
     std::thread thread_; // last: everything above exists before it runs
 };
 
@@ -123,7 +163,8 @@ struct MediaManager::Impl {
         double shown = -1.0; // source time of `image`
         std::vector<uint8_t> rgba;
         int lastUse = 0;
-        std::unique_ptr<Seeker> seeker; // the editor's far frames (scrubbing)
+        std::unique_ptr<Seeker> seeker; // the editor's frames (scrubbing, playing)
+        std::deque<std::pair<double, sk_sp<SkImage>>> recent; // the seeker's latest frames, by start
     };
     struct Decoded {
         std::vector<float> samples;
@@ -179,12 +220,22 @@ struct MediaManager::Impl {
     uint64_t generation = 1;
     std::atomic<uint64_t> arrivals{0}; // frames a seeker finished (and filmstrips made)
     struct FilmstripJob {
-        std::future<std::shared_ptr<const Filmstrip>> job;
-        std::shared_ptr<const Filmstrip> done;
+        std::future<void> job;
+        std::shared_ptr<FilmstripProgress> progress = std::make_shared<FilmstripProgress>();
         std::shared_ptr<std::atomic_bool> cancel = std::make_shared<std::atomic_bool>(false);
     };
     std::map<std::string, FilmstripJob> filmstrips; // by file
     bool staleServed = false;          // a picture shown while its frame was on its way
+    // How many screen pixels a composition pixel takes in each view showing the editor's
+    // composition (by view, with the tick it was told): videos are decoded no bigger than shown.
+    std::map<const void*, std::pair<double, int>> previewScales;
+    bool scaledPreview = true;
+    double previewScale() const {
+        double s = 0.0;
+        for (const auto& [view, entry] : previewScales)
+            if (tick - entry.second < 60) s = std::max(s, entry.first);
+        return s > 0.0 ? s : 1.0;
+    }
 
     void trimFrames() {
         while (frameBytes > frameBudget && !frames.empty()) {
@@ -354,7 +405,18 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
     if (!item || !item->hasVideo) return nullptr;
     if (item->kind == MediaKind::Image) return thumbnail(*item); // the full image
     Impl& m = impl();
+    const bool preview = &comp == m.preview;
     const std::string file = showsProxy(comp, *item) ? platform8(proxyPath(*item)) : item->path;
+    const double frame = item->fps > 0 ? 1.0 / item->fps : 1.0 / 30.0;
+    // The editor decodes a video no bigger than it shows it (steps of an eighth, so zooming does
+    // not decode again at every step); exports and 3D layers, at full size.
+    double scale = 1.0;
+    if (preview && m.scaledPreview && !layer.threeD && item->width > 0) {
+        const Affine w = comp.worldMatrix(layer, t);
+        const double shown = m.previewScale() * std::max(std::hypot(w.a, w.b), std::hypot(w.c, w.d)) *
+                             (layer.media.size.x > 0 ? layer.media.size.x / item->width : 1.0);
+        scale = std::clamp(std::ceil(shown * 8.0) / 8.0, 0.125, 1.0);
+    }
     Impl::Video& v = m.videos[{&comp, layer.id}];
     v.lastUse = m.tick;
     if (v.path != file) {
@@ -366,97 +428,129 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
         if (!v.reader) m.errors[item->id] = error;
     }
     if (!v.reader) return nullptr;
+    if (v.seeker && v.seeker->scale() != scale) v.seeker = nullptr, v.recent.clear(); // made again at the new size
     const double source = std::clamp(layer.media.sourceTime(t), 0.0, std::max(0.0, item->duration));
-    const double frame = item->fps > 0 ? 1.0 / item->fps : 1.0 / 30.0;
-    if (v.image && std::fabs(source - v.shown) < frame * 0.5) return v.image; // this frame is already decoded
-    // Decoded before (by this layer or another one showing the same file)?
-    auto& cached = m.frames[file];
-    if (auto it = cached.upper_bound(source + 1e-6); it != cached.begin()) {
-        --it;
-        if (source < it->first + it->second.duration - 1e-6) {
-            it->second.lastUse = ++m.frameUses;
-            v.image = it->second.image;
+    const bool fits = v.image && std::abs(v.image->width() - std::max(2, static_cast<int>(std::lround(item->width * scale / 2.0)) * 2)) <= 2;
+    if (v.image && fits && std::fabs(source - v.shown) < frame * 0.5) return v.image; // this frame is already decoded
+    // Decoded before (by this layer or another one showing the same file at this size)?
+    auto& cached = m.frames[scale < 1.0 ? file + "@" + std::to_string(scale) : file];
+    auto keep = [&](double start, const sk_sp<SkImage>& img) {
+        if (start < 0 || m.frameBudget == 0 || !img) return;
+        Impl::CachedFrame& entry = cached[start];
+        if (entry.image) m.frameBytes -= entry.image->imageInfo().computeMinByteSize();
+        entry = {img, frame, ++m.frameUses};
+        m.frameBytes += img->imageInfo().computeMinByteSize();
+        m.trimFrames();
+    };
+    auto lookUp = [&]() -> sk_sp<SkImage> {
+        for (auto it = v.recent.rbegin(); it != v.recent.rend(); ++it)
+            if (source >= it->first - 1e-6 && source < it->first + frame - 1e-6) return it->second;
+        if (auto it = cached.upper_bound(source + 1e-6); it != cached.begin()) {
+            --it;
+            if (source < it->first + it->second.duration - 1e-6) {
+                it->second.lastUse = ++m.frameUses;
+                return it->second.image;
+            }
+        }
+        return nullptr;
+    };
+    if (preview) {
+        // The editor: frames come from the clip's seeker; what it made since is kept first.
+        if (!v.seeker) v.seeker = std::make_unique<Seeker>(file, scale, frame, &m.arrivals);
+        for (Seeker::Frame& f : v.seeker->take()) {
+            sk_sp<SkImage> img = toImage(f.w, f.h, std::move(f.rgba));
+            if (!img) continue;
+            v.recent.emplace_back(f.start, img);
+            if (v.recent.size() > static_cast<size_t>(Seeker::kAhead) * 3) v.recent.pop_front();
+            keep(f.start, img);
+        }
+        v.seeker->want(source); // this one (unless on its way), and the next few
+        if (sk_sp<SkImage> hit = lookUp()) {
+            v.image = hit;
             v.shown = source;
             return v.image;
         }
-    }
-    // The editor, scrubbing: a frame far from where this reader is comes from the seeker (the
-    // last picture shows until it is there); reading on (playing) stays here, frame by frame.
-    if (&comp == m.preview && v.image) {
-        Seeker::Frame f;
-        if (v.seeker && v.seeker->take(f)) {
-            if (sk_sp<SkImage> img = toImage(f.w, f.h, f.rgba, false)) {
-                if (f.start >= 0 && m.frameBudget > 0) {
-                    Impl::CachedFrame& entry = cached[f.start];
-                    if (entry.image) m.frameBytes -= entry.image->imageInfo().computeMinByteSize();
-                    entry = {img, frame, ++m.frameUses};
-                    m.frameBytes += img->imageInfo().computeMinByteSize();
-                    m.trimFrames();
-                }
-                v.image = img;
-                v.shown = f.time;
-                if (std::fabs(f.time - source) < frame * 0.5) return v.image;
-            }
-        }
-        const double at = v.reader->frameTime(); // where this reader stands
-        const auto near = [&](double from) { return from >= 0 && source >= from - 1e-6 && source <= from + frame * 4.0; };
-        // Just after the picture shown (playing on, a slow drag forward): read here, so this reader
-        // catches up once and then goes on frame by frame.
-        if (!near(at) && !near(v.shown)) {
-            if (!v.seeker) v.seeker = std::make_unique<Seeker>(file, &m.arrivals);
-            v.seeker->want(source);
+        if (v.image) { // still on its way: the last picture meanwhile
             m.staleServed = true;
             return v.image;
         }
+        v.reader->setOutputScale(scale); // nothing to show yet: this one now
+    } else if (sk_sp<SkImage> hit = lookUp()) {
+        v.image = hit;
+        v.shown = source;
+        return v.image;
     }
     if (!v.reader->frameAt(source, v.rgba)) return v.image;
-    v.image = toImage(v.reader->width(), v.reader->height(), v.rgba, false);
+    v.image = toImage(v.reader->width(), v.reader->height(), std::move(v.rgba));
     v.shown = source;
-    if (const double start = v.reader->frameTime(); v.image && start >= 0 && m.frameBudget > 0) {
-        Impl::CachedFrame& entry = cached[start];
-        if (entry.image) m.frameBytes -= entry.image->imageInfo().computeMinByteSize();
-        entry = {v.image, frame, ++m.frameUses};
-        m.frameBytes += v.image->imageInfo().computeMinByteSize();
-        m.trimFrames();
-    }
+    keep(v.reader->frameTime(), v.image);
     return v.image;
 }
 
+void MediaManager::setPreviewScale(const void* view, double pixelsPerUnit) {
+    Impl& m = impl();
+    if (pixelsPerUnit > 0.0) m.previewScales[view] = {pixelsPerUnit, m.tick};
+    else m.previewScales.erase(view);
+}
+
+void MediaManager::setScaledPreview(bool on) { impl().scaledPreview = on; }
+
 namespace {
 
-// Decodes `count` frames along the video, each shrunk to `height` pixels high (box filter).
-std::shared_ptr<const Filmstrip> makeFilmstrip(const std::filesystem::path& file, double duration, const std::atomic_bool* cancel) {
+// Pictures along the video, 54 pixels high, decoded small (never at full size). First the
+// keyframe before each time (quick: all along the clip in a moment), coarse to fine; then the
+// exact frames, reading on. What is made so far is published every few pictures.
+void makeFilmstrip(const std::filesystem::path& file, double duration, const std::atomic_bool* cancel, FilmstripProgress* progress,
+                   std::atomic<uint64_t>* arrivals) {
     std::unique_ptr<VideoReader> reader = VideoReader::open(file);
-    if (!reader || reader->width() <= 0 || reader->height() <= 0 || duration <= 0) return nullptr;
-    auto strip = std::make_shared<Filmstrip>();
+    if (!reader || reader->width() <= 0 || reader->height() <= 0 || duration <= 0) return;
+    Filmstrip strip;
     const int count = std::clamp(static_cast<int>(std::ceil(duration / 0.5)), 1, 160); // one every half second, at most 160
-    strip->step = duration / count;
-    strip->height = 54;
-    strip->width = std::max(1, static_cast<int>(std::lround(strip->height * static_cast<double>(reader->width()) / reader->height())));
-    const int sw = reader->width(), sh = reader->height(), dw = strip->width, dh = strip->height;
+    strip.step = duration / count;
+    strip.height = 54;
+    strip.width = std::max(2, static_cast<int>(std::lround(strip.height * static_cast<double>(reader->width()) / reader->height())));
+    strip.frames.resize(static_cast<size_t>(count));
+    reader->setOutputScale(std::min(1.0, (strip.height + 1.0) / reader->height()));
+    auto publish = [&] {
+        ++strip.version;
+        auto copy = std::make_shared<const Filmstrip>(strip);
+        std::lock_guard lock(progress->mutex);
+        progress->latest = std::move(copy);
+        arrivals->fetch_add(1); // the timeline draws again
+    };
+    // A picture from the reader, fitted to the strip's size (the reader's is within a pixel).
     std::vector<uint8_t> rgba;
-    for (int i = 0; i < count && !cancel->load(); ++i) {
-        if (!reader->frameAt((i + 0.5) * strip->step, rgba) || rgba.size() < static_cast<size_t>(sw) * sh * 4) break;
-        std::vector<uint8_t> small(static_cast<size_t>(dw) * dh * 4);
+    auto grab = [&](int i) {
+        if (!reader->frameAt((i + 0.5) * strip.step, rgba)) return false;
+        const int sw = reader->width(), sh = reader->height(), dw = strip.width, dh = strip.height;
+        if (rgba.size() < static_cast<size_t>(sw) * sh * 4) return false;
+        std::vector<uint8_t>& out = strip.frames[static_cast<size_t>(i)];
+        out.resize(static_cast<size_t>(dw) * dh * 4);
         for (int y = 0; y < dh; ++y) {
-            const int y0 = y * sh / dh, y1 = std::max(y0 + 1, (y + 1) * sh / dh);
-            for (int x = 0; x < dw; ++x) {
-                const int x0 = x * sw / dw, x1 = std::max(x0 + 1, (x + 1) * sw / dw);
-                // A few samples of the box are plenty for a picture this small.
-                uint32_t sum[4] = {0, 0, 0, 0}, n = 0;
-                for (int yy = y0; yy < y1; yy += std::max(1, (y1 - y0) / 3))
-                    for (int xx = x0; xx < x1; xx += std::max(1, (x1 - x0) / 3)) {
-                        const uint8_t* px = rgba.data() + (static_cast<size_t>(yy) * sw + xx) * 4;
-                        for (int c = 0; c < 4; ++c) sum[c] += px[c];
-                        ++n;
-                    }
-                uint8_t* out = small.data() + (static_cast<size_t>(y) * dw + x) * 4;
-                for (int c = 0; c < 4; ++c) out[c] = static_cast<uint8_t>(sum[c] / std::max(1u, n));
-            }
+            const uint8_t* row = rgba.data() + static_cast<size_t>(std::min(sh - 1, y * sh / dh)) * sw * 4;
+            for (int x = 0; x < dw; ++x) std::memcpy(out.data() + (static_cast<size_t>(y) * dw + x) * 4, row + std::min(sw - 1, x * sw / dw) * 4, 4);
         }
-        strip->frames.push_back(std::move(small));
+        return true;
+    };
+    // 1. Keyframes, coarse to fine.
+    reader->setQuick(true);
+    int made = 0;
+    for (int stride = 16; stride >= 1 && !cancel->load(); stride /= 2)
+        for (int i = 0; i < count && !cancel->load(); i += stride) {
+            if (!strip.frames[static_cast<size_t>(i)].empty()) continue;
+            if (grab(i) && ++made % 8 == 0) publish();
+        }
+    if (cancel->load()) return;
+    publish();
+    // 2. The exact frames, reading on (no seeking back and forth).
+    reader->setQuick(false);
+    for (int i = 0; i < count && !cancel->load(); ++i) {
+        grab(i);
+        if (i % 16 == 15) publish();
     }
-    return strip->frames.empty() ? nullptr : strip;
+    if (cancel->load()) return;
+    strip.complete = true;
+    publish();
 }
 
 } // namespace
@@ -467,23 +561,17 @@ std::shared_ptr<const Filmstrip> MediaManager::filmstrip(const MediaItem& item) 
     const bool proxy = hasProxy(item);
     const std::string file = proxy ? platform8(proxyPath(item)) : item.path;
     Impl::FilmstripJob& f = m.filmstrips[file];
-    if (f.done) return f.done;
     if (!f.job.valid()) {
         try {
-            f.job = std::async(std::launch::async, [path = pathOf(file), duration = item.duration, cancel = f.cancel, arrivals = &m.arrivals] {
-                auto strip = makeFilmstrip(path, duration, cancel.get());
-                arrivals->fetch_add(1); // the timeline draws again
-                return strip;
-            });
+            f.job = std::async(std::launch::async, [path = pathOf(file), duration = item.duration, cancel = f.cancel, progress = f.progress,
+                                                    arrivals = &m.arrivals] { makeFilmstrip(path, duration, cancel.get(), progress.get(), arrivals); });
         } catch (const std::exception&) {
             return nullptr;
         }
         return nullptr;
     }
-    if (f.job.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return nullptr;
-    f.done = f.job.get();
-    if (!f.done) f.done = std::make_shared<Filmstrip>(); // nothing to show: not tried again
-    return f.done->frames.empty() ? nullptr : f.done;
+    std::lock_guard lock(f.progress->mutex);
+    return f.progress->latest;
 }
 
 void MediaManager::setPreview(const Composition* preview) { impl().preview = preview; }

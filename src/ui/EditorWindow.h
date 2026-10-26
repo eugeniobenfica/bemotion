@@ -21,7 +21,6 @@ class QAction;
 class QLabel;
 class QMenu;
 class QPushButton;
-class QStackedWidget;
 class QTimer;
 namespace ads {
 class CDockAreaWidget;
@@ -36,7 +35,6 @@ class ObjectsPanel;
 class MediaPanel;
 class ScopesPanel;
 class ToolsPanel;
-class TransitionsPanel;
 class ColorPanel;
 class AnimationsPanel;
 class ToolsPopover;
@@ -102,6 +100,7 @@ private:
     void autosave();
     void openPreview(); // full screen, only the picture, playing
     void exportFrame(bool toClipboard = false); // the frame at the playhead, as a PNG
+    void exportLottieFile();                    // File › Export Lottie (core/Lottie.h)
     void resetLayout();
     void fitSideAreas(); // side areas at least as wide as their tabs
     void maximizeDock(ads::CDockWidget* dock);
@@ -142,10 +141,6 @@ private:
     ViewportPanel* viewport_ = nullptr;
     PropertiesPanel* properties_ = nullptr;
     EffectsPanel* effects_ = nullptr;
-    TransitionsPanel* transitions_ = nullptr;
-    QWidget* motion_ = nullptr;          // Animate: transitions and Quick Animations
-    QStackedWidget* motionPages_ = nullptr;
-    QWidget* motionSwitch_ = nullptr;
     std::pair<uint64_t, uint64_t> motionPicked_{0, 0}; // transition / animation picked when last looked
     ColorPanel* color_ = nullptr;
     AnimationsPanel* animations_ = nullptr;

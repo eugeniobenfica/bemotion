@@ -105,7 +105,7 @@ QGridLayout* CollapsibleSection::grid() {
         grid_->setHorizontalSpacing(6);
         grid_->setVerticalSpacing(4);
         grid_->setColumnMinimumWidth(0, 20);
-        grid_->setColumnMinimumWidth(1, 88);
+        grid_->setColumnMinimumWidth(1, 60); // labels shorten below their width (ElidedLabel)
         grid_->setColumnStretch(2, 1);
         grid_->setColumnMinimumWidth(3, 24);
         body_->addLayout(grid_);
@@ -115,7 +115,7 @@ QGridLayout* CollapsibleSection::grid() {
 
 void CollapsibleSection::addPlainRow(const QString& label, QWidget* editor) {
     QGridLayout* g = grid();
-    auto* l = new QLabel(trLabel(label));
+    auto* l = new ui::ElidedLabel(trLabel(label));
     ui::setTone(l, ui::Tone::TextDim);
     g->addWidget(l, gridRows_, 1);
     g->addWidget(editor, gridRows_, 2);
@@ -219,7 +219,7 @@ QWidget* PropertyRow::buildEditors(const PropertyRef& prop) {
     });
 
     labelText_ = trLabel(QString::fromUtf8(prop.label));
-    label_ = new QLabel(labelText_);
+    label_ = new ui::ElidedLabel(labelText_); // shortened when the panel is narrow
     label_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(label_, &QWidget::customContextMenuRequested, this, [this](QPoint p) { showMenu(label_->mapToGlobal(p)); });
 

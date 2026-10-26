@@ -160,8 +160,8 @@ public:
             if (error) *error = "This video's codec is not supported.";
             return false;
         }
-        width_ = dec_.ctx->width;
-        height_ = dec_.ctx->height;
+        width_ = fullWidth_ = dec_.ctx->width;
+        height_ = fullHeight_ = dec_.ctx->height;
         const AVRational rate = av_guess_frame_rate(in_.fmt, stream_, nullptr);
         frameDuration_ = rate.num > 0 ? av_q2d(av_inv_q(rate)) : 1.0 / 30.0;
         // Time 0 of the clip is its first frame (edit lists and offsets are handled by libavformat).
@@ -174,6 +174,21 @@ public:
     bool hardware() const override { return dec_.hwFormat != AV_PIX_FMT_NONE; }
     double frameTime() const override { return have_ ? shown_ : -1.0; }
     double frameDuration() const { return frameDuration_; }
+    void setOutputScale(double scale) override {
+        scale = std::clamp(scale, 0.01, 1.0);
+        // Even sizes (chroma planes), at least 2 x 2.
+        const int w = std::max(2, static_cast<int>(std::lround(fullWidth_ * scale / 2.0)) * 2);
+        const int h = std::max(2, static_cast<int>(std::lround(fullHeight_ * scale / 2.0)) * 2);
+        if (scale >= 1.0 || w >= fullWidth_ || h >= fullHeight_) width_ = fullWidth_, height_ = fullHeight_;
+        else width_ = w, height_ = h;
+        if (have_ && static_cast<int>(rgba_.size()) != width_ * height_ * 4) have_ = false; // converted again when asked
+    }
+    void setQuick(bool keyframesOnly) override {
+        quick_ = keyframesOnly;
+        dec_.ctx->skip_loop_filter = AVDISCARD_ALL; // small pictures: the deblocking would not show
+        dec_.ctx->skip_frame = keyframesOnly ? AVDISCARD_NONKEY : AVDISCARD_DEFAULT;
+        have_ = false;
+    }
 
     bool frameAt(double seconds, std::vector<uint8_t>& rgba) override {
         if (decode(seconds, rgba)) return true;
@@ -192,8 +207,10 @@ private:
             rgba = rgba_;
             return true;
         }
-        // Backwards, or far ahead: seek to the keyframe before, then decode forward.
-        if (!have_ || seconds < shown_ || seconds > shown_ + 1.0) {
+        // Backwards, or far ahead: seek to the keyframe before, then decode forward. (Keyframes
+        // only: always, and the first one there is the picture.)
+        const bool seek = quick_ || !have_ || seconds < shown_ || seconds > shown_ + 1.0;
+        if (seek) {
             const int64_t ts = static_cast<int64_t>((seconds + origin_) / av_q2d(stream_->time_base));
             av_seek_frame(in_.fmt, index_, ts, AVSEEK_FLAG_BACKWARD);
             avcodec_flush_buffers(dec_.ctx);
@@ -206,7 +223,7 @@ private:
             if (r == 0) {
                 const int64_t pts = frame.f->best_effort_timestamp;
                 const double t = (pts == AV_NOPTS_VALUE ? shown_ + frameDuration_ : pts * av_q2d(stream_->time_base)) - origin_;
-                const bool covers = t + frameDuration_ > seconds + 1e-6;
+                const bool covers = quick_ || t + frameDuration_ > seconds + 1e-6;
                 if (covers || !have_) store(frame.f, t);
                 av_frame_unref(frame.f);
                 if (covers) break;
@@ -244,8 +261,10 @@ private:
             }
             f = copy.f;
         }
+        // Shrinking a lot (a filmstrip): an area filter, else bilinear.
+        const int flags = width_ * 3 < f->width ? SWS_AREA : SWS_BILINEAR;
         sws_ = sws_getCachedContext(sws_, f->width, f->height, static_cast<AVPixelFormat>(f->format), width_, height_,
-                                    AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
+                                    AV_PIX_FMT_RGBA, flags, nullptr, nullptr, nullptr);
         if (!sws_) return;
         rgba_.resize(static_cast<size_t>(width_) * height_ * 4);
         uint8_t* dst[4] = {rgba_.data(), nullptr, nullptr, nullptr};
@@ -260,7 +279,9 @@ private:
     AVStream* stream_ = nullptr;
     SwsContext* sws_ = nullptr;
     int index_ = -1;
-    int width_ = 0, height_ = 0;
+    int width_ = 0, height_ = 0;         // of the pictures made (setOutputScale)
+    int fullWidth_ = 0, fullHeight_ = 0; // of the video
+    bool quick_ = false;
     double frameDuration_ = 1.0 / 30.0;
     double origin_ = 0.0;
     double shown_ = 0.0;

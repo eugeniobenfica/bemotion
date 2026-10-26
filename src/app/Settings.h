@@ -59,6 +59,9 @@ struct Settings {
     bool hardwareDecoding = false; // videos read by the graphics card (media/MediaIO.h); off: a fast processor often beats it
     bool useProxies = true;       // the editor shows videos' proxies when they have one
     int cacheMegabytes = 1024;    // memory for cached frames: half decoded video, half rendered previews
+    bool scaledVideoPreview = true; // the editor decodes videos no bigger than it shows them (exports: full size)
+    bool autoProxies = false;       // imported videos bigger than 1280 x 720 get a proxy at once
+    bool showFilmstrips = true;     // video clips show their frames on the timeline
     // The interface language: "auto" (the system's, when there is a file for it), "en", or a
     // language file's code ("pt-BR"); see ui/Language.h. Takes effect at the next start.
     std::string language = "auto";

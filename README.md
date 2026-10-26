@@ -170,9 +170,11 @@ does.
   property, this clip's values, animation, math and every other layer's
   properties, each with what it does, searchable; close it and it keeps
   working; *Convert to Keyframes* bakes it
-- **Animate** panel: transitions and Quick Animations together (both are
-  keyframes made for you), a switch between their pages, each page listing
-  first what the selected clip has (with a way to take it off)
+- **Animate** panel: transitions and Quick Animations are one thing there
+  (keyframes made for you): one list, one search, the same tiles and, on the
+  timeline, the same bands; on top, everything the clip has in time order
+  (its in, its animations, its out), each with its length and a way to take
+  it off
 - **Quick Animations**: Fade, Pop, Slide, Drop, Zoom, Rise, Shake, Heartbeat,
   Float, Bounce, Wobble, Blink, Spin, Typewriter, Draw On… click one for the
   selection or drag it onto a clip; stackable, importable, savable; each is a
@@ -252,6 +254,10 @@ does.
 - Audio is mixed in: AAC in MP4, PCM in MOV, Opus in WebM, a `.wav` beside PNGs
 - **Export Frame** (Shift+E, the viewport's camera button, or *File › Copy
   Frame*): the frame at the playhead as a full-size PNG
+- **Export Lottie** (*File › Export Lottie*, or `bemotion lottie`): shapes,
+  paths, plain text, pictures, backgrounds, masks and compounds as a Lottie
+  JSON for the web and apps, keyframes with their easing (expressions are
+  baked); what Lottie has no place for (video, effects, cameras) is listed
 - Render, export and edit from the command line or an AI assistant
 
 </td>
@@ -292,14 +298,16 @@ does.
   (Settings › Interface › Language, switched at once, no restart); a
   language is one JSON file anyone can translate and drop into bemotion's
   `languages` folder
-- **Smooth with big footage**: **proxies** (Media panel › right-click ›
-  *Create Proxy*: a small copy the editor plays, exports use the original),
-  frames kept in memory as they are shown (they play again at once),
-  scrubbing that never waits for a video (far frames decode in the
-  background), and optional **hardware decoding**
-  (Settings › Editor › Playback)
+- **Smooth with big footage**: videos decoded on threads of their own, read
+  ahead while playing and **at the size they are shown** (a 4K clip in a
+  small viewport is read small; exports always at full size), **proxies**
+  (Media panel › right-click › *Create Proxy*, or made on import), frames
+  kept in memory as they are shown (they play again at once), scrubbing that
+  never waits for a video, filmstrips that fill in at once (keyframes first,
+  then the exact frames), and optional **hardware decoding** — all in
+  *Settings › Performance*
 - Each object says what it has: effects and transitions at the top of
-  Properties; the Transitions panel shows the clip's in and out transitions,
+  Properties; the Animate panel shows the clip's ins, outs and animations,
   their durations and a remove button; clips in the timeline name their
   speed, matte, blending mode and masks
 
@@ -354,7 +362,11 @@ does.
   and video (MP4, MOV, M4V, MKV, WebM, AVI, WMV, MPEG, MTS) on every platform,
   through FFmpeg. **Folders** keep it tidy (they live in the project only;
   nothing moves on disk): *New Folder*, then drag media onto one or
-  right-click › *Move to Folder*.
+  right-click › *Move to Folder*; drag it out of the folder (anywhere below
+  or outside it) to take it out.
+  **SVG drawings** (*File › Import SVG*, or dropped like media) become shape
+  layers, one per outline, in a compound: paths, shapes, groups' transforms,
+  fills, gradients, strokes; a letter's hole cuts it as a mask.
   Audio plays with the timeline; video clips show their frames along them and
   their sound on an *Audio* row of its own under them (mute it there); sound
   clips show their waveform; video and audio clips trim only within their
@@ -364,6 +376,8 @@ does.
   (inside a folder too)
 - Dialogs and windows wear bemotion's own header (the title, a close button;
   drag it to move, an edge to resize): no system title bar
+- The mouse wears the tool you picked (cut, pen, crop, ripple, roll, slip)
+  where it works
 - **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
   Space+drag or Alt+drag; corner handles scale (Shift = uniform), the rotation
   handle rotates (Shift = 15° snaps)
@@ -379,8 +393,8 @@ does.
   releases the layers keeping their look
 - **New objects** start at the playhead and last 5 seconds (like Premiere's
   default still duration); the playhead may go past the end to add more
-- **Settings** (Ctrl+,): Theme, Interface, Editor, Shortcuts (searchable) and
-  Plugins pages, each option a titled, described row, each page with a reset;
+- **Settings** (Ctrl+,): Theme, Interface, Editor, Performance, Shortcuts
+  (searchable) and Plugins pages, each option a titled, described row, each page with a reset;
   the intro animation can be turned off in *Interface*
 - **Help** (F1), in the same style as Settings: every shortcut as key caps
   (searchable), *Learn* (the guides), About, Credits and License

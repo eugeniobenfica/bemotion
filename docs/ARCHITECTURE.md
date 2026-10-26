@@ -247,8 +247,10 @@ decoded), eased over its fade.
   working copy, so values in queries and scripts are what renders.
   Mistyped names get `core/Suggest.h`'s "did you mean", as operations do.
 - **`Presets`** — Quick Animations: they write ordinary keyframes. The
-  *Animate* panel lists them (its second page, `ui/panels/AnimationsPanel`;
-  the first is `TransitionsPanel`, the dock "Motion"); dragged onto a
+  *Animate* panel (`ui/panels/AnimationsPanel`, the dock "Motion") lists them
+  and the transitions as one thing: one list and search, one "what the clip
+  has" card in time order, and on the timeline one band style
+  (`drawMotionBand`) picked, moved, stretched and deleted alike; dragged onto a
   clip (`kAnimationMime`, the preset as JSON) one plays from the drop point.
   `applyQuickAnimation` also remembers it on the layer (`Layer::animations`:
   name, category, start, duration; moved by `shiftTime`) for the timeline's
@@ -407,6 +409,27 @@ Rules:
   own (`Seeker`, the newest wish only) while the last one shows; renders that
   used such a stand-in are not kept (`takeStale`), and `arrivals()` redraws.
   While playing, the scene renders at the frame's own time, as exports do.
+- **The editor never waits for a decoder**: every video of the editor's
+  composition is read by its clip's `Seeker` thread, which also reads a few
+  frames ahead of the playhead (`kAhead`), handed over without a copy
+  (`toImage` takes the pixels). It decodes at the size shown
+  (`VideoReader::setOutputScale`: the views tell `setPreviewScale` how many
+  screen pixels a composition pixel takes; times the layer's scale, rounded up
+  to an eighth; cached frames are kept per size), so a 4K clip in a small
+  viewport is converted and drawn small; exports and 3D layers read full
+  size. Filmstrips are made small from the start (`setQuick`: keyframes and
+  no deblocking first, coarse to fine, then the exact frames) and published
+  as they grow (`Filmstrip::version`); the timeline keeps them as pixmaps at
+  the height it draws. *Settings › Performance* holds the switches
+  (`scaled_video_preview`, `auto_proxies`, `show_filmstrips`, hardware
+  decoding, proxies, cache memory, preview quality).
+
+- **SVG and Lottie** (`core/Svg`, `core/Lottie`): pure data, no Qt. `addSvg`
+  reads SVG text with its own small XML and path reader into Path shape
+  layers (`svg.add`, File › Import SVG, dropped `.svg` files); `toLottie`
+  writes the composition as Bodymovin JSON (File › Export Lottie,
+  `bemotion lottie`), keyframes as Bézier easing, expressions and Elastic /
+  Bounce baked per frame, and lists what it left out.
 
 ## 7. The editor (`src/ui`)
 
@@ -502,7 +525,7 @@ Rules:
   layer) shows alone, and Delete removes it. A transition picked there is the
   selection on its own (`EditorContext::transitionLayer`). Video clips draw
   their frames (`MediaManager::filmstrip`: small pictures along the video,
-  made on a thread the first time); their sound has a row of its own (Audio)
+  made on a thread the first time, shown as they come); their sound has a row of its own (Audio)
   under the track. The
   timeline's Ripple / Roll / Slip tools (`Tool::Ripple`…) redo their edit from
   a copy of the composition taken when the drag started (`dragBase_`), and

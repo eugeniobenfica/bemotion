@@ -1,5 +1,6 @@
 #include "ui/PreviewWindow.h"
 
+#include "media/MediaManager.h"
 #include "render/SceneRenderer.h"
 #include "ui/Draw.h"
 #include "ui/EditorContext.h"
@@ -94,6 +95,7 @@ void PreviewWindow::paintEvent(QPaintEvent*) {
     const SkImageInfo info = qtImageInfo(px.width(), px.height());
     if (sk_sp<SkSurface> surface = SkSurfaces::WrapPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()))) {
         const float z = static_cast<float>(scale);
+        media::MediaManager::get().setPreviewScale(this, zoom * z); // videos decoded no bigger than shown here
         SkCanvas* canvas = surface->getCanvas();
         canvas->clipRect(SkRect::MakeXYWH(origin.x * z, origin.y * z, size.x * z, size.y * z)); // nothing past the frame
         render::drawComposition(canvas, c, t, render::View{origin * z, zoom * z, c.cameraAt(t)}, true, true, nullptr);

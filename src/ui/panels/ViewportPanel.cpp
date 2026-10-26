@@ -11,6 +11,7 @@
 #include "ui/EditorContext.h"
 #include "ui/Mime.h"
 #include "ui/Theme.h"
+#include "ui/Tools.h"
 #include "ui/Widgets.h"
 #include "ui/SkiaQt.h"
 
@@ -478,6 +479,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
                 if (Layer* l = uncropped.findLayer(cropping->id))
                     l->media.cropLeft = l->media.cropTop = l->media.cropRight = l->media.cropBottom = AnimFloat{0.0f};
             }
+            media::MediaManager::get().setPreviewScale(this, zoom_ * z); // videos decoded no bigger than shown here
             media::MediaManager::get().takeStale(); // from here on: did this frame use a stand-in?
             render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, render::View{origin_ * z, zoom_ * z, world_}, true,
                                     throughCamera_, orbit_ ? &orbitLens_ : nullptr);
@@ -1349,7 +1351,7 @@ void ViewportPanel::updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods) {
         else if (PathPoint hit; pathPointAt(mouse, hit))
             shape = Qt::PointingHandCursor;
         else if (ctx_.tool == Tool::Pen && !orbit_)
-            shape = Qt::CrossCursor;
+            shape = Qt::BitmapCursor; // the pen's own (below)
         else {
             const double t = ctx_.time;
             Layer* single = ctx_.selection.size() == 1 ? ctx_.selected() : nullptr;
@@ -1376,6 +1378,9 @@ void ViewportPanel::updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods) {
             if (orbit_ && cameraAt(mouse)) shape = Qt::PointingHandCursor;
         }
     }
+    // A tool on (the pen, crop): its icon, unless something under the mouse has its own pointer.
+    if (shape == Qt::BitmapCursor || (shape == Qt::ArrowCursor && drag_ == Drag::None && ctx_.tool == Tool::Crop && !overRulerTop && !overRulerLeft))
+        return setCursor(ui::toolCursor(ctx_.tool));
     setCursor(shape);
 }
 

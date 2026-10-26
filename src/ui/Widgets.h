@@ -11,6 +11,7 @@
 #include <QAbstractButton>
 #include <QIcon>
 #include <QLabel>
+#include <QLayout>
 #include <QPushButton>
 #include <QToolButton>
 #include <QStringList>
@@ -367,6 +368,49 @@ private:
     void pick();
     Color color_;
     bool alphaEnabled_ = true;
+};
+
+// A row of buttons (or chips) that wraps onto the next line when the panel is narrow, instead
+// of making the panel wider than it is.
+class FlowLayout : public QLayout {
+public:
+    explicit FlowLayout(QWidget* parent = nullptr) : QLayout(parent) { setContentsMargins(0, 0, 0, 0); }
+    ~FlowLayout() override;
+    void addItem(QLayoutItem* item) override { items_.push_back(item); }
+    int count() const override { return static_cast<int>(items_.size()); }
+    QLayoutItem* itemAt(int i) const override { return i >= 0 && i < count() ? items_[static_cast<size_t>(i)] : nullptr; }
+    QLayoutItem* takeAt(int i) override;
+    Qt::Orientations expandingDirections() const override { return {}; }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override { return arrange(QRect(0, 0, width, 0), false); }
+    QSize sizeHint() const override;
+    QSize minimumSize() const override;
+    void setGeometry(const QRect& r) override {
+        QLayout::setGeometry(r);
+        arrange(r, true);
+    }
+
+private:
+    int arrange(const QRect& r, bool place) const;
+    std::vector<QLayoutItem*> items_;
+};
+
+// A label that shortens its text with "…" when there is no room (the whole text in its
+// tooltip), so a long name or path never widens its panel.
+class ElidedLabel : public QLabel {
+public:
+    explicit ElidedLabel(const QString& text = {}, Qt::TextElideMode mode = Qt::ElideRight, QWidget* parent = nullptr)
+        : QLabel(text, parent), mode_(mode) {
+        setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred); // its whole text when there is room
+    }
+    QSize minimumSizeHint() const override { return {std::min(QLabel::minimumSizeHint().width(), 36), QLabel::minimumSizeHint().height()}; }
+    QSize sizeHint() const override { return QLabel::sizeHint(); }
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+
+private:
+    Qt::TextElideMode mode_;
 };
 
 } // namespace bemotion::ui

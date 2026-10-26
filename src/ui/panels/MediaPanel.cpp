@@ -1,7 +1,9 @@
 #include "ui/panels/MediaPanel.h"
 
 #include "app/Platform.h"
+#include "app/Settings.h"
 #include "core/Ops.h"
+#include "core/Svg.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
 #include "ui/EditorContext.h"
@@ -32,8 +34,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <map>
 #include <set>
+#include <sstream>
 
 namespace bemotion {
 
@@ -116,7 +120,8 @@ public:
             rows_ = std::move(rows);
             int h = 0;
             for (const Row& r : rows_) h += height(r);
-            setFixedHeight(std::max(1, h));
+            rowsHeight_ = h;
+            setMinimumHeight(h + kRow); // room below the rows: media dropped there leaves its folder
         }
         update();
     }
@@ -253,6 +258,14 @@ protected:
             d.popClip();
             if (layersUsing(ctx_.comp(), item->id) > 0) d.circleFilled(ui::Pt(width() - 9.0f, rowTop + 10.0f), 3.0f, theme::kAccent);
         }
+        // Media of a folder dragged off it: the room below says where it lands.
+        if (dragOut_) {
+            const float top = static_cast<float>(rowsHeight_) + 2.0f, bottom = std::max(top + kRow - 4.0f, static_cast<float>(QWidget::height()) - 2.0f);
+            d.rectFilled(ui::Pt(2, top), ui::Pt(width() - 2, bottom), theme::accent(30), 6.0f);
+            d.rect(ui::Pt(2, top), ui::Pt(width() - 2, bottom), theme::kAccent, 6.0f, 1.0f);
+            const QString text = tr("Drop here: out of its folder");
+            d.text(ui::Pt((width() - d.textWidth(text)) * 0.5f, top + (kRow - 4.0f - d.textHeight()) * 0.5f), theme::kAccent, text);
+        }
     }
 
     bool event(QEvent* e) override {
@@ -359,7 +372,7 @@ protected:
         if (item && !media::MediaManager::get().fileMissing(*item)) ctx_.addMedia(item->id);
     }
 
-    // Media dragged onto a folder goes into it; onto the items at the top, out of its folder.
+    // Media dragged onto a folder (or what is in it) goes into it; anywhere else, out of its folder.
     std::string dropTarget(int y) const {
         const Row* r = rowAt(y);
         if (!r) return {};
@@ -372,17 +385,23 @@ protected:
     void dragMoveEvent(QDragMoveEvent* e) override {
         if (!e->mimeData()->hasFormat(ui::kMediaMime)) return e->ignore();
         const std::string target = dropTarget(static_cast<int>(e->position().y()));
-        if (target != dropFolder_) dropFolder_ = target, update();
+        uint64_t id = 0;
+        const MediaItem* item = ui::readMime(e->mimeData(), ui::kMediaMime, id) ? ctx_.comp().findMedia(id) : nullptr;
+        const bool out = target.empty() && item && !item->folder.empty();
+        if (target != dropFolder_ || out != dragOut_) dropFolder_ = target, dragOut_ = out, update();
         e->acceptProposedAction();
     }
     void dragLeaveEvent(QDragLeaveEvent*) override {
         dropFolder_.clear();
+        dragOut_ = false;
         update();
     }
     void dropEvent(QDropEvent* e) override {
         uint64_t id = 0;
         const std::string target = dropTarget(static_cast<int>(e->position().y()));
         dropFolder_.clear();
+        dragOut_ = false;
+        update();
         if (!ui::readMime(e->mimeData(), ui::kMediaMime, id)) return e->ignore();
         const MediaItem* item = ctx_.comp().findMedia(id);
         if (item && item->folder != target) apply({{"op", "media.move"}, {"media", id}, {"folder", target}});
@@ -518,6 +537,8 @@ private:
     std::vector<Row> rows_;
     std::set<std::string> closed_; // folders closed (for this session)
     std::string dropFolder_;       // the folder media is being dragged onto
+    bool dragOut_ = false;         // media from a folder dragged off it: it would leave the folder
+    int rowsHeight_ = 0;
     std::map<uint64_t, std::pair<std::string, QImage>> thumbs_;
     int hover_ = -1;
     uint64_t pressed_ = 0;
@@ -576,8 +597,7 @@ MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), c
     auto* hcol = new QVBoxLayout(holder);
     hcol->setContentsMargins(0, 0, 0, 0);
     list_ = new MediaList(ctx_, *this);
-    hcol->addWidget(list_);
-    hcol->addStretch();
+    hcol->addWidget(list_, 1); // down to the bottom: the room below the rows takes media out of its folder
     scroll_->setWidget(holder);
     col->addWidget(scroll_, 1);
 
@@ -606,12 +626,42 @@ void MediaPanel::showMessage(const std::string& text) {
     messageRow_->setVisible(!text.empty());
 }
 
-void MediaPanel::importFiles(const std::vector<std::filesystem::path>& files, bool addLayers) {
-    if (files.empty()) return;
+void MediaPanel::importFiles(const std::vector<std::filesystem::path>& allFiles, bool addLayers) {
+    if (allFiles.empty()) return;
     std::vector<std::string> errors;
-    const std::vector<uint64_t> ids = media::MediaManager::get().import(ctx_.comp(), files, &errors);
+    // SVG drawings become shape layers at the playhead (core/Svg.h), not media.
+    std::vector<std::filesystem::path> files;
+    bool drew = false;
+    for (const auto& f : allFiles) {
+        std::string ext = platform::toUtf8(f.extension());
+        for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (ext != ".svg") {
+            files.push_back(f);
+            continue;
+        }
+        std::ifstream in(f, std::ios::binary);
+        std::ostringstream text;
+        text << in.rdbuf();
+        std::string error;
+        if (const uint64_t id = in ? addSvg(ctx_.comp(), text.str(), platform::toUtf8(f.stem()), ctx_.time, &error) : 0) {
+            ctx_.select(id);
+            drew = true;
+        } else {
+            errors.push_back(platform::toUtf8(f.filename()) + ": " + (error.empty() ? std::string("could not be read") : error));
+        }
+    }
+    if (drew) ctx_.touch();
+    const std::vector<uint64_t> ids = files.empty() ? std::vector<uint64_t>{} : media::MediaManager::get().import(ctx_.comp(), files, &errors);
     if (addLayers)
         for (uint64_t id : ids) ctx_.addMedia(id);
+    // Settings › Performance: big videos get their proxy at once.
+    if (settings().autoProxies) {
+        std::vector<MediaItem> big;
+        for (uint64_t id : ids)
+            if (const MediaItem* item = ctx_.comp().findMedia(id); item && media::proxyWanted(*item) && !media::MediaManager::get().hasProxy(*item))
+                big.push_back(*item);
+        if (!big.empty()) media::MediaManager::get().makeProxies(big);
+    }
     if (!ids.empty()) {
         list_->selected = ids.back();
         ctx_.touch();
@@ -625,14 +675,23 @@ void MediaPanel::importFiles(const std::vector<std::filesystem::path>& files, bo
 }
 
 void MediaPanel::openImportDialog() {
-    importFiles(platform::openFilesDialog(TR_NOOP("Import Media"), TR_NOOP("Media files"), media::supportedExtensions()), false);
+    std::vector<std::string> extensions = media::supportedExtensions();
+    extensions.push_back("svg"); // drawings: shape layers (importFiles)
+    importFiles(platform::openFilesDialog(TR_NOOP("Import Media"), TR_NOOP("Media files"), extensions), false);
 }
 
 void MediaPanel::dragEnterEvent(QDragEnterEvent* e) {
-    if (e->mimeData()->hasUrls()) e->acceptProposedAction();
+    if (e->mimeData()->hasUrls() || e->mimeData()->hasFormat(ui::kMediaMime)) e->acceptProposedAction();
 }
 
 void MediaPanel::dropEvent(QDropEvent* e) {
+    // Media of a folder dropped on the panel around the list (its search, its buttons): out of it.
+    if (uint64_t id = 0; ui::readMime(e->mimeData(), ui::kMediaMime, id)) {
+        if (const MediaItem* item = ctx_.comp().findMedia(id); item && !item->folder.empty())
+            list_->apply({{"op", "media.move"}, {"media", id}, {"folder", ""}});
+        e->acceptProposedAction();
+        return;
+    }
     // Files dropped here are only imported (like After Effects' Project panel).
     std::vector<std::filesystem::path> files;
     for (const QUrl& url : e->mimeData()->urls())

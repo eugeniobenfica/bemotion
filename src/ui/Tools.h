@@ -7,6 +7,8 @@
 #include "ui/Keymap.h"
 #include "ui/Widgets.h"
 
+#include <QCursor>
+
 #include <string>
 #include <string_view>
 #include <vector>
@@ -14,6 +16,7 @@
 namespace bemotion {
 
 class EditorContext;
+enum class Tool;
 
 namespace ui {
 
@@ -38,6 +41,9 @@ bool toolEnabled(EditorContext& ctx, const ToolInfo& tool);
 bool toolActive(const EditorContext& ctx, const ToolInfo& tool); // the current modal tool
 // Runs the tool. Call it where layers may change (not while timeline rows are being drawn).
 void runTool(EditorContext& ctx, const ToolInfo& tool);
+// The mouse pointer while a tool is on: its icon (the arrow for Selection), where the tool
+// works (the viewport, the timeline's clips).
+QCursor toolCursor(Tool tool);
 
 } // namespace ui
 } // namespace bemotion

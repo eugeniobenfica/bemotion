@@ -5,6 +5,7 @@
 #include "media/RecordingBuffer.h"
 
 #include <QImage>
+#include <QPixmap>
 #include <QPointF>
 #include <QWidget>
 
@@ -169,7 +170,8 @@ private:
     void showMaskMenu(QPoint global, uint64_t layer, int index);
     struct FilmImages {
         std::shared_ptr<const media::Filmstrip> strip;
-        std::vector<QImage> images;
+        std::vector<QPixmap> pictures; // at the height drawn (null: not made yet)
+        int height = 0;                // in device pixels
     };
     std::map<uint64_t, FilmImages> filmImages_; // by media id
     void paintGraph(QPainter& p, QSize size);

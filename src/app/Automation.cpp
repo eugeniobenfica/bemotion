@@ -7,6 +7,7 @@
 #include "core/Describe.h"
 #include "core/Serialization.h"
 #include "core/Validate.h"
+#include "core/Lottie.h"
 #include "media/AudioEngine.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
@@ -48,6 +49,7 @@ constexpr const char* kUsage =
     "  bemotion render <project> [--at t1,t2,...] [--count N] [--width W] [--each] --out <file.png>\n"
     "  bemotion script <project> <file.lua | -> [--time T] [--select id,id] [--out <file>] [--dry-run] [--describe]\n"
     "  bemotion new <project> [--width W] [--height H] [--fps F]\n"
+    "  bemotion lottie <project> --out <file.json>  (a Lottie animation: shapes, text, pictures)\n"
     "  bemotion transcribe <audio or video> [--language auto|en|pt|...] [--from s] [--to s] [--cpu] [--out <file.srt>]\n"
     "  bemotion mcp                    (MCP server for AI assistants: JSON-RPC on stdin / stdout)\n"
     "  bemotion <project> --export <file> [--format mp4|png|mov|webm|gif] [--scale N] [--transparent]\n";
@@ -187,6 +189,19 @@ int apply(const Args& a) {
     }
     print(out.dump(2) + "\n");
     return r.ok ? 0 : 1;
+}
+
+int lottieCmd(const Args& a) {
+    if (a.positional.size() != 1) return usageError("lottie takes one project");
+    const std::string outFile = a.value("out");
+    if (outFile.empty()) return usageError("lottie needs --out <file.json>");
+    Project p;
+    if (!load(a.positional[0], p)) return 1;
+    std::vector<std::string> leftOut;
+    std::string error;
+    if (!exportLottie(p.comp, platform::fromUtf8(outFile), &leftOut, &error)) return usageError(error);
+    print(json{{"ok", true}, {"file", outFile}, {"left_out", leftOut}}.dump(2) + "\n");
+    return 0;
 }
 
 int renderCmd(const Args& a) {
@@ -436,7 +451,7 @@ int transcribeCmd(const Args& a) {
 }
 
 bool isAutomationCommand(const std::string& arg) {
-    return arg == "transcribe" || arg == "describe" || arg == "validate" || arg == "apply" || arg == "render" || arg == "new" || arg == "script" || arg == "mcp" || arg == "help" ||
+    return arg == "transcribe" || arg == "describe" || arg == "validate" || arg == "apply" || arg == "render" || arg == "lottie" || arg == "new" || arg == "script" || arg == "mcp" || arg == "help" ||
            arg == "--help" || arg == "-h";
 }
 
@@ -446,6 +461,7 @@ int runAutomation(const std::vector<std::string>& args) {
     if (cmd == "validate") return validateCmd(parse(args, {"fix"}));
     if (cmd == "apply") return apply(parse(args, {"dry-run", "describe"}));
     if (cmd == "render") return renderCmd(parse(args, {"each"}));
+    if (cmd == "lottie") return lottieCmd(parse(args, {}));
     if (cmd == "new") return newProject(parse(args, {}));
     if (cmd == "script") return script(parse(args, {"dry-run", "describe"}));
     if (cmd == "transcribe") return transcribeCmd(parse(args, {"cpu"}));

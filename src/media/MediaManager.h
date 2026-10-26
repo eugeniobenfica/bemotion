@@ -20,10 +20,13 @@ namespace bemotion::media {
 using AudioData = std::shared_ptr<const std::vector<float>>; // stereo, kAudioRate
 using Loudness = std::shared_ptr<const std::vector<float>>;  // RMS every kLoudnessBlock frames
 // Small pictures along a video, for the timeline: frame i shows the source at (i + 0.5) * step.
+// Made a little at a time: an empty frame is not there yet (show the nearest one).
 struct Filmstrip {
     double step = 1.0;
     int width = 0, height = 0;
     std::vector<std::vector<uint8_t>> frames; // RGBA, width * height * 4 each
+    bool complete = false;
+    uint64_t version = 0; // grows as frames arrive
 };
 constexpr size_t kLoudnessBlock = 480;                         // 10 ms at kAudioRate
 
@@ -41,7 +44,8 @@ public:
     sk_sp<SkImage> frameFor(const Composition& comp, const Layer& layer, double t);
     sk_sp<SkImage> thumbnail(const MediaItem& item); // the image / an early video frame; null while unavailable
     // A video's filmstrip, made in the background the first time it is asked for (from its proxy
-    // when there is one); null until it is ready (arrivals() changes then).
+    // when there is one): a few pictures along all of it first, then the others, then the exact
+    // frames; null until the first ones are there (arrivals() changes as more arrive).
     std::shared_ptr<const Filmstrip> filmstrip(const MediaItem& item);
 
     AudioData audio(uint64_t mediaId) const; // null while decoding (or without audio)
@@ -81,6 +85,10 @@ public:
     // used one is not kept), and clears it.
     uint64_t arrivals() const;
     bool takeStale();
+    // How many screen pixels a composition pixel takes in a view of the editor's composition
+    // (0: the view is gone): its videos are decoded no bigger than shown (setScaledPreview).
+    void setPreviewScale(const void* view, double pixelsPerUnit);
+    void setScaledPreview(bool on); // the Performance setting "Decode video at the size shown"
     // Every video opened again (hardware decoding turned on or off).
     void reopenVideos();
 

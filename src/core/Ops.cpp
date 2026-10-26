@@ -7,6 +7,7 @@
 #include "core/Geometry.h"
 #include "core/Serialization.h"
 #include "core/Suggest.h"
+#include "core/Svg.h"
 #include "core/Transitions.h"
 #include "core/Validate.h"
 
@@ -217,6 +218,7 @@ public:
             {"layer.freeze", &Applier::layerFreeze},
             {"layer.separate_audio", &Applier::layerSeparateAudio},
             {"layer.link_audio", &Applier::layerLinkAudio},
+            {"svg.add", &Applier::svgAdd},
             {"mask.add", &Applier::maskAdd},
             {"mask.set", &Applier::maskSet},
             {"mask.remove", &Applier::maskRemove},
@@ -812,6 +814,14 @@ private:
             fail("layer \"" + name + "\" is not a video with sound (nothing to separate)");
         const uint64_t audio = separateAudio(c_, l.id);
         return {{"layer", audio}, {"name", name + " (audio)"}};
+    }
+
+    json svgAdd(const json& op) {
+        if (!has(op, "svg")) fail("missing field \"svg\" (the SVG file's text)");
+        std::string error;
+        const uint64_t id = addSvg(c_, text(op["svg"], "svg"), has(op, "name") ? text(op["name"], "name") : "SVG", time(op), &error);
+        if (!id) fail(error);
+        return {{"layer", id}, {"name", c_.findLayer(id)->name}};
     }
 
     json layerLinkAudio(const json& op) {

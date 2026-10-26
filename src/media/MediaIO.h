@@ -60,6 +60,12 @@ public:
     virtual bool frameAt(double seconds, std::vector<uint8_t>& rgba) = 0;
     virtual bool hardware() const { return false; } // decoding on the graphics card
     virtual double frameTime() const { return -1.0; } // where the last frame starts (seconds), -1 if none
+    // Pictures this much smaller than the video (0 < scale <= 1; width() and height() follow):
+    // a preview showing the video small never converts and copies its full size.
+    virtual void setOutputScale(double scale) { (void)scale; }
+    // For small pictures (the timeline's filmstrip): a lighter decode, and with `keyframesOnly`
+    // the keyframe before the time asked (much faster to reach than the exact frame).
+    virtual void setQuick(bool keyframesOnly) { (void)keyframesOnly; }
 };
 
 // Proxies: a small copy of a video, every frame a picture of its own (Motion JPEG), quick to

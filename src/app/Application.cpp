@@ -204,6 +204,7 @@ void Application::initShared() {
     PluginHost::get().load();
     media::MediaManager::get().install();
     media::setHardwareDecoding(settings().hardwareDecoding);
+    media::MediaManager::get().setScaledPreview(settings().scaledVideoPreview);
     media::setProxyFolder(platform::appDataDir() / "proxies");
     media::MediaManager::get().setUseProxies(settings().useProxies);
     media::MediaManager::get().setFrameCacheMegabytes(settings().cacheMegabytes / 2); // the other half: the viewport's

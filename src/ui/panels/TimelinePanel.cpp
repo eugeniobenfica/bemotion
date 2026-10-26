@@ -51,6 +51,24 @@ using ui::Rgba;
 
 namespace {
 
+// A transition or a Quick Animation on its clip: the same band for both (they are the same
+// thing, keyframes made for you). `stretchRight`: the end its length is dragged by.
+void drawMotionBand(ui::Draw& d, float left, float right, float y, float h, bool picked, bool stretchRight, bool withIcon,
+                    ui::Icon icon, const QString& name) {
+    const Rgba tone = theme::kAccent;
+    d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(theme::kBgPanel, 225), 5.0f); // readable over a video's frames
+    d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(tone, picked ? 80 : 45), 5.0f);
+    d.rect({left, y + 5}, {right, y + h - 5}, picked ? theme::kText : tone, 5.0f, picked ? 2.0f : 1.2f);
+    const float handle = stretchRight ? right : left;
+    d.line({handle, y + 8}, {handle, y + h - 8}, tone, 2.0f);
+    if (withIcon) ui::drawIcon(d, icon, {left + 10.0f, y + h * 0.5f}, 12.0f, tone);
+    if (right - left > 44.0f && !name.isEmpty()) { // its name, when there is room
+        d.pushClip({left + 18.0f, y}, {right - 3.0f, y + h});
+        d.text({left + 20.0f, y + (h - d.textHeight()) * 0.5f}, theme::kText, name);
+        d.popClip();
+    }
+}
+
 constexpr float kRulerHeight = 26.0f;
 // Row sizes come from Settings > Interface.
 float layerRowHeight() { return settings().timelineLayerRow; }
@@ -1591,13 +1609,10 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
             if (!selectedTransition && transition.joined && ctx_.transitionLayer)
                 if (const Layer* other = transitionPartner(ctx_.comp(), layer, incoming ? TransitionEdge::In : TransitionEdge::Out))
                     selectedTransition = ctx_.transitionLayer == other->id && ctx_.transitionIncoming == !incoming;
-            d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::accent(85), 5.0f);
-            d.rect({left, y + 5}, {right, y + h - 5}, selectedTransition ? theme::kText : theme::kAccent, 5.0f,
-                   selectedTransition ? 2.0f : 1.0f);
             // A transition across a cut shows one icon, on the cut (its two halves meet there).
-            if (!transition.joined) ui::drawIcon(d, ui::Icon::Transition, {(left + right) * 0.5f, y + h * 0.5f}, 13.0f, theme::kAccent);
-            const float handle = incoming ? right : left;
-            d.line({handle, y + 8}, {handle, y + h - 8}, theme::kAccent, 2.0f);
+            const TransitionInfo* info = findTransition(transition.id);
+            drawMotionBand(d, left, right, y, h, selectedTransition, incoming, !transition.joined, ui::Icon::Transition,
+                           transition.joined || !info ? QString() : tr(info->name));
         };
         paintTransition(layer.transitionIn, true);
         paintTransition(layer.transitionOut, false);
@@ -1803,32 +1818,49 @@ void TimelinePanel::paintPropKeys(QPainter& p, const Item& item, float width) {
 
 bool TimelinePanel::paintFilmstrip(QPainter& p, const Layer& layer, QPointF a, QPointF b) {
     const MediaItem* item = ctx_.comp().findMedia(layer.media.mediaId);
-    if (!item || item->kind != MediaKind::Video) return false;
+    if (!item || item->kind != MediaKind::Video || !settings().showFilmstrips) return false;
     const std::shared_ptr<const media::Filmstrip> strip = media::MediaManager::get().filmstrip(*item);
     if (!strip) return false;
-    FilmImages& cached = filmImages_[item->id];
-    if (cached.strip != strip) { // made (again): pictures for painting
-        cached.strip = strip;
-        cached.images.clear();
-        for (const auto& rgba : strip->frames)
-            cached.images.push_back(QImage(rgba.data(), strip->width, strip->height, QImage::Format_RGBA8888).copy());
-    }
     const QRectF area(a + QPointF(1, 1), b - QPointF(1, 1));
-    if (area.width() < 2 || area.height() < 4 || cached.images.empty()) return false;
+    if (area.width() < 2 || area.height() < 4 || strip->frames.empty()) return false;
     const qreal th = area.height(), tw = th * strip->width / std::max(1, strip->height);
+    // Pictures already at the size drawn (scaled once, not at every paint), made as they arrive.
+    const qreal dpr = p.device() ? p.device()->devicePixelRatioF() : 1.0;
+    const int ph = std::max(1, static_cast<int>(std::lround(th * dpr))), pw = std::max(1, static_cast<int>(std::lround(tw * dpr)));
+    FilmImages& cached = filmImages_[item->id];
+    if (cached.strip != strip || cached.height != ph) {
+        if (cached.height != ph || cached.pictures.size() != strip->frames.size()) cached.pictures.assign(strip->frames.size(), QPixmap());
+        cached.strip = strip;
+        cached.height = ph;
+    }
+    auto picture = [&](size_t i) -> const QPixmap* {
+        const auto& rgba = strip->frames[i];
+        if (rgba.empty()) return nullptr;
+        QPixmap& pm = cached.pictures[i];
+        if (pm.isNull()) {
+            const QImage image(rgba.data(), strip->width, strip->height, QImage::Format_RGBA8888);
+            pm = QPixmap::fromImage(image.scaled(pw, ph, Qt::IgnoreAspectRatio, Qt::SmoothTransformation));
+            pm.setDevicePixelRatio(dpr);
+        }
+        return &pm;
+    };
     p.save();
-    QPainterPath clip;
-    clip.addRoundedRect(area, 4, 4);
-    p.setClipPath(clip, Qt::IntersectClip);
-    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.setClipRect(area, Qt::IntersectClip);
     p.setOpacity(layer.visible ? 0.9 : 0.35);
     // Tiles from the clip's start, each showing the moment under its middle.
     const qreal from = std::max(area.left(), static_cast<qreal>(trackX0()) - tw), to = std::min(area.right(), static_cast<qreal>(trackX0() + trackW()));
     const qreal first = area.left() + std::floor((from - area.left()) / tw) * tw;
     for (qreal x = first; x < to; x += tw) {
         const double source = layer.media.sourceTime(xToTime(static_cast<float>(x + tw * 0.5)));
-        const int i = std::clamp(static_cast<int>(source / strip->step), 0, static_cast<int>(cached.images.size()) - 1);
-        p.drawImage(QRectF(x, area.top(), tw, th), cached.images[static_cast<size_t>(i)]);
+        const int n = static_cast<int>(strip->frames.size());
+        const int i = std::clamp(static_cast<int>(source / strip->step), 0, n - 1);
+        // Not made yet: the nearest one that is.
+        const QPixmap* pm = nullptr;
+        for (int k = 0; k < n && !pm; ++k) {
+            if (i + k < n) pm = picture(static_cast<size_t>(i + k));
+            if (!pm && i - k >= 0) pm = picture(static_cast<size_t>(i - k));
+        }
+        if (pm) p.drawPixmap(QPointF(x, area.top()), *pm);
     }
     p.restore();
     return true;
@@ -1848,19 +1880,8 @@ void TimelinePanel::paintAnimations(QPainter& p, const Layer& layer, float y, fl
                 keyed = pr.anim->keyTime(k) >= a.start - kTimeEpsilon && pr.anim->keyTime(k) <= a.start + a.duration + kTimeEpsilon;
         if (!keyed) continue;
         const float left = timeToX(from) + 2.0f, right = std::max(left + 16.0f, timeToX(until) - 2.0f);
-        const Rgba tone = theme::kKeyframe;
         const bool picked = ctx_.animationLayer == layer.id && ctx_.animationIndex == static_cast<int>(&a - layer.animations.data());
-        // Solid underneath: readable over a video's frames too.
-        d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(theme::kBgPanel, 225), 5.0f);
-        d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(tone, picked ? 80 : 45), 5.0f);
-        d.rect({left, y + 5}, {right, y + h - 5}, picked ? theme::kText : tone, 5.0f, picked ? 2.0f : 1.2f);
-        d.line({right, y + 8}, {right, y + h - 8}, tone, 2.0f); // its end: drag to stretch it
-        ui::drawIcon(d, ui::Icon::Ease, {left + 10.0f, y + h * 0.5f}, 12.0f, tone);
-        if (right - left > 44.0f) { // its name, when there is room
-            d.pushClip({left + 18.0f, y}, {right - 3.0f, y + h});
-            d.text({left + 20.0f, y + (h - d.textHeight()) * 0.5f}, theme::kText, trs(a.name));
-            d.popClip();
-        }
+        drawMotionBand(d, left, right, y, h, picked, true, true, ui::Icon::Ease, trs(a.name));
     }
 }
 
@@ -2606,19 +2627,19 @@ void TimelinePanel::rowsMove(QMouseEvent* e) {
     computeItems();
     const Item* item = itemAt(static_cast<float>(pos.y()));
     Qt::CursorShape cursor = Qt::ArrowCursor;
+    const bool clipTool = ctx_.tool == Tool::Razor || ctx_.tool == Tool::Ripple || ctx_.tool == Tool::Roll || ctx_.tool == Tool::Slip;
     if (item && item->kind == Item::Track && pos.x() >= trackX0()) {
         Drag mode;
         clipHit(*item, static_cast<float>(pos.x()), mode);
-        if (ctx_.tool == Tool::Razor) cursor = Qt::PointingHandCursor;
-        else if (ctx_.tool == Tool::Roll && cutAt(*item, static_cast<float>(pos.x()))) cursor = Qt::SplitHCursor;
-        else if (ctx_.tool == Tool::Slip && mode == Drag::LayerMove) cursor = Qt::SizeHorCursor;
+        if (clipTool) cursor = Qt::BitmapCursor; // the tool's icon (below)
         else if (transitionHit(*item, static_cast<float>(pos.x())).resize || animationHit(*item, static_cast<float>(pos.x())).resize ||
                  mode == Drag::LayerIn || mode == Drag::LayerOut)
             cursor = Qt::SizeHorCursor;
         else if (transitionHit(*item, static_cast<float>(pos.x())) || animationHit(*item, static_cast<float>(pos.x())))
             cursor = Qt::OpenHandCursor;
     }
-    rows_->setCursor(cursor);
+    if (cursor == Qt::BitmapCursor) rows_->setCursor(ui::toolCursor(ctx_.tool));
+    else rows_->setCursor(cursor);
     if (item && item->kind == Item::Prop && pos.x() >= trackX0()) {
         if (auto ref = findProperty(ctx_, item->layer, item->prop, item->effectIndex))
             for (int k = 0; k < ref->anim->keyCount(); ++k)

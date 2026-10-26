@@ -3,7 +3,13 @@
 #include "ui/Language.h"
 
 #include "ui/EditorContext.h"
+#include "ui/Theme.h"
 #include "ui/panels/TimelinePanel.h"
+
+#include <QPainter>
+#include <QPixmap>
+
+#include <map>
 
 namespace bemotion::ui {
 
@@ -86,6 +92,39 @@ void runTool(EditorContext& ctx, const ToolInfo& tool) {
     else if (id == "backward") ctx.shiftSelected(1);
     else if (id == "text") ctx.addText();
     else if (id == "camera") ctx.addCamera();
+}
+
+QCursor toolCursor(Tool tool) {
+    Icon icon = Icon::Pointer;
+    QPoint hot(16, 16); // where it acts: the middle of its icon, the tip of the pen
+    switch (tool) {
+    case Tool::Select: return QCursor(Qt::ArrowCursor);
+    case Tool::Razor: icon = Icon::Razor; break;
+    case Tool::Crop: icon = Icon::Crop; break;
+    case Tool::Pen: icon = Icon::Pen, hot = QPoint(7, 25); break;
+    case Tool::Ripple: icon = Icon::RippleEdit; break;
+    case Tool::Roll: icon = Icon::RollEdit; break;
+    case Tool::Slip: icon = Icon::SlipEdit; break;
+    }
+    // Made once per tool and theme: its icon with a halo, readable on any picture.
+    static std::map<std::pair<int, Rgba>, QCursor> made;
+    const auto key = std::make_pair(static_cast<int>(tool), theme::kText);
+    if (auto it = made.find(key); it != made.end()) return it->second;
+    constexpr qreal kScale = 2.0; // sharp on high-density screens
+    QPixmap pixmap(static_cast<int>(32 * kScale), static_cast<int>(32 * kScale));
+    pixmap.fill(Qt::transparent);
+    {
+        QPainter p(&pixmap);
+        const QPixmap halo = makeIcon(icon, theme::kBgDeep, 64).pixmap(static_cast<int>(22 * kScale));
+        const QPixmap shape = makeIcon(icon, theme::kText, 64).pixmap(static_cast<int>(22 * kScale));
+        const QPointF at(5 * kScale, 5 * kScale);
+        for (int dx = -2; dx <= 2; dx += 2)
+            for (int dy = -2; dy <= 2; dy += 2)
+                if (dx || dy) p.drawPixmap(at + QPointF(dx, dy), halo);
+        p.drawPixmap(at, shape);
+    }
+    pixmap.setDevicePixelRatio(kScale);
+    return made[key] = QCursor(pixmap, hot.x(), hot.y());
 }
 
 } // namespace bemotion::ui

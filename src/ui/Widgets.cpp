@@ -1397,4 +1397,67 @@ void ColorButton::pick() {
     if (self) emit editFinished();
 }
 
+// --- FlowLayout, ElidedLabel ----------------------------------------------------------------
+
+FlowLayout::~FlowLayout() {
+    for (QLayoutItem* item : items_) delete item;
+}
+
+QLayoutItem* FlowLayout::takeAt(int i) {
+    if (i < 0 || i >= count()) return nullptr;
+    QLayoutItem* item = items_[static_cast<size_t>(i)];
+    items_.erase(items_.begin() + i);
+    return item;
+}
+
+QSize FlowLayout::sizeHint() const {
+    QSize size;
+    const int gap = std::max(0, spacing());
+    for (const QLayoutItem* item : items_) {
+        if (item->isEmpty()) continue;
+        const QSize hint = item->sizeHint();
+        size.setWidth(size.width() + (size.width() ? gap : 0) + hint.width());
+        size.setHeight(std::max(size.height(), hint.height()));
+    }
+    return size;
+}
+
+QSize FlowLayout::minimumSize() const {
+    QSize size; // the widest item: anything narrower wraps
+    for (const QLayoutItem* item : items_)
+        if (!item->isEmpty()) size = size.expandedTo(item->minimumSize());
+    const QMargins m = contentsMargins();
+    return size + QSize(m.left() + m.right(), m.top() + m.bottom());
+}
+
+int FlowLayout::arrange(const QRect& r, bool place) const {
+    const int gap = std::max(0, spacing());
+    const QMargins m = contentsMargins();
+    const QRect area = r.adjusted(m.left(), m.top(), -m.right(), -m.bottom());
+    int x = area.x(), y = area.y(), lineHeight = 0;
+    for (QLayoutItem* item : items_) {
+        if (item->isEmpty()) continue;
+        QSize hint = item->sizeHint();
+        hint.setWidth(std::min(hint.width(), std::max(item->minimumSize().width(), area.width())));
+        if (x > area.x() && x + hint.width() > area.right() + 1) { // no room left on this line
+            x = area.x();
+            y += lineHeight + gap;
+            lineHeight = 0;
+        }
+        if (place) item->setGeometry(QRect(QPoint(x, y), hint));
+        x += hint.width() + gap;
+        lineHeight = std::max(lineHeight, hint.height());
+    }
+    return y + lineHeight - r.y() + m.bottom();
+}
+
+void ElidedLabel::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    const QRect area = contentsRect();
+    const QString shown = fontMetrics().elidedText(text(), mode_, area.width());
+    p.setPen(palette().color(foregroundRole()));
+    p.setFont(font());
+    p.drawText(area, static_cast<int>(alignment() | Qt::TextSingleLine), shown);
+}
+
 } // namespace bemotion::ui

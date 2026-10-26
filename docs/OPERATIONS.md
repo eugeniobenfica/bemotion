@@ -119,6 +119,16 @@ and a track matte (below).
 
 **`ungroup`** — `layer` (a compound), `time`: the layers keep their look.
 
+**`svg.add`** → `{"layer": id, "name"}` — `svg`: the text of an SVG file;
+`name` (default `SVG`), `time` (where its clips start, default 0). Its paths,
+rectangles, circles, ellipses, lines, polylines and polygons become Path shape
+layers (through their groups' transforms, with their fill — a gradient keeps its
+first and last colors —, stroke and opacity), fitted in the middle of the
+composition at 80% of its size, in a compound named `name` when there are
+several (`layer` is the compound's id, else the one layer's). An outline inside
+another (a letter's hole) cuts it as a Subtract mask. Text, images, filters and
+patterns are left out. File › Import SVG does the same.
+
 ## Masks and track mattes
 
 **`mask.add`** → `{"index": i}` — `layer`, and `shape` (`rectangle`, the

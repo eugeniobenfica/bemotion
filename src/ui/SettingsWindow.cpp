@@ -686,7 +686,57 @@ QWidget* editorPage() {
     saving->addRow(tr("Crash recovery"), tr("Unsaved changes are always kept aside: if bemotion closes unexpectedly, it offers them "
                                      "back the next time it opens"),
                    nullptr);
-    SettingsCard* playback = addSection(col, tr("Playback"));
+    if (!s.advanced) {
+        col->addSpacing(6);
+        col->addWidget(hintLabel(tr("How far the arrow keys step and how close things snap are in Advanced Options (bottom left).")));
+        return page;
+    }
+    SettingsCard* playhead = addSection(col, tr("Playhead"));
+    playhead->addRow(tr("Arrow keys step"), tr("Left / Right move the playhead this many frames"), spinControl(s.arrowFrames, 1, 60, tr(" frames")));
+    playhead->addRow(tr("Big step"), tr("With Shift by default (see Shortcuts)"), spinControl(s.bigArrowFrames, 1, 300, tr(" frames")));
+    SettingsCard* snapping = addSection(col, tr("Snapping"));
+    snapping->addRow(tr("Snap distance"),
+                     tr("How close (on screen) an object, clip, keyframe or the playhead gets before it snaps. S or the magnet "
+                     "turns snapping on and off; hold Ctrl while dragging to ignore it."),
+                     sliderControl(s.snapDistance, 2.0f, 30.0f, "%.0f px"));
+    return page;
+}
+
+QWidget* performancePage() {
+    Settings& s = settings();
+    QVBoxLayout* col;
+    QWidget* page = pageWidget(col);
+    addPageHeader(col, tr("Performance"), [] {
+        Settings& st = settings();
+        const Settings d;
+        st.hardwareDecoding = d.hardwareDecoding, st.useProxies = d.useProxies, st.cacheMegabytes = d.cacheMegabytes;
+        st.scaledVideoPreview = d.scaledVideoPreview, st.autoProxies = d.autoProxies, st.showFilmstrips = d.showFilmstrips;
+        st.previewQuality = d.previewQuality;
+        media::setHardwareDecoding(st.hardwareDecoding);
+        media::MediaManager::get().reopenVideos();
+        media::MediaManager::get().setUseProxies(st.useProxies);
+        media::MediaManager::get().setFrameCacheMegabytes(st.cacheMegabytes / 2);
+        media::MediaManager::get().setScaledPreview(st.scaledVideoPreview);
+    });
+    SettingsCard* preview = addSection(col, tr("Preview"));
+    preview->addRow(tr("Preview quality"),
+                    tr("The viewport draws at full, half or a quarter of its size, then enlarges it: lighter while editing "
+                       "heavy scenes. Exports are always at full quality (also in the viewport's corner)"),
+                    segmented({TR_NOOP("Full"), TR_NOOP("Half"), TR_NOOP("Quarter")}, s.previewQuality >= 4 ? 2 : s.previewQuality >= 2 ? 1 : 0,
+                              [](int i) {
+                                  settings().previewQuality = i == 2 ? 4 : i == 1 ? 2 : 1;
+                                  saveSettings();
+                                  emit AppSignals::get().appearanceChanged();
+                              }));
+    preview->addRow(tr("Decode video at the size shown"),
+                    tr("A video shown small in the viewport is read small: much less work for 4K and HD footage. Exports "
+                       "always read it at full size"),
+                    switchControl(s.scaledVideoPreview, [](bool on) {
+                        settings().scaledVideoPreview = on;
+                        media::MediaManager::get().setScaledPreview(on);
+                        saveSettings();
+                    }));
+    SettingsCard* playback = addSection(col, tr("Video"));
     const std::string decoder = media::hardwareDecoderName();
     playback->addRow(tr("Hardware video decoding"),
                      tr("The graphics card reads HD and 4K videos (H.264, HEVC, VP9, AV1): lighter on a laptop's processor, though a fast processor is often quicker on its own") +
@@ -703,6 +753,12 @@ QWidget* editorPage() {
                      switchControl(s.useProxies, [](bool on) {
                          settings().useProxies = on;
                          media::MediaManager::get().setUseProxies(on);
+                         saveSettings();
+                     }));
+    playback->addRow(tr("Make proxies when importing"),
+                     tr("Videos bigger than 1280 × 720 get a proxy as soon as they are imported (in the background)"),
+                     switchControl(s.autoProxies, [](bool on) {
+                         settings().autoProxies = on;
                          saveSettings();
                      }));
     {
@@ -731,23 +787,19 @@ QWidget* editorPage() {
         media::MediaManager::get().setFrameCacheMegabytes(v / 2);
         saveSettings();
     });
-    playback->addRow(tr("Memory for cached frames"),
-                     tr("Frames already shown are kept, so they play again at once (the green line on the timeline's ruler). "
+    SettingsCard* memoryCard = addSection(col, tr("Memory"));
+    memoryCard->addRow(tr("Memory for cached frames"),
+                     tr("Decoded video frames and rendered previews already shown are kept, so they play again at once. "
                      "More memory: longer stretches"),
                      memory);
-    if (!s.advanced) {
-        col->addSpacing(6);
-        col->addWidget(hintLabel(tr("How far the arrow keys step and how close things snap are in Advanced Options (bottom left).")));
-        return page;
-    }
-    SettingsCard* playhead = addSection(col, tr("Playhead"));
-    playhead->addRow(tr("Arrow keys step"), tr("Left / Right move the playhead this many frames"), spinControl(s.arrowFrames, 1, 60, tr(" frames")));
-    playhead->addRow(tr("Big step"), tr("With Shift by default (see Shortcuts)"), spinControl(s.bigArrowFrames, 1, 300, tr(" frames")));
-    SettingsCard* snapping = addSection(col, tr("Snapping"));
-    snapping->addRow(tr("Snap distance"),
-                     tr("How close (on screen) an object, clip, keyframe or the playhead gets before it snaps. S or the magnet "
-                     "turns snapping on and off; hold Ctrl while dragging to ignore it."),
-                     sliderControl(s.snapDistance, 2.0f, 30.0f, "%.0f px"));
+    SettingsCard* timeline = addSection(col, tr("Timeline"));
+    timeline->addRow(tr("Video frames on clips"),
+                     tr("Video clips show pictures of their frames (made in the background). Off: plain clips, lighter on a slow computer"),
+                     switchControl(s.showFilmstrips, [](bool on) {
+                         settings().showFilmstrips = on;
+                         saveSettings();
+                         emit AppSignals::get().appearanceChanged();
+                     }));
     return page;
 }
 
@@ -1296,6 +1348,7 @@ void openSettings(SettingsTab tab) {
                                    {{tr("Theme"), Icon::Palette, themePage},
                                     {tr("Interface"), Icon::Sliders, interfacePage},
                                     {tr("Editor"), Icon::Edit, editorPage},
+                                    {tr("Performance"), Icon::Speed, performancePage},
                                     {tr("Shortcuts"), Icon::Keyboard, shortcutsPage},
                                     {tr("Plugins"), Icon::Plugin, pluginsPage}},
                                    footer);

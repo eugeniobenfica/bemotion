@@ -14,10 +14,12 @@
 #include "core/Geometry.h"
 #include "core/History.h"
 #include "core/Language.h"
+#include "core/Lottie.h"
 #include "core/Presets.h"
 #include "core/Project.h"
 #include "core/Serialization.h"
 #include "core/Snapping.h"
+#include "core/Svg.h"
 #include "core/Transitions.h"
 
 #include <nlohmann/json.hpp>
@@ -862,6 +864,101 @@ void testSeparateAudio() {
     for (const Layer& l : p.comp.layers) gone = gone && l.name != "Talk (audio)";
     CHECK(gone);
     CHECK(!run(p, R"({"op": "layer.link_audio", "layer": "Talk"})").ok); // it has its sound already
+}
+
+void testSvgImport() {
+    // Shapes, a group's transform, a style sheet class, a gradient, a hole, an arc.
+    const std::string svg = R"svg(<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
+  <style>.red { fill: #ff0000; stroke: rgb(0, 0, 255); stroke-width: 2 }</style>
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#000"/></linearGradient></defs>
+  <rect width="200" height="100" fill="url(#g)"/>
+  <g transform="translate(50 50)"><circle class="red" r="20"/></g>
+  <path id="ring" d="M120 20h60v60h-60z M135 35h30v30h-30z" fill="gold"/>
+  <path d="M10 90 A 10 10 0 0 1 30 90" fill="none" stroke="black"/>
+  <text x="0" y="0">left out</text>
+</svg>)svg";
+    SvgDrawing d;
+    std::string error;
+    CHECK(parseSvg(svg, d, &error));
+    CHECK(d.shapes.size() == 4);
+    CHECK(near(d.size.x, 200.0f) && near(d.size.y, 100.0f));
+    if (d.shapes.size() == 4) {
+        CHECK(d.shapes[0].fillKind == ShapeFill::Linear && near(d.shapes[0].fillAngle, 90.0f) && near(d.shapes[0].fillColor.r, 1.0f));
+        // The circle went through its group's translate; its class colored it.
+        Vec2 mn, mx;
+        CHECK(bezierBounds(d.shapes[1].outline, mn, mx) && near(mn.x, 30.0f, 0.1f) && near(mx.y, 70.0f, 0.1f));
+        CHECK(near(d.shapes[1].fillColor.r, 1.0f) && d.shapes[1].stroke && near(d.shapes[1].strokeColor.b, 1.0f) && near(d.shapes[1].strokeWidth, 2.0f));
+        // The inner square is a hole of the outer one.
+        CHECK(d.shapes[2].name == "ring" && d.shapes[2].holes.size() == 1 && d.shapes[2].outline.vertices.size() == 4);
+        // The arc: an open, stroked outline.
+        CHECK(!d.shapes[3].outline.closed && !d.shapes[3].fill && d.shapes[3].stroke);
+    }
+    CHECK(!parseSvg("<html></html>", d, &error) && !error.empty());
+
+    // As layers (svg.add): a compound fitted in the composition, the hole a Subtract mask.
+    Project p;
+    p.comp.width = 1000, p.comp.height = 1000, p.comp.duration = 4.0;
+    nlohmann::json op = {{"op", "svg.add"}, {"svg", svg}, {"name", "Logo"}, {"time", 1.0}};
+    const OpsResult r = applyOps(p, nlohmann::json::array({op}));
+    CHECK(r.ok);
+    const Layer* group = p.comp.findLayer(r.results[0]["layer"].get<uint64_t>());
+    CHECK(group && group->type == LayerType::Compound && group->name == "Logo" && near(static_cast<float>(group->inPoint), 1.0f));
+    const Layer* ring = nullptr;
+    int children = 0;
+    for (const Layer& l : p.comp.layers)
+        if (l.parent && group && l.parent == group->id) {
+            ++children;
+            CHECK(l.type == LayerType::Shape && l.shape.kind == ShapeKind::Path);
+            if (l.name == "ring") ring = &l;
+        }
+    CHECK(children == 4);
+    CHECK(ring && ring->masks.size() == 1 && ring->masks[0].mode == MaskMode::Subtract);
+    // 200 x 100 fits 800 wide (80%): four times bigger, the ring 240 px.
+    if (ring) {
+        Vec2 mn, mx;
+        CHECK(bezierBounds(ring->shape.path, mn, mx) && near(mx.x - mn.x, 240.0f, 0.5f));
+    }
+}
+
+void testLottieExport() {
+    Project p;
+    p.comp.width = 800, p.comp.height = 600, p.comp.fps = 30, p.comp.duration = 3.0;
+    Layer box = makeShapeLayer(ShapeKind::Rectangle, {400, 300}, 3.0);
+    box.name = "Box";
+    box.transform.position.setKey(0.0, {200, 300}, Easing::EaseOut);
+    box.transform.position.setKey(1.0, {600, 300}, Easing::Hold);
+    box.transform.position.setKey(2.0, {600, 100}, Easing::Linear);
+    box.transform.rotation.expression = "time * 90";
+    const uint64_t boxId = p.comp.addLayer(box).id;
+    Layer star = makeShapeLayer(ShapeKind::Star, {100, 100}, 3.0);
+    star.shape.strokeEnabled = true;
+    p.comp.addLayer(star);
+    Layer cam;
+    cam.type = LayerType::Camera;
+    cam.name = "Cam";
+    p.comp.addLayer(cam);
+    p.comp.createCompound({boxId}, 0.0);
+    std::vector<std::string> leftOut;
+    const nlohmann::json j = nlohmann::json::parse(toLottie(p.comp, {}, &leftOut));
+    CHECK(j["w"] == 800 && j["h"] == 600 && j["fr"] == 30.0 && j["op"] == 90.0);
+    CHECK(leftOut.size() == 1); // the camera
+    const nlohmann::json* boxJson = nullptr;
+    const nlohmann::json* nullJson = nullptr;
+    for (const auto& l : j["layers"]) {
+        if (l["nm"] == "Box") boxJson = &l;
+        if (l["ty"] == 3) nullJson = &l;
+    }
+    CHECK(boxJson && nullJson && (*boxJson)["parent"] == (*nullJson)["ind"]);
+    if (boxJson) {
+        const auto& pos = (*boxJson)["ks"]["p"];
+        CHECK(pos["a"] == 1 && pos["k"].size() == 3);
+        CHECK(pos["k"][0].contains("o") && pos["k"][0].contains("to")); // eased, along its motion path
+        CHECK(pos["k"][1]["h"] == 1);                                  // held
+        // An expression: baked every frame of the clip.
+        CHECK((*boxJson)["ks"]["r"]["a"] == 1 && (*boxJson)["ks"]["r"]["k"].size() >= 90);
+        CHECK((*boxJson)["shapes"][0]["it"][0]["ty"] == "rc");
+    }
 }
 
 void testQuickAnimationMarks() {
@@ -1888,6 +1985,8 @@ int main() {
         {"cut transitions", testCutTransitions},
         {"separate audio", testSeparateAudio},
         {"quick animation marks", testQuickAnimationMarks},
+        {"svg import", testSvgImport},
+        {"lottie export", testLottieExport},
         {"subtitles", testSubtitles},
         {"counter", testCounter},
         {"letters and fit", testLetters},

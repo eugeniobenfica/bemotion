@@ -120,7 +120,7 @@ std::vector<DataRow> parseRows(const std::string& text) {
 PropertiesPanel::PropertiesPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(parent), ctx_(ctx) {
     setWidgetResizable(true);
     setFrameShape(QFrame::NoFrame);
-    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded); // only when narrower than its narrowest (rows wrap and shorten first)
 }
 
 // What the panel's widgets depend on: when it changes, they are rebuilt.
@@ -445,7 +445,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
     // What it has besides its properties: its effects and transitions, each a click away.
     if (layer.type != LayerType::Camera) {
         const bool audioOnly = layer.type == LayerType::Media && layer.media.hasAudio && !layer.media.hasVideo;
-        auto* row = new QHBoxLayout;
+        auto* row = new ui::FlowLayout; // wraps when the panel is narrow
         row->setSpacing(6);
         auto chip = [&](const QString& panel, const QString& tip) { // `panel`: its English id, never translated
             auto* b = new QPushButton;
@@ -460,7 +460,6 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         fx->setIcon(ui::makeIcon(ui::Icon::FxStylize, theme::kTextDim, 16));
         QPushButton* trChip = audioOnly ? nullptr : chip(QStringLiteral("Transitions"), tr("How it comes in and goes away (Animate panel)"));
         if (trChip) trChip->setIcon(ui::makeIcon(ui::Icon::Transition, theme::kTextDim, 16));
-        row->addStretch();
         col->addLayout(row);
         auto fill = [fx, trChip, audioOnly](const Layer& l) {
             const size_t n = audioOnly ? l.audioEffects.size() : l.effects.size();
@@ -931,20 +930,23 @@ void PropertiesPanel::buildMediaSource(QVBoxLayout* col, Layer& layer) {
         return;
     }
     const bool missing = media::MediaManager::get().fileMissing(*item);
-    s->body()->addWidget(new QLabel(QString::fromStdString(item->name)));
+    s->body()->addWidget(new ui::ElidedLabel(QString::fromStdString(item->name)));
     char info[128];
     if (item->kind == MediaKind::Image) std::snprintf(info, sizeof info, "%s  ·  %d×%d", tr("Image").toUtf8().constData(), item->width, item->height);
     else if (item->kind == MediaKind::Audio) std::snprintf(info, sizeof info, "%s  ·  %.2f s", tr("Audio").toUtf8().constData(), item->duration);
     else
         std::snprintf(info, sizeof info, "%s  ·  %d×%d  ·  %.2f s  ·  %.4g fps%s", tr("Video").toUtf8().constData(), item->width, item->height,
                       item->duration, item->fps, item->hasAudio ? tr("  ·  with audio").toUtf8().constData() : "");
-    s->body()->addWidget(dim(QString::fromUtf8(info)));
-    auto* path = missing ? new QLabel(tr("Missing: %1").arg(QString::fromStdString(item->path))) : faint(QString::fromStdString(item->path));
-    path->setWordWrap(true);
-    if (missing) ui::setTone(path, ui::Tone::Danger);
+    auto* about = dim(QString::fromUtf8(info));
+    about->setWordWrap(true);
+    s->body()->addWidget(about);
+    // The path, shortened in its middle (the folder and the file name stay readable).
+    auto* path = new ui::ElidedLabel(missing ? tr("Missing: %1").arg(QString::fromStdString(item->path)) : QString::fromStdString(item->path), Qt::ElideMiddle);
+    path->setToolTip(QString::fromStdString(item->path));
+    ui::setTone(path, missing ? ui::Tone::Danger : ui::Tone::TextFaint);
     s->body()->addWidget(path);
     if (missing) s->body()->addWidget(faint(tr("Relink it from the Media panel (right-click the item).")));
-    auto* row = new QHBoxLayout;
+    auto* row = new ui::FlowLayout; // wraps when the panel is narrow
     const uint64_t id = layer.id;
     if (layer.media.hasVideo) {
         auto* fit = new QPushButton(tr("Fit to Composition"));
@@ -1067,7 +1069,7 @@ void PropertiesPanel::buildMediaTime(QVBoxLayout* col, Layer& layer) {
         if (setTimeRemap(ctx_.comp(), id, v)) ctx_.touch(); // its row comes and goes (the panel rebuilds)
     });
     s->addPlainRow(tr("Time Remap"), remap);
-    auto* buttons = new QHBoxLayout;
+    auto* buttons = new ui::FlowLayout; // wraps when the panel is narrow
     auto* freeze = new QPushButton(tr("Freeze Frame"));
     freeze->setToolTip(tr("The whole clip holds the frame under the playhead"));
     connect(freeze, &QPushButton::clicked, this, [this, id] {
@@ -1080,7 +1082,6 @@ void PropertiesPanel::buildMediaTime(QVBoxLayout* col, Layer& layer) {
         ui::showSpeedDialog(ctx_, this);
     });
     buttons->addWidget(more);
-    buttons->addStretch();
     s->body()->addLayout(buttons);
     col->addWidget(s);
     refreshers_.push_back([this, id, speed, reverse, remap] {
@@ -1355,10 +1356,9 @@ void PropertiesPanel::buildCaptions(QVBoxLayout* col, Layer& layer) {
     row->addWidget(fit);
     row->addStretch();
     s->body()->addLayout(row);
-    auto* row2 = new QHBoxLayout;
+    auto* row2 = new ui::FlowLayout; // wraps when the panel is narrow
     row2->addWidget(import);
     row2->addWidget(exportSrt);
-    row2->addStretch();
     s->body()->addLayout(row2);
     // Speech to text: the clips with sound, one of which fills this layer.
     std::vector<std::pair<uint64_t, std::string>> sounds;
@@ -1529,7 +1529,7 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
         row->addWidget(all);
         s->body()->addLayout(row);
     }
-    auto* buttons = new QHBoxLayout;
+    auto* buttons = new ui::FlowLayout; // wraps when the panel is narrow
     auto* add = new QPushButton(tr("+ Add Row"));
     add->setVisible(names.empty()); // named rows are added by name, above
     connect(add, &QPushButton::clicked, this, [this, rowsOf] {
@@ -1573,7 +1573,6 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
     buttons->addWidget(paste);
     buttons->addWidget(copy);
     buttons->addWidget(csv);
-    buttons->addStretch();
     s->body()->addLayout(buttons);
     col->addWidget(s);
 }
@@ -1778,7 +1777,7 @@ void PropertiesPanel::buildPluginTable(QVBoxLayout* col, Layer& layer) {
             key_.clear();
         }
     };
-    auto* buttons = new QHBoxLayout;
+    auto* buttons = new ui::FlowLayout; // wraps when the panel is narrow
     auto button = [&](const QString& text, const QString& tip, std::function<void()> click) {
         auto* b = new QPushButton(text);
         b->setToolTip(tip);
@@ -1812,9 +1811,8 @@ void PropertiesPanel::buildPluginTable(QVBoxLayout* col, Layer& layer) {
                 if (i < static_cast<int>(r.size())) r.erase(r.begin() + i);
         });
     });
-    buttons->addStretch();
     s->body()->addLayout(buttons);
-    auto* more = new QHBoxLayout;
+    auto* more = new ui::FlowLayout; // wraps when the panel is narrow
     auto* csv = new QPushButton(tr("Import CSV..."));
     csv->setToolTip(tr("Replace the table with a CSV file (comma, semicolon or tab separated)"));
     connect(csv, &QPushButton::clicked, this, [this, id] { importCsv(id); });
@@ -1832,7 +1830,6 @@ void PropertiesPanel::buildPluginTable(QVBoxLayout* col, Layer& layer) {
     more->addWidget(csv);
     more->addWidget(paste);
     more->addWidget(copy);
-    more->addStretch();
     s->body()->addLayout(more);
     col->addWidget(s);
 }
