@@ -100,6 +100,7 @@ add_executable(bemotion WIN32
     ui/panels/ToolsPanel.cpp
     ui/panels/TransitionsPanel.cpp
     ui/panels/AnimationsPanel.cpp
+    ui/panels/ColorPanel.cpp
     ui/Transcribe.cpp
     ui/panels/ViewportPanel.cpp)
 set_target_properties(bemotion PROPERTIES AUTOMOC ON)

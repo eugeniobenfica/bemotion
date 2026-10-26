@@ -23,6 +23,7 @@
 #include "ui/PreviewWindow.h"
 #include "ui/Tools.h"
 #include "ui/Widgets.h"
+#include "ui/panels/ColorPanel.h"
 #include "ui/panels/EffectsPanel.h"
 #include "ui/panels/MediaPanel.h"
 #include "ui/panels/ScopesPanel.h"
@@ -287,6 +288,7 @@ void EditorWindow::buildDocks() {
     properties_ = new PropertiesPanel(ctx_);
     effects_ = new EffectsPanel(ctx_);
     transitions_ = new TransitionsPanel(ctx_);
+    color_ = new ColorPanel(ctx_);
     animations_ = new AnimationsPanel(ctx_);
     scopes_ = new ScopesPanel(ctx_);
     timeline_ = new TimelinePanel(ctx_);
@@ -345,6 +347,7 @@ void EditorWindow::buildDocks() {
         d->tabWidget()->installEventFilter(this); // double-click a tab: maximize / restore
         // Shown again some other way (View > Panels, Reset Layout): its restore handle goes.
         connect(d, &ads::CDockWidget::viewToggled, this, [this, d](bool open) {
+            QTimer::singleShot(0, this, [this] { fitSideAreas(); }); // a tab more or less
             if (!open) return;
             for (size_t i = 0; i < minimized_.size(); ++i)
                 if (std::find(minimized_[i].docks.begin(), minimized_[i].docks.end(), d) != minimized_[i].docks.end()) {
@@ -365,6 +368,12 @@ void EditorWindow::buildDocks() {
     auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock(TR_NOOP("Properties"), properties_));
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Effects"), effects_), right);
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Transitions"), transitions_), right);
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Color"), color_), right); // grading: LUT, curves, correction
+    connect(color_, &ColorPanel::showScopesRequested, this, [this] {
+        ads::CDockWidget* scopes = dockWidgets_["Scopes"];
+        scopes->toggleView(true);
+        scopes->setAsCurrentTab();
+    });
     right->setCurrentIndex(0);
     // The timeline with the audio meters at its right.
     auto* timelineHost = new QWidget;
@@ -393,11 +402,20 @@ void EditorWindow::buildDocks() {
         bool complete = !saved.empty();
         for (const auto& [name, d] : dockWidgets_) complete = complete && saved.find("\"" + name + "\"") != std::string::npos;
         if (complete) docks_->restoreState(QByteArray(saved.data(), static_cast<qsizetype>(saved.size())));
-        // The side panels stay wide enough for their tabs' whole names (a narrower saved layout
-        // widens): "Objects  Media  Animate" with the minimize and maximize buttons.
-        for (const char* name : {"Objects", "Properties"})
-            if (ads::CDockAreaWidget* area = dockWidgets_[name]->dockAreaWidget()) area->setMinimumWidth(285);
+        fitSideAreas();
     });
+}
+
+void EditorWindow::fitSideAreas() {
+    // The side panels stay wide enough for their tabs' whole names (a narrower saved layout
+    // widens): the open tabs, the minimize and maximize buttons.
+    for (const char* name : {"Objects", "Properties"}) {
+        ads::CDockAreaWidget* area = dockWidgets_[name]->dockAreaWidget();
+        if (!area) continue;
+        int tabs = 0;
+        for (ads::CDockWidget* d : area->openedDockWidgets()) tabs += d->tabWidget()->sizeHint().width() + 2; // its margins
+        area->setMinimumWidth(std::max(275, tabs + 56));
+    }
 }
 
 void EditorWindow::dockToolbar(QPointF position) {
@@ -1125,7 +1143,7 @@ void EditorWindow::buildMenus() {
     connect(view, &QMenu::aboutToShow, meters, [meters] { meters->setChecked(settings().showMeters); });
     QMenu* panels = view->addMenu(tr("Panels"));
     view->addAction(tr("Tools..."), this, [this] { showTools(); });
-    for (const char* name : {"Objects", "Media", "Animate", "Scopes", "Properties", "Effects", "Transitions", "Timeline"})
+    for (const char* name : {"Objects", "Media", "Animate", "Scopes", "Properties", "Effects", "Transitions", "Color", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction(tr("Reset Layout"), this, [this] { resetLayout(); });
     view->addSeparator();
@@ -1316,6 +1334,7 @@ void EditorWindow::tick() {
     properties_->sync();
     effects_->sync();
     transitions_->sync();
+    color_->sync();
     animations_->sync();
     scopes_->sync();
     timeline_->sync();

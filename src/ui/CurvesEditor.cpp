@@ -35,8 +35,13 @@ void CurvesEditor::setCurves(const Curves& curves) {
 }
 
 QRectF CurvesEditor::tabRect(int i) const {
-    const float w = std::min<float>(56.0f, (width() - 8.0f) / 4.0f);
-    return {4.0 + i * w, 2.0, w - 4.0, kTabs - 6.0};
+    // As wide as its name (with the edited dot), at least 56 px; all four squeezed into the width.
+    float w[4], total = 0.0f;
+    for (int c = 0; c < 4; ++c) total += w[c] = std::max(56.0f, static_cast<float>(fontMetrics().horizontalAdvance(tr(kChannelNames[c]) + " •")) + 16.0f);
+    const float scale = std::min(1.0f, (width() - 8.0f) / total);
+    float x = 4.0f;
+    for (int c = 0; c < i; ++c) x += w[c] * scale;
+    return {x, 2.0, w[i] * scale - 4.0, kTabs - 6.0};
 }
 
 QRectF CurvesEditor::plot() const {

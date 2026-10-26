@@ -178,10 +178,12 @@ does.
 - Add keyframes right in the Graph Editor (right-click, double-click or *+*)
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…
   stackable, keyframable, with presets
-- **Color**: **Curves** (RGB and each channel), **Apply LUT** (any `.cube`
-  file, or five looks that come with bemotion: Teal & Orange, Warm, Cool,
-  Bleach Bypass, Film Fade) and **Chroma Key** for green and blue screens
-  (tolerance, softness, spill suppression, choke)
+- **Color**: the **Color** panel (beside Transitions, like Premiere's
+  Lumetri) grades the selected layer in one place: brightness and contrast,
+  hue and saturation, a **look** (any `.cube` LUT, or five that come with
+  bemotion: Teal & Orange, Warm, Cool, Bleach Bypass, Film Fade) and
+  **curves** (RGB and each channel); plus **Chroma Key** for green and blue
+  screens (tolerance, softness, spill suppression, choke)
 - **Scopes** (View › Panels › Scopes): waveform, RGB parade, vectorscope and
   histogram of the frame at the playhead
 - **Audio effects** on any clip with sound: gain, fades, a three-band **EQ**,

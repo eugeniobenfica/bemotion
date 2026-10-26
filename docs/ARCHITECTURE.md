@@ -544,7 +544,15 @@ Rules:
   text needs its translation in each bundled file: `tools/languages.py
   --missing pt-BR` lists them and ctest fails until they are there. Names
   saved anywhere (dock objects, settings, theme files) stay English.
-- **Scopes** (`panels/ScopesPanel`, closed by default: View › Panels): the
+- **Color** (`panels/ColorPanel`, a tab beside Transitions): the selected
+  layer's grading, Lumetri's way: Brightness & Contrast, Hue/Saturation, a
+  look (Apply LUT) and Curves. Each part is the layer's first effect of that
+  type: one it does not have yet shows its defaults, and its first change
+  inserts it (before the parts that come after it in the panel; rows wait
+  until the drag ends). Nothing new in the document: the Effects tab shows
+  the same effects. *Show Scopes* opens the Scopes tab.
+- **Scopes** (`panels/ScopesPanel`, closed by default: View › Panels, or the
+  Color tab's *Show Scopes*): the
   frame at the playhead rendered 384 px wide, as a luma waveform, RGB parade,
   vectorscope or histogram, at most a few times a second while it changes.
 

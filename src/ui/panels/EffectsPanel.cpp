@@ -6,6 +6,7 @@
 #include "ui/CurvesEditor.h"
 #include "ui/EditorContext.h"
 #include "ui/PropertyRow.h"
+#include "ui/panels/ColorPanel.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -299,29 +300,13 @@ void EffectsPanel::rebuildStack() {
         }
         if (e.type == EffectType::Lut) {
             auto* lut = new QComboBox;
-            lut->addItem(tr("None"), QString());
-            for (const std::string& name : render::bundledLuts()) {
-                const std::string file = "bundled:" + name;
-                lut->addItem(QString::fromStdString(name.substr(0, name.size() - 5)), QString::fromStdString(file)); // without ".cube"
-            }
-            if (!e.file.empty() && lut->findData(QString::fromStdString(e.file)) < 0) {
-                const std::filesystem::path p = platform::fromUtf8(e.file);
-                lut->addItem(QString::fromStdString(platform::toUtf8(p.filename())), QString::fromStdString(e.file));
-            }
-            lut->insertSeparator(lut->count());
-            lut->addItem(tr("Choose File..."), QStringLiteral("?"));
-            lut->setCurrentIndex(std::max(0, lut->findData(QString::fromStdString(e.file))));
-            lut->setToolTip(tr("A color look-up table: one of the looks that come with bemotion, or a .cube file"));
+            ui::fillLutChoices(lut, e.file);
             connect(lut, &QComboBox::activated, this, [this, id, i, lut](int index) {
-                std::string file = lut->itemData(index).toString().toStdString();
-                if (file == "?") {
-                    const auto chosen = platform::openFileDialog(TR_NOOP("Choose a LUT"), TR_NOOP("Cube LUT"), ".cube");
-                    if (!chosen) {
-                        stackKey_.clear(); // back to what it was
-                        sync();
-                        return;
-                    }
-                    file = platform::toUtf8(*chosen);
+                std::string file;
+                if (!ui::lutOfChoice(lut, index, file)) {
+                    stackKey_.clear(); // back to what it was
+                    sync();
+                    return;
                 }
                 if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size()) && l->effects[i].file != file) {
                     l->effects[i].file = file;

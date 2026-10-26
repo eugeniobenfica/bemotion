@@ -36,6 +36,7 @@ class MediaPanel;
 class ScopesPanel;
 class ToolsPanel;
 class TransitionsPanel;
+class ColorPanel;
 class AnimationsPanel;
 class ToolsPopover;
 class ViewportPanel;
@@ -101,6 +102,7 @@ private:
     void openPreview(); // full screen, only the picture, playing
     void exportFrame(bool toClipboard = false); // the frame at the playhead, as a PNG
     void resetLayout();
+    void fitSideAreas(); // side areas at least as wide as their tabs
     void maximizeDock(ads::CDockWidget* dock);
     void toggleViewportFullscreen();
     void minimizeArea(ads::CDockAreaWidget* area);
@@ -140,6 +142,7 @@ private:
     PropertiesPanel* properties_ = nullptr;
     EffectsPanel* effects_ = nullptr;
     TransitionsPanel* transitions_ = nullptr;
+    ColorPanel* color_ = nullptr;
     AnimationsPanel* animations_ = nullptr;
     TimelinePanel* timeline_ = nullptr;
     std::map<std::string, ads::CDockWidget*> dockWidgets_;
