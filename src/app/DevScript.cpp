@@ -109,8 +109,9 @@ void DevScript::mouseButton(QWidget* window, int button, bool down) {
         QApplication::sendEvent(w, &e);
     } else {
         QMouseEvent e(QEvent::MouseButtonRelease, local, global, b, Qt::MouseButtons(buttons_), Qt::KeyboardModifiers(modifiers_));
-        QApplication::sendEvent(w, &e);
+        // Let go first: a release can open a modal dialog and stay inside it until it closes.
         if (!buttons_) grabbed_ = nullptr;
+        QApplication::sendEvent(w, &e);
         // A right click also asks for the context menu, as the system does. Posted: a menu's own
         // event loop then runs after this step, and later steps can drive it.
         if (b == Qt::RightButton)

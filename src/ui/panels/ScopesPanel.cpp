@@ -1,5 +1,6 @@
 #include "ui/panels/ScopesPanel.h"
 
+#include "media/MediaManager.h"
 #include "render/SceneRenderer.h"
 #include "ui/Draw.h"
 #include "ui/EditorContext.h"
@@ -70,7 +71,7 @@ ScopesPanel::ScopesPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent),
 
 void ScopesPanel::sync() {
     if (!isVisible()) return;
-    if (valid_ && ctx_.revision() == revision_ && ctx_.time == time_) return;
+    if (valid_ && ctx_.revision() == revision_ && ctx_.time == time_ && media::MediaManager::get().arrivals() == arrivals_) return;
     if (!sinceRender_.isValid() || sinceRender_.elapsed() >= kRefreshMs) {
         renderFrame();
         update();
@@ -91,6 +92,7 @@ void ScopesPanel::renderFrame() {
         render::drawComposition(surface->getCanvas(), c, t, render::View{{0, 0}, scale, c.cameraAt(t)}, true);
     revision_ = ctx_.revision();
     time_ = t;
+    arrivals_ = media::MediaManager::get().arrivals();
     valid_ = true;
     sinceRender_.restart();
 }

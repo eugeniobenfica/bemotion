@@ -41,6 +41,16 @@ public:
     // shown in the Properties panel. Keyframe selection belongs to it.
     std::vector<uint64_t> selection;
     std::vector<KeySelection> selectedKeys;
+    // A transition picked on the timeline: the selection then, instead of its clip (the
+    // Transitions panel shows that clip's transitions; Delete removes it). 0: none.
+    uint64_t transitionLayer = 0;
+    bool transitionIncoming = true;
+    void selectTransition(uint64_t layerId, bool incoming); // clears the layer selection
+    // A mask picked as an object (its row on the timeline): its layer selected, and only that
+    // mask's points shown in the viewport; Delete removes it. -1: none (any mask editable).
+    int maskFocus = -1;
+    void selectMask(uint64_t layerId, int index);
+    bool deleteFocusedMask(); // false without one
 
     Tool tool = Tool::Select;
     bool snapping = true;     // magnet: objects, clips and keyframes snap (hold Ctrl to bypass)
@@ -54,9 +64,6 @@ public:
     // negative backwards. Play / pause goes back to 1.
     double playRate = 1.0;
     void shuttle(int direction); // -1: J (backwards, faster each time), 0: K (stop), 1: L
-    // Frames the viewport keeps rendered (they play again without rendering): the timeline's
-    // ruler shows them as a green line, like After Effects' RAM preview.
-    std::set<int> cachedFrames;
 
     void open(Project p, std::filesystem::path file);
 

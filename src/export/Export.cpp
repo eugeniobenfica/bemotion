@@ -103,6 +103,9 @@ bool ExportJob::start(const Project& project, const Settings& settings, std::str
 
     int w = 0, h = 0;
     outputSize(comp, settings_, w, h);
+    width_ = w;
+    height_ = h;
+    pixels_.clear();
     if (!renderer_.init(w, h, error)) return false;
 
     audio_.clear();
@@ -153,8 +156,7 @@ void ExportJob::step(double budgetSeconds) {
 
 void ExportJob::cancel() {
     if (!running_) return;
-    std::string ignored;
-    encoder_->finish(ignored);
+    encoder_->abort(); // at once: no flushing, the partial file removed
     encoder_.reset();
     renderer_.release();
     running_ = false;

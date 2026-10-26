@@ -881,6 +881,64 @@ std::vector<std::string> bundledLuts() {
     return names;
 }
 
+bool lutSwatch(const std::string& file, int w, int h, std::vector<uint8_t>& rgba) {
+    if (w <= 0 || h <= 0) return false;
+    Lut3D lut;
+    if (!file.empty()) {
+        std::ifstream in(lutPath(file), std::ios::binary);
+        std::stringstream text;
+        text << in.rdbuf();
+        if (!in || !parseCubeLut(text.str(), lut) || lut.size < 2) return false;
+    }
+    const int n = lut.size;
+    auto at = [&](int r, int g, int b, int c) { return lut.rgb[((static_cast<size_t>(b) * n + g) * n + r) * 3 + c]; };
+    auto apply = [&](float rgb[3]) { // trilinear, as the shader samples
+        if (n < 2) return;
+        float pos[3];
+        int i0[3], i1[3];
+        for (int c = 0; c < 3; ++c) {
+            pos[c] = std::clamp(rgb[c], 0.0f, 1.0f) * (n - 1);
+            i0[c] = std::min(n - 2, static_cast<int>(pos[c]));
+            i1[c] = i0[c] + 1;
+            pos[c] -= i0[c];
+        }
+        for (int c = 0; c < 3; ++c) {
+            auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
+            const float c00 = lerp(at(i0[0], i0[1], i0[2], c), at(i1[0], i0[1], i0[2], c), pos[0]);
+            const float c10 = lerp(at(i0[0], i1[1], i0[2], c), at(i1[0], i1[1], i0[2], c), pos[0]);
+            const float c01 = lerp(at(i0[0], i0[1], i1[2], c), at(i1[0], i0[1], i1[2], c), pos[0]);
+            const float c11 = lerp(at(i0[0], i1[1], i1[2], c), at(i1[0], i1[1], i1[2], c), pos[0]);
+            rgb[c] = lerp(lerp(c00, c10, pos[1]), lerp(c01, c11, pos[1]), pos[2]);
+        }
+    };
+    rgba.assign(static_cast<size_t>(w) * h * 4, 255);
+    const int grayFrom = h * 3 / 4;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            float rgb[3];
+            const float u = w > 1 ? static_cast<float>(x) / (w - 1) : 0.0f;
+            if (y >= grayFrom) {
+                rgb[0] = rgb[1] = rgb[2] = u;
+            } else { // hue across, value down (a soft saturation: skin, sky and foliage tones)
+                const float v = 0.95f - 0.7f * static_cast<float>(y) / std::max(1, grayFrom - 1), s = 0.6f;
+                const float hh = u * 6.0f, f = hh - std::floor(hh);
+                const float p = v * (1 - s), q = v * (1 - s * f), t = v * (1 - s * (1 - f));
+                switch (static_cast<int>(hh) % 6) {
+                case 0: rgb[0] = v, rgb[1] = t, rgb[2] = p; break;
+                case 1: rgb[0] = q, rgb[1] = v, rgb[2] = p; break;
+                case 2: rgb[0] = p, rgb[1] = v, rgb[2] = t; break;
+                case 3: rgb[0] = p, rgb[1] = q, rgb[2] = v; break;
+                case 4: rgb[0] = t, rgb[1] = p, rgb[2] = v; break;
+                default: rgb[0] = v, rgb[1] = p, rgb[2] = q; break;
+                }
+            }
+            apply(rgb);
+            uint8_t* px = rgba.data() + (static_cast<size_t>(y) * w + x) * 4;
+            for (int c = 0; c < 3; ++c) px[c] = static_cast<uint8_t>(std::lround(std::clamp(rgb[c], 0.0f, 1.0f) * 255.0f));
+        }
+    return true;
+}
+
 bool lutInfo(const std::string& file, std::string& title, std::string& error) {
     const LoadedLut& lut = loadLut(file);
     title = lut.title;

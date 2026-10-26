@@ -18,6 +18,7 @@
 #include <QHBoxLayout>
 #include <QImage>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
@@ -89,6 +90,7 @@ public:
         setMouseTracking(true);
         setAcceptDrops(true);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setFocusPolicy(Qt::ClickFocus); // Delete removes the item clicked (in a folder too)
     }
 
     std::string filter;
@@ -254,6 +256,24 @@ protected:
     }
 
     bool event(QEvent* e) override {
+        // Delete / Backspace on a selected item: it, not the timeline's layers (the editor's own
+        // Delete shortcut would take the key first).
+        if (e->type() == QEvent::ShortcutOverride && selected) {
+            const int key = static_cast<QKeyEvent*>(e)->key();
+            if (key == Qt::Key_Delete || key == Qt::Key_Backspace) {
+                e->accept();
+                return true;
+            }
+        }
+        if (e->type() == QEvent::KeyPress && selected) {
+            const int key = static_cast<QKeyEvent*>(e)->key();
+            if (key == Qt::Key_Delete || key == Qt::Key_Backspace) {
+                const uint64_t id = selected;
+                selected = 0;
+                remove(id);
+                return true;
+            }
+        }
         if (e->type() == QEvent::ToolTip) {
             auto* he = static_cast<QHelpEvent*>(e);
             const Row* row = rowAt(he->pos().y());

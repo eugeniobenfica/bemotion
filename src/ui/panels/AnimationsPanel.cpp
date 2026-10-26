@@ -111,7 +111,7 @@ void AnimationsPanel::rebuild() {
             connect(t, &QAbstractButton::clicked, this, [this, preset] {
                 bool any = false;
                 for (Layer* l : ctx_.selectedLayers())
-                    if (presetAppliesTo(preset, *l)) applyPreset(preset, *l, ctx_.time), any = true;
+                    if (presetAppliesTo(preset, *l)) applyQuickAnimation(preset, *l, ctx_.time), any = true;
                 if (any) ctx_.touch();
             });
             t->setDragData([preset] { return ui::makeTextMime(ui::kAnimationMime, presetToJson(preset)); });

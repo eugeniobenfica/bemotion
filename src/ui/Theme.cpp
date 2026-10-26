@@ -343,14 +343,10 @@ void apply(const Palette& given) {
     buttons.replace("INNER", QString::number(inner)).replace("BW", QString::number(bw)).replace("Rpx", QString::number(r) + "px");
     s += buttons;
     // Segmented controls (ui::segmented): one outlined strip; the chosen part in the accent.
-    QString seg = "QPushButton[segment] { background: FIELD; border: BWpx solid FBORDER; border-radius: 0; padding: 4px 12px; color: DIM; }\n"
-                  "QPushButton[segment]:hover { color: TEXT; background: FHOVER; }\n"
-                  "QPushButton[segment]:checked { background: SOFT; color: TEXT; border-color: ABORDER; }\n"
+    // (Their strip draws the outline, the fill and the chosen part: SegmentStrip in Widgets.cpp.)
+    QString seg = "QPushButton[segment] { background: transparent; border: none; border-radius: 0; padding: 5px 12px; color: DIM; }\n"
+                  "QPushButton[segment]:hover, QPushButton[segment]:checked { color: TEXT; background: transparent; }\n"
                   "QPushButton[segment]:disabled { color: FAINT; }\n"
-                  "QPushButton[segment=\"first\"] { border-top-left-radius: Rpx; border-bottom-left-radius: Rpx; }\n"
-                  "QPushButton[segment=\"last\"] { border-top-right-radius: Rpx; border-bottom-right-radius: Rpx; }\n"
-                  "QPushButton[segment=\"only\"] { border-radius: Rpx; }\n"
-                  "QPushButton[segment=\"middle\"], QPushButton[segment=\"last\"] { margin-left: -1px; }\n"
                   // A key shortcut shown as a field you click to change (Settings › Shortcuts).
                   "QPushButton[keycap=\"true\"] { background: FIELD; border-color: FBORDER; font-weight: 600; }\n";
     seg.replace("FIELD", css(kField)).replace("FBORDER", css(kFieldBorder)).replace("FHOVER", css(mix(p.field, p.text, 0.06f)));

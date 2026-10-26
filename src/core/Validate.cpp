@@ -318,8 +318,14 @@ private:
                 if (e.value != before.value || e.value2 != before.value2 || e.value3 != before.value3)
                     report(where, std::string(audioEffectId(e.type)) + " values out of range");
             }
-            for (ClipTransition* transition : {&l.transitionIn, &l.transitionOut})
+            for (ClipTransition* transition : {&l.transitionIn, &l.transitionOut}) {
                 if (!std::isfinite(transition->duration) || transition->duration <= 0.0f) transition->id.clear(), transition->duration = 0.5f;
+                if (transition->overlap && !transition->joined) transition->overlap = false; // a crossed cut has two sides
+            }
+            if (std::erase_if(l.animations, [](const AppliedAnimation& a) {
+                    return !std::isfinite(a.start) || !std::isfinite(a.duration) || a.duration <= 0.0;
+                }) > 0)
+                report(where, "quick animation marks with bad times dropped");
 
             const Layer pristine = l; // for default values
             for (const PropertyRef& prop : l.properties()) {

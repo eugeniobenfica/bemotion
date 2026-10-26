@@ -65,7 +65,11 @@ std::string presetToJson(const AnimationPreset& preset);
 
 bool presetAppliesTo(const AnimationPreset& preset, const Layer& layer);
 double presetDuration(const AnimationPreset& preset, const Layer& layer);
-void applyPreset(const AnimationPreset& preset, Layer& layer, double time);
+// `insideClip`: moved to fit in the clip (a transition across a cut plays partly outside it).
+void applyPreset(const AnimationPreset& preset, Layer& layer, double time, bool insideClip = true);
+// A Quick Animation (the Animate panel, dropped on a clip): applyPreset, and remembered on the
+// layer (Layer::animations) where it went, replacing one it covers.
+void applyQuickAnimation(const AnimationPreset& preset, Layer& layer, double time);
 
 // Captures the keyframes of `layer` between `start` and `end` as a preset
 // with absolute values ("Save as Quick Animation").

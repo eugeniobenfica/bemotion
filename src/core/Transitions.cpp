@@ -123,6 +123,16 @@ const Definition kDefinitions[] = {
 
 bool isThreeD(const char* category) { return std::strcmp(category, "3D") == 0; }
 
+const Definition* definitionOf(const std::string& id) {
+    for (const Definition& d : kDefinitions)
+        if (id == d.info.id) return &d;
+    return nullptr;
+}
+
+// On a crossed cut the outgoing clip plays its Out animation too (a push, a zoom through), but
+// not a fade: it stays whole under the incoming clip fading in, or the picture would dim.
+bool outgoingAnimates(const Definition& d) { return std::strcmp(d.info.category, "Fade") != 0; }
+
 AnimationPreset presetOf(const char* tracks, double duration) {
     AnimationPreset p;
     parsePreset(std::string(R"({"name":"transition","tracks":)") + tracks + "}", p);
@@ -130,8 +140,8 @@ AnimationPreset presetOf(const char* tracks, double duration) {
     return p;
 }
 
-void removePresetKeys(const AnimationPreset& preset, Layer& layer, double time) {
-    const double start = std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - preset.duration));
+void removePresetKeys(const AnimationPreset& preset, Layer& layer, double time, bool insideClip = true) {
+    const double start = insideClip ? std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - preset.duration)) : time;
     const double end = start + preset.duration;
     auto properties = layer.properties();
     for (const PresetTrack& track : preset.tracks) {
@@ -227,18 +237,24 @@ bool removeTransition(Layer& layer, TransitionEdge edge) {
         transition = {};
         removed = true;
     };
+    // A crossed cut's keys span the whole transition, half before the cut and half after.
+    auto removeCrossed = [&](ClipTransition& transition, const char* tracks, double cut) {
+        removePresetKeys(presetOf(tracks, transition.duration * 2.0), layer, cut - transition.duration, false);
+        transition = {};
+        removed = true;
+    };
     if (edge != TransitionEdge::Out) {
-        const Definition* definition = nullptr;
-        for (const Definition& candidate : kDefinitions)
-            if (candidate.info.id == layer.transitionIn.id) definition = &candidate;
-        if (definition) remove(layer.transitionIn, definition->in, layer.inPoint);
+        const Definition* definition = definitionOf(layer.transitionIn.id);
+        if (definition && layer.transitionIn.overlap) removeCrossed(layer.transitionIn, definition->in, layer.inPoint);
+        else if (definition) remove(layer.transitionIn, definition->in, layer.inPoint);
         else if (layer.transitionIn.active()) layer.transitionIn = {}, removed = true;
     }
     if (edge != TransitionEdge::In) {
-        const Definition* definition = nullptr;
-        for (const Definition& candidate : kDefinitions)
-            if (candidate.info.id == layer.transitionOut.id) definition = &candidate;
-        if (definition) remove(layer.transitionOut, definition->out, layer.outPoint - layer.transitionOut.duration);
+        const Definition* definition = definitionOf(layer.transitionOut.id);
+        if (definition && layer.transitionOut.overlap) {
+            if (outgoingAnimates(*definition)) removeCrossed(layer.transitionOut, definition->out, layer.outPoint);
+            else layer.transitionOut = {}, removed = true;
+        } else if (definition) remove(layer.transitionOut, definition->out, layer.outPoint - layer.transitionOut.duration);
         else if (layer.transitionOut.active()) layer.transitionOut = {}, removed = true;
     }
     return removed;
@@ -270,20 +286,42 @@ Layer* transitionPartner(Composition& comp, const Layer& layer, TransitionEdge e
 bool applyCutTransition(Composition& comp, Layer& first, const std::string& id, double duration) {
     Layer* second = nextOnTrack(comp, first);
     if (!second || !canTakeTransition(first, id) || !canTakeTransition(*second, id)) return false;
-    const double half = std::max(0.05, duration * 0.5);
+    const Definition* def = definitionOf(id);
+    if (!def) return false;
+    if (isThreeD(def->info.category) && (first.type == LayerType::Background || first.parent || second->type == LayerType::Background || second->parent))
+        return false; // only top-level layers turn in 3D
+    // Half on each side of the cut, at most half of either clip.
+    const double half = std::clamp(duration * 0.5, 0.05, std::max(0.05, std::min(first.outPoint - first.inPoint, second->outPoint - second->inPoint) * 0.5));
     if (first.transitionOut.active()) removeTransition(comp, first, TransitionEdge::Out);
     if (second->transitionIn.active()) removeTransition(comp, *second, TransitionEdge::In);
-    if (!applyTransition(first, id, TransitionEdge::Out, half)) return false;
-    if (!applyTransition(*second, id, TransitionEdge::In, half)) {
-        removeTransition(first, TransitionEdge::Out);
-        return false;
-    }
-    first.transitionOut.joined = second->transitionIn.joined = true;
+    // The clips overlap for the whole transition (a cross dissolve, not a dip between two
+    // fades): the incoming one animates in above the outgoing one, which stays (a fade) or
+    // animates out at the same time (a push, a zoom through).
+    if (isThreeD(def->info.category)) first.threeD = second->threeD = true;
+    const double cut = first.outPoint;
+    applyPreset(presetOf(def->in, half * 2.0), *second, cut - half, false);
+    if (outgoingAnimates(*def)) applyPreset(presetOf(def->out, half * 2.0), first, cut - half, false);
+    first.transitionOut = {id, static_cast<float>(half), true, true};
+    second->transitionIn = {id, static_cast<float>(half), true, true};
+    // Same track: the incoming clip goes right above the outgoing one in the stack.
+    auto& layers = comp.layers;
+    const auto a = std::find_if(layers.begin(), layers.end(), [&](const Layer& l) { return &l == &first; });
+    const auto b = std::find_if(layers.begin(), layers.end(), [&](const Layer& l) { return &l == second; });
+    if (b > a) std::rotate(a, b, b + 1); // (references to them change: callers look them up again)
     return true;
 }
 
 bool resizeTransition(Composition& comp, Layer& layer, TransitionEdge edge, double duration) {
     Layer* partner = transitionPartner(comp, layer, edge);
+    // A crossed cut is made again: both clips' keys span it together.
+    if (partner && (edge == TransitionEdge::In ? layer.transitionIn : layer.transitionOut).overlap) {
+        Layer* first = edge == TransitionEdge::Out ? &layer : partner;
+        const std::string id = first->transitionOut.id;
+        const uint64_t firstId = first->id;
+        removeTransition(comp, *first, TransitionEdge::Out);
+        Layer* again = comp.findLayer(firstId);
+        return again && applyCutTransition(comp, *again, id, duration * 2.0);
+    }
     if (!resizeTransition(layer, edge, duration)) return false;
     if (partner) resizeTransition(*partner, edge == TransitionEdge::In ? TransitionEdge::Out : TransitionEdge::In, duration);
     return true;

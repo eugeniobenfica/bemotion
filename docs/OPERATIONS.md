@@ -164,7 +164,10 @@ at the new speed (its pitch changes).
 
 **`layer.time_remap`** — `layer`, `enabled`: on, the `time_remap` property
 (keyframes at the clip's ends) says which source second is shown at each
-moment; off, back to its speed. **`layer.freeze`** → `{"source_time": s}` —
+moment; off, back to its speed. **`layer.separate_audio`** → `{"layer": id,
+"name"}` — `layer`: a video with sound keeps its picture; its sound becomes a
+clip of its own on a new track right below (same media, time, speed, volume
+and audio effects). **`layer.freeze`** → `{"source_time": s}` —
 `layer`, `time`: the clip holds the frame it shows there (Time Remap with one
 value).
 
@@ -244,9 +247,10 @@ while any other clip with sound — without ducking itself — is above
 `whip_left`, `whip_right`, `drop`; Scale: `zoom`, `zoom_out`, `pop`,
 `stretch`, `squash`, `elastic`; Rotate: `spin`, `swing`, `roll`; 3D: `turn`,
 `tilt`, `fly`, which make the layer 3D), `edge` (`in`, `out`, `both`, or
-`cut`: across the cut after this clip, with the next clip on its track, half
-the duration on each side; default `in`), `duration` (seconds, default 0.5;
-1 for `cut`). Keyframes at the clip's start and/or end; keys already there
+`cut`: across the cut after this clip, with the next clip on its track: the
+two clips overlap for the whole duration, half on each side of the cut, the
+next one animating in above this one (a cross dissolve with `fade`, a push
+with a slide); default `in`), `duration` (seconds, default 0.5; 1 for `cut`). Keyframes at the clip's start and/or end; keys already there
 are replaced. Cameras and sound-only clips take none.
 
 **`arrange.distribute`** — `layers` (list, or `"all"`), `axis` (`x` or `y`),

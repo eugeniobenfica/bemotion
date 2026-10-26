@@ -193,6 +193,17 @@ public:
         return ok;
     }
 
+    void abort() override {
+        // finish() would encode the rest of the audio and every frame the encoder holds: on a long
+        // project, seconds to minutes that look like a hang.
+        const bool wrote = oc_ && !(oc_->oformat->flags & AVFMT_NOFILE);
+        cleanup();
+        if (wrote) {
+            std::error_code ec;
+            std::filesystem::remove(params_.output, ec); // half a file plays nowhere
+        }
+    }
+
 private:
     bool fail(std::string& error, const char* message) {
         if (error.empty()) error = message;

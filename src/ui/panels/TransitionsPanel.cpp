@@ -15,6 +15,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cmath>
 
 namespace bemotion {
 
@@ -64,6 +65,32 @@ TransitionsPanel::TransitionsPanel(EditorContext& ctx, QWidget* parent) : QScrol
 void TransitionsPanel::resizeEvent(QResizeEvent* e) {
     QScrollArea::resizeEvent(e);
     if (std::max(2, (viewport()->width() - 16) / 92) != columns_) rebuild();
+}
+
+void TransitionsPanel::applyToSelection(const std::string& id) {
+    Composition& comp = ctx_.comp();
+    std::vector<uint64_t> ids;
+    for (Layer* l : ctx_.selectedLayers()) ids.push_back(l->id);
+    auto selected = [&](const Layer* l) { return l && std::find(ids.begin(), ids.end(), l->id) != ids.end() && canTakeTransition(*l, id); };
+    bool any = false;
+    for (uint64_t layerId : ids) { // looked up each time: a cut transition reorders the stack
+        Layer* l = comp.findLayer(layerId);
+        if (!l || !canTakeTransition(*l, id)) continue;
+        // Two selected clips that touch on a track: one transition across their cut (they
+        // overlap, a cross dissolve), made from the first one; a free edge gets its own.
+        const bool cutBefore = selected(transitionPartner(comp, *l, TransitionEdge::In)) || [&] {
+            for (Layer& other : comp.layers)
+                if (&other != l && other.track == l->track && other.parent == l->parent &&
+                    std::fabs(other.outPoint - l->inPoint) < comp.frameDuration() * 0.5 && selected(&other))
+                    return true;
+            return false;
+        }();
+        const bool cutAfter = selected(nextOnTrack(comp, *l));
+        if (!cutBefore) any = applyTransition(*l, id, TransitionEdge::In, 0.5) || any;
+        if (cutAfter) any = applyCutTransition(comp, *l, id, 1.0) || any;
+        else any = applyTransition(*l, id, TransitionEdge::Out, 0.5) || any;
+    }
+    if (any) ctx_.touch();
 }
 
 void TransitionsPanel::rebuild() {
@@ -121,16 +148,12 @@ void TransitionsPanel::rebuild() {
             if (category_ != list[i].category) continue;
             auto* t = new ui::Tile(iconOf(list[i].id), list[i].name);
             t->setTileSize(tile);
-            t->setToolTip(tr("%1\n\nClick: the selected clips, in and out. Or drag it onto the start or end of a clip, "
-                                  "or onto the cut between two clips. Drag its edge on the timeline to set its duration.")
+            t->setToolTip(tr("%1\n\nClick: the selected clips, in and out (across the cut between two selected clips that "
+                             "touch). Or drag it onto the start or end of a clip, or onto the cut between two clips. Drag its "
+                             "edge on the timeline to set its duration.")
                               .arg(tr(list[i].about)));
             const std::string id = list[i].id;
-            connect(t, &QAbstractButton::clicked, this, [this, id] {
-                bool any = false;
-                for (Layer* l : ctx_.selectedLayers())
-                    if (canTakeTransition(*l, id)) any = applyTransition(*l, id, TransitionEdge::Both, 0.5) || any;
-                if (any) ctx_.touch();
-            });
+            connect(t, &QAbstractButton::clicked, this, [this, id] { applyToSelection(id); });
             t->setDragData([id] { return ui::makeTextMime(ui::kTransitionMime, id); });
             grid->addWidget(t, n / columns_, n % columns_);
             tiles_.push_back(t);
@@ -143,9 +166,16 @@ void TransitionsPanel::rebuild() {
     setWidget(content);
 }
 
+std::vector<Layer*> TransitionsPanel::shownLayers() const {
+    auto& ctx = const_cast<EditorContext&>(ctx_);
+    if (ctx.selection.empty() && ctx.transitionLayer) // a transition picked on the timeline: its clip's
+        if (Layer* l = ctx.comp().findLayer(ctx.transitionLayer)) return {l};
+    return ctx.selectedLayers();
+}
+
 std::string TransitionsPanel::selectionKey() const {
     std::string key;
-    for (const Layer* l : ctx_.selectedLayers())
+    for (const Layer* l : shownLayers())
         key += std::to_string(l->id) + ":" + l->name + ":" + l->transitionIn.id + (l->transitionIn.joined ? "+" : "") + ":" +
                l->transitionOut.id + (l->transitionOut.joined ? "+" : "") + ",";
     return key;
@@ -154,7 +184,7 @@ std::string TransitionsPanel::selectionKey() const {
 void TransitionsPanel::buildApplied(QVBoxLayout* col) {
     shownKey_ = selectionKey();
     durations_[0] = durations_[1] = nullptr;
-    const auto selected = ctx_.selectedLayers();
+    const auto selected = shownLayers();
     if (selected.size() > 1) {
         col->addWidget(new QLabel(tr("Transitions  ·  %1 clips").arg(selected.size())));
         col->addWidget(faint(tr("A transition clicked below goes to each of them, in and out.")));
@@ -216,14 +246,14 @@ void TransitionsPanel::sync() {
         return;
     }
     // Durations changed elsewhere (dragged on the timeline, undone) show here.
-    if (const auto selected = ctx_.selectedLayers(); selected.size() == 1) {
+    if (const auto selected = shownLayers(); selected.size() == 1) {
         const Layer* l = selected.front();
         if (durations_[0] && !durations_[0]->editing()) durations_[0]->setValue(l->transitionIn.duration);
         if (durations_[1] && !durations_[1]->editing()) durations_[1]->setValue(l->transitionOut.duration);
     }
     // Dimmed when the selection cannot take transitions (nothing selected: anything goes); a
     // dot on what the clips have (and on its category).
-    const auto selected = ctx_.selectedLayers();
+    const auto selected = shownLayers();
     bool canApply = selected.empty();
     for (Layer* l : selected) canApply = canApply || canTakeTransition(*l);
     for (size_t i = 0; i < tiles_.size(); ++i) {

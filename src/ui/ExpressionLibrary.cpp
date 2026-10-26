@@ -2,10 +2,12 @@
 
 #include "ui/Draw.h"
 #include "ui/Theme.h"
+#include "ui/Widgets.h"
 
 #include <QApplication>
 #include <QGuiApplication>
 #include <QHBoxLayout>
+#include <QLabel>
 #include <QKeyEvent>
 #include <QLineEdit>
 #include <QMouseEvent>
@@ -21,7 +23,7 @@ namespace bemotion::ui {
 
 namespace {
 
-constexpr int kWidth = 600, kHeight = 400, kSide = 150;
+constexpr int kWidth = 620, kHeight = 430, kSide = 150;
 constexpr int kRow = 46, kHeaderRow = 28, kCategoryRow = 30;
 
 QFont codeFont() {
@@ -155,20 +157,22 @@ protected:
             if (on || hot)
                 d.rectFilled(Pt(6, y + 1), Pt(width() - 6.0f, y + h - 2), on ? theme::withAlpha(theme::kAccent, 28) : theme::kBgHover,
                              theme::current().rounding);
+            // What it does first, in plain words; the code it writes under it.
             QString shownCode = entry.code;
             shownCode.remove('|');
-            p.setFont(code);
-            p.setPen(qcolor(theme::kAccent));
+            p.setFont(base);
+            p.setPen(qcolor(on || hot ? theme::kText : theme::kTextDim));
             p.drawText(QRectF(14, y + 5, width() - 28, 20), Qt::AlignLeft | Qt::AlignVCenter,
-                       p.fontMetrics().elidedText(shownCode, Qt::ElideRight, width() - (showCategory ? 120 : 28)));
-            p.setFont(small);
+                       p.fontMetrics().elidedText(entry.about, Qt::ElideRight, width() - (showCategory ? 120 : 28)));
             if (showCategory) {
+                p.setFont(small);
                 p.setPen(qcolor(theme::kTextFaint));
                 p.drawText(QRectF(width() - 110, y + 5, 96, 20), Qt::AlignRight | Qt::AlignVCenter, entry.category);
             }
-            p.setPen(qcolor(on ? theme::kText : theme::kTextDim));
+            p.setFont(code);
+            p.setPen(qcolor(on ? theme::kAccent : theme::withAlpha(theme::kAccent, 190)));
             p.drawText(QRectF(14, y + 24, width() - 28, 18), Qt::AlignLeft | Qt::AlignVCenter,
-                       p.fontMetrics().elidedText(entry.about, Qt::ElideRight, width() - 28));
+                       p.fontMetrics().elidedText(shownCode, Qt::ElideRight, width() - 28));
             y += h;
         }
     }
@@ -221,6 +225,13 @@ public:
         list_->setAutoFillBackground(false);
         body->addWidget(scroll_, 1);
         col->addLayout(body, 1);
+        // How to use it without the mouse.
+        auto* keys = new QLabel(tr("↑ ↓  choose   ·   Enter  insert   ·   Tab  next category   ·   Esc  close"));
+        setTone(keys, Tone::TextFaint);
+        QFont smallFont = keys->font();
+        smallFont.setPointSizeF(smallFont.pointSizeF() * 0.85);
+        keys->setFont(smallFont);
+        col->addWidget(keys);
         connect(search_, &QLineEdit::textChanged, this, [this] { refresh(); });
         const auto it = std::find(categories_.begin(), categories_.end(), start);
         showCategory(it == categories_.end() ? 0 : static_cast<int>(it - categories_.begin()));
@@ -235,7 +246,7 @@ protected:
         d.rect(Pt(0.5f, 0.5f), Pt(width() - 0.5f, height() - 0.5f), theme::kBorder, r);
         // Between the categories and the entries.
         const float x = 10.0f + kSide + 2.0f;
-        d.line(Pt(x, 52), Pt(x, height() - 12.0f), theme::kBorder, 1.0f);
+        d.line(Pt(x, 52), Pt(x, height() - 34.0f), theme::kBorder, 1.0f);
     }
     bool eventFilter(QObject* o, QEvent* e) override {
         if (o == search_ && e->type() == QEvent::KeyPress) {

@@ -386,27 +386,93 @@ void PropertyRow::openExpression(const QString& text) {
     if (!expr_) { // the timeline's compact rows: the same editor, in a small window
         QDialog dialog(label_->window());
         dialog.setWindowTitle(labelText_ + tr(" Expression"));
-        dialog.setMinimumWidth(520);
+        dialog.setMinimumWidth(560);
         auto* col = new QVBoxLayout(&dialog);
-        col->setContentsMargins(18, 16, 18, 14);
-        auto* head = new QLabel(labelText_ + " =");
-        ui::setTone(head, ui::Tone::TextDim);
-        col->addWidget(head);
+        col->setContentsMargins(20, 18, 20, 16);
+        col->setSpacing(8);
+        // Which property of which layer, and what a formula does here.
+        auto* head = new QHBoxLayout;
+        auto* icon = new QLabel;
+        icon->setPixmap(ui::makeIcon(ui::Icon::Expression, theme::kAccent, 20).pixmap(20, 20));
+        head->addWidget(icon);
+        auto* title = new QLabel(labelText_);
+        QFont bold = title->font();
+        bold.setPointSizeF(bold.pointSizeF() * 1.15);
+        bold.setWeight(QFont::DemiBold);
+        title->setFont(bold);
+        head->addWidget(title);
+        if (const Layer* layer = ctx_.comp().findLayer(layerId_)) {
+            auto* where = new QLabel(QStringLiteral("·  ") + QString::fromStdString(layer->name));
+            ui::setTone(where, ui::Tone::TextDim);
+            head->addWidget(where);
+        }
+        head->addStretch();
+        col->addLayout(head);
+        auto* about = new QLabel(tr("A formula worked out every frame. value is what the keyframes give; time, the seconds."));
+        about->setWordWrap(true);
+        ui::setTone(about, ui::Tone::TextFaint);
+        col->addWidget(about);
         auto* editor = new ui::ExpressionEditor(ctx_, layerId_, kind_ == PropertyKind::Vec2);
         editor->setProperty(id_, kind_ == PropertyKind::Color);
         editor->setRowButtons(false);
         editor->setText(text);
-        connect(editor, &ui::ExpressionEditor::edited, &dialog, [editor](const QString& t) {
+        auto check = [editor](const QString& t) {
             const std::string e = t.trimmed().toStdString();
             editor->setProblem(e.empty() ? QString() : QString::fromStdString(checkExpression(e)));
-        });
+        };
+        connect(editor, &ui::ExpressionEditor::edited, &dialog, check);
         col->addWidget(editor);
-        auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-        connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
-        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-        col->addWidget(buttons);
+        // A start: the property's first examples, one click each.
+        auto* quick = new QHBoxLayout;
+        quick->setSpacing(6);
+        auto* tryLabel = new QLabel(tr("Try"));
+        ui::setTone(tryLabel, ui::Tone::TextFaint);
+        quick->addWidget(tryLabel);
+        int shown = 0;
+        for (const ui::ExpressionEntry& ex : ui::expressionExamples(id_, kind_ == PropertyKind::Vec2, kind_ == PropertyKind::Color)) {
+            if (ex.header || shown >= 3) continue;
+            QString code = ex.snippet.isEmpty() ? ex.code : ex.snippet;
+            code.remove('|');
+            auto* chip = new QPushButton(ex.code);
+            chip->setProperty("flat", true);
+            chip->setToolTip(ex.about);
+            chip->setCursor(Qt::PointingHandCursor);
+            connect(chip, &QPushButton::clicked, &dialog, [editor, code, check] {
+                editor->setText(code);
+                check(code);
+                editor->focusText();
+            });
+            quick->addWidget(chip);
+            ++shown;
+        }
+        quick->addStretch();
+        col->addLayout(quick);
+        auto* line = new QFrame;
+        line->setFrameShape(QFrame::HLine);
+        ui::setTone(line, ui::Tone::Border);
+        col->addWidget(line);
+        auto* buttons = new QHBoxLayout;
+        const bool had = prop() && prop()->anim->hasExpression();
+        if (had) { // off again: the keyframes (or the value) as before
+            auto* remove = new QPushButton(tr("Remove"));
+            remove->setToolTip(tr("No expression: the keyframes (or the value) again"));
+            connect(remove, &QPushButton::clicked, &dialog, [&dialog] { dialog.done(2); });
+            buttons->addWidget(remove);
+        }
+        buttons->addStretch();
+        auto* cancel = new QPushButton(tr("Cancel"));
+        connect(cancel, &QPushButton::clicked, &dialog, &QDialog::reject);
+        auto* apply = new QPushButton(tr("Apply"));
+        apply->setProperty("accent", true);
+        apply->setDefault(true);
+        connect(apply, &QPushButton::clicked, &dialog, &QDialog::accept);
+        buttons->addWidget(cancel);
+        buttons->addWidget(apply);
+        col->addLayout(buttons);
         editor->focusText();
-        if (dialog.exec() == QDialog::Accepted) applyExpression(editor->text());
+        const int result = dialog.exec();
+        if (result == QDialog::Accepted) applyExpression(editor->text());
+        else if (result == 2) removeExpression();
         refresh();
         return;
     }

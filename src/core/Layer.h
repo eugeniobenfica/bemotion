@@ -357,7 +357,20 @@ struct ClipTransition {
     // Half of a transition on the cut between this clip and its neighbor on the track (this
     // clip's out and the next one's in): they change together.
     bool joined = false;
+    // A crossed cut (joined only): the two clips overlap for the whole transition, `duration`
+    // on each side of the cut, the incoming one animating in over the outgoing one (a cross
+    // dissolve, a push...). Without it (files from before), each half played on its own side.
+    bool overlap = false;
     bool active() const { return !id.empty(); }
+};
+
+// A Quick Animation put on a clip (Animate panel): its keyframes are ordinary ones; this only
+// remembers where it went and what it was, so the timeline can show it like a transition.
+struct AppliedAnimation {
+    std::string name;     // the preset's ("Pop In")
+    std::string category; // "Entrance", "Emphasis", "Exit"...
+    double start = 0.0;   // composition time (moves with the clip)
+    double duration = 0.0;
 };
 
 constexpr int kLabelColorCount = 8;
@@ -401,12 +414,17 @@ struct Layer {
     std::vector<Effect> effects; // applied in order
     std::vector<AudioEffect> audioEffects; // mixed in order for audio media
     ClipTransition transitionIn, transitionOut;
+    std::vector<AppliedAnimation> animations; // Quick Animations on it, in time order
 
     // All animatable properties that apply to this layer's type, in UI order.
     std::vector<PropertyRef> properties();
     PropertyRef* findProperty(std::vector<PropertyRef>& props, const char* propertyId);
 
-    bool activeAt(double t) const { return visible && t >= inPoint && t < outPoint; }
+    bool activeAt(double t) const { return visible && t >= shownFrom() && t < shownUntil(); }
+    // Where the clip shows: its in and out points, widened by a crossed cut's transition (half of
+    // it before the cut for the incoming clip, half after for the outgoing one).
+    double shownFrom() const { return inPoint - (transitionIn.active() && transitionIn.overlap ? transitionIn.duration : 0.0); }
+    double shownUntil() const { return outPoint + (transitionOut.active() && transitionOut.overlap ? transitionOut.duration : 0.0); }
 
     // Local (layer) space -> composition space at time t.
     Affine matrixAt(double t) const;

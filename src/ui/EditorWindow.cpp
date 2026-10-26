@@ -943,6 +943,7 @@ void EditorWindow::buildMenus() {
     edit->addAction(action(Action::Duplicate, tr("Duplicate"), [this] { ctx_.duplicateSelected(); }));
     edit->addAction(action(Action::Delete, tr("Delete"), [this] {
         if (timeline_->deleteSelectedTransition()) return;
+        if (ctx_.deleteFocusedMask()) return; // a mask picked on the timeline: it, not its layer
         if (!ctx_.selectedKeys.empty()) ctx_.deleteSelectedKeys();
         else ctx_.deleteSelected();
     }));
@@ -970,6 +971,20 @@ void EditorWindow::buildMenus() {
 
     QMenu* layer = bar->addMenu(tr("Layer"));
     layer->addAction(action(Action::Split, tr("Split at Playhead"), [this] { ctx_.splitSelectedAtPlayhead(); }));
+    // Separate Audio: made when shown, for the selection then (the action is added in its place).
+    QAction* separateSpot = layer->addSeparator();
+    separateSpot->setVisible(false);
+    connect(layer, &QMenu::aboutToShow, this, [this, layer, separateSpot] {
+        for (QAction* a : layer->actions())
+            if (a->property("separate").toBool()) delete a;
+        QMenu scratch;
+        ui::addSeparateAudio(scratch, ctx_);
+        for (QAction* a : scratch.actions()) {
+            a->setParent(layer);
+            a->setProperty("separate", true);
+            layer->insertAction(separateSpot, a);
+        }
+    });
     // Time, blending, track matte and masks: filled when shown, for the selection then.
     QMenu* timeMenu = layer->addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), tr("Time"));
     connect(timeMenu, &QMenu::aboutToShow, this, [this, timeMenu] {

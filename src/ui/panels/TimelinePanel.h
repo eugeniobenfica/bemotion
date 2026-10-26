@@ -1,8 +1,10 @@
 #pragma once
 
 #include "ui/EditorContext.h"
+#include "media/MediaManager.h"
 #include "media/RecordingBuffer.h"
 
+#include <QImage>
 #include <QPointF>
 #include <QWidget>
 
@@ -88,7 +90,7 @@ private:
 
     // One laid out row of the body.
     struct Item {
-        enum Kind { Track, Group, Prop, Recording } kind = Track;
+        enum Kind { Track, Group, Prop, Recording, Mask } kind = Track; // Mask: one of its layer's masks (effectIndex)
         float top = 0, h = 0;
         int rowIndex = 0;           // Track: position among the visible tracks
         uint64_t track = 0;
@@ -154,7 +156,19 @@ private:
     media::RecordingPreview recordingPreview_;
     void paintGroup(QPainter& p, const Item& item, float width);
     void paintPropKeys(QPainter& p, const Item& item, float width);
-    void paintWaveform(QPainter& p, const Layer& layer, QPointF a, QPointF b, uint32_t color) const;
+    // The sound of a clip between a and b: centered (sound alone) or growing up from b (under a video's frames).
+    void paintWaveform(QPainter& p, const Layer& layer, QPointF a, QPointF b, uint32_t color, bool fromBottom = false) const;
+    // A video's frames along its clip (MediaManager::filmstrip), between a and b. False until made.
+    bool paintFilmstrip(QPainter& p, const Layer& layer, QPointF a, QPointF b);
+    // Quick Animations on a clip (Layer::animations), as bands like transitions.
+    void paintAnimations(QPainter& p, const Layer& layer, float y, float h);
+    void paintMask(QPainter& p, const Item& item, float width);
+    void showMaskMenu(QPoint global, uint64_t layer, int index);
+    struct FilmImages {
+        std::shared_ptr<const media::Filmstrip> strip;
+        std::vector<QImage> images;
+    };
+    std::map<uint64_t, FilmImages> filmImages_; // by media id
     void paintGraph(QPainter& p, QSize size);
     void paintGraphEmpty(QPainter& p, QSize size); // what the graph needs, when it has nothing to show
     std::vector<uint64_t> graphLayers() const;     // with nothing selected, the layers listed to pick one
@@ -312,8 +326,6 @@ private:
     double snapLineTime_ = -1.0;
     TransitionDrop transitionDrop_; // while a transition is dragged over the rows
     PresetDrop presetDrop_;         // while a Quick Animation is
-    uint64_t selectedTransitionLayer_ = 0;
-    bool selectedTransitionIncoming_ = true;
     // Box selection by dragging on empty timeline space.
     bool marquee_ = false;
     QPointF marqueeStart_, marqueeEnd_;

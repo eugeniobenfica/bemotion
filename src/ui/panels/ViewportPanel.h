@@ -268,6 +268,7 @@ private:
         uint64_t scope = 0;
         bool snapping = false, guides = false, rulers = false, playing = false;
         int tool = 0;
+        uint64_t arrivals = 0; // video frames decoded in the background (scrubbing)
         bool operator==(const Signature&) const = default;
     } drawn_;
     struct FrameKey {

@@ -168,6 +168,23 @@ void fillBlendMenu(QMenu* menu, EditorContext& ctx) {
     }
 }
 
+void addSeparateAudio(QMenu& menu, EditorContext& ctx) {
+    std::vector<uint64_t> videos;
+    for (Layer* l : ctx.selectedLayers())
+        if (l->type == LayerType::Media && l->media.hasVideo && l->media.hasAudio) videos.push_back(l->id);
+    QAction* a = menu.addAction(menuIcon(Icon::Audio, theme::kTextDim), tr("Separate Audio"), [&ctx, videos] {
+        std::vector<uint64_t> made;
+        for (uint64_t id : videos)
+            if (const uint64_t audio = separateAudio(ctx.comp(), id)) made.push_back(audio);
+        if (made.empty()) return;
+        ctx.selection = made; // the new audio clips, to move or delete
+        ctx.touch();
+    });
+    a->setEnabled(!videos.empty());
+    a->setToolTip(tr("The sound becomes a clip of its own on a track below, to move, trim or delete apart"));
+    menu.setToolTipsVisible(true);
+}
+
 void fillMatteMenu(QMenu* menu, EditorContext& ctx) {
     menu->setToolTipsVisible(true);
     Layer* layer = ctx.selected();

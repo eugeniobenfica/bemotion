@@ -195,6 +195,28 @@ bool freezeFrame(Composition& comp, uint64_t id, double t) {
     return true;
 }
 
+uint64_t separateAudio(Composition& comp, uint64_t id) {
+    Layer* l = comp.findLayer(id);
+    if (!l || l->type != LayerType::Media || !l->media.hasVideo || !l->media.hasAudio) return 0;
+    Layer sound = *l;
+    sound.track = 0; // a new track
+    sound.name = l->name + " (audio)";
+    sound.media.hasVideo = false;
+    sound.effects.clear(); // the picture's
+    sound.masks.clear();
+    sound.matte = MatteMode::None;
+    sound.matteLayer = 0;
+    sound.transitionIn = sound.transitionOut = {};
+    sound.threeD = false;
+    l->media.hasAudio = false; // the picture alone now
+    l->audioEffects.clear();
+    // Right below the video's track.
+    int below = comp.indexOf(id) + 1;
+    for (const TrackRow& r : comp.trackRows())
+        if (r.track == l->track) below = r.first + r.count;
+    return comp.addLayer(std::move(sound), below).id;
+}
+
 // --- markers ----------------------------------------------------------------------------------
 
 int markerAt(const Composition& comp, double t) {

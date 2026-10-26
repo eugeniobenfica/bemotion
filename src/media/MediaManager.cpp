@@ -9,6 +9,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cmath>
 #include <deque>
 #include <future>
@@ -16,6 +17,7 @@
 #include <mutex>
 #include <set>
 #include <thread>
+#include <utility>
 
 namespace bemotion::media {
 
@@ -37,6 +39,78 @@ sk_sp<SkImage> toImage(int w, int h, const std::vector<uint8_t>& rgba, bool mipm
 
 } // namespace
 
+// Scrubbing: a video's far frames decoded on a thread of its own, the newest wish only (the ones
+// passed over are skipped), so dragging the playhead over a long-GOP video never waits for a
+// keyframe and the frames after it; the editor shows the last frame meanwhile.
+class Seeker {
+public:
+    struct Frame {
+        double time = -1.0, start = -1.0; // asked for; where the frame starts
+        int w = 0, h = 0;
+        std::vector<uint8_t> rgba;
+    };
+    Seeker(std::string file, std::atomic<uint64_t>* arrivals) : file_(std::move(file)), arrivals_(arrivals), thread_([this] { run(); }) {}
+    ~Seeker() {
+        {
+            std::lock_guard lock(mutex_);
+            quit_ = true;
+        }
+        wake_.notify_all();
+        thread_.join();
+    }
+    void want(double t) {
+        {
+            std::lock_guard lock(mutex_);
+            if (pending_ && wanted_ == t) return;
+            wanted_ = t;
+            pending_ = true;
+        }
+        wake_.notify_one();
+    }
+    bool take(Frame& out) {
+        std::lock_guard lock(mutex_);
+        if (!ready_) return false;
+        out = std::move(done_);
+        ready_ = false;
+        return true;
+    }
+
+private:
+    void run() {
+        std::unique_ptr<VideoReader> reader = VideoReader::open(pathOf(file_));
+        std::unique_lock lock(mutex_);
+        for (;;) {
+            wake_.wait(lock, [this] { return quit_ || pending_; });
+            if (quit_) return;
+            Frame f;
+            f.time = wanted_;
+            pending_ = false;
+            lock.unlock();
+            const bool ok = reader && reader->frameAt(f.time, f.rgba);
+            if (ok) {
+                f.w = reader->width();
+                f.h = reader->height();
+                f.start = reader->frameTime();
+            }
+            lock.lock();
+            if (ok) {
+                done_ = std::move(f);
+                ready_ = true;
+                arrivals_->fetch_add(1); // the views draw again
+            }
+        }
+    }
+
+    std::string file_;
+    std::atomic<uint64_t>* arrivals_;
+    std::mutex mutex_;
+    std::condition_variable wake_;
+    double wanted_ = 0.0;
+    bool pending_ = false, quit_ = false, ready_ = false;
+    Frame done_;
+    std::thread thread_; // last: everything above exists before it runs
+};
+
 struct MediaManager::Impl {
     struct Picture { // an image, or a video's thumbnail
         std::string path;
@@ -49,6 +123,7 @@ struct MediaManager::Impl {
         double shown = -1.0; // source time of `image`
         std::vector<uint8_t> rgba;
         int lastUse = 0;
+        std::unique_ptr<Seeker> seeker; // the editor's far frames (scrubbing)
     };
     struct Decoded {
         std::vector<float> samples;
@@ -102,6 +177,14 @@ struct MediaManager::Impl {
     std::atomic_bool proxyCancel{false};
     std::map<uint64_t, std::string> proxyErrors;
     uint64_t generation = 1;
+    std::atomic<uint64_t> arrivals{0}; // frames a seeker finished (and filmstrips made)
+    struct FilmstripJob {
+        std::future<std::shared_ptr<const Filmstrip>> job;
+        std::shared_ptr<const Filmstrip> done;
+        std::shared_ptr<std::atomic_bool> cancel = std::make_shared<std::atomic_bool>(false);
+    };
+    std::map<std::string, FilmstripJob> filmstrips; // by file
+    bool staleServed = false;          // a picture shown while its frame was on its way
 
     void trimFrames() {
         while (frameBytes > frameBudget && !frames.empty()) {
@@ -158,6 +241,10 @@ void MediaManager::release() {
     m.videos.clear();
     m.frames.clear();
     m.frameBytes = 0;
+    for (auto& [file, f] : m.filmstrips) f.cancel->store(true); // filmstrips being made stop
+    for (auto& [file, f] : m.filmstrips)
+        if (f.job.valid()) f.job.wait();
+    m.filmstrips.clear();
     render::setMediaProvider({});
 }
 
@@ -293,6 +380,35 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
             return v.image;
         }
     }
+    // The editor, scrubbing: a frame far from where this reader is comes from the seeker (the
+    // last picture shows until it is there); reading on (playing) stays here, frame by frame.
+    if (&comp == m.preview && v.image) {
+        Seeker::Frame f;
+        if (v.seeker && v.seeker->take(f)) {
+            if (sk_sp<SkImage> img = toImage(f.w, f.h, f.rgba, false)) {
+                if (f.start >= 0 && m.frameBudget > 0) {
+                    Impl::CachedFrame& entry = cached[f.start];
+                    if (entry.image) m.frameBytes -= entry.image->imageInfo().computeMinByteSize();
+                    entry = {img, frame, ++m.frameUses};
+                    m.frameBytes += img->imageInfo().computeMinByteSize();
+                    m.trimFrames();
+                }
+                v.image = img;
+                v.shown = f.time;
+                if (std::fabs(f.time - source) < frame * 0.5) return v.image;
+            }
+        }
+        const double at = v.reader->frameTime(); // where this reader stands
+        const auto near = [&](double from) { return from >= 0 && source >= from - 1e-6 && source <= from + frame * 4.0; };
+        // Just after the picture shown (playing on, a slow drag forward): read here, so this reader
+        // catches up once and then goes on frame by frame.
+        if (!near(at) && !near(v.shown)) {
+            if (!v.seeker) v.seeker = std::make_unique<Seeker>(file, &m.arrivals);
+            v.seeker->want(source);
+            m.staleServed = true;
+            return v.image;
+        }
+    }
     if (!v.reader->frameAt(source, v.rgba)) return v.image;
     v.image = toImage(v.reader->width(), v.reader->height(), v.rgba, false);
     v.shown = source;
@@ -306,7 +422,75 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
     return v.image;
 }
 
+namespace {
+
+// Decodes `count` frames along the video, each shrunk to `height` pixels high (box filter).
+std::shared_ptr<const Filmstrip> makeFilmstrip(const std::filesystem::path& file, double duration, const std::atomic_bool* cancel) {
+    std::unique_ptr<VideoReader> reader = VideoReader::open(file);
+    if (!reader || reader->width() <= 0 || reader->height() <= 0 || duration <= 0) return nullptr;
+    auto strip = std::make_shared<Filmstrip>();
+    const int count = std::clamp(static_cast<int>(std::ceil(duration / 0.5)), 1, 160); // one every half second, at most 160
+    strip->step = duration / count;
+    strip->height = 54;
+    strip->width = std::max(1, static_cast<int>(std::lround(strip->height * static_cast<double>(reader->width()) / reader->height())));
+    const int sw = reader->width(), sh = reader->height(), dw = strip->width, dh = strip->height;
+    std::vector<uint8_t> rgba;
+    for (int i = 0; i < count && !cancel->load(); ++i) {
+        if (!reader->frameAt((i + 0.5) * strip->step, rgba) || rgba.size() < static_cast<size_t>(sw) * sh * 4) break;
+        std::vector<uint8_t> small(static_cast<size_t>(dw) * dh * 4);
+        for (int y = 0; y < dh; ++y) {
+            const int y0 = y * sh / dh, y1 = std::max(y0 + 1, (y + 1) * sh / dh);
+            for (int x = 0; x < dw; ++x) {
+                const int x0 = x * sw / dw, x1 = std::max(x0 + 1, (x + 1) * sw / dw);
+                // A few samples of the box are plenty for a picture this small.
+                uint32_t sum[4] = {0, 0, 0, 0}, n = 0;
+                for (int yy = y0; yy < y1; yy += std::max(1, (y1 - y0) / 3))
+                    for (int xx = x0; xx < x1; xx += std::max(1, (x1 - x0) / 3)) {
+                        const uint8_t* px = rgba.data() + (static_cast<size_t>(yy) * sw + xx) * 4;
+                        for (int c = 0; c < 4; ++c) sum[c] += px[c];
+                        ++n;
+                    }
+                uint8_t* out = small.data() + (static_cast<size_t>(y) * dw + x) * 4;
+                for (int c = 0; c < 4; ++c) out[c] = static_cast<uint8_t>(sum[c] / std::max(1u, n));
+            }
+        }
+        strip->frames.push_back(std::move(small));
+    }
+    return strip->frames.empty() ? nullptr : strip;
+}
+
+} // namespace
+
+std::shared_ptr<const Filmstrip> MediaManager::filmstrip(const MediaItem& item) {
+    if (item.kind != MediaKind::Video || !item.hasVideo || item.duration <= 0) return nullptr;
+    Impl& m = impl();
+    const bool proxy = hasProxy(item);
+    const std::string file = proxy ? platform8(proxyPath(item)) : item.path;
+    Impl::FilmstripJob& f = m.filmstrips[file];
+    if (f.done) return f.done;
+    if (!f.job.valid()) {
+        try {
+            f.job = std::async(std::launch::async, [path = pathOf(file), duration = item.duration, cancel = f.cancel, arrivals = &m.arrivals] {
+                auto strip = makeFilmstrip(path, duration, cancel.get());
+                arrivals->fetch_add(1); // the timeline draws again
+                return strip;
+            });
+        } catch (const std::exception&) {
+            return nullptr;
+        }
+        return nullptr;
+    }
+    if (f.job.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return nullptr;
+    f.done = f.job.get();
+    if (!f.done) f.done = std::make_shared<Filmstrip>(); // nothing to show: not tried again
+    return f.done->frames.empty() ? nullptr : f.done;
+}
+
 void MediaManager::setPreview(const Composition* preview) { impl().preview = preview; }
+
+uint64_t MediaManager::arrivals() const { return impl().arrivals.load(); }
+
+bool MediaManager::takeStale() { return std::exchange(impl().staleServed, false); }
 
 void MediaManager::setUseProxies(bool on) {
     Impl& m = impl();

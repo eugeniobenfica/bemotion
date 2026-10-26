@@ -259,6 +259,7 @@ void Layer::shiftTime(double delta) {
     inPoint += delta;
     outPoint += delta;
     media.start += delta; // the footage moves with its layer
+    for (AppliedAnimation& a : animations) a.start += delta;
     for (auto& p : properties())
         for (int i = 0; i < p.anim->keyCount(); ++i) p.anim->setKeyTime(i, p.anim->keyTime(i) + delta);
 }

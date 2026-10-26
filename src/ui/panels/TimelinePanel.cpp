@@ -485,7 +485,7 @@ protected:
             const TimelinePanel::PresetDrop drop = panel_->presetDropAt(e->position(), presetJson);
             panel_->presetDrop_ = {};
             if (Layer* layer = drop.ok ? ctx.comp().findLayer(drop.layer) : nullptr) {
-                applyPreset(preset, *layer, drop.time);
+                applyQuickAnimation(preset, *layer, drop.time);
                 ctx.select(layer->id);
                 ctx.touch();
                 e->acceptProposedAction();
@@ -1084,6 +1084,18 @@ void TimelinePanel::computeItems() {
         y += track.h;
         for (int i = row.first; i < row.first + row.count; ++i)
             clips_.push_back({layers[i].id, track.top, track.top + track.h, timeToX(layers[i].inPoint), timeToX(layers[i].outPoint)});
+        // Its masks, each a row of its own right under it: objects you see, pick, hide and delete.
+        for (int m = 0; m < static_cast<int>(focus->masks.size()); ++m) {
+            Item mask;
+            mask.kind = Item::Mask;
+            mask.top = y;
+            mask.h = groupRowHeight() + 6.0f;
+            mask.track = row.track;
+            mask.layer = focus->id;
+            mask.effectIndex = m;
+            items_.push_back(mask);
+            y += mask.h;
+        }
         if (!expanded_.count(row.track)) continue;
 
         const char* group = nullptr;
@@ -1262,7 +1274,9 @@ void TimelinePanel::sync() {
     // Repaint when anything the timeline shows changed (and now and then for audio waveforms
     // finishing their decode).
     std::string sig = std::to_string(ctx_.revision()) + ":" + std::to_string(ctx_.time) + ":" + std::to_string(ctx_.scope) + ":" +
-                      std::to_string(static_cast<int>(ctx_.tool)) + ":" + std::to_string(ctx_.selectedKeys.size()) + ":";
+                      std::to_string(static_cast<int>(ctx_.tool)) + ":" + std::to_string(ctx_.selectedKeys.size()) + ":" +
+                      std::to_string(ctx_.transitionLayer) + (ctx_.transitionIncoming ? "i" : "o") + ":" +
+                      std::to_string(media::MediaManager::get().arrivals()) + ":"; // filmstrips made
     for (uint64_t id : ctx_.selection) sig += std::to_string(id) + ",";
     for (const KeySelection& k : ctx_.selectedKeys) sig += std::to_string(k.keyUid) + ",";
     if (sig != signature_ || ++idleSyncs_ > 30) {
@@ -1323,14 +1337,6 @@ void TimelinePanel::paintRuler(QPainter& p, int width) {
     // Past the end of the composition (nothing to mark while it is empty: it grows with its content).
     const float endX = timeToX(visibleEnd());
     if (!comp.layers.empty() || hasRecordingPreview()) d.rectFilled({endX, 0}, {x1, h}, theme::shade(90));
-    // Frames the viewport holds rendered (they play without rendering again): a green line.
-    for (auto it = ctx_.cachedFrames.begin(); it != ctx_.cachedFrames.end();) {
-        const int first = *it;
-        int last = first;
-        while (++it != ctx_.cachedFrames.end() && *it == last + 1) ++last;
-        const float a = timeToX(first * fd), b = timeToX((last + 1) * fd);
-        if (b >= x0 && a <= x1) d.rectFilled({a, h - 3}, {std::max(b, a + 1.0f), h}, theme::kSuccess);
-    }
     // Markers: a flag in their color, the name beside it when there is room.
     for (size_t i = 0; i < comp.markers.size(); ++i) {
         const Marker& m = comp.markers[i];
@@ -1375,6 +1381,7 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
             case Item::Recording: paintRecording(p, item, width); break;
             case Item::Group: paintGroup(p, item, width); break;
             case Item::Prop: paintPropKeys(p, item, width); break;
+            case Item::Mask: paintMask(p, item, width); break;
             }
         }
         if (ctx_.comp().layers.empty() && !hasRecordingPreview()) {
@@ -1549,13 +1556,30 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
         const Pt a(bx1 + 1, y + 4), b(bx2 - 1, y + h - 4); // 1px gap shows cut points
         d.rectFilled(a, b, toRgba(lc, layer.visible ? (selected ? 0.42f : 0.26f) : 0.1f), 5.0f);
         if (selected) d.rect(a, b, primary ? theme::kText : theme::ink(170), 5.0f, primary ? 1.8f : 1.3f);
-        if (layer.type == LayerType::Media && layer.media.hasAudio) paintWaveform(p, layer, a, b, toRgba(lc, 0.75f));
+        // A video shows its frames, its sound (if any) as a band along the bottom growing up; sound
+        // alone fills the clip.
+        const bool frames = layer.type == LayerType::Media && layer.media.hasVideo && paintFilmstrip(p, layer, {a.x, a.y}, {b.x, b.y});
+        if (layer.type == LayerType::Media && layer.media.hasAudio) {
+            if (frames) {
+                const float band = (b.y - a.y) * 0.42f;
+                d.rectFilled({a.x + 1, b.y - band}, {b.x - 1, b.y - 1}, toRgba(lc, 0.55f), 0.0f);
+                paintWaveform(p, layer, {a.x, b.y - band}, {b.x, b.y - 1}, ui::rgba(255, 255, 255, 190), true);
+            } else {
+                paintWaveform(p, layer, a, b, toRgba(lc, 0.75f));
+            }
+        }
+        if (selected && frames) d.rect(a, b, primary ? theme::kText : theme::ink(170), 5.0f, primary ? 1.8f : 1.3f); // over the pictures
+        paintAnimations(p, layer, y, h);
         auto paintTransition = [&](const ClipTransition& transition, bool incoming) {
             if (!transition.active()) return;
             const float duration = std::max(16.0f, std::fabs(timeToX(layer.inPoint + transition.duration) - bx1));
             const float left = incoming ? bx1 + 2.0f : bx2 - duration - 2.0f;
             const float right = incoming ? bx1 + duration + 2.0f : bx2 - 2.0f;
-            const bool selectedTransition = selectedTransitionLayer_ == layer.id && selectedTransitionIncoming_ == incoming;
+            // Picked, here or (across a cut) on its other half: both halves light up.
+            bool selectedTransition = ctx_.transitionLayer == layer.id && ctx_.transitionIncoming == incoming;
+            if (!selectedTransition && transition.joined && ctx_.transitionLayer)
+                if (const Layer* other = transitionPartner(ctx_.comp(), layer, incoming ? TransitionEdge::In : TransitionEdge::Out))
+                    selectedTransition = ctx_.transitionLayer == other->id && ctx_.transitionIncoming == !incoming;
             d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::accent(85), 5.0f);
             d.rect({left, y + 5}, {right, y + h - 5}, selectedTransition ? theme::kText : theme::kAccent, 5.0f,
                    selectedTransition ? 2.0f : 1.0f);
@@ -1589,8 +1613,20 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
             }
             d.popClip();
         } else {
+            // After what covers the clip's start (its transition, a Quick Animation there).
+            float nameX = std::max(bx1, x0) + 10;
+            if (layer.transitionIn.active()) nameX = std::max(nameX, timeToX(layer.inPoint + layer.transitionIn.duration) + 8);
+            for (const AppliedAnimation& an : layer.animations)
+                if (an.start <= layer.inPoint + kTimeEpsilon) nameX = std::max(nameX, std::max(timeToX(an.start + an.duration), bx1 + 18.0f) + 6);
+            const QString name = QString::fromStdString(layer.name + clipNotes(ctx_.comp(), layer));
             d.pushClip({std::max(bx1, x0), y}, {std::min(bx2, x1), y + h});
-            d.text({std::max(bx1, x0) + 10, y + (h - d.textHeight()) * 0.5f}, theme::ink(150), layer.name + clipNotes(ctx_.comp(), layer));
+            if (frames) { // a dark pill: readable over the pictures
+                const float top = y + 7, w = d.textWidth(name) + 12;
+                d.rectFilled({nameX - 6, top}, {nameX + w - 6, top + d.textHeight() + 4}, theme::withAlpha(theme::kBgDeep, 200), 4.0f);
+                d.text({nameX, top + 2}, theme::kText, name);
+            } else {
+                d.text({nameX, y + (h - d.textHeight()) * 0.5f}, theme::ink(150), name);
+            }
             d.popClip();
         }
         // Summary of the clip's keyframes (within the clip only, e.g. after a cut).
@@ -1603,6 +1639,70 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
                 }
     }
     d.popClip();
+}
+
+void TimelinePanel::paintMask(QPainter& p, const Item& item, float width) {
+    ui::Draw d(p);
+    Layer* layer = ctx_.comp().findLayer(item.layer);
+    if (!layer || item.effectIndex < 0 || item.effectIndex >= static_cast<int>(layer->masks.size())) return;
+    const Mask& mask = layer->masks[static_cast<size_t>(item.effectIndex)];
+    const float y = item.top, h = item.h, cy = y + h * 0.5f;
+    const bool picked = ctx_.isSelected(layer->id) && ctx_.maskFocus == item.effectIndex;
+    d.rectFilled({0, y}, {width, y + h}, picked ? theme::accent(40) : theme::shade(45));
+    if (picked) d.rectFilled({0, y + 2}, {3, y + h - 2}, theme::kAccent, 1.5f);
+    // Left: on / off (the eye column), a mask icon, its name, how it combines.
+    const Rgba ink = mask.enabled ? theme::kText : theme::kTextFaint;
+    ui::drawIcon(d, mask.enabled ? ui::Icon::Eye : ui::Icon::EyeOff, {kVisX + kButton * 0.5f, cy}, kButton * 0.6f, mask.enabled ? theme::kTextDim : theme::kTextFaint);
+    ui::drawIcon(d, ui::Icon::Mask, {kChipX + 8.0f, cy}, 14.0f, picked ? theme::kAccent : theme::kTextDim);
+    d.pushClip({kNameX - 8, y}, {leftWidth_ - 6, y + h});
+    const QString how = tr(kMaskModeLabels[static_cast<int>(mask.mode)]) + (mask.inverted ? tr(" · Inverted") : QString());
+    d.text({kNameX - 4, cy - d.textHeight() * 0.5f}, ink, trLabel(QString::fromStdString(mask.name)));
+    d.text({leftWidth_ - 10 - d.textWidth(how), cy - d.textHeight() * 0.5f}, theme::kTextFaint, how);
+    d.popClip();
+    // Right: a bar along its clip.
+    const float x0 = trackX0(), x1 = x0 + trackW();
+    d.pushClip({x0, y}, {x1, y + h});
+    const float a = timeToX(layer->inPoint) + 1, b = timeToX(layer->outPoint) - 1;
+    d.rectFilled({a, y + 3}, {b, y + h - 3}, mask.enabled ? theme::ink(picked ? 60 : 30) : theme::ink(12), 4.0f);
+    d.rect({a, y + 3}, {b, y + h - 3}, picked ? theme::kAccent : theme::ink(70), 4.0f, picked ? 1.5f : 1.0f);
+    ui::drawIcon(d, ui::Icon::Mask, {std::max(a, x0) + 12.0f, cy}, 12.0f, theme::kTextDim);
+    d.popClip();
+}
+
+void TimelinePanel::showMaskMenu(QPoint global, uint64_t layerId, int index) {
+    Layer* layer = ctx_.comp().findLayer(layerId);
+    if (!layer || index < 0 || index >= static_cast<int>(layer->masks.size())) return;
+    QMenu menu;
+    auto mask = [this, layerId, index]() -> Mask* {
+        Layer* l = ctx_.comp().findLayer(layerId);
+        return l && index < static_cast<int>(l->masks.size()) ? &l->masks[static_cast<size_t>(index)] : nullptr;
+    };
+    QMenu* mode = menu.addMenu(tr("Mode"));
+    for (int i = 0; i < static_cast<int>(std::size(kMaskModeLabels)); ++i) {
+        QAction* a = mode->addAction(tr(kMaskModeLabels[i]), [this, mask, i] {
+            if (Mask* m = mask()) m->mode = static_cast<MaskMode>(i), ctx_.touch();
+        });
+        a->setCheckable(true);
+        a->setChecked(static_cast<int>(layer->masks[static_cast<size_t>(index)].mode) == i);
+    }
+    QAction* inverted = menu.addAction(tr("Inverted"), [this, mask] {
+        if (Mask* m = mask()) m->inverted = !m->inverted, ctx_.touch();
+    });
+    inverted->setCheckable(true);
+    inverted->setChecked(layer->masks[static_cast<size_t>(index)].inverted);
+    menu.addAction(tr("Rename..."), [this, mask] {
+        Mask* m = mask();
+        if (!m) return;
+        bool ok = false;
+        const QString name = QInputDialog::getText(this, tr("Rename Mask"), tr("Name"), QLineEdit::Normal, QString::fromStdString(m->name), &ok);
+        if (ok && !name.trimmed().isEmpty() && (m = mask())) m->name = name.trimmed().toStdString(), ctx_.touch();
+    });
+    menu.addSeparator();
+    menu.addAction(tr("Delete Mask"), [this, layerId, index] {
+        ctx_.selectMask(layerId, index);
+        ctx_.deleteFocusedMask();
+    });
+    menu.exec(global);
 }
 
 void TimelinePanel::paintGroup(QPainter& p, const Item& item, float width) {
@@ -1656,7 +1756,68 @@ void TimelinePanel::paintPropKeys(QPainter& p, const Item& item, float width) {
     d.popClip();
 }
 
-void TimelinePanel::paintWaveform(QPainter& p, const Layer& layer, QPointF a, QPointF b, uint32_t color) const {
+bool TimelinePanel::paintFilmstrip(QPainter& p, const Layer& layer, QPointF a, QPointF b) {
+    const MediaItem* item = ctx_.comp().findMedia(layer.media.mediaId);
+    if (!item || item->kind != MediaKind::Video) return false;
+    const std::shared_ptr<const media::Filmstrip> strip = media::MediaManager::get().filmstrip(*item);
+    if (!strip) return false;
+    FilmImages& cached = filmImages_[item->id];
+    if (cached.strip != strip) { // made (again): pictures for painting
+        cached.strip = strip;
+        cached.images.clear();
+        for (const auto& rgba : strip->frames)
+            cached.images.push_back(QImage(rgba.data(), strip->width, strip->height, QImage::Format_RGBA8888).copy());
+    }
+    const QRectF area(a + QPointF(1, 1), b - QPointF(1, 1));
+    if (area.width() < 2 || area.height() < 4 || cached.images.empty()) return false;
+    const qreal th = area.height(), tw = th * strip->width / std::max(1, strip->height);
+    p.save();
+    QPainterPath clip;
+    clip.addRoundedRect(area, 4, 4);
+    p.setClipPath(clip, Qt::IntersectClip);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.setOpacity(layer.visible ? 0.9 : 0.35);
+    // Tiles from the clip's start, each showing the moment under its middle.
+    const qreal from = std::max(area.left(), static_cast<qreal>(trackX0()) - tw), to = std::min(area.right(), static_cast<qreal>(trackX0() + trackW()));
+    const qreal first = area.left() + std::floor((from - area.left()) / tw) * tw;
+    for (qreal x = first; x < to; x += tw) {
+        const double source = layer.media.sourceTime(xToTime(static_cast<float>(x + tw * 0.5)));
+        const int i = std::clamp(static_cast<int>(source / strip->step), 0, static_cast<int>(cached.images.size()) - 1);
+        p.drawImage(QRectF(x, area.top(), tw, th), cached.images[static_cast<size_t>(i)]);
+    }
+    p.restore();
+    return true;
+}
+
+void TimelinePanel::paintAnimations(QPainter& p, const Layer& layer, float y, float h) {
+    if (layer.animations.empty()) return;
+    ui::Draw d(p);
+    auto props = const_cast<Layer&>(layer).properties();
+    for (const AppliedAnimation& a : layer.animations) {
+        const double from = std::max(a.start, layer.inPoint), until = std::min(a.start + a.duration, layer.outPoint);
+        if (until <= from) continue;
+        // Still there? (its keys may have been moved or deleted since)
+        bool keyed = false;
+        for (const PropertyRef& pr : props)
+            for (int k = 0; k < pr.anim->keyCount() && !keyed; ++k)
+                keyed = pr.anim->keyTime(k) >= a.start - kTimeEpsilon && pr.anim->keyTime(k) <= a.start + a.duration + kTimeEpsilon;
+        if (!keyed) continue;
+        const float left = timeToX(from) + 2.0f, right = std::max(left + 16.0f, timeToX(until) - 2.0f);
+        const Rgba tone = theme::kKeyframe;
+        // Solid underneath: readable over a video's frames too.
+        d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(theme::kBgPanel, 225), 5.0f);
+        d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(tone, 45), 5.0f);
+        d.rect({left, y + 5}, {right, y + h - 5}, tone, 5.0f, 1.2f);
+        ui::drawIcon(d, ui::Icon::Ease, {left + 10.0f, y + h * 0.5f}, 12.0f, tone);
+        if (right - left > 44.0f) { // its name, when there is room
+            d.pushClip({left + 18.0f, y}, {right - 3.0f, y + h});
+            d.text({left + 20.0f, y + (h - d.textHeight()) * 0.5f}, theme::kText, trs(a.name));
+            d.popClip();
+        }
+    }
+}
+
+void TimelinePanel::paintWaveform(QPainter& p, const Layer& layer, QPointF a, QPointF b, uint32_t color, bool fromBottom) const {
     const media::AudioData data = media::MediaManager::get().audio(layer.media.mediaId);
     if (!data || data->empty()) return;
     const std::vector<float>& s = *data;
@@ -1677,8 +1838,14 @@ void TimelinePanel::paintWaveform(QPainter& p, const Layer& layer, QPointF a, QP
         float peak = 0.0f;
         for (size_t i = i0; i < i1; i += stride) peak = std::max({peak, std::fabs(s[i * 2]), std::fabs(s[i * 2 + 1])});
         const float gain = std::clamp(layer.media.volume.valueAt(xToTime(x)) * 0.01f, 0.0f, 2.0f);
-        const float hh = std::max(0.5f, std::sqrt(std::min(1.0f, peak * gain)) * half); // sqrt: quiet audio stays visible
-        path.addRect(QRectF(x, mid - hh, kStep - 0.6f, hh * 2));
+        const float level = std::sqrt(std::min(1.0f, peak * gain)); // sqrt: quiet audio stays visible
+        if (fromBottom) { // under a video's frames: one side, up from the bottom
+            const float full = static_cast<float>(b.y() - a.y()) * 0.9f, hh = std::max(0.5f, level * full);
+            path.addRect(QRectF(x, b.y() - hh, kStep - 0.6f, hh));
+        } else {
+            const float hh = std::max(0.5f, level * half);
+            path.addRect(QRectF(x, mid - hh, kStep - 0.6f, hh * 2));
+        }
     }
     p.fillPath(path, ui::qcolor(color));
 }
@@ -1808,18 +1975,18 @@ TimelinePanel::TransitionHit TimelinePanel::transitionHit(const Item& track, flo
 }
 
 bool TimelinePanel::deleteSelectedTransition() {
-    if (!selectedTransitionLayer_) return false;
-    Layer* layer = ctx_.comp().findLayer(selectedTransitionLayer_);
-    const TransitionEdge edge = selectedTransitionIncoming_ ? TransitionEdge::In : TransitionEdge::Out;
+    if (!ctx_.transitionLayer) return false;
+    Layer* layer = ctx_.comp().findLayer(ctx_.transitionLayer);
+    const TransitionEdge edge = ctx_.transitionIncoming ? TransitionEdge::In : TransitionEdge::Out;
     const bool removed = layer && removeTransition(ctx_.comp(), *layer, edge); // a cut's other half goes too
-    selectedTransitionLayer_ = 0;
+    ctx_.transitionLayer = 0;
     if (removed) ctx_.touch();
     relayout();
     return removed;
 }
 
 void TimelinePanel::clickLayer(uint64_t id) {
-    selectedTransitionLayer_ = 0;
+    ctx_.transitionLayer = 0;
     if (ctrlHeld()) ctx_.toggleSelected(id);
     else if (shiftHeld()) ctx_.selectRange(id);
     else if (!ctx_.isSelected(id)) ctx_.select(id);
@@ -1860,6 +2027,7 @@ void TimelinePanel::showTrackMenu(QPoint global) {
     menu.addAction(tr("Split at Playhead\tCtrl+K"), [this] { ctx_.splitSelectedAtPlayhead(); });
     menu.addAction(tr("Ripple Delete\tShift+Del"), [this] { ctx_.rippleDeleteSelected(); })->setToolTip(tr("Delete and close the gap: the clips after it move back"));
     ui::fillTimeMenu(menu.addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), tr("Time")), ctx_, this);
+    ui::addSeparateAudio(menu, ctx_);
     if (ui::canTranscribe(ctx_, focus)) {
         QAction* t = menu.addAction(ui::menuIcon(ui::Icon::Subtitles, theme::kTextDim), tr("Transcribe to Subtitles..."),
                                     [this, focus] { ui::transcribeClip(ctx_, focus, 0, this); });
@@ -2199,8 +2367,7 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
         // Track area.
         if (left) {
             if (const TransitionHit transition = transitionHit(row, x)) {
-                selectedTransitionLayer_ = transition.layer;
-                selectedTransitionIncoming_ = transition.incoming;
+                ctx_.selectTransition(transition.layer, transition.incoming); // the transition alone, not its clip
                 if (transition.resize && !ctrlHeld() && !shiftHeld())
                     beginLayerDrag(transition.incoming ? Drag::TransitionIn : Drag::TransitionOut, transition.layer, pos);
                 relayout();
@@ -2232,6 +2399,19 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
             } else {
                 beginMarquee(pos); // empty track space: box selection
             }
+        }
+        relayout();
+        return;
+    }
+    if (item->kind == Item::Mask) { // a mask as an object: picked, shown / hidden, its menu
+        const Layer* layer = ctx_.comp().findLayer(item->layer);
+        if (!layer || item->effectIndex >= static_cast<int>(layer->masks.size())) return;
+        if (left && x >= kVisX && x < kVisX + kButton) {
+            ctx_.comp().findLayer(item->layer)->masks[static_cast<size_t>(item->effectIndex)].enabled ^= true;
+            ctx_.touch();
+        } else if (left || right) {
+            ctx_.selectMask(item->layer, item->effectIndex);
+            if (right) showMaskMenu(e->globalPosition().toPoint(), item->layer, item->effectIndex);
         }
         relayout();
         return;

@@ -798,7 +798,19 @@ void testCutTransitions() {
     Layer* second = first ? nextOnTrack(c, *first) : nullptr;
     CHECK(first && second && first->transitionOut.joined && second->transitionIn.joined);
     CHECK(near(first->transitionOut.duration, 0.5f) && near(second->transitionIn.duration, 0.5f)); // half each side of the cut
-    CHECK(near(first->transform.opacity.valueAt(1.999), 0.0f, 2.0f) && near(second->transform.opacity.valueAt(2.5), 100.0f));
+    // A cross dissolve: the clips overlap around the cut, the next one fading in above the first,
+    // which stays whole under it (no dip to the background between two fades).
+    CHECK(first->transitionOut.overlap && second->transitionIn.overlap);
+    CHECK(first->activeAt(2.25) && second->activeAt(1.75) && !first->activeAt(2.6) && !second->activeAt(1.4));
+    CHECK(near(first->transform.opacity.valueAt(2.25), 100.0f) && near(second->transform.opacity.valueAt(2.5), 100.0f));
+    CHECK(second->transform.opacity.valueAt(2.0) > 10.0f && second->transform.opacity.valueAt(2.0) < 90.0f);
+    CHECK(c.indexOf(second->id) < c.indexOf(first->id)); // above it in the stack
+    {
+        Project saved;
+        CHECK(deserializeProject(serializeProject(p), saved));
+        const Layer* s = saved.comp.findLayer(second->id);
+        CHECK(s && s->transitionIn.overlap);
+    }
     CHECK(transitionPartner(c, *second, TransitionEdge::In) == first);
     CHECK(resizeTransition(c, *second, TransitionEdge::In, 0.8));
     CHECK(near(first->transitionOut.duration, 0.8f)); // the other half follows
@@ -810,6 +822,37 @@ void testCutTransitions() {
     CHECK(canTakeTransition(*first, "turn") && applyTransition(*first, "turn", TransitionEdge::In, 0.5) && first->threeD);
     Project back;
     CHECK(deserializeProject(serializeProject(p), back) && validate(back).empty());
+}
+
+void testSeparateAudio() {
+    Project p;
+    MediaItem m;
+    m.name = "talk.mp4";
+    m.path = "talk.mp4";
+    m.kind = MediaKind::Video;
+    m.hasVideo = m.hasAudio = true;
+    m.width = 640;
+    m.height = 360;
+    m.duration = 4.0;
+    const uint64_t mediaId = p.comp.addMedia(m);
+    CHECK(run(p, (R"([{"op": "layer.add", "type": "media", "name": "Talk", "media": )" + std::to_string(mediaId) + "}]").c_str()).ok);
+    Layer* video = nullptr;
+    for (Layer& l : p.comp.layers)
+        if (l.name == "Talk") video = &l;
+    CHECK(video);
+    const uint64_t videoId = video ? video->id : 0;
+    const OpsResult r = run(p, R"({"op": "layer.separate_audio", "layer": "Talk"})");
+    CHECK(r.ok);
+    const Layer* v = p.comp.findLayer(videoId);
+    const Layer* a = nullptr;
+    for (const Layer& l : p.comp.layers)
+        if (l.name == "Talk (audio)") a = &l;
+    CHECK(v && a && v->media.hasVideo && !v->media.hasAudio && a->media.hasAudio && !a->media.hasVideo);
+    CHECK(a && v && a->track != v->track && near(static_cast<float>(a->inPoint), static_cast<float>(v->inPoint)) &&
+          near(static_cast<float>(a->outPoint), static_cast<float>(v->outPoint)));
+    CHECK(a && v && p.comp.indexOf(a->id) > p.comp.indexOf(v->id)); // below the picture
+    CHECK(!run(p, R"({"op": "layer.separate_audio", "layer": "Talk"})").ok); // no sound left to separate
+    CHECK(validate(p).empty());
 }
 
 void testFileParams() {
@@ -1809,6 +1852,7 @@ int main() {
         {"3d camera", testCamera3D},
         {"3d camera tilt", testCamera3DTilt},
         {"cut transitions", testCutTransitions},
+        {"separate audio", testSeparateAudio},
         {"subtitles", testSubtitles},
         {"counter", testCounter},
         {"letters and fit", testLetters},

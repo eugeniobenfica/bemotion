@@ -249,13 +249,24 @@ decoded), eased over its fade.
 - **`Presets`** — Quick Animations: they write ordinary keyframes. The
   *Animate* panel (`ui/panels/AnimationsPanel`) lists them; dragged onto a
   clip (`kAnimationMime`, the preset as JSON) one plays from the drop point.
+  `applyQuickAnimation` also remembers it on the layer (`Layer::animations`:
+  name, category, start, duration; moved by `shiftTime`) for the timeline's
+  band; a band whose keys are gone is not drawn.
 - **`Transitions`** — a clip's way in and out (fade, slides, zoom, pop, spin),
-  written as keyframes at its edges with the preset engine.
+  written as keyframes at its edges with the preset engine. Across a cut
+  (`applyCutTransition`) the clips overlap (`ClipTransition::overlap`,
+  `Layer::shownFrom` / `shownUntil`, which `activeAt` uses): half the
+  duration on each side, the incoming clip moved above the outgoing one and
+  animating in over it; the outgoing one animates out too, except for fades
+  (a cross dissolve, no dip). Files from before (`overlap` absent) keep their
+  two halves side by side.
 - **`Arrange`** — distribute layers evenly, stagger start times.
 - **`Editing`** — the timeline edits the editor and operations share:
   ripple delete, close gap, ripple trim, rolling edit, slip, a clip's speed and
   direction (`setClipSpeed`), Time Remap and Freeze Frame (`setTimeRemap`,
-  `freezeFrame`), markers (`Composition::markers`, sorted, one per moment).
+  `freezeFrame`), Separate Audio (`separateAudio`: the sound to a clip of its
+  own on a new track below, the video's `hasAudio` off), markers
+  (`Composition::markers`, sorted, one per moment).
   Footage's source time is `MediaProps::sourceTime` (speed, reverse, remap);
   `Composition::sourceSpan` is where a clip has source frames (its trims stop
   there).
@@ -365,8 +376,11 @@ Rules:
   to download them into app data (`app/Downloads`). `ui/Transcribe` runs it
   on a thread with progress and Stop and fills a Subtitles layer.
 - `export/ExportJob` snapshots the project and feeds an `Encoder` frame by
-  frame from the calling thread (`step()`), so the UI stays responsive and
-  cancelling is trivial. `FfmpegEncoder` (MP4 / H.264, MOV / ProRes, WebM /
+  frame from the calling thread (`step()`), so the UI stays responsive.
+  Cancelling calls `Encoder::abort()`: nothing more is encoded (finishing
+  would encode the rest of the audio and flush every frame the encoder
+  holds, which looked like a hang) and the unfinished file is removed. The
+  dialog previews the last frame (`ExportJob::lastFrame`). `FfmpegEncoder` (MP4 / H.264, MOV / ProRes, WebM /
   VP9, GIF) and `PngSequenceEncoder`. `app/Automation::exportProject` is the
   one helper the command line, MCP and `--export` share.
 - FFmpeg versions differ between platforms (Ubuntu 24.04 ships 6.1, MSYS2
@@ -386,8 +400,11 @@ Rules:
 - **Caches**: decoded video frames by file and start time, least recently
   shown first out, half the `cache_megabytes` setting (`setFrameCacheMegabytes`);
   the viewport keeps rendered frames by frame number while the document, the
-  view and `MediaManager::generation()` stay the same (the other half), and
-  the timeline's ruler shows them as a green line (`EditorContext::cachedFrames`).
+  view and `MediaManager::generation()` stay the same (the other half; no mark
+  on the ruler: a line growing behind the playhead read as a bug). Scrubbing
+  the editor's composition, a far video frame is decoded on a thread of its
+  own (`Seeker`, the newest wish only) while the last one shows; renders that
+  used such a stand-in are not kept (`takeStale`), and `arrivals()` redraws.
   While playing, the scene renders at the frame's own time, as exports do.
 
 ## 7. The editor (`src/ui`)
@@ -479,7 +496,13 @@ Rules:
   `media.move`; `Validate` keeps every item's folder in the list.
 - **Pen and paths** (`ViewportPanel`): `Tool::Pen` draws a new path shape,
   or a mask on a selected layer that is not a shape; the selected layer's path
-  and masks show their points and handles (dragged with any tool). The
+  and masks show their points and handles (dragged with any tool); a mask
+  picked on the timeline (`EditorContext::maskFocus`, its own row under its
+  layer) shows alone, and Delete removes it. A transition picked there is the
+  selection on its own (`EditorContext::transitionLayer`). Video clips draw
+  their frames (`MediaManager::filmstrip`: small pictures along the video,
+  made on a thread the first time) with their sound as a band along the
+  bottom. The
   timeline's Ripple / Roll / Slip tools (`Tool::Ripple`…) redo their edit from
   a copy of the composition taken when the drag started (`dragBase_`), and
   markers live on its ruler. J / K / L set `EditorContext::playRate` (sound
@@ -545,8 +568,10 @@ Rules:
   --missing pt-BR` lists them and ctest fails until they are there. Names
   saved anywhere (dock objects, settings, theme files) stay English.
 - **Color** (`panels/ColorPanel`, a tab beside Transitions): the selected
-  layer's grading, Lumetri's way: Brightness & Contrast, Hue/Saturation, a
-  look (Apply LUT) and Curves. Each part is the layer's first effect of that
+  layer's grading, Lumetri's way: Basic Correction (Brightness & Contrast and
+  Hue/Saturation on tone sliders; an animated parameter shows its keyframe
+  row instead), a look (Apply LUT: cards with a swatch made by
+  `render::lutSwatch`) and Curves. Each part is the layer's first effect of that
   type: one it does not have yet shows its defaults, and its first change
   inserts it (before the parts that come after it in the panel; rows wait
   until the drag ends). Nothing new in the document: the Effects tab shows

@@ -116,7 +116,9 @@ does.
   rotation and scale, fading out)
 - **Masks**: a rectangle or ellipse over a layer, or drawn with the Pen on a
   selected layer; feather, opacity, expansion (all animatable), Add /
-  Subtract / Intersect / Difference, inverted
+  Subtract / Intersect / Difference, inverted. Each mask is a row of its own
+  on the timeline, under its layer: pick it (only its points show), hide it,
+  rename it, change its mode, delete it
 - **Track mattes and blending modes**, as in After Effects: a layer shows
   only through another one's alpha or brightness (inverted too), and mixes
   with what is under it (Multiply, Screen, Overlay, Add, Color… 17 modes,
@@ -170,18 +172,22 @@ does.
 - **Quick Animations** in their own panel (*Animate*): Fade, Pop, Slide,
   Drop, Zoom, Rise, Shake, Heartbeat, Float, Bounce, Wobble, Blink, Spin,
   Typewriter, Draw On… click one for the selection or drag it onto a clip;
-  stackable, importable, savable
+  stackable, importable, savable; each shows on its clip in the timeline, a
+  band with its name, like a transition
 - **Transitions** panel by category (Fade, Slide, Scale, Rotate, 3D): click
   one for the selected clips, or drag it onto a clip's start or end, or onto
-  the cut between two clips; drag its
-  edge for the duration — plain keyframes you can still edit
+  the cut between two clips (they overlap: a real cross dissolve, a push);
+  drag its edge for the duration — plain keyframes you can still edit. A
+  transition picked on the timeline is the selection on its own (Delete
+  removes it, not its clip)
 - Add keyframes right in the Graph Editor (right-click, double-click or *+*)
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…
   stackable, keyframable, with presets
 - **Color**: the **Color** panel (beside Transitions, like Premiere's
-  Lumetri) grades the selected layer in one place: brightness and contrast,
-  hue and saturation, a **look** (any `.cube` LUT, or five that come with
-  bemotion: Teal & Orange, Warm, Cool, Bleach Bypass, Film Fade) and
+  Lumetri) grades the selected layer in one place: brightness, contrast,
+  saturation, hue and lightness on sliders whose track shows what they do, a
+  **look** picked from cards that preview it (any `.cube` LUT, or five that
+  come with bemotion: Teal & Orange, Warm, Cool, Bleach Bypass, Film Fade) and
   **curves** (RGB and each channel); plus **Chroma Key** for green and blue
   screens (tolerance, softness, spill suppression, choke)
 - **Scopes** (View › Panels › Scopes): waveform, RGB parade, vectorscope and
@@ -235,6 +241,8 @@ does.
 
 ### ✦ Deliver
 - **Export** to MP4 / H.264, MOV ProRes 4444, WebM VP9, GIF and PNG sequences
+  (the frame being written shows as it goes; Cancel stops at once and removes
+  the unfinished file)
   with transparency — [FFmpeg](https://ffmpeg.org) is built in
 - Audio is mixed in: AAC in MP4, PCM in MOV, Opus in WebM, a `.wav` beside PNGs
 - **Export Frame** (Shift+E, the viewport's camera button, or *File › Copy
@@ -281,8 +289,9 @@ does.
   `languages` folder
 - **Smooth with big footage**: **proxies** (Media panel › right-click ›
   *Create Proxy*: a small copy the editor plays, exports use the original),
-  frames kept in memory as they are shown (a green line on the timeline's
-  ruler: they play again at once), and optional **hardware decoding**
+  frames kept in memory as they are shown (they play again at once),
+  scrubbing that never waits for a video (far frames decode in the
+  background), and optional **hardware decoding**
   (Settings › Editor › Playback)
 - Each object says what it has: effects and transitions at the top of
   Properties; the Transitions panel shows the clip's in and out transitions,
@@ -341,8 +350,12 @@ does.
   through FFmpeg. **Folders** keep it tidy (they live in the project only;
   nothing moves on disk): *New Folder*, then drag media onto one or
   right-click › *Move to Folder*.
-  Audio plays with the timeline, clips show their waveform, video and audio
-  clips trim only within their source, and missing files can be relinked
+  Audio plays with the timeline; video clips show their frames along them
+  (their sound as a band at the bottom), sound clips their waveform; video and
+  audio clips trim only within their source, missing files can be relinked,
+  and *Separate Audio* (right-click a clip, or the Layer menu) gives a video's
+  sound a clip of its own. Delete removes the media picked in the Media panel
+  (inside a folder too)
 - **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
   Space+drag or Alt+drag; corner handles scale (Shift = uniform), the rotation
   handle rotates (Shift = 15° snaps)

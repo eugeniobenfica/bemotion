@@ -74,6 +74,11 @@ public:
     // `rgba` is top-down, straight alpha, width * height * 4 bytes.
     virtual bool write(const uint8_t* rgba, std::string& error) = 0;
     virtual bool finish(std::string& error) = 0;
+    // Stops at once (cancel): nothing more is encoded or written, the unfinished file goes.
+    virtual void abort() {
+        std::string ignored;
+        finish(ignored);
+    }
 };
 
 std::unique_ptr<Encoder> createEncoder(Format format);
@@ -94,6 +99,10 @@ public:
     int framesTotal() const { return count_; }
     double elapsedSeconds() const;
     const Settings& settings() const { return settings_; }
+    // The last frame rendered (RGBA, straight alpha, top-down), for a preview; empty before one.
+    const std::vector<uint8_t>& lastFrame() const { return pixels_; }
+    int frameWidth() const { return width_; }
+    int frameHeight() const { return height_; }
 
 private:
     void fail(std::string message);
@@ -107,6 +116,7 @@ private:
     int first_ = 0;
     int count_ = 0;
     int frame_ = 0;
+    int width_ = 0, height_ = 0; // output size
     bool running_ = false;
     bool done_ = false;
     bool cancelled_ = false;

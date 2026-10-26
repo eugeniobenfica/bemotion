@@ -38,6 +38,7 @@ private:
     QElapsedTimer sinceRender_;
     uint64_t revision_ = 0;
     double time_ = -1.0;
+    uint64_t arrivals_ = 0; // a scrubbed video frame decoded since
     bool valid_ = false;
     int width_ = 0, height_ = 0;
     std::vector<uint8_t> rgba_; // the frame, straight RGBA

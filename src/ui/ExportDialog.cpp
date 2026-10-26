@@ -17,11 +17,14 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialog>
+#include <QElapsedTimer>
+#include <QImage>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QGridLayout>
 #include <QPainter>
+#include <QPainterPath>
 #include <QLineEdit>
 #include <QProgressBar>
 #include <QPushButton>
@@ -118,6 +121,42 @@ QLabel* colored(const QString& text, Tone tone) {
     return l;
 }
 
+// The frame being exported (then the last one), fitted in a rounded box.
+class FramePreview : public QWidget {
+public:
+    FramePreview() {
+        setMinimumHeight(150);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    }
+    void setImage(QImage image) {
+        image_ = std::move(image);
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
+        QPainterPath box;
+        box.addRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
+        p.fillPath(box, theme::q(theme::kField));
+        if (!image_.isNull()) {
+            const QSize s = image_.size().scaled(size() - QSize(16, 16), Qt::KeepAspectRatio);
+            const QRect r(QPoint((width() - s.width()) / 2, (height() - s.height()) / 2), s);
+            QPainterPath frame;
+            frame.addRoundedRect(QRectF(r), 4, 4);
+            p.setClipPath(frame);
+            p.drawImage(r, image_);
+            p.setClipping(false);
+        }
+        p.setPen(QPen(theme::q(theme::kBorder), 1.0));
+        p.drawPath(box);
+    }
+
+private:
+    QImage image_;
+};
+
 // Remembered between exports in this session, like the old dialog.
 struct Remembered {
     exporting::Settings settings;
@@ -170,14 +209,8 @@ public:
 
 protected:
     void reject() override {
-        if (packageRunning_) {
-            packageCancel_->store(true);
-            progressInfo_->setText(tr("Cancelling..."));
-            return;
-        }
-        if (job_.running()) { // Esc / close while exporting cancels it
-            job_.cancel();
-            showResult();
+        if (packageRunning_ || job_.running() || waiting_) { // Esc / close while exporting cancels it
+            cancelExport();
             return;
         }
         QDialog::reject();
@@ -346,32 +379,47 @@ private:
         auto* page = new QWidget;
         auto* col = new QVBoxLayout(page);
         col->setContentsMargins(0, 0, 0, 0);
+        col->setSpacing(6);
+        // What, where to, how far: the title and file on the left, the percentage on the right.
+        auto* head = new QHBoxLayout;
+        auto* names = new QVBoxLayout;
+        names->setSpacing(2);
         progressTitle_ = pageTitle(tr("Exporting..."));
-        col->addWidget(progressTitle_);
+        names->addWidget(progressTitle_);
         progressFile_ = colored("", Tone::TextDim);
-        col->addWidget(progressFile_);
-        col->addSpacing(6);
+        names->addWidget(progressFile_);
+        head->addLayout(names, 1);
+        percent_ = new QLabel;
+        QFont big = percent_->font();
+        big.setPointSizeF(big.pointSizeF() * 2.2);
+        big.setWeight(QFont::DemiBold);
+        percent_->setFont(big);
+        setTone(percent_, Tone::Accent);
+        head->addWidget(percent_, 0, Qt::AlignRight | Qt::AlignVCenter);
+        col->addLayout(head);
+        col->addSpacing(8);
+        preview_ = new FramePreview; // the frame being written
+        col->addWidget(preview_, 1);
+        col->addSpacing(8);
         bar_ = new QProgressBar;
         bar_->setRange(0, 1000);
         bar_->setTextVisible(false);
         bar_->setFixedHeight(8);
         col->addWidget(bar_);
-        progressInfo_ = colored("", Tone::TextFaint);
-        col->addWidget(progressInfo_);
-        col->addSpacing(8);
+        auto* facts = new QHBoxLayout;
+        progressInfo_ = colored("", Tone::TextDim);
+        progressInfo_->setWordWrap(false);
+        facts->addWidget(progressInfo_, 1);
+        progressLeft_ = colored("", Tone::TextDim);
+        progressLeft_->setWordWrap(false);
+        facts->addWidget(progressLeft_);
+        col->addLayout(facts);
+        col->addSpacing(10);
         auto* buttons = new QHBoxLayout;
         buttons->addStretch();
         auto* cancel = new QPushButton(tr("Cancel"));
         cancel->setMinimumWidth(110);
-        connect(cancel, &QPushButton::clicked, this, [this] {
-            if (packageRunning_) {
-                packageCancel_->store(true);
-                progressInfo_->setText(tr("Cancelling..."));
-            } else {
-                job_.cancel();
-                showResult();
-            }
-        });
+        connect(cancel, &QPushButton::clicked, this, [this] { cancelExport(); });
         buttons->addWidget(cancel);
         col->addLayout(buttons);
         return page;
@@ -381,14 +429,19 @@ private:
         auto* page = new QWidget;
         auto* col = new QVBoxLayout(page);
         col->setContentsMargins(0, 0, 0, 0);
+        col->setSpacing(6);
         resultTitle_ = pageTitle("");
         col->addWidget(resultTitle_);
         resultInfo_ = colored("", Tone::TextDim);
         col->addWidget(resultInfo_);
-        resultPath_ = new QLabel;
-        resultPath_->setWordWrap(true);
+        col->addSpacing(8);
+        resultPreview_ = new FramePreview; // the last frame written
+        col->addWidget(resultPreview_, 1);
+        col->addSpacing(4);
+        resultPath_ = colored("", Tone::TextDim);
         resultPath_->setTextInteractionFlags(Qt::TextSelectableByMouse);
         col->addWidget(resultPath_);
+        col->addStretch(); // the buttons stay at the bottom without a preview
         col->addSpacing(10);
         auto* buttons = new QHBoxLayout;
         buttons->addStretch();
@@ -464,6 +517,12 @@ private:
         pages_->setCurrentIndex(1);
         progressTitle_->setText(tr("Preparing..."));
         progressFile_->setText(QString::fromStdString(platform::toUtf8(s.output.filename())));
+        percent_->setText("0%");
+        progressInfo_->clear();
+        progressLeft_->clear();
+        preview_->setImage({});
+        previewClock_.invalidate();
+        cancelledEarly_ = false;
         bar_->setRange(0, 1000);
         bar_->setValue(0);
         waiting_ = true;
@@ -491,6 +550,9 @@ private:
         progressTitle_->setText(tr("Packaging project..."));
         progressFile_->setText(QString::fromStdString(platform::toUtf8(packageOutput_.filename())));
         progressInfo_->setText(tr("Collecting linked files..."));
+        percent_->clear();
+        progressLeft_->clear();
+        preview_->setImage({});
         bar_->setRange(0, 0);
         timer_->start(30);
     }
@@ -517,6 +579,7 @@ private:
                                           : cancelled ? QString() : QString::fromStdString(result.error));
             reveal_->setVisible(result.ok);
             play_->hide();
+            resultPreview_->hide();
             return;
         }
         if (waiting_) { // audio of the composition still decoding
@@ -546,17 +609,42 @@ private:
         bar_->setValue(done * 1000 / total);
         const double elapsed = job_.elapsedSeconds();
         const double remaining = done > 0 ? elapsed / done * (total - done) : 0.0;
-        progressTitle_->setText(tr("Exporting...  %1%").arg(done * 100 / total));
-        progressInfo_->setText(tr("Frame %1 of %2  ·  %3 elapsed  ·  about %4 left")
-                                   .arg(done)
-                                   .arg(total)
-                                   .arg(QString::fromStdString(formatDuration(elapsed)))
-                                   .arg(done > 0 ? QString::fromStdString(formatDuration(remaining)) : QString("--:--")));
+        progressTitle_->setText(tr("Exporting..."));
+        percent_->setText(QString("%1%").arg(done * 100 / total));
+        progressInfo_->setText(tr("Frame %1 of %2  ·  %3 elapsed").arg(done).arg(total).arg(QString::fromStdString(formatDuration(elapsed))));
+        progressLeft_->setText(done > 0 ? tr("About %1 left").arg(QString::fromStdString(formatDuration(remaining))) : QString());
+        if (!previewClock_.isValid() || previewClock_.elapsed() > 250) { // a few times a second is plenty
+            previewClock_.restart();
+            preview_->setImage(frameImage());
+        }
+    }
+
+    // Stops at once, whatever the stage (reading audio, exporting, packaging).
+    void cancelExport() {
+        if (packageRunning_) {
+            packageCancel_->store(true);
+            progressInfo_->setText(tr("Cancelling..."));
+            return;
+        }
+        cancelledEarly_ = waiting_; // before the job started
+        job_.cancel();
+        showResult();
+    }
+
+    // The last frame, small (a preview, not the file).
+    QImage frameImage() const {
+        const std::vector<uint8_t>& px = job_.lastFrame();
+        const int w = job_.frameWidth(), h = job_.frameHeight();
+        if (w <= 0 || h <= 0 || px.size() < static_cast<size_t>(w) * h * 4) return {};
+        return QImage(px.data(), w, h, QImage::Format_RGBA8888).scaled(640, 360, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
 
     void showResult() {
         timer_->stop();
         waiting_ = false;
+        const QImage last = job_.succeeded() ? frameImage() : QImage();
+        resultPreview_->setImage(last);
+        resultPreview_->setVisible(!last.isNull()); // nothing to show: no empty box
         pages_->setCurrentIndex(2);
         const bool ok = job_.succeeded();
         const bool sequence = job_.settings().format == exporting::Format::PngSequence;
@@ -565,10 +653,10 @@ private:
             ui::setTone(resultTitle_, ui::Tone::Accent);
             resultInfo_->setText(tr("%1 frames in %2").arg(job_.framesTotal()).arg(QString::fromStdString(formatDuration(job_.elapsedSeconds()))));
             resultPath_->setText(QString::fromStdString(platform::toUtf8(job_.settings().output)));
-        } else if (job_.cancelled()) {
+        } else if (job_.cancelled() || cancelledEarly_) {
             resultTitle_->setText(tr("Export cancelled"));
-            resultTitle_->setStyleSheet("");
-            resultInfo_->clear();
+            ui::setTone(resultTitle_, ui::Tone::Text);
+            resultInfo_->setText(tr("Nothing was saved: the unfinished file was removed."));
             resultPath_->clear();
         } else {
             resultTitle_->setText(tr("Export failed"));
@@ -605,7 +693,10 @@ private:
     DragValue *from_ = nullptr, *to_ = nullptr;
     QCheckBox* transparent_ = nullptr;
     QLineEdit* output_ = nullptr;
-    QLabel *progressTitle_ = nullptr, *progressFile_ = nullptr, *progressInfo_ = nullptr;
+    QLabel *progressTitle_ = nullptr, *progressFile_ = nullptr, *progressInfo_ = nullptr, *progressLeft_ = nullptr, *percent_ = nullptr;
+    FramePreview *preview_ = nullptr, *resultPreview_ = nullptr;
+    QElapsedTimer previewClock_;
+    bool cancelledEarly_ = false; // cancelled while reading the audio, before the job began
     QProgressBar* bar_ = nullptr;
     QLabel *resultTitle_ = nullptr, *resultInfo_ = nullptr, *resultPath_ = nullptr;
     QPushButton *reveal_ = nullptr, *play_ = nullptr;

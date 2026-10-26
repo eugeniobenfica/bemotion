@@ -10,6 +10,7 @@ class QVBoxLayout;
 namespace bemotion {
 
 class EditorContext;
+struct Layer;
 namespace ui {
 class DragValue;
 class Tile;
@@ -29,8 +30,10 @@ protected:
 
 private:
     void rebuild();
+    void applyToSelection(const std::string& id); // a click on one: the selected clips' edges and cuts
     void buildApplied(QVBoxLayout* col); // the selected clip's transitions
-    std::string selectionKey() const;          // what the top part shows (rebuilt when it changes)
+    std::string selectionKey() const;
+    std::vector<Layer*> shownLayers() const; // the selected clips, or the picked transition's clip          // what the top part shows (rebuilt when it changes)
     EditorContext& ctx_;
     std::vector<ui::Tile*> tiles_;
     std::vector<std::string> tileIds_; // a category name or a transition id, per tile

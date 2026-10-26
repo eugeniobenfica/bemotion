@@ -24,6 +24,8 @@ QComboBox* blendModeCombo(EditorContext& ctx);
 void showBlendMode(QComboBox* combo, BlendMode mode);
 void fillMatteMenu(QMenu* menu, EditorContext& ctx);
 void fillMaskMenu(QMenu* menu, EditorContext& ctx);
+// "Separate Audio" for the selected videos with sound (their sound becomes clips of its own).
+void addSeparateAudio(QMenu& menu, EditorContext& ctx);
 // Rectangle / ellipse masks fitted to the selected layers.
 void addFittedMask(EditorContext& ctx, bool ellipse);
 // Speed (percent) and duration of the selected video / audio clips, reverse, ripple (modal).

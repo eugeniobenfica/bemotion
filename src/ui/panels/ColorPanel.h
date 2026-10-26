@@ -2,9 +2,11 @@
 
 #include "core/Layer.h"
 
+#include <QImage>
 #include <QScrollArea>
 
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -18,10 +20,11 @@ class CollapsibleSection;
 class PropertyRow;
 
 // The Color tab (next to Transitions), like Premiere's Lumetri Color: the selected layer's
-// grading in one place, in the order a colorist works: brightness and contrast, hue and
-// saturation, a look (LUT) and curves. Each part is an effect of the layer's stack (the Effects
-// tab shows them too): a part the layer does not have yet shows its default values, and the
-// first change adds the effect. Scopes open from here.
+// grading in one place, in the order a colorist works: basic correction (brightness, contrast,
+// hue, saturation, lightness on sliders whose track shows what they do), a look (LUTs as
+// cards, each a swatch of what it does) and curves. Each part is an effect of the layer's
+// stack (the Effects tab shows them too): a part the layer does not have yet shows its default
+// values, and the first change adds the effect. Scopes open from here.
 class ColorPanel : public QScrollArea {
     Q_OBJECT
 public:
@@ -37,19 +40,22 @@ protected:
 private:
     std::string structureKey();
     void rebuild();
-    // One part: its effect's rows when the layer has it, else editable defaults that add it.
-    void buildPart(QVBoxLayout* col, Layer& layer, EffectType type);
-    void buildLook(CollapsibleSection* section, Layer& layer, int index);
-    void buildCurves(CollapsibleSection* section, Layer& layer, int index);
+    void buildBasic(QVBoxLayout* col, Layer& layer);
+    void buildLook(QVBoxLayout* col, Layer& layer);
+    void buildCurves(QVBoxLayout* col, Layer& layer);
+    // On / off and reset for the effects of a part (none: the part is at its defaults).
+    QWidget* partTools(uint64_t layerId, const std::vector<EffectType>& types);
     // The layer's first effect of `type`, added when `create` (before the parts that come after
     // it in the panel).
     Effect* effectOf(uint64_t layerId, EffectType type, bool create);
+    QImage swatch(const std::string& lut); // a look's card picture (cached)
 
     EditorContext& ctx_;
     std::string key_;
     bool editing_ = false; // a default being dragged or typed: its rows wait
     std::vector<PropertyRow*> rows_;
     std::vector<std::function<void()>> refreshers_;
+    std::map<std::string, QImage> swatches_;
 };
 
 namespace ui {

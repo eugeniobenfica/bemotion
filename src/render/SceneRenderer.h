@@ -71,6 +71,9 @@ void setMediaProvider(MediaProvider provider);
 void setLutFolder(const std::filesystem::path& folder);
 std::vector<std::string> bundledLuts();
 bool lutInfo(const std::string& file, std::string& title, std::string& error);
+// A small picture of what a LUT does (RGBA, w x h): hues across, light to dark down, a gray ramp
+// along the bottom, through the LUT ("": the picture as it is). False if the file is unusable.
+bool lutSwatch(const std::string& file, int w, int h, std::vector<uint8_t>& rgba);
 
 // The direct child of a compound under a composition point (0 if none), for
 // picking a layer inside a compound. throughCamera: as the camera shows it

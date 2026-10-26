@@ -278,11 +278,23 @@ double presetDuration(const AnimationPreset& p, const Layer& layer) {
     return d;
 }
 
-void applyPreset(const AnimationPreset& preset, Layer& layer, double time) {
+void applyQuickAnimation(const AnimationPreset& preset, Layer& layer, double time) {
+    if (!presetAppliesTo(preset, layer)) return;
+    applyPreset(preset, layer, time);
+    const double dur = presetDuration(preset, layer);
+    const double t0 = std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - dur)); // where applyPreset put it
+    std::erase_if(layer.animations, [&](const AppliedAnimation& a) { return a.start < t0 + dur - 1e-6 && t0 < a.start + a.duration - 1e-6; });
+    const AppliedAnimation applied{preset.name, preset.category, t0, dur};
+    layer.animations.insert(std::upper_bound(layer.animations.begin(), layer.animations.end(), t0,
+                                             [](double t, const AppliedAnimation& a) { return t < a.start; }),
+                            applied);
+}
+
+void applyPreset(const AnimationPreset& preset, Layer& layer, double time, bool insideClip) {
     if (!presetAppliesTo(preset, layer)) return;
     const double dur = presetDuration(preset, layer);
     // Keep the animation inside the clip.
-    const double t0 = std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - dur));
+    const double t0 = insideClip ? std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - dur)) : time;
     const double t1 = t0 + dur;
     if (preset.enableStroke && layer.type == LayerType::Shape) layer.shape.strokeEnabled = true;
     if (preset.letters.set && layer.type == LayerType::Text) {

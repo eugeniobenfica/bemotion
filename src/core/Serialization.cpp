@@ -364,9 +364,20 @@ json encodeLayer(const Layer& constLayer) {
             effects.push_back({{"type", audioEffectId(e.type)}, {"enabled", e.enabled}, {"value", e.value}, {"value2", e.value2}, {"value3", e.value3}});
         j["audio_effects"] = std::move(effects);
     }
-    if (layer.transitionIn.active() || layer.transitionOut.active())
-        j["transitions"] = {{"in", {{"id", layer.transitionIn.id}, {"duration", layer.transitionIn.duration}, {"joined", layer.transitionIn.joined}}},
-                            {"out", {{"id", layer.transitionOut.id}, {"duration", layer.transitionOut.duration}, {"joined", layer.transitionOut.joined}}}};
+    if (!layer.animations.empty()) {
+        json list = json::array();
+        for (const AppliedAnimation& a : layer.animations)
+            list.push_back({{"name", a.name}, {"category", a.category}, {"start", a.start}, {"duration", a.duration}});
+        j["animations"] = std::move(list);
+    }
+    if (layer.transitionIn.active() || layer.transitionOut.active()) {
+        auto encode = [](const ClipTransition& t) {
+            json e = {{"id", t.id}, {"duration", t.duration}, {"joined", t.joined}};
+            if (t.overlap) e["overlap"] = true; // a crossed cut (files from before have none)
+            return e;
+        };
+        j["transitions"] = {{"in", encode(layer.transitionIn)}, {"out", encode(layer.transitionOut)}};
+    }
     return j;
 }
 
@@ -503,11 +514,16 @@ Layer decodeLayer(const json& j) {
                 out.id = value->value("id", std::string());
                 out.duration = value->value("duration", 0.5f);
                 out.joined = value->value("joined", false);
+                out.overlap = out.joined && value->value("overlap", false);
             }
         };
         decodeTransition("in", layer.transitionIn);
         decodeTransition("out", layer.transitionOut);
     }
+    if (const auto list = j.find("animations"); list != j.end() && list->is_array())
+        for (const json& a : *list)
+            if (a.is_object())
+                layer.animations.push_back({a.value("name", std::string()), a.value("category", std::string()), a.value("start", 0.0), a.value("duration", 0.0)});
     return layer;
 }
 

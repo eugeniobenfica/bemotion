@@ -215,6 +215,7 @@ public:
             {"layer.speed", &Applier::layerSpeed},
             {"layer.time_remap", &Applier::layerTimeRemap},
             {"layer.freeze", &Applier::layerFreeze},
+            {"layer.separate_audio", &Applier::layerSeparateAudio},
             {"mask.add", &Applier::maskAdd},
             {"mask.set", &Applier::maskSet},
             {"mask.remove", &Applier::maskRemove},
@@ -801,6 +802,15 @@ private:
         Layer& l = footage(op);
         freezeFrame(c_, l.id, time(op));
         return {{"source_time", round3(l.media.remap.base)}};
+    }
+
+    json layerSeparateAudio(const json& op) {
+        Layer& l = layer(op);
+        const std::string name = l.name;
+        if (l.type != LayerType::Media || !l.media.hasVideo || !l.media.hasAudio)
+            fail("layer \"" + name + "\" is not a video with sound (nothing to separate)");
+        const uint64_t audio = separateAudio(c_, l.id);
+        return {{"layer", audio}, {"name", name + " (audio)"}};
     }
 
     // --- masks ---

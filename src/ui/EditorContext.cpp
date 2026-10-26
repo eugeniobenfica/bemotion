@@ -38,13 +38,40 @@ std::vector<Layer*> EditorContext::selectedLayers() {
     return out;
 }
 
+void EditorContext::selectMask(uint64_t layerId, int index) {
+    select(layerId);
+    maskFocus = index;
+}
+
+bool EditorContext::deleteFocusedMask() {
+    Layer* l = selected();
+    if (maskFocus < 0 || !l || maskFocus >= static_cast<int>(l->masks.size())) return false;
+    l->masks.erase(l->masks.begin() + maskFocus);
+    maskFocus = -1;
+    selectedKeys.clear(); // keys name masks by index
+    touch();
+    return true;
+}
+
+void EditorContext::selectTransition(uint64_t layerId, bool incoming) {
+    maskFocus = -1;
+    selection.clear();
+    selectedKeys.clear();
+    transitionLayer = layerId;
+    transitionIncoming = incoming;
+}
+
 void EditorContext::select(uint64_t layerId) {
     if (primaryId() != layerId) selectedKeys.clear();
+    transitionLayer = 0; // a clip or nothing: no transition either
+    maskFocus = -1;
     selection.clear();
     if (layerId) selection.push_back(layerId);
 }
 
 void EditorContext::toggleSelected(uint64_t layerId) {
+    transitionLayer = 0;
+    maskFocus = -1;
     if (isSelected(layerId)) std::erase(selection, layerId);
     else selection.push_back(layerId);
     selectedKeys.clear();
@@ -64,6 +91,8 @@ void EditorContext::selectRange(uint64_t layerId) {
 }
 
 void EditorContext::selectAll() {
+    transitionLayer = 0;
+    maskFocus = -1;
     selection.clear();
     for (const auto& l : comp().layers) selection.push_back(l.id);
     selectedKeys.clear();

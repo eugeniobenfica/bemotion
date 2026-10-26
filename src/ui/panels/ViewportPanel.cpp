@@ -371,7 +371,7 @@ void ViewportPanel::sync() {
     if (penDrawing_ && (ctx_.tool != Tool::Pen || !pathOf(penTarget_) || ctx_.selection.size() != 1 || ctx_.primaryId() != penTarget_.layer))
         finishPen();
     Signature s{ctx_.revision(), ctx_.time,       ctx_.selection, ctx_.scope,  ctx_.snapping,
-                ctx_.showGuides, ctx_.showRulers, ctx_.playing,   static_cast<int>(ctx_.tool)};
+                ctx_.showGuides, ctx_.showRulers, ctx_.playing,   static_cast<int>(ctx_.tool), media::MediaManager::get().arrivals()};
     if (s == drawn_) return;
     drawn_ = std::move(s);
     update();
@@ -427,7 +427,6 @@ void ViewportPanel::positionHud() {
 void ViewportPanel::clearCache() {
     cache_.clear();
     cacheBytes_ = 0;
-    ctx_.cachedFrames.clear();
 }
 
 void ViewportPanel::paintEvent(QPaintEvent*) {
@@ -479,12 +478,14 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
                 if (Layer* l = uncropped.findLayer(cropping->id))
                     l->media.cropLeft = l->media.cropTop = l->media.cropRight = l->media.cropBottom = AnimFloat{0.0f};
             }
+            media::MediaManager::get().takeStale(); // from here on: did this frame use a stand-in?
             render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, render::View{origin_ * z, zoom_ * z, world_}, true,
                                     throughCamera_, orbit_ ? &orbitLens_ : nullptr);
             frameKey_ = key;
+            const bool stale = media::MediaManager::get().takeStale(); // a video frame still on its way: not kept
             // Kept (shared until the next render writes a new picture), the frames farthest from
             // the playhead going first when the memory for it is full.
-            if (onFrame) {
+            if (onFrame && !stale) {
                 const size_t budget = static_cast<size_t>(std::max(0, settings().cacheMegabytes / 2)) << 20;
                 const size_t bytes = static_cast<size_t>(frame_.sizeInBytes());
                 if (bytes <= budget) {
@@ -496,8 +497,6 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
                         cacheBytes_ -= static_cast<size_t>(far->second.sizeInBytes());
                         cache_.erase(far);
                     }
-                    ctx_.cachedFrames.clear();
-                    for (const auto& [n, image] : cache_) ctx_.cachedFrames.insert(n);
                 }
             }
         }
@@ -1034,6 +1033,8 @@ std::vector<ViewportPanel::PathRef> ViewportPanel::editablePaths() const {
     if (orbit_ || ctx_.selection.size() != 1) return out;
     const Layer* l = const_cast<EditorContext&>(ctx_).selected();
     if (!l || l->locked || !l->activeAt(ctx_.time) || l->type == LayerType::Camera) return out;
+    // A mask picked on the timeline: that one alone, as an object of its own.
+    if (ctx_.maskFocus >= 0 && ctx_.maskFocus < static_cast<int>(l->masks.size())) return {{l->id, ctx_.maskFocus}};
     if (l->type == LayerType::Shape && l->shape.kind == ShapeKind::Path) out.push_back({l->id, -1});
     for (int i = 0; i < static_cast<int>(l->masks.size()); ++i) out.push_back({l->id, i});
     return out;

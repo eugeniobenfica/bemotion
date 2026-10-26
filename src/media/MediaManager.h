@@ -19,6 +19,12 @@ namespace bemotion::media {
 
 using AudioData = std::shared_ptr<const std::vector<float>>; // stereo, kAudioRate
 using Loudness = std::shared_ptr<const std::vector<float>>;  // RMS every kLoudnessBlock frames
+// Small pictures along a video, for the timeline: frame i shows the source at (i + 0.5) * step.
+struct Filmstrip {
+    double step = 1.0;
+    int width = 0, height = 0;
+    std::vector<std::vector<uint8_t>> frames; // RGBA, width * height * 4 each
+};
 constexpr size_t kLoudnessBlock = 480;                         // 10 ms at kAudioRate
 
 class MediaManager {
@@ -34,6 +40,9 @@ public:
     // Picture of a media layer at composition time `t` (null when not available).
     sk_sp<SkImage> frameFor(const Composition& comp, const Layer& layer, double t);
     sk_sp<SkImage> thumbnail(const MediaItem& item); // the image / an early video frame; null while unavailable
+    // A video's filmstrip, made in the background the first time it is asked for (from its proxy
+    // when there is one); null until it is ready (arrivals() changes then).
+    std::shared_ptr<const Filmstrip> filmstrip(const MediaItem& item);
 
     AudioData audio(uint64_t mediaId) const; // null while decoding (or without audio)
     // The audio as a layer's EQ and Noise Reduction make it (shared by layers with the same
@@ -66,6 +75,12 @@ public:
     // Bumped whenever a picture can change without the project changing (a proxy made or
     // switched on, a file found again): rendered frames cached elsewhere are stale then.
     uint64_t generation() const;
+    // Scrubbing the editor's composition: a far video frame is decoded in the background and the
+    // last one is shown meanwhile. arrivals() changes when such a frame is ready (draw again);
+    // takeStale() says whether a picture since the last call was such a stand-in (a render that
+    // used one is not kept), and clears it.
+    uint64_t arrivals() const;
+    bool takeStale();
     // Every video opened again (hardware decoding turned on or off).
     void reopenVideos();
 

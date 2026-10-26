@@ -18,6 +18,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPushButton>
 #include <QButtonGroup>
 #include <QPixmap>
@@ -1172,8 +1173,64 @@ void Switch::paintEvent(QPaintEvent*) {
     d.circleFilled(c, knob, on ? rgba(255, 255, 255) : (enabled ? theme::kTextDim : theme::kTextFaint));
 }
 
+namespace {
+
+// A segmented control's strip, drawn whole: one rounded outline, thin lines between the parts,
+// the chosen part in the accent. (A style sheet rounding only some corners of each button drew
+// the outer left edge thin and broken.)
+class SegmentStrip : public QWidget {
+public:
+    bool eventFilter(QObject* watched, QEvent* e) override {
+        if (e->type() == QEvent::Enter || e->type() == QEvent::Leave || e->type() == QEvent::EnabledChange) update();
+        return QWidget::eventFilter(watched, e);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        const theme::Palette& pal = theme::current();
+        const float r = std::clamp(pal.rounding, 0.0f, 12.0f);
+        const float bw = std::max(1.0f, std::round(std::clamp(pal.borderWidth, 0.0f, 2.0f)));
+        const QRectF outer = QRectF(rect()).adjusted(bw * 0.5, bw * 0.5, -bw * 0.5, -bw * 0.5);
+        QPainterPath shape;
+        shape.addRoundedRect(outer, r, r);
+        p.fillPath(shape, theme::q(theme::kField));
+        const auto buttons = findChildren<QPushButton*>(Qt::FindDirectChildrenOnly);
+        p.save();
+        p.setClipPath(shape);
+        for (QPushButton* b : buttons) {
+            const QRectF part = QRectF(b->geometry()).adjusted(0, -2, 0, 2);
+            if (b->isChecked()) p.fillRect(part, theme::q(theme::accent(55)));
+            else if (b->underMouse() && b->isEnabled()) p.fillRect(part, theme::q(theme::mix(pal.field, pal.text, 0.06f)));
+        }
+        p.restore();
+        // The lines between parts (not next to the chosen one: its own outline is there).
+        p.setPen(QPen(theme::q(theme::kFieldBorder), bw));
+        for (int i = 1; i < buttons.size(); ++i) {
+            if (buttons[i]->isChecked() || buttons[i - 1]->isChecked()) continue;
+            const qreal x = buttons[i]->geometry().left() + 0.5;
+            p.drawLine(QPointF(x, outer.top()), QPointF(x, outer.bottom()));
+        }
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(shape);
+        // The chosen part: an accent outline, rounded where it meets the strip's ends (its box cut
+        // by the strip's shape), square between parts.
+        p.setPen(QPen(theme::q(theme::accent(170)), bw));
+        for (QPushButton* b : buttons) {
+            if (!b->isChecked()) continue;
+            const QRectF g = QRectF(b->geometry());
+            QPainterPath part;
+            part.addRect(QRectF(QPointF(std::max(outer.left(), g.left() + 0.5), outer.top()), QPointF(std::min(outer.right(), g.right() + 0.5), outer.bottom())));
+            p.drawPath(part.intersected(shape));
+        }
+    }
+};
+
+} // namespace
+
 QWidget* segmented(const QStringList& choices, int current, std::function<void(int)> changed, const std::vector<bool>& enabled) {
-    auto* box = new QWidget;
+    auto* box = new SegmentStrip;
     auto* row = new QHBoxLayout(box);
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(0);
@@ -1184,12 +1241,13 @@ QWidget* segmented(const QStringList& choices, int current, std::function<void(i
         b->setCheckable(true);
         b->setChecked(i == current);
         b->setCursor(Qt::PointingHandCursor);
-        // Where it sits (first, middle, last) rounds the outer corners only.
-        b->setProperty("segment", choices.size() == 1 ? "only" : i == 0 ? "first" : i == choices.size() - 1 ? "last" : "middle");
+        b->setProperty("segment", "part"); // text only: the strip draws the rest
         if (i < static_cast<int>(enabled.size()) && !enabled[i]) b->setEnabled(false);
+        b->installEventFilter(box); // hover: the strip draws it
         group->addButton(b, i);
         row->addWidget(b);
     }
+    QObject::connect(group, &QButtonGroup::idToggled, box, [box](int, bool) { box->update(); });
     QObject::connect(group, &QButtonGroup::idClicked, box, [changed](int i) {
         if (changed) changed(i);
     });

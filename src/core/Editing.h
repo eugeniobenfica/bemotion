@@ -49,6 +49,11 @@ bool setClipSpeed(Composition& comp, uint64_t id, double speed, bool reversed, b
 bool setTimeRemap(Composition& comp, uint64_t id, bool on);
 // Freezes the clip on the frame it shows at `t` (Premiere's Frame Hold): Time Remap with one value.
 bool freezeFrame(Composition& comp, uint64_t id, double t);
+// Separate Audio (Premiere's Unlink): a video clip with sound keeps its picture, and its sound
+// becomes a clip of its own on a new track right below (the same media, time, speed, volume
+// and audio effects), to move, trim or delete apart. Returns the audio clip's id (0: the
+// layer is not a video with sound).
+uint64_t separateAudio(Composition& comp, uint64_t id);
 // True for clips these apply to: video and audio (not stills).
 bool hasTimeline(const Composition& comp, const Layer& layer);
 
