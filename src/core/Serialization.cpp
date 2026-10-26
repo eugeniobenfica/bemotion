@@ -367,7 +367,7 @@ json encodeLayer(const Layer& constLayer) {
     if (!layer.animations.empty()) {
         json list = json::array();
         for (const AppliedAnimation& a : layer.animations)
-            list.push_back({{"name", a.name}, {"category", a.category}, {"start", a.start}, {"duration", a.duration}});
+            list.push_back({{"name", a.name}, {"category", a.category}, {"start", a.start}, {"duration", a.duration}, {"properties", a.properties}});
         j["animations"] = std::move(list);
     }
     if (layer.transitionIn.active() || layer.transitionOut.active()) {
@@ -523,7 +523,13 @@ Layer decodeLayer(const json& j) {
     if (const auto list = j.find("animations"); list != j.end() && list->is_array())
         for (const json& a : *list)
             if (a.is_object())
-                layer.animations.push_back({a.value("name", std::string()), a.value("category", std::string()), a.value("start", 0.0), a.value("duration", 0.0)});
+            {
+                AppliedAnimation applied{a.value("name", std::string()), a.value("category", std::string()), a.value("start", 0.0), a.value("duration", 0.0), {}};
+                if (const auto ps = a.find("properties"); ps != a.end() && ps->is_array())
+                    for (const json& p : *ps)
+                        if (p.is_string()) applied.properties.push_back(p.get<std::string>());
+                layer.animations.push_back(std::move(applied));
+            }
     return layer;
 }
 

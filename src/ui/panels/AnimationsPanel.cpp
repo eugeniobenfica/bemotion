@@ -5,6 +5,7 @@
 #include "core/Presets.h"
 #include "ui/EditorContext.h"
 #include "ui/Mime.h"
+#include "ui/PagedWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -79,6 +80,33 @@ void AnimationsPanel::rebuild() {
     col->setContentsMargins(8, 8, 8, 8);
     col->setSpacing(6);
     tiles_.clear();
+    // What the clip has: each one with a way to take it off (its keyframes go too).
+    appliedKey_ = appliedKey();
+    Layer* clip = ctx_.selection.size() == 1 ? ctx_.selected() : ctx_.comp().findLayer(ctx_.animationLayer);
+    if (clip) {
+        col->addWidget(new QLabel(tr("Animations  ·  %1").arg(QString::fromStdString(clip->name))));
+        auto* card = new ui::SettingsCard;
+        if (clip->animations.empty())
+            card->addRow(tr("None yet"), tr("Click one below, or drag it onto the clip"), nullptr);
+        const uint64_t id = clip->id;
+        for (size_t i = 0; i < clip->animations.size(); ++i) {
+            const AppliedAnimation& a = clip->animations[i];
+            auto* remove = new ui::IconButton(ui::Icon::Trash, tr("Remove this animation (its keyframes go too)"), 26);
+            connect(remove, &QAbstractButton::clicked, this, [this, id, i] {
+                if (Layer* l = ctx_.comp().findLayer(id); l && removeQuickAnimation(*l, i)) {
+                    if (ctx_.animationLayer == id) ctx_.animationLayer = 0;
+                    ctx_.touch();
+                }
+                QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
+            });
+            const bool picked = ctx_.animationLayer == id && ctx_.animationIndex == static_cast<int>(i);
+            card->addRow((picked ? QStringLiteral("▸ ") : QString()) + trs(a.name),
+                         tr("%1 s from %2 s (drag its band on the timeline: its end stretches it)").arg(a.duration, 0, 'f', 2).arg(a.start - clip->inPoint, 0, 'f', 2),
+                         remove);
+        }
+        col->addWidget(card);
+        col->addSpacing(6);
+    }
     auto* about = new QLabel(tr("Quick Animations: click one for the selected layers (it starts at the playhead), or drag it onto a clip."));
     about->setWordWrap(true);
     ui::setTone(about, ui::Tone::TextFaint);
@@ -180,9 +208,17 @@ void AnimationsPanel::rebuild() {
     sync();
 }
 
+std::string AnimationsPanel::appliedKey() {
+    const Layer* clip = ctx_.selection.size() == 1 ? ctx_.selected() : ctx_.comp().findLayer(ctx_.animationLayer);
+    if (!clip) return {};
+    std::string key = std::to_string(clip->id) + clip->name + ":" + std::to_string(ctx_.animationLayer) + "/" + std::to_string(ctx_.animationIndex);
+    for (const AppliedAnimation& a : clip->animations) key += "|" + a.name + std::to_string(a.start) + "," + std::to_string(a.duration);
+    return key;
+}
+
 void AnimationsPanel::sync() {
     if (!isVisible()) return;
-    if (PresetLibrary::all().size() != presetCount_) { // imported or saved elsewhere
+    if (PresetLibrary::all().size() != presetCount_ || appliedKey() != appliedKey_) { // imported or saved elsewhere; the clip's list
         rebuild();
         return;
     }

@@ -182,6 +182,24 @@ void addSeparateAudio(QMenu& menu, EditorContext& ctx) {
     });
     a->setEnabled(!videos.empty());
     a->setToolTip(tr("The sound becomes a clip of its own on a track below, to move, trim or delete apart"));
+    // Link: each selected video without sound, with a selected sound clip of its media (or the one
+    // beside it in time).
+    std::vector<std::pair<uint64_t, uint64_t>> pairs;
+    for (Layer* l : ctx.selectedLayers())
+        if (const uint64_t audio = audioToLink(ctx.comp(), l->id, ctx.selection)) pairs.emplace_back(l->id, audio);
+    if (!pairs.empty()) {
+        QAction* link = menu.addAction(menuIcon(Icon::Audio, theme::kTextDim), tr("Link Audio"), [&ctx, pairs] {
+            bool any = false;
+            for (const auto& [video, audio] : pairs) any = linkAudio(ctx.comp(), video, audio) || any;
+            if (!any) return;
+            std::vector<uint64_t> videos;
+            for (const auto& [video, audio] : pairs) videos.push_back(video);
+            ctx.select(0);
+            ctx.selection = videos;
+            ctx.touch();
+        });
+        link->setToolTip(tr("The sound of the same media goes back into the video, as one clip again"));
+    }
     menu.setToolTipsVisible(true);
 }
 

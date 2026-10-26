@@ -34,6 +34,7 @@ private:
     void rebuild();
     void buildComposition(QVBoxLayout* col);
     void buildLayer(QVBoxLayout* col, Layer& layer);
+    void buildMask(QVBoxLayout* col, Layer& layer, int index); // a mask picked on the timeline: its options alone
     void buildMediaSource(QVBoxLayout* col, Layer& layer);
     void buildMediaTime(QVBoxLayout* col, Layer& layer);
     void buildBlending(QVBoxLayout* col, Layer& layer);

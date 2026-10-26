@@ -19,6 +19,7 @@ namespace bemotion::ui {
 PagedWindow::PagedWindow(const QString& title, std::vector<Page> pages, QWidget* footer)
     : QWidget(nullptr, Qt::Window), pages_(std::move(pages)) {
     setWindowTitle(title);
+    setProperty("chrome", true); // framed by bemotion (ui/WindowChrome.h)
     setAttribute(Qt::WA_DeleteOnClose, false);
     resize(800, 600);
     auto* row = new QHBoxLayout(this);

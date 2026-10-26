@@ -216,6 +216,7 @@ public:
             {"layer.time_remap", &Applier::layerTimeRemap},
             {"layer.freeze", &Applier::layerFreeze},
             {"layer.separate_audio", &Applier::layerSeparateAudio},
+            {"layer.link_audio", &Applier::layerLinkAudio},
             {"mask.add", &Applier::maskAdd},
             {"mask.set", &Applier::maskSet},
             {"mask.remove", &Applier::maskRemove},
@@ -811,6 +812,20 @@ private:
             fail("layer \"" + name + "\" is not a video with sound (nothing to separate)");
         const uint64_t audio = separateAudio(c_, l.id);
         return {{"layer", audio}, {"name", name + " (audio)"}};
+    }
+
+    json layerLinkAudio(const json& op) {
+        Layer& v = layer(op);
+        const std::string name = v.name;
+        if (v.type != LayerType::Media || !v.media.hasVideo || v.media.hasAudio)
+            fail("layer \"" + name + "\" is not a video without sound (nothing to link)");
+        uint64_t audio = 0;
+        if (has(op, "audio")) audio = layer(json{{"layer", op["audio"]}}).id;
+        else audio = audioToLink(c_, v.id);
+        if (!audio) fail("no sound-only clip of the same media to link with \"" + name + "\"");
+        bool inSync = true;
+        if (!linkAudio(c_, v.id, audio, &inSync)) fail("\"audio\" must be a sound-only clip of the same media");
+        return {{"in_sync", inSync}};
     }
 
     // --- masks ---

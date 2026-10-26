@@ -853,6 +853,40 @@ void testSeparateAudio() {
     CHECK(a && v && p.comp.indexOf(a->id) > p.comp.indexOf(v->id)); // below the picture
     CHECK(!run(p, R"({"op": "layer.separate_audio", "layer": "Talk"})").ok); // no sound left to separate
     CHECK(validate(p).empty());
+    // And back: the sound clip goes into the video again.
+    const OpsResult linked = run(p, R"({"op": "layer.link_audio", "layer": "Talk"})");
+    CHECK(linked.ok);
+    v = p.comp.findLayer(videoId);
+    CHECK(v && v->media.hasVideo && v->media.hasAudio);
+    bool gone = true;
+    for (const Layer& l : p.comp.layers) gone = gone && l.name != "Talk (audio)";
+    CHECK(gone);
+    CHECK(!run(p, R"({"op": "layer.link_audio", "layer": "Talk"})").ok); // it has its sound already
+}
+
+void testQuickAnimationMarks() {
+    Layer l = makeShapeLayer(ShapeKind::Rectangle, {100, 100}, 5.0);
+    AnimationPreset fade;
+    CHECK(parsePreset(R"({"name": "Fade In", "category": "Entrance", "duration": 1,
+                         "tracks": [{"property": "opacity", "keys": [{"t": 0, "v": 0}, {"t": 1, "v": "rest"}]}]})", fade));
+    applyQuickAnimation(fade, l, 1.0);
+    CHECK(l.animations.size() == 1 && near(static_cast<float>(l.animations[0].start), 1.0f) && l.animations[0].properties.size() == 1);
+    CHECK(l.transform.opacity.keyCount() == 2);
+    // Stretched to 2 s: its keys spread with it.
+    CHECK(retimeQuickAnimation(l, 0, 1.0, 2.0));
+    CHECK(near(static_cast<float>(l.transform.opacity.keyTime(1)), 3.0f));
+    // Moved with its clip.
+    l.shiftTime(1.0);
+    CHECK(near(static_cast<float>(l.animations[0].start), 2.0f));
+    // Taken off: its keys go.
+    CHECK(removeQuickAnimation(l, 0));
+    CHECK(l.animations.empty() && l.transform.opacity.keyCount() == 0);
+    // A transition moved to the other end.
+    Layer t = makeShapeLayer(ShapeKind::Rectangle, {100, 100}, 4.0);
+    CHECK(applyTransition(t, "fade", TransitionEdge::In, 0.5));
+    CHECK(moveTransition(t, TransitionEdge::In));
+    CHECK(!t.transitionIn.active() && t.transitionOut.active() && t.transitionOut.id == "fade");
+    CHECK(near(t.transform.opacity.valueAt(4.0), 0.0f, 0.5f) && near(t.transform.opacity.valueAt(0.1), 100.0f));
 }
 
 void testFileParams() {
@@ -1853,6 +1887,7 @@ int main() {
         {"3d camera tilt", testCamera3DTilt},
         {"cut transitions", testCutTransitions},
         {"separate audio", testSeparateAudio},
+        {"quick animation marks", testQuickAnimationMarks},
         {"subtitles", testSubtitles},
         {"counter", testCounter},
         {"letters and fit", testLetters},

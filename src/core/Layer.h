@@ -371,6 +371,7 @@ struct AppliedAnimation {
     std::string category; // "Entrance", "Emphasis", "Exit"...
     double start = 0.0;   // composition time (moves with the clip)
     double duration = 0.0;
+    std::vector<std::string> properties; // what it animates (its keys there are its own)
 };
 
 constexpr int kLabelColorCount = 8;

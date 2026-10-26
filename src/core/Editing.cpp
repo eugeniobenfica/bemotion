@@ -217,6 +217,41 @@ uint64_t separateAudio(Composition& comp, uint64_t id) {
     return comp.addLayer(std::move(sound), below).id;
 }
 
+bool linkAudio(Composition& comp, uint64_t videoId, uint64_t audioId, bool* inSync) {
+    Layer* video = comp.findLayer(videoId);
+    const Layer* audio = comp.findLayer(audioId);
+    if (!video || !audio || video == audio || video->type != LayerType::Media || audio->type != LayerType::Media) return false;
+    if (!video->media.hasVideo || video->media.hasAudio || audio->media.hasVideo || !audio->media.hasAudio) return false;
+    if (video->media.mediaId != audio->media.mediaId) return false;
+    if (inSync)
+        *inSync = std::fabs(video->media.start - audio->media.start) < comp.frameDuration() * 0.5 &&
+                  std::fabs(video->media.speed - audio->media.speed) < 1e-9 && video->media.reversed == audio->media.reversed;
+    video->media.hasAudio = true;
+    video->media.volume = audio->media.volume;
+    video->audioEffects = audio->audioEffects;
+    video->muted = audio->muted;
+    comp.removeLayerTree(audioId);
+    return true;
+}
+
+uint64_t audioToLink(const Composition& comp, uint64_t videoId, const std::vector<uint64_t>& preferred) {
+    const Layer* video = comp.findLayer(videoId);
+    if (!video || video->type != LayerType::Media || !video->media.hasVideo || video->media.hasAudio) return 0;
+    auto fits = [&](const Layer& l) {
+        return l.id != videoId && l.type == LayerType::Media && !l.media.hasVideo && l.media.hasAudio && l.media.mediaId == video->media.mediaId;
+    };
+    for (uint64_t id : preferred)
+        if (const Layer* l = comp.findLayer(id); l && fits(*l)) return id;
+    uint64_t best = 0;
+    double bestOverlap = 0.0;
+    for (const Layer& l : comp.layers)
+        if (fits(l)) {
+            const double overlap = std::min(l.outPoint, video->outPoint) - std::max(l.inPoint, video->inPoint);
+            if (overlap > bestOverlap) best = l.id, bestOverlap = overlap;
+        }
+    return best;
+}
+
 // --- markers ----------------------------------------------------------------------------------
 
 int markerAt(const Composition& comp, double t) {

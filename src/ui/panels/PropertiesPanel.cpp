@@ -127,7 +127,7 @@ PropertiesPanel::PropertiesPanel(EditorContext& ctx, QWidget* parent) : QScrollA
 std::string PropertiesPanel::structureKey() {
     std::ostringstream k;
     Layer* layer = ctx_.selected();
-    k << ctx_.selection.size() << ':';
+    k << ctx_.selection.size() << ':' << ctx_.maskFocus << ':';
     if (!layer) return k.str() + "comp";
     k << layer->id << ':' << static_cast<int>(layer->type) << ':' << static_cast<int>(layer->shape.kind) << ':'
       << static_cast<int>(layer->background.fill) << ':' << layer->background.mediaId << ':' << ctx_.comp().media.size() << ':'
@@ -167,11 +167,50 @@ void PropertiesPanel::rebuild() {
     auto* col = new QVBoxLayout(content);
     col->setContentsMargins(8, 8, 8, 8);
     col->setSpacing(4);
-    if (Layer* layer = ctx_.selected()) buildLayer(col, *layer);
-    else buildComposition(col);
+    if (Layer* layer = ctx_.selected(); layer && ctx_.maskFocus >= 0 && ctx_.maskFocus < static_cast<int>(layer->masks.size()))
+        buildMask(col, *layer, ctx_.maskFocus);
+    else if (layer)
+        buildLayer(col, *layer);
+    else
+        buildComposition(col);
     col->addStretch();
     setWidget(content);
     verticalScrollBar()->setValue(scroll);
+}
+
+// --- a mask, as an object of its own ----------------------------------------------------------
+
+void PropertiesPanel::buildMask(QVBoxLayout* col, Layer& layer, int index) {
+    const uint64_t id = layer.id;
+    const Mask& mask = layer.masks[static_cast<size_t>(index)];
+    auto* head = new QHBoxLayout;
+    auto* icon = new QLabel;
+    icon->setPixmap(ui::makeIcon(ui::Icon::Mask, theme::kAccent, 20).pixmap(20, 20));
+    head->addWidget(icon);
+    head->addWidget(new QLabel(trLabel(QString::fromStdString(mask.name)) + QStringLiteral("  ·  ") + QString::fromStdString(layer.name)), 1);
+    auto* remove = new ui::IconButton(ui::Icon::Trash, tr("Delete this mask"), 24);
+    connect(remove, &QAbstractButton::clicked, this, [this] { ctx_.deleteFocusedMask(); });
+    head->addWidget(remove);
+    col->addLayout(head);
+    // Back to everything the layer has.
+    auto* back = new QPushButton(ui::makeIcon(ui::Icon::Back, theme::kAccent, 16), tr("All of %1").arg(QString::fromStdString(layer.name)));
+    back->setProperty("flat", true);
+    back->setCursor(Qt::PointingHandCursor);
+    connect(back, &QPushButton::clicked, this, [this, id] { ctx_.select(id); });
+    auto* row = new QHBoxLayout;
+    row->addWidget(back);
+    row->addStretch();
+    col->addLayout(row);
+    // Its settings, then its animatable rows (feather, opacity, expansion, the path).
+    auto* section = new CollapsibleSection(trLabel(QString::fromStdString(mask.name)));
+    buildMaskRows(section, layer, index);
+    for (const PropertyRef& prop : layer.properties())
+        if (prop.maskIndex == index && (!prop.whileAnimated || prop.anim->isAnimated())) rows_.push_back(new PropertyRow(ctx_, id, prop, section));
+    col->addWidget(section);
+    auto* hint = new QLabel(tr("Its points show in the viewport: drag them, or draw another mask with the Pen (G)."));
+    hint->setWordWrap(true);
+    ui::setTone(hint, ui::Tone::TextFaint);
+    col->addWidget(hint);
 }
 
 // --- composition ---------------------------------------------------------------------------
@@ -408,7 +447,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         const bool audioOnly = layer.type == LayerType::Media && layer.media.hasAudio && !layer.media.hasVideo;
         auto* row = new QHBoxLayout;
         row->setSpacing(6);
-        auto chip = [&](const QString& panel, const QString& tip) {
+        auto chip = [&](const QString& panel, const QString& tip) { // `panel`: its English id, never translated
             auto* b = new QPushButton;
             b->setProperty("flat", true);
             b->setCursor(Qt::PointingHandCursor);
@@ -417,9 +456,9 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             row->addWidget(b);
             return b;
         };
-        auto* fx = chip(tr("Effects"), audioOnly ? tr("Its audio effects (Effects panel)") : tr("Its effects (Effects panel)"));
+        auto* fx = chip(QStringLiteral("Effects"), audioOnly ? tr("Its audio effects (Effects panel)") : tr("Its effects (Effects panel)"));
         fx->setIcon(ui::makeIcon(ui::Icon::FxStylize, theme::kTextDim, 16));
-        QPushButton* trChip = audioOnly ? nullptr : chip(tr("Transitions"), tr("How it comes in and goes away (Transitions panel)"));
+        QPushButton* trChip = audioOnly ? nullptr : chip(QStringLiteral("Transitions"), tr("How it comes in and goes away (Animate panel)"));
         if (trChip) trChip->setIcon(ui::makeIcon(ui::Icon::Transition, theme::kTextDim, 16));
         row->addStretch();
         col->addLayout(row);

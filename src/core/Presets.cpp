@@ -284,10 +284,47 @@ void applyQuickAnimation(const AnimationPreset& preset, Layer& layer, double tim
     const double dur = presetDuration(preset, layer);
     const double t0 = std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - dur)); // where applyPreset put it
     std::erase_if(layer.animations, [&](const AppliedAnimation& a) { return a.start < t0 + dur - 1e-6 && t0 < a.start + a.duration - 1e-6; });
-    const AppliedAnimation applied{preset.name, preset.category, t0, dur};
+    AppliedAnimation applied{preset.name, preset.category, t0, dur, {}};
+    for (const PresetTrack& track : preset.tracks) applied.properties.push_back(track.property);
     layer.animations.insert(std::upper_bound(layer.animations.begin(), layer.animations.end(), t0,
                                              [](double t, const AppliedAnimation& a) { return t < a.start; }),
                             applied);
+}
+
+bool removeQuickAnimation(Layer& layer, size_t index) {
+    if (index >= layer.animations.size()) return false;
+    const AppliedAnimation a = layer.animations[index];
+    auto props = layer.properties();
+    for (const std::string& id : a.properties)
+        if (const PropertyRef* p = layer.findProperty(props, id.c_str()))
+            for (int i = p->anim->keyCount() - 1; i >= 0; --i) {
+                const double t = p->anim->keyTime(i);
+                if (t >= a.start - kTimeEpsilon && t <= a.start + a.duration + kTimeEpsilon) p->anim->removeKey(i);
+            }
+    layer.animations.erase(layer.animations.begin() + static_cast<std::ptrdiff_t>(index));
+    return true;
+}
+
+bool retimeQuickAnimation(Layer& layer, size_t index, double start, double duration) {
+    if (index >= layer.animations.size()) return false;
+    AppliedAnimation& a = layer.animations[index];
+    duration = std::clamp(duration, 0.05, std::max(0.05, layer.outPoint - layer.inPoint));
+    start = std::clamp(start, layer.inPoint, std::max(layer.inPoint, layer.outPoint - duration));
+    if (std::fabs(start - a.start) < 1e-9 && std::fabs(duration - a.duration) < 1e-9) return false;
+    const double scale = a.duration > 0 ? duration / a.duration : 1.0;
+    auto props = layer.properties();
+    for (const std::string& id : a.properties)
+        if (const PropertyRef* p = layer.findProperty(props, id.c_str())) {
+            for (int i = 0; i < p->anim->keyCount(); ++i) {
+                const double t = p->anim->keyTime(i);
+                if (t >= a.start - kTimeEpsilon && t <= a.start + a.duration + kTimeEpsilon) p->anim->setKeyTime(i, start + (t - a.start) * scale);
+            }
+            p->anim->sortKeys();
+        }
+    a.start = start;
+    a.duration = duration;
+    std::stable_sort(layer.animations.begin(), layer.animations.end(), [](const AppliedAnimation& x, const AppliedAnimation& y) { return x.start < y.start; });
+    return true;
 }
 
 void applyPreset(const AnimationPreset& preset, Layer& layer, double time, bool insideClip) {

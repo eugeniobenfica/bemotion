@@ -51,6 +51,15 @@ public:
     int maskFocus = -1;
     void selectMask(uint64_t layerId, int index);
     bool deleteFocusedMask(); // false without one
+    // A Quick Animation picked on the timeline (Layer::animations[animationIndex]), the selection
+    // on its own like a transition. 0: none.
+    uint64_t animationLayer = 0;
+    int animationIndex = -1;
+    void selectAnimation(uint64_t layerId, int index);
+    // Delete (the key, the toolbar's trash): what is picked goes, in this order: a transition, a
+    // Quick Animation, a mask, keyframes, else the selected layers.
+    void deletePicked();
+    bool hasPicked() const;
 
     Tool tool = Tool::Select;
     bool snapping = true;     // magnet: objects, clips and keyframes snap (hold Ctrl to bypass)

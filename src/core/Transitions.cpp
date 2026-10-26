@@ -260,6 +260,16 @@ bool removeTransition(Layer& layer, TransitionEdge edge) {
     return removed;
 }
 
+bool moveTransition(Layer& layer, TransitionEdge from) {
+    if (from == TransitionEdge::Both) return false;
+    const ClipTransition t = from == TransitionEdge::In ? layer.transitionIn : layer.transitionOut;
+    if (!t.active() || t.joined) return false;
+    const TransitionEdge to = from == TransitionEdge::In ? TransitionEdge::Out : TransitionEdge::In;
+    removeTransition(layer, from);
+    if ((to == TransitionEdge::In ? layer.transitionIn : layer.transitionOut).active()) removeTransition(layer, to);
+    return applyTransition(layer, t.id, to, t.duration);
+}
+
 Layer* nextOnTrack(Composition& comp, const Layer& layer) {
     const double eps = comp.frameDuration() * 0.5;
     for (Layer& other : comp.layers)

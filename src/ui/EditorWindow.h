@@ -21,6 +21,7 @@ class QAction;
 class QLabel;
 class QMenu;
 class QPushButton;
+class QStackedWidget;
 class QTimer;
 namespace ads {
 class CDockAreaWidget;
@@ -142,6 +143,10 @@ private:
     PropertiesPanel* properties_ = nullptr;
     EffectsPanel* effects_ = nullptr;
     TransitionsPanel* transitions_ = nullptr;
+    QWidget* motion_ = nullptr;          // Animate: transitions and Quick Animations
+    QStackedWidget* motionPages_ = nullptr;
+    QWidget* motionSwitch_ = nullptr;
+    std::pair<uint64_t, uint64_t> motionPicked_{0, 0}; // transition / animation picked when last looked
     ColorPanel* color_ = nullptr;
     AnimationsPanel* animations_ = nullptr;
     TimelinePanel* timeline_ = nullptr;

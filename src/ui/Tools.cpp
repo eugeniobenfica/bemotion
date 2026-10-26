@@ -55,7 +55,7 @@ bool toolEnabled(EditorContext& ctx, const ToolInfo& tool) {
     if (id == "split" || id == "compound" || id == "duplicate" || id == "forward" || id == "backward")
         return !ctx.selection.empty();
     if (id == "release") return ctx.selectionHasCompound();
-    if (id == "delete") return !ctx.selection.empty() || !ctx.selectedKeys.empty();
+    if (id == "delete") return ctx.hasPicked(); // a transition or Quick Animation picked counts
     if (id == "easy_ease") return !ctx.selectedKeys.empty();
     return true;
 }
@@ -80,10 +80,8 @@ void runTool(EditorContext& ctx, const ToolInfo& tool) {
     else if (id == "compound") ctx.createCompound();
     else if (id == "release") ctx.releaseSelectedCompounds();
     else if (id == "duplicate") ctx.duplicateSelected();
-    else if (id == "delete") {
-        if (!ctx.selectedKeys.empty()) ctx.deleteSelectedKeys();
-        else ctx.deleteSelected();
-    } else if (id == "easy_ease") TimelinePanel::applyEase(ctx, TimelinePanel::Ease::EasyEase);
+    else if (id == "delete") ctx.deletePicked();
+    else if (id == "easy_ease") TimelinePanel::applyEase(ctx, TimelinePanel::Ease::EasyEase);
     else if (id == "forward") ctx.shiftSelected(-1);
     else if (id == "backward") ctx.shiftSelected(1);
     else if (id == "text") ctx.addText();

@@ -117,8 +117,9 @@ does.
 - **Masks**: a rectangle or ellipse over a layer, or drawn with the Pen on a
   selected layer; feather, opacity, expansion (all animatable), Add /
   Subtract / Intersect / Difference, inverted. Each mask is a row of its own
-  on the timeline, under its layer: pick it (only its points show), hide it,
-  rename it, change its mode, delete it
+  on the timeline, under its layer: pick it (only its points show, and
+  Properties shows its options alone), hide it, rename it, change its mode,
+  delete it
 - **Track mattes and blending modes**, as in After Effects: a layer shows
   only through another one's alpha or brightness (inverted too), and mixes
   with what is under it (Multiply, Screen, Overlay, Add, Color… 17 modes,
@@ -169,17 +170,21 @@ does.
   property, this clip's values, animation, math and every other layer's
   properties, each with what it does, searchable; close it and it keeps
   working; *Convert to Keyframes* bakes it
-- **Quick Animations** in their own panel (*Animate*): Fade, Pop, Slide,
-  Drop, Zoom, Rise, Shake, Heartbeat, Float, Bounce, Wobble, Blink, Spin,
-  Typewriter, Draw On… click one for the selection or drag it onto a clip;
-  stackable, importable, savable; each shows on its clip in the timeline, a
-  band with its name, like a transition
-- **Transitions** panel by category (Fade, Slide, Scale, Rotate, 3D): click
-  one for the selected clips, or drag it onto a clip's start or end, or onto
-  the cut between two clips (they overlap: a real cross dissolve, a push);
-  drag its edge for the duration — plain keyframes you can still edit. A
-  transition picked on the timeline is the selection on its own (Delete
-  removes it, not its clip)
+- **Animate** panel: transitions and Quick Animations together (both are
+  keyframes made for you), a switch between their pages, each page listing
+  first what the selected clip has (with a way to take it off)
+- **Quick Animations**: Fade, Pop, Slide, Drop, Zoom, Rise, Shake, Heartbeat,
+  Float, Bounce, Wobble, Blink, Spin, Typewriter, Draw On… click one for the
+  selection or drag it onto a clip; stackable, importable, savable; each is a
+  band on its clip in the timeline: pick it on its own, drag it along the
+  clip, drag its end to make it longer or shorter, Delete (or the toolbar's
+  trash) takes it off with its keys
+- **Transitions** by category (Fade, Slide, Scale, Rotate, 3D): click one for
+  the selected clips, or drag it onto a clip's start or end, or onto the cut
+  between two clips (they overlap: a real cross dissolve, a push); drag its
+  edge for the duration, drag it to the clip's other end to move it — plain
+  keyframes you can still edit. A transition picked on the timeline is the
+  selection on its own (Delete or the trash removes it, not its clip)
 - Add keyframes right in the Graph Editor (right-click, double-click or *+*)
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…
   stackable, keyframable, with presets
@@ -350,12 +355,15 @@ does.
   through FFmpeg. **Folders** keep it tidy (they live in the project only;
   nothing moves on disk): *New Folder*, then drag media onto one or
   right-click › *Move to Folder*.
-  Audio plays with the timeline; video clips show their frames along them
-  (their sound as a band at the bottom), sound clips their waveform; video and
-  audio clips trim only within their source, missing files can be relinked,
-  and *Separate Audio* (right-click a clip, or the Layer menu) gives a video's
-  sound a clip of its own. Delete removes the media picked in the Media panel
+  Audio plays with the timeline; video clips show their frames along them and
+  their sound on an *Audio* row of its own under them (mute it there); sound
+  clips show their waveform; video and audio clips trim only within their
+  source, missing files can be relinked, *Separate Audio* (right-click a
+  clip, or the Layer menu) gives a video's sound a clip of its own and *Link
+  Audio* puts it back. Delete removes the media picked in the Media panel
   (inside a folder too)
+- Dialogs and windows wear bemotion's own header (the title, a close button;
+  drag it to move, an edge to resize): no system title bar
 - **Viewport**: wheel zoom around the cursor, pan with middle/right drag,
   Space+drag or Alt+drag; corner handles scale (Shift = uniform), the rotation
   handle rotates (Shift = 15° snaps)

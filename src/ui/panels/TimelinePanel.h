@@ -70,7 +70,6 @@ public:
     void rebuildPluginButtons();
     void releaseToolPill(); // out of the timeline's bar (it floats elsewhere)
     void dockToolPill();    // back into it
-    bool deleteSelectedTransition();
 
 
 private:
@@ -85,12 +84,15 @@ private:
     //              track (drop in a row) or onto a new track (drop between rows)
     //   LayerIn/Out  trim a clip edge
     //   RippleIn/Out, Roll, Slip  the editing tools (Tool::Ripple, Roll, Slip); Marker: a marker's flag
+    //   TransitionMove  a transition's body: dropped past the clip's middle, it goes to the other end
+    //   AnimationMove / AnimationResize  a Quick Animation's band: along its clip / its end
     enum class Drag { None, Keys, LayerName, LayerMove, LayerIn, LayerOut, TransitionIn, TransitionOut, Playhead, Marker,
-                      RippleIn, RippleOut, Roll, Slip };
+                      RippleIn, RippleOut, Roll, Slip, TransitionMove, AnimationMove, AnimationResize };
 
     // One laid out row of the body.
     struct Item {
-        enum Kind { Track, Group, Prop, Recording, Mask } kind = Track; // Mask: one of its layer's masks (effectIndex)
+        // Mask: one of its layer's masks (effectIndex). Audio: the sound of the track's video clips.
+        enum Kind { Track, Group, Prop, Recording, Mask, Audio } kind = Track;
         float top = 0, h = 0;
         int rowIndex = 0;           // Track: position among the visible tracks
         uint64_t track = 0;
@@ -163,6 +165,7 @@ private:
     // Quick Animations on a clip (Layer::animations), as bands like transitions.
     void paintAnimations(QPainter& p, const Layer& layer, float y, float h);
     void paintMask(QPainter& p, const Item& item, float width);
+    void paintAudio(QPainter& p, const Item& item, float width);
     void showMaskMenu(QPoint global, uint64_t layer, int index);
     struct FilmImages {
         std::shared_ptr<const media::Filmstrip> strip;
@@ -192,6 +195,13 @@ private:
     PresetDrop presetDropAt(QPointF pos, const std::string& presetJson) const;
     void paintTransitionDrop(ui::Draw& d);
     TransitionHit transitionHit(const Item& track, float x) const;
+    struct AnimationHit {
+        uint64_t layer = 0;
+        int index = -1;
+        bool resize = false; // on its end: drag to make it longer or shorter
+        explicit operator bool() const { return layer != 0; }
+    };
+    AnimationHit animationHit(const Item& track, float x) const;
     void clickLayer(uint64_t id);
     void clickTrack(const Item& track);
     // Markers on the ruler: the one whose flag is under (x, y) (-1: none), dragging, renaming, menus.
@@ -308,6 +318,8 @@ private:
     uint64_t dragLayer_ = 0;
     double dragOrigIn_ = 0.0, dragOrigOut_ = 0.0, dragApplied_ = 0.0;
     float dragOrigTransitionDuration_ = 0.0f;
+    bool dragTransitionIn_ = true;                     // TransitionMove: which end it started at
+    double dragAnimStart_ = 0.0, dragAnimDuration_ = 0.0; // AnimationMove / Resize: where it was
     bool restacking_ = false; // vertical drag past the threshold: show the drop gap
     float dragY_ = 0.0f;
     std::vector<uint64_t> dragMoving_; // clips moving in time (a compound brings its contents)

@@ -30,7 +30,9 @@ protected:
 
 private:
     void rebuild();
+    std::string appliedKey(); // what the "on this clip" list shows (rebuilt when it changes)
     EditorContext& ctx_;
+    std::string appliedKey_;
     std::vector<std::pair<ui::Tile*, std::string>> tiles_; // with the preset's name
     QLabel* message_ = nullptr;
     std::string messageText_;

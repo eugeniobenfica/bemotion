@@ -62,6 +62,7 @@
 #include <QPointer>
 #include <QSplitter>
 #include <QPushButton>
+#include <QStackedWidget>
 #include <QScreen>
 #include <QTimer>
 #include <QUrl>
@@ -327,7 +328,12 @@ void EditorWindow::buildDocks() {
     connect(viewport_, &ViewportPanel::layerMenuRequested, timeline_, &TimelinePanel::showTrackMenu);
     connect(viewport_, &ViewportPanel::snapshotRequested, this, [this] { exportFrame(); });
     connect(properties_, &PropertiesPanel::panelRequested, this, [this](const QString& name) {
-        auto it = dockWidgets_.find(name.toStdString());
+        // Transitions live in Animate (its first page).
+        if (name == "Transitions") {
+            motionPages_->setCurrentIndex(0);
+            if (const auto parts = motionSwitch_->findChildren<QPushButton*>(Qt::FindDirectChildrenOnly); !parts.isEmpty()) parts[0]->setChecked(true);
+        }
+        auto it = dockWidgets_.find(name == "Transitions" ? std::string("Motion") : name.toStdString());
         if (it == dockWidgets_.end()) return;
         if (it->second->isClosed()) it->second->toggleView(true); // (a minimized panel comes back too)
         it->second->setAsCurrentTab();
@@ -338,12 +344,13 @@ void EditorWindow::buildDocks() {
     QTimer::singleShot(0, this, [this] { placeToolbar(); });
     connect(timeline_, &TimelinePanel::toolsPanelRequested, this, &EditorWindow::showTools);
 
-    auto dock = [&](const char* name, QWidget* w) {
-        auto* d = new ads::CDockWidget(docks_, name); // the name stays English: saved layouts know panels by it
+    // `id`: what saved layouts know the panel by (English, never translated); its name by default.
+    auto dock = [&](const char* name, QWidget* w, const char* id = nullptr) {
+        auto* d = new ads::CDockWidget(docks_, id ? id : name); // the name stays English: saved layouts know panels by it
         d->setWindowTitle(tr(name));
         d->setWidget(w, ads::CDockWidget::ForceNoScrollArea);
         d->setFeature(ads::CDockWidget::DockWidgetFloatable, true);
-        dockWidgets_[name] = d;
+        dockWidgets_[id ? id : name] = d;
         d->tabWidget()->installEventFilter(this); // double-click a tab: maximize / restore
         // Shown again some other way (View > Panels, Reset Layout): its restore handle goes.
         connect(d, &ads::CDockWidget::viewToggled, this, [this, d](bool open) {
@@ -362,12 +369,29 @@ void EditorWindow::buildDocks() {
     auto* center = docks_->setCentralWidget(vp);
     auto* left = docks_->addDockWidget(ads::LeftDockWidgetArea, dock(TR_NOOP("Objects"), objects_));
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Media"), media_), left);
-    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Animate"), animations_), left); // Quick Animations: dragged onto clips, like objects
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Scopes"), scopes_), left);       // beside the Effects tab while grading
     left->setCurrentIndex(0);
     auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock(TR_NOOP("Properties"), properties_));
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Effects"), effects_), right);
-    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Transitions"), transitions_), right);
+    // Animate: transitions and Quick Animations in one panel (both are keyframes made for you),
+    // a switch between their pages; picking one on the timeline shows its page. ("Motion": a
+    // layout saved with the two panels apart comes back as the default one.)
+    motion_ = new QWidget;
+    {
+        auto* col = new QVBoxLayout(motion_);
+        col->setContentsMargins(0, 8, 0, 0);
+        col->setSpacing(6);
+        motionPages_ = new QStackedWidget;
+        motionPages_->addWidget(transitions_);
+        motionPages_->addWidget(animations_);
+        motionSwitch_ = ui::segmented({TR_NOOP("Transitions"), TR_NOOP("Animations")}, 0, [this](int i) { motionPages_->setCurrentIndex(i); });
+        auto* bar = new QHBoxLayout;
+        bar->setContentsMargins(8, 0, 8, 0);
+        bar->addWidget(motionSwitch_, 1);
+        col->addLayout(bar);
+        col->addWidget(motionPages_, 1);
+    }
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Animate"), motion_, "Motion"), right);
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Color"), color_), right); // grading: LUT, curves, correction
     connect(color_, &ColorPanel::showScopesRequested, this, [this] {
         ads::CDockWidget* scopes = dockWidgets_["Scopes"];
@@ -942,10 +966,7 @@ void EditorWindow::buildMenus() {
     edit->addAction(action(Action::Paste, tr("Paste"), [this] { pasteFromClipboard(); }));
     edit->addAction(action(Action::Duplicate, tr("Duplicate"), [this] { ctx_.duplicateSelected(); }));
     edit->addAction(action(Action::Delete, tr("Delete"), [this] {
-        if (timeline_->deleteSelectedTransition()) return;
-        if (ctx_.deleteFocusedMask()) return; // a mask picked on the timeline: it, not its layer
-        if (!ctx_.selectedKeys.empty()) ctx_.deleteSelectedKeys();
-        else ctx_.deleteSelected();
+        ctx_.deletePicked(); // a transition, a Quick Animation or a mask picked: it, not its layer
     }));
     edit->addAction(action(Action::RippleDelete, tr("Ripple Delete"), [this] { ctx_.rippleDeleteSelected(); }));
     edit->addSeparator();
@@ -1158,7 +1179,7 @@ void EditorWindow::buildMenus() {
     connect(view, &QMenu::aboutToShow, meters, [meters] { meters->setChecked(settings().showMeters); });
     QMenu* panels = view->addMenu(tr("Panels"));
     view->addAction(tr("Tools..."), this, [this] { showTools(); });
-    for (const char* name : {"Objects", "Media", "Animate", "Scopes", "Properties", "Effects", "Transitions", "Color", "Timeline"})
+    for (const char* name : {"Objects", "Media", "Scopes", "Properties", "Effects", "Motion", "Color", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction(tr("Reset Layout"), this, [this] { resetLayout(); });
     view->addSeparator();
@@ -1348,6 +1369,18 @@ void EditorWindow::tick() {
     viewport_->sync();
     properties_->sync();
     effects_->sync();
+    // A transition or a Quick Animation just picked on the timeline: its page of Animate.
+    if (const std::pair<uint64_t, uint64_t> picked{ctx_.transitionLayer, ctx_.animationLayer}; picked != motionPicked_) {
+        motionPicked_ = picked;
+        const int page = ctx_.animationLayer ? 1 : ctx_.transitionLayer ? 0 : -1;
+        if (page >= 0 && page != motionPages_->currentIndex()) {
+            motionPages_->setCurrentIndex(page);
+            const auto parts = motionSwitch_->findChildren<QPushButton*>(Qt::FindDirectChildrenOnly);
+            if (page < parts.size()) parts[page]->setChecked(true);
+        }
+        // Its tab in front: what it is and a way to take it off (Properties has nothing to show).
+        if (ads::CDockWidget* motion = dockWidgets_["Motion"]; page >= 0 && !motion->isClosed()) motion->setAsCurrentTab();
+    }
     transitions_->sync();
     color_->sync();
     animations_->sync();

@@ -167,7 +167,12 @@ at the new speed (its pitch changes).
 moment; off, back to its speed. **`layer.separate_audio`** → `{"layer": id,
 "name"}` — `layer`: a video with sound keeps its picture; its sound becomes a
 clip of its own on a new track right below (same media, time, speed, volume
-and audio effects). **`layer.freeze`** → `{"source_time": s}` —
+and audio effects). **`layer.link_audio`** → `{"in_sync": bool}` — `layer`: a
+video without sound; `audio` (optional: else the sound-only clip of the same
+media overlapping it most): that clip's sound goes back into the video (its
+volume and audio effects) and the clip goes; the video's timing decides
+(`in_sync`: whether they played the same moment). **`layer.freeze`** →
+`{"source_time": s}` —
 `layer`, `time`: the clip holds the frame it shows there (Time Remap with one
 value).
 

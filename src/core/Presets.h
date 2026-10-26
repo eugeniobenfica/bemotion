@@ -70,6 +70,12 @@ void applyPreset(const AnimationPreset& preset, Layer& layer, double time, bool 
 // A Quick Animation (the Animate panel, dropped on a clip): applyPreset, and remembered on the
 // layer (Layer::animations) where it went, replacing one it covers.
 void applyQuickAnimation(const AnimationPreset& preset, Layer& layer, double time);
+// A Quick Animation on the layer (Layer::animations[index]) taken off: its keys go (those of
+// its properties inside its time) and so does its mark. False without one.
+bool removeQuickAnimation(Layer& layer, size_t index);
+// ... moved and stretched to `start`, `duration` (within the clip): its keys move with it,
+// spaced in proportion. False without one.
+bool retimeQuickAnimation(Layer& layer, size_t index, double start, double duration);
 
 // Captures the keyframes of `layer` between `start` and `end` as a preset
 // with absolute values ("Save as Quick Animation").

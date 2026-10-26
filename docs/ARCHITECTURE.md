@@ -247,7 +247,8 @@ decoded), eased over its fade.
   working copy, so values in queries and scripts are what renders.
   Mistyped names get `core/Suggest.h`'s "did you mean", as operations do.
 - **`Presets`** — Quick Animations: they write ordinary keyframes. The
-  *Animate* panel (`ui/panels/AnimationsPanel`) lists them; dragged onto a
+  *Animate* panel lists them (its second page, `ui/panels/AnimationsPanel`;
+  the first is `TransitionsPanel`, the dock "Motion"); dragged onto a
   clip (`kAnimationMime`, the preset as JSON) one plays from the drop point.
   `applyQuickAnimation` also remembers it on the layer (`Layer::animations`:
   name, category, start, duration; moved by `shiftTime`) for the timeline's
@@ -501,8 +502,8 @@ Rules:
   layer) shows alone, and Delete removes it. A transition picked there is the
   selection on its own (`EditorContext::transitionLayer`). Video clips draw
   their frames (`MediaManager::filmstrip`: small pictures along the video,
-  made on a thread the first time) with their sound as a band along the
-  bottom. The
+  made on a thread the first time); their sound has a row of its own (Audio)
+  under the track. The
   timeline's Ripple / Roll / Slip tools (`Tool::Ripple`…) redo their edit from
   a copy of the composition taken when the drag started (`dragBase_`), and
   markers live on its ruler. J / K / L set `EditorContext::playRate` (sound
@@ -730,6 +731,17 @@ non-animatable settings. This touches many files: plan it as one change
 **A panel** — a `QWidget` with `sync()` (structure key + refresh), created and
 docked in `EditorWindow::buildDocks`, listed in *View › Panels*. Saved layouts
 without it fall back to the default layout automatically.
+
+**A window or dialog** — a `QDialog` (or a window with the property `chrome`)
+gets bemotion's header from `ui/WindowChrome` by itself (frameless, its title
+and a close button, moved by its header, resized by its edges). What a click
+picks on the timeline is in `EditorContext`: layers (`selection`), a
+transition (`transitionLayer`), a Quick Animation (`animationLayer` /
+`animationIndex`, moved and stretched by `retimeQuickAnimation`), a mask
+(`maskFocus`, Properties then shows it alone); `deletePicked()` is what
+Delete and the toolbar's trash do. A video's sound shows on an Audio row
+under its track; `separateAudio` / `linkAudio` (`core/Editing`) split and
+join it.
 
 **A setting** — a field with a default in `Settings`, read and written in
 `Settings.cpp`, a control in `SettingsWindow.cpp`, and a reset in its page.

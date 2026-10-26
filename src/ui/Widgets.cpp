@@ -1175,9 +1175,9 @@ void Switch::paintEvent(QPaintEvent*) {
 
 namespace {
 
-// A segmented control's strip, drawn whole: one rounded outline, thin lines between the parts,
-// the chosen part in the accent. (A style sheet rounding only some corners of each button drew
-// the outer left edge thin and broken.)
+// A segmented control's strip, drawn whole: a rounded track, and the chosen part a pill inset
+// in it, the same shape wherever it sits (first, middle or last). (A style sheet rounding only
+// some corners of each button drew edges thin, broken, or different per position.)
 class SegmentStrip : public QWidget {
 public:
     bool eventFilter(QObject* watched, QEvent* e) override {
@@ -1196,33 +1196,24 @@ protected:
         QPainterPath shape;
         shape.addRoundedRect(outer, r, r);
         p.fillPath(shape, theme::q(theme::kField));
-        const auto buttons = findChildren<QPushButton*>(Qt::FindDirectChildrenOnly);
-        p.save();
-        p.setClipPath(shape);
-        for (QPushButton* b : buttons) {
-            const QRectF part = QRectF(b->geometry()).adjusted(0, -2, 0, 2);
-            if (b->isChecked()) p.fillRect(part, theme::q(theme::accent(55)));
-            else if (b->underMouse() && b->isEnabled()) p.fillRect(part, theme::q(theme::mix(pal.field, pal.text, 0.06f)));
-        }
-        p.restore();
-        // The lines between parts (not next to the chosen one: its own outline is there).
         p.setPen(QPen(theme::q(theme::kFieldBorder), bw));
-        for (int i = 1; i < buttons.size(); ++i) {
-            if (buttons[i]->isChecked() || buttons[i - 1]->isChecked()) continue;
-            const qreal x = buttons[i]->geometry().left() + 0.5;
-            p.drawLine(QPointF(x, outer.top()), QPointF(x, outer.bottom()));
-        }
         p.setBrush(Qt::NoBrush);
         p.drawPath(shape);
-        // The chosen part: an accent outline, rounded where it meets the strip's ends (its box cut
-        // by the strip's shape), square between parts.
-        p.setPen(QPen(theme::q(theme::accent(170)), bw));
-        for (QPushButton* b : buttons) {
-            if (!b->isChecked()) continue;
-            const QRectF g = QRectF(b->geometry());
-            QPainterPath part;
-            part.addRect(QRectF(QPointF(std::max(outer.left(), g.left() + 0.5), outer.top()), QPointF(std::min(outer.right(), g.right() + 0.5), outer.bottom())));
-            p.drawPath(part.intersected(shape));
+        // Each part a pill inset in the track: the chosen one in the accent, a hovered one lighter.
+        const float inset = 2.0f + bw * 0.5f, pr = std::max(2.0f, r - inset * 0.5f);
+        for (QPushButton* b : findChildren<QPushButton*>(Qt::FindDirectChildrenOnly)) {
+            const bool hot = b->underMouse() && b->isEnabled();
+            if (!b->isChecked() && !hot) continue;
+            const QRectF pill = QRectF(b->geometry()).intersected(outer).adjusted(inset, inset, -inset, -inset);
+            QPainterPath path;
+            path.addRoundedRect(pill, pr, pr);
+            if (b->isChecked()) {
+                p.fillPath(path, theme::q(theme::accent(55)));
+                p.setPen(QPen(theme::q(theme::accent(170)), bw));
+                p.drawPath(path);
+            } else {
+                p.fillPath(path, theme::q(theme::mix(pal.field, pal.text, 0.07f)));
+            }
         }
     }
 };

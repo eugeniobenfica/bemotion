@@ -40,6 +40,10 @@ bool applyTransition(Layer& layer, const std::string& id, TransitionEdge edge, d
 // Changes the duration while replacing the keyframes made at the old duration.
 bool resizeTransition(Layer& layer, TransitionEdge edge, double duration);
 
+// Moves a clip's transition to its other end (In <-> Out), same kind and length; one there is
+// replaced. False for a joined one (a cut's) or none.
+bool moveTransition(Layer& layer, TransitionEdge from);
+
 // Removes the transition metadata and the keyframes generated for its current duration.
 bool removeTransition(Layer& layer, TransitionEdge edge);
 

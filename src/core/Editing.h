@@ -54,6 +54,13 @@ bool freezeFrame(Composition& comp, uint64_t id, double t);
 // and audio effects), to move, trim or delete apart. Returns the audio clip's id (0: the
 // layer is not a video with sound).
 uint64_t separateAudio(Composition& comp, uint64_t id);
+// Link Audio, the other way: a video clip without sound takes the sound of a sound-only clip of
+// the same media (its volume, audio effects) and that clip goes. The video's timing decides;
+// `inSync` says whether the two played the same moment. False when they do not fit.
+bool linkAudio(Composition& comp, uint64_t video, uint64_t audio, bool* inSync = nullptr);
+// A sound-only clip of `video`'s media to link it with: a selected one in `preferred` first,
+// else the one overlapping it most in time (0: none).
+uint64_t audioToLink(const Composition& comp, uint64_t video, const std::vector<uint64_t>& preferred = {});
 // True for clips these apply to: video and audio (not stills).
 bool hasTimeline(const Composition& comp, const Layer& layer);
 

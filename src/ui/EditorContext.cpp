@@ -2,7 +2,9 @@
 
 #include "app/PluginHost.h"
 #include "core/Clipboard.h"
+#include "core/Presets.h"
 #include "core/Serialization.h"
+#include "core/Transitions.h"
 #include "ui/Language.h"
 
 #include <algorithm>
@@ -53,7 +55,42 @@ bool EditorContext::deleteFocusedMask() {
     return true;
 }
 
+void EditorContext::selectAnimation(uint64_t layerId, int index) {
+    maskFocus = -1;
+    transitionLayer = 0;
+    selection.clear();
+    selectedKeys.clear();
+    animationLayer = layerId;
+    animationIndex = index;
+}
+
+bool EditorContext::hasPicked() const {
+    return transitionLayer || animationLayer || !selection.empty() || !selectedKeys.empty();
+}
+
+void EditorContext::deletePicked() {
+    if (transitionLayer) {
+        Layer* l = comp().findLayer(transitionLayer);
+        const bool removed = l && removeTransition(comp(), *l, transitionIncoming ? TransitionEdge::In : TransitionEdge::Out);
+        transitionLayer = 0;
+        if (removed) touch();
+        return;
+    }
+    if (animationLayer) {
+        Layer* l = comp().findLayer(animationLayer);
+        const bool removed = l && animationIndex >= 0 && removeQuickAnimation(*l, static_cast<size_t>(animationIndex));
+        animationLayer = 0;
+        animationIndex = -1;
+        if (removed) touch();
+        return;
+    }
+    if (deleteFocusedMask()) return;
+    if (!selectedKeys.empty()) deleteSelectedKeys();
+    else deleteSelected();
+}
+
 void EditorContext::selectTransition(uint64_t layerId, bool incoming) {
+    animationLayer = 0;
     maskFocus = -1;
     selection.clear();
     selectedKeys.clear();
@@ -64,13 +101,14 @@ void EditorContext::selectTransition(uint64_t layerId, bool incoming) {
 void EditorContext::select(uint64_t layerId) {
     if (primaryId() != layerId) selectedKeys.clear();
     transitionLayer = 0; // a clip or nothing: no transition either
+    animationLayer = 0;
     maskFocus = -1;
     selection.clear();
     if (layerId) selection.push_back(layerId);
 }
 
 void EditorContext::toggleSelected(uint64_t layerId) {
-    transitionLayer = 0;
+    transitionLayer = animationLayer = 0;
     maskFocus = -1;
     if (isSelected(layerId)) std::erase(selection, layerId);
     else selection.push_back(layerId);
@@ -91,7 +129,7 @@ void EditorContext::selectRange(uint64_t layerId) {
 }
 
 void EditorContext::selectAll() {
-    transitionLayer = 0;
+    transitionLayer = animationLayer = 0;
     maskFocus = -1;
     selection.clear();
     for (const auto& l : comp().layers) selection.push_back(l.id);

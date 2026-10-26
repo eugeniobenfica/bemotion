@@ -1084,6 +1084,22 @@ void TimelinePanel::computeItems() {
         y += track.h;
         for (int i = row.first; i < row.first + row.count; ++i)
             clips_.push_back({layers[i].id, track.top, track.top + track.h, timeToX(layers[i].inPoint), timeToX(layers[i].outPoint)});
+        // The sound of its videos: a row of its own, like After Effects / Premiere's linked audio.
+        bool sound = false;
+        for (int i = row.first; i < row.first + row.count; ++i)
+            sound = sound || (layers[i].type == LayerType::Media && layers[i].media.hasVideo && layers[i].media.hasAudio);
+        if (sound) {
+            Item audio;
+            audio.kind = Item::Audio;
+            audio.top = y;
+            audio.h = std::max(30.0f, layerRowHeight() * 0.7f);
+            audio.track = row.track;
+            audio.first = row.first;
+            audio.count = row.count;
+            audio.layer = focus->id;
+            items_.push_back(audio);
+            y += audio.h;
+        }
         // Its masks, each a row of its own right under it: objects you see, pick, hide and delete.
         for (int m = 0; m < static_cast<int>(focus->masks.size()); ++m) {
             Item mask;
@@ -1276,6 +1292,7 @@ void TimelinePanel::sync() {
     std::string sig = std::to_string(ctx_.revision()) + ":" + std::to_string(ctx_.time) + ":" + std::to_string(ctx_.scope) + ":" +
                       std::to_string(static_cast<int>(ctx_.tool)) + ":" + std::to_string(ctx_.selectedKeys.size()) + ":" +
                       std::to_string(ctx_.transitionLayer) + (ctx_.transitionIncoming ? "i" : "o") + ":" +
+                      std::to_string(ctx_.animationLayer) + "/" + std::to_string(ctx_.animationIndex) + ":" + std::to_string(ctx_.maskFocus) + ":" +
                       std::to_string(media::MediaManager::get().arrivals()) + ":"; // filmstrips made
     for (uint64_t id : ctx_.selection) sig += std::to_string(id) + ",";
     for (const KeySelection& k : ctx_.selectedKeys) sig += std::to_string(k.keyUid) + ",";
@@ -1382,6 +1399,7 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
             case Item::Group: paintGroup(p, item, width); break;
             case Item::Prop: paintPropKeys(p, item, width); break;
             case Item::Mask: paintMask(p, item, width); break;
+            case Item::Audio: paintAudio(p, item, width); break;
             }
         }
         if (ctx_.comp().layers.empty() && !hasRecordingPreview()) {
@@ -1559,15 +1577,8 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
         // A video shows its frames, its sound (if any) as a band along the bottom growing up; sound
         // alone fills the clip.
         const bool frames = layer.type == LayerType::Media && layer.media.hasVideo && paintFilmstrip(p, layer, {a.x, a.y}, {b.x, b.y});
-        if (layer.type == LayerType::Media && layer.media.hasAudio) {
-            if (frames) {
-                const float band = (b.y - a.y) * 0.42f;
-                d.rectFilled({a.x + 1, b.y - band}, {b.x - 1, b.y - 1}, toRgba(lc, 0.55f), 0.0f);
-                paintWaveform(p, layer, {a.x, b.y - band}, {b.x, b.y - 1}, ui::rgba(255, 255, 255, 190), true);
-            } else {
-                paintWaveform(p, layer, a, b, toRgba(lc, 0.75f));
-            }
-        }
+        // Sound alone: its waveform here; a video's sound has a row of its own (paintAudio).
+        if (layer.type == LayerType::Media && layer.media.hasAudio && !layer.media.hasVideo) paintWaveform(p, layer, a, b, toRgba(lc, 0.75f));
         if (selected && frames) d.rect(a, b, primary ? theme::kText : theme::ink(170), 5.0f, primary ? 1.8f : 1.3f); // over the pictures
         paintAnimations(p, layer, y, h);
         auto paintTransition = [&](const ClipTransition& transition, bool incoming) {
@@ -1666,6 +1677,40 @@ void TimelinePanel::paintMask(QPainter& p, const Item& item, float width) {
     d.rectFilled({a, y + 3}, {b, y + h - 3}, mask.enabled ? theme::ink(picked ? 60 : 30) : theme::ink(12), 4.0f);
     d.rect({a, y + 3}, {b, y + h - 3}, picked ? theme::kAccent : theme::ink(70), 4.0f, picked ? 1.5f : 1.0f);
     ui::drawIcon(d, ui::Icon::Mask, {std::max(a, x0) + 12.0f, cy}, 12.0f, theme::kTextDim);
+    d.popClip();
+}
+
+void TimelinePanel::paintAudio(QPainter& p, const Item& item, float width) {
+    ui::Draw d(p);
+    const auto& layers = ctx_.comp().layers;
+    const float y = item.top, h = item.h, cy = y + h * 0.5f;
+    bool anySelected = false, anyOn = false;
+    for (int i = item.first; i < item.first + item.count && i < static_cast<int>(layers.size()); ++i)
+        if (layers[i].media.hasAudio && layers[i].media.hasVideo) {
+            anySelected = anySelected || ctx_.isSelected(layers[i].id);
+            anyOn = anyOn || !layers[i].muted;
+        }
+    d.rectFilled({0, y}, {width, y + h}, anySelected ? theme::accent(22) : theme::shade(45));
+    // Left: sound on / off for the track's videos, a speaker, "Audio".
+    ui::drawIcon(d, anyOn ? ui::Icon::Speaker : ui::Icon::SpeakerMuted, {kVisX + kButton * 0.5f, cy}, kButton * 0.6f,
+                 anyOn ? theme::kTextDim : theme::kTextFaint);
+    ui::drawIcon(d, ui::Icon::Audio, {kChipX + 8.0f, cy}, 14.0f, theme::kTextDim);
+    d.pushClip({kNameX - 8, y}, {leftWidth_ - 6, y + h});
+    d.text({kNameX - 4, cy - d.textHeight() * 0.5f}, anyOn ? theme::kText : theme::kTextFaint, tr("Audio"));
+    d.popClip();
+    // Right: each video's sound under it.
+    const float x0 = trackX0(), x1 = x0 + trackW();
+    d.pushClip({x0, y}, {x1, y + h});
+    for (int i = item.first; i < item.first + item.count && i < static_cast<int>(layers.size()); ++i) {
+        const Layer& l = layers[i];
+        if (!l.media.hasAudio || !l.media.hasVideo) continue;
+        const bool selected = ctx_.isSelected(l.id);
+        const Color lc = labelColor(l.label);
+        const Pt a(timeToX(l.inPoint) + 1, y + 3), b(timeToX(l.outPoint) - 1, y + h - 3);
+        d.rectFilled(a, b, toRgba(lc, l.muted ? 0.08f : selected ? 0.32f : 0.2f), 4.0f);
+        if (selected) d.rect(a, b, theme::ink(170), 4.0f, 1.2f);
+        if (!l.muted) paintWaveform(p, l, {a.x, a.y}, {b.x, b.y}, toRgba(lc, 0.85f));
+    }
     d.popClip();
 }
 
@@ -1804,10 +1849,12 @@ void TimelinePanel::paintAnimations(QPainter& p, const Layer& layer, float y, fl
         if (!keyed) continue;
         const float left = timeToX(from) + 2.0f, right = std::max(left + 16.0f, timeToX(until) - 2.0f);
         const Rgba tone = theme::kKeyframe;
+        const bool picked = ctx_.animationLayer == layer.id && ctx_.animationIndex == static_cast<int>(&a - layer.animations.data());
         // Solid underneath: readable over a video's frames too.
         d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(theme::kBgPanel, 225), 5.0f);
-        d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(tone, 45), 5.0f);
-        d.rect({left, y + 5}, {right, y + h - 5}, tone, 5.0f, 1.2f);
+        d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(tone, picked ? 80 : 45), 5.0f);
+        d.rect({left, y + 5}, {right, y + h - 5}, picked ? theme::kText : tone, 5.0f, picked ? 2.0f : 1.2f);
+        d.line({right, y + 8}, {right, y + h - 8}, tone, 2.0f); // its end: drag to stretch it
         ui::drawIcon(d, ui::Icon::Ease, {left + 10.0f, y + h * 0.5f}, 12.0f, tone);
         if (right - left > 44.0f) { // its name, when there is room
             d.pushClip({left + 18.0f, y}, {right - 3.0f, y + h});
@@ -1954,6 +2001,22 @@ void TimelinePanel::paintTransitionDrop(ui::Draw& d) {
     }
 }
 
+TimelinePanel::AnimationHit TimelinePanel::animationHit(const Item& track, float mx) const {
+    const auto& layers = ctx_.comp().layers;
+    for (int i = track.first; i < track.first + track.count && i < static_cast<int>(layers.size()); ++i) {
+        const Layer& layer = layers[i];
+        for (int k = 0; k < static_cast<int>(layer.animations.size()); ++k) {
+            const AppliedAnimation& a = layer.animations[static_cast<size_t>(k)];
+            const double from = std::max(a.start, layer.inPoint), until = std::min(a.start + a.duration, layer.outPoint);
+            if (until <= from) continue;
+            const float left = timeToX(from) + 2.0f, right = std::max(left + 16.0f, timeToX(until) - 2.0f);
+            if (mx < left || mx > right) continue;
+            return {layer.id, k, std::fabs(mx - right) <= kEdgeGrab};
+        }
+    }
+    return {};
+}
+
 TimelinePanel::TransitionHit TimelinePanel::transitionHit(const Item& track, float mx) const {
     const auto& layers = ctx_.comp().layers;
     for (int i = track.first; i < track.first + track.count && i < static_cast<int>(layers.size()); ++i) {
@@ -1972,17 +2035,6 @@ TimelinePanel::TransitionHit TimelinePanel::transitionHit(const Item& track, flo
         if (TransitionHit hit = findHit(layer.transitionOut, false)) return hit;
     }
     return {};
-}
-
-bool TimelinePanel::deleteSelectedTransition() {
-    if (!ctx_.transitionLayer) return false;
-    Layer* layer = ctx_.comp().findLayer(ctx_.transitionLayer);
-    const TransitionEdge edge = ctx_.transitionIncoming ? TransitionEdge::In : TransitionEdge::Out;
-    const bool removed = layer && removeTransition(ctx_.comp(), *layer, edge); // a cut's other half goes too
-    ctx_.transitionLayer = 0;
-    if (removed) ctx_.touch();
-    relayout();
-    return removed;
 }
 
 void TimelinePanel::clickLayer(uint64_t id) {
@@ -2368,8 +2420,24 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
         if (left) {
             if (const TransitionHit transition = transitionHit(row, x)) {
                 ctx_.selectTransition(transition.layer, transition.incoming); // the transition alone, not its clip
-                if (transition.resize && !ctrlHeld() && !shiftHeld())
-                    beginLayerDrag(transition.incoming ? Drag::TransitionIn : Drag::TransitionOut, transition.layer, pos);
+                if (!ctrlHeld() && !shiftHeld()) {
+                    if (transition.resize) beginLayerDrag(transition.incoming ? Drag::TransitionIn : Drag::TransitionOut, transition.layer, pos);
+                    else { // its body: to the clip's other end
+                        beginLayerDrag(Drag::TransitionMove, transition.layer, pos);
+                        dragTransitionIn_ = transition.incoming;
+                    }
+                }
+                relayout();
+                return;
+            }
+            if (const AnimationHit band = animationHit(row, x)) { // a Quick Animation: picked alone, moved, stretched
+                ctx_.selectAnimation(band.layer, band.index);
+                if (const Layer* l = ctx_.comp().findLayer(band.layer); l && !ctrlHeld() && !shiftHeld()) {
+                    const AppliedAnimation& a = l->animations[static_cast<size_t>(band.index)];
+                    beginLayerDrag(band.resize ? Drag::AnimationResize : Drag::AnimationMove, band.layer, pos);
+                    dragAnimStart_ = a.start;
+                    dragAnimDuration_ = a.duration;
+                }
                 relayout();
                 return;
             }
@@ -2399,6 +2467,30 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
             } else {
                 beginMarquee(pos); // empty track space: box selection
             }
+        }
+        relayout();
+        return;
+    }
+    if (item->kind == Item::Audio) { // the videos' sound: mute it, pick its clip, Separate / Link Audio
+        auto& all = ctx_.comp().layers;
+        if (left && x >= kVisX && x < kVisX + kButton) { // sound on / off for the track's videos
+            bool anyOn = false;
+            for (int i = item->first; i < item->first + item->count; ++i)
+                if (all[i].media.hasAudio && all[i].media.hasVideo) anyOn = anyOn || !all[i].muted;
+            for (int i = item->first; i < item->first + item->count; ++i)
+                if (all[i].media.hasAudio && all[i].media.hasVideo) all[i].muted = anyOn;
+            ctx_.touch();
+        } else if (x >= trackX0()) {
+            for (int i = item->first; i < item->first + item->count; ++i)
+                if (all[i].media.hasAudio && all[i].media.hasVideo && x >= timeToX(all[i].inPoint) && x <= timeToX(all[i].outPoint)) {
+                    clickLayer(all[i].id);
+                    if (right) {
+                        QMenu menu;
+                        ui::addSeparateAudio(menu, ctx_);
+                        menu.exec(e->globalPosition().toPoint());
+                    }
+                    break;
+                }
         }
         relayout();
         return;
@@ -2497,7 +2589,8 @@ void TimelinePanel::rowsMove(QMouseEvent* e) {
         return;
     }
     if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName ||
-        drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut) {
+        drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut || drag_ == Drag::TransitionMove || drag_ == Drag::AnimationMove ||
+        drag_ == Drag::AnimationResize) {
         updateLayerDrag(pos);
         return;
     }
@@ -2519,8 +2612,11 @@ void TimelinePanel::rowsMove(QMouseEvent* e) {
         if (ctx_.tool == Tool::Razor) cursor = Qt::PointingHandCursor;
         else if (ctx_.tool == Tool::Roll && cutAt(*item, static_cast<float>(pos.x()))) cursor = Qt::SplitHCursor;
         else if (ctx_.tool == Tool::Slip && mode == Drag::LayerMove) cursor = Qt::SizeHorCursor;
-        else if (transitionHit(*item, static_cast<float>(pos.x())).resize || mode == Drag::LayerIn || mode == Drag::LayerOut)
+        else if (transitionHit(*item, static_cast<float>(pos.x())).resize || animationHit(*item, static_cast<float>(pos.x())).resize ||
+                 mode == Drag::LayerIn || mode == Drag::LayerOut)
             cursor = Qt::SizeHorCursor;
+        else if (transitionHit(*item, static_cast<float>(pos.x())) || animationHit(*item, static_cast<float>(pos.x())))
+            cursor = Qt::OpenHandCursor;
     }
     rows_->setCursor(cursor);
     if (item && item->kind == Item::Prop && pos.x() >= trackX0()) {
@@ -2540,7 +2636,8 @@ void TimelinePanel::rowsRelease(QMouseEvent* e) {
     }
     if (drag_ == Drag::Keys) endKeyDrag();
     else if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName ||
-             drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut)
+             drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut || drag_ == Drag::TransitionMove || drag_ == Drag::AnimationMove ||
+             drag_ == Drag::AnimationResize)
         endLayerDrag(pos);
     else if (drag_ == Drag::RippleIn || drag_ == Drag::RippleOut || drag_ == Drag::Roll || drag_ == Drag::Slip) {
         drag_ = Drag::None;
@@ -2641,6 +2738,27 @@ void TimelinePanel::updateLayerDrag(QPointF pos) {
         comp.setOutPoint(layer->id, dragOrigOut_ + snappedDelta({dragOrigOut_}, raw));
         ctx_.touch();
         break;
+    case Drag::TransitionMove: // lands on release
+        rows_->setCursor(Qt::ClosedHandCursor);
+        break;
+    case Drag::AnimationMove:
+    case Drag::AnimationResize: {
+        rows_->setCursor(drag_ == Drag::AnimationMove ? Qt::ClosedHandCursor : Qt::SizeHorCursor);
+        const int index = ctx_.animationIndex;
+        if (index < 0 || index >= static_cast<int>(layer->animations.size())) break;
+        const double start = drag_ == Drag::AnimationMove ? dragAnimStart_ + raw : dragAnimStart_;
+        const double duration = drag_ == Drag::AnimationResize ? std::max(0.05, dragAnimDuration_ + raw) : dragAnimDuration_;
+        const AppliedAnimation before = layer->animations[static_cast<size_t>(index)];
+        if (retimeQuickAnimation(*layer, static_cast<size_t>(index), start, duration)) {
+            // Its index may change (they stay in time order): follow it by what it is.
+            for (size_t i = 0; i < layer->animations.size(); ++i)
+                if (layer->animations[i].name == before.name && layer->animations[i].properties == before.properties &&
+                    (i == static_cast<size_t>(index) || std::fabs(layer->animations[i].start - before.start) > 1e-9))
+                    ctx_.animationIndex = static_cast<int>(i);
+            ctx_.touch();
+        }
+        break;
+    }
     case Drag::TransitionIn:
     case Drag::TransitionOut: {
         const double sign = drag_ == Drag::TransitionIn ? 1.0 : -1.0;
@@ -2658,7 +2776,17 @@ void TimelinePanel::updateLayerDrag(QPointF pos) {
 
 void TimelinePanel::endLayerDrag(QPointF pos) {
     computeItems();
-    if (drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut) {
+    if (drag_ == Drag::TransitionMove) { // past the clip's middle: to its other end
+        if (Layer* layer = ctx_.comp().findLayer(dragLayer_)) {
+            const double t = xToTime(static_cast<float>(pos.x())), middle = (layer->inPoint + layer->outPoint) * 0.5;
+            const TransitionEdge from = dragTransitionIn_ ? TransitionEdge::In : TransitionEdge::Out;
+            if ((dragTransitionIn_ && t > middle) || (!dragTransitionIn_ && t < middle))
+                if (moveTransition(*layer, from)) {
+                    ctx_.selectTransition(layer->id, !dragTransitionIn_);
+                    ctx_.touch();
+                }
+        }
+    } else if (drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut || drag_ == Drag::AnimationMove || drag_ == Drag::AnimationResize) {
     } else if (restacking_) {
         const DropTarget t = dropTargetAt(static_cast<float>(pos.y()), drag_);
         if (t.valid) {

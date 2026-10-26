@@ -69,6 +69,7 @@ add_executable(bemotion WIN32
     ui/Draw.cpp
     ui/SkiaQt.h
     ui/Style.cpp
+    ui/WindowChrome.cpp
     ui/EditorContext.cpp
     ui/EditorWindow.cpp
     ui/ExportDialog.cpp

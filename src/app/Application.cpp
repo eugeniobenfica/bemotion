@@ -25,6 +25,7 @@
 #include "ui/Style.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
+#include "ui/WindowChrome.h"
 
 #include <QAction>
 #include <QApplication>
@@ -153,6 +154,7 @@ int Application::run(int argc, char** argv) {
     platform::log("Qt " + std::string(qVersion()) + " on " + QSysInfo::prettyProductName().toStdString() + ", screen scale " +
                   std::to_string(app.devicePixelRatio()));
     QApplication::setStyle(new ui::Style); // Fusion with our check boxes; the palette and style sheet do the rest
+    ui::installWindowChrome();              // dialogs and windows framed by bemotion, not the system
     initShared();
     // The interface font: Inter ships with bemotion (other families come from the system).
     for (const char* style : {"Regular", "Medium", "SemiBold", "Bold"})
