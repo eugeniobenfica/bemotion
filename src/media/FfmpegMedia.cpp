@@ -437,7 +437,7 @@ std::filesystem::path proxyPath(const MediaItem& item) {
     const std::filesystem::path source = pathOf(item.path);
     const auto size = std::filesystem::file_size(source, ec);
     const auto stamp = std::filesystem::last_write_time(source, ec);
-    const std::string key = item.path + "|" + std::to_string(size) + "|" + std::to_string(stamp.time_since_epoch().count());
+    const std::string key = item.path + "|" + std::to_string(size) + "|" + std::to_string(static_cast<long long>(stamp.time_since_epoch().count())) /* libc++: a 128-bit count */;
     char name[32];
     std::snprintf(name, sizeof name, "%016llx.mkv", static_cast<unsigned long long>(fnv1a(key)));
     return folder / name;
