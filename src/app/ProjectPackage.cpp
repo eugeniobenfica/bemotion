@@ -157,6 +157,11 @@ bool packageProject(const Project& project, const fs::path& projectFile, const f
         if (!include(param.text, param.relative, path, relative)) return fail("Missing plugin file: " + (param.relative.empty() ? param.text : param.relative));
         param.text = path; param.relative = relative;
     }
+    for (Layer& layer : copy.comp.layers) for (Effect& effect : layer.effects) if (!effect.file.empty() && effect.file.rfind("bundled:", 0) != 0) {
+        std::string path, relative;
+        if (!include(effect.file, effect.relative, path, relative)) return fail("Missing LUT file: " + (effect.relative.empty() ? effect.file : effect.relative));
+        effect.file = path; effect.relative = relative;
+    }
     if (!projectFile.empty() && sameFile(output, projectFile)) return fail("Choose a ZIP file outside the project file");
     for (const File& f : files) if (sameFile(output, f.source)) return fail("Choose a ZIP file outside the project media");
     ZipWriter zip(output, cancelled); std::string detail;

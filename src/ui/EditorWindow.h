@@ -33,6 +33,7 @@ namespace bemotion {
 class RecentProjects;
 class ObjectsPanel;
 class MediaPanel;
+class ScopesPanel;
 class ToolsPanel;
 class TransitionsPanel;
 class AnimationsPanel;
@@ -128,6 +129,7 @@ private:
     QByteArray windowGeometryBeforeFullscreen_;
     ObjectsPanel* objects_ = nullptr;
     MediaPanel* media_ = nullptr;
+    ScopesPanel* scopes_ = nullptr;
     ToolsPanel* tools_ = nullptr;
     ToolsPopover* toolsPopover_ = nullptr;
     ViewportPanel* viewport_ = nullptr;

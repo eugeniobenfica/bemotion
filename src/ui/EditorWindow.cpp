@@ -25,6 +25,7 @@
 #include "ui/Widgets.h"
 #include "ui/panels/EffectsPanel.h"
 #include "ui/panels/MediaPanel.h"
+#include "ui/panels/ScopesPanel.h"
 #include "ui/panels/ObjectsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "ui/panels/TimelinePanel.h"
@@ -228,6 +229,7 @@ EditorWindow::EditorWindow(Project project, std::filesystem::path path, RecentPr
 
 EditorWindow::~EditorWindow() {
     qApp->removeEventFilter(this);
+    media::MediaManager::get().setPreview(nullptr);
     while (!minimized_.empty()) restoreMinimized(0); // minimized panels come back with the next project
     recovery::discard(ctx_.path, ctx_.project.name); // closed normally: nothing to recover
     if (media::Recorder::get().recording()) media::Recorder::get().cancel(); // a recording left running ends with the project
@@ -242,7 +244,7 @@ EditorWindow::~EditorWindow() {
 }
 
 QString EditorWindow::title() const {
-    return QString::fromStdString(ctx_.project.name) + (ctx_.isDirty() ? " •" : "") + QString("  —  bemotion");
+    return QString::fromStdString(ctx_.project.name) + (ctx_.isDirty() ? " •" : "") + tr("  —  bemotion");
 }
 
 // --- docks -----------------------------------------------------------------------------
@@ -269,6 +271,7 @@ void EditorWindow::buildDocks() {
 
     objects_ = new ObjectsPanel(ctx_);
     media_ = new MediaPanel(ctx_);
+    media::MediaManager::get().setPreview(&ctx_.comp()); // its videos may show their proxies
     tools_ = new ToolsPanel(ctx_);
     viewport_ = new ViewportPanel(ctx_);
     viewport_->setPreviewQuality(settings().previewQuality);
@@ -276,6 +279,7 @@ void EditorWindow::buildDocks() {
     effects_ = new EffectsPanel(ctx_);
     transitions_ = new TransitionsPanel(ctx_);
     animations_ = new AnimationsPanel(ctx_);
+    scopes_ = new ScopesPanel(ctx_);
     timeline_ = new TimelinePanel(ctx_);
     toolsPopover_ = new ToolsPopover(tools_, this);
     connect(timeline_, &TimelinePanel::pluginButtonClicked, this, [this](const std::string& id, bool pressed) { runPluginCommand(id, pressed); });
@@ -324,7 +328,8 @@ void EditorWindow::buildDocks() {
     connect(timeline_, &TimelinePanel::toolsPanelRequested, this, &EditorWindow::showTools);
 
     auto dock = [&](const char* name, QWidget* w) {
-        auto* d = new ads::CDockWidget(docks_, name);
+        auto* d = new ads::CDockWidget(docks_, name); // the name stays English: saved layouts know panels by it
+        d->setWindowTitle(tr(name));
         d->setWidget(w, ads::CDockWidget::ForceNoScrollArea);
         d->setFeature(ads::CDockWidget::DockWidgetFloatable, true);
         dockWidgets_[name] = d;
@@ -340,16 +345,17 @@ void EditorWindow::buildDocks() {
         });
         return d;
     };
-    auto* vp = dock("Viewport", viewport_);
+    auto* vp = dock(TR_NOOP("Viewport"), viewport_);
     vp->setFeature(ads::CDockWidget::DockWidgetClosable, false);
     auto* center = docks_->setCentralWidget(vp);
-    auto* left = docks_->addDockWidget(ads::LeftDockWidgetArea, dock("Objects", objects_));
-    docks_->addDockWidgetTabToArea(dock("Media", media_), left);
-    docks_->addDockWidgetTabToArea(dock("Animate", animations_), left); // Quick Animations: dragged onto clips, like objects
+    auto* left = docks_->addDockWidget(ads::LeftDockWidgetArea, dock(TR_NOOP("Objects"), objects_));
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Media"), media_), left);
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Animate"), animations_), left); // Quick Animations: dragged onto clips, like objects
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Scopes"), scopes_), left);       // beside the Effects tab while grading
     left->setCurrentIndex(0);
-    auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock("Properties", properties_));
-    docks_->addDockWidgetTabToArea(dock("Effects", effects_), right);
-    docks_->addDockWidgetTabToArea(dock("Transitions", transitions_), right);
+    auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock(TR_NOOP("Properties"), properties_));
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Effects"), effects_), right);
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Transitions"), transitions_), right);
     right->setCurrentIndex(0);
     // The timeline with the audio meters at its right.
     auto* timelineHost = new QWidget;
@@ -361,12 +367,13 @@ void EditorWindow::buildDocks() {
     meters_->setContentsMargins(0, 0, 0, 0);
     timelineRow->addWidget(meters_);
     meters_->setVisible(settings().showMeters);
-    auto* bottom = docks_->addDockWidget(ads::BottomDockWidgetArea, dock("Timeline", timelineHost));
+    auto* bottom = docks_->addDockWidget(ads::BottomDockWidgetArea, dock(TR_NOOP("Timeline"), timelineHost));
     (void)center;
     QTimer::singleShot(0, this, [this, left, right, bottom] {
         docks_->setSplitterSizes(left, {width() * 17 / 100, width() * 57 / 100, width() * 26 / 100});
         docks_->setSplitterSizes(bottom, {height() * 64 / 100, height() * 36 / 100});
         (void)right;
+        dockWidgets_["Scopes"]->toggleView(false); // a pro tool: View > Panels opens it (in the left area)
         defaultLayout_ = docks_->saveState();
         // The last layout, when there is one.
         std::ifstream in(layoutFile(), std::ios::binary);
@@ -450,7 +457,7 @@ void EditorWindow::toolbarDragMoved(QPoint global) {
     const bool floating = settings().toolbarInViewport;
     if (floating && timeline_->isVisible()) {
         const QRect r(timeline_->mapTo(this, QPoint(4, 2)), QSize(std::max(flat.width() + 8, 200), flat.height() + 6));
-        zone(r, "Back to the timeline", {ToolbarDrop::Timeline, {}, {}, QRect(r.topLeft() + QPoint(4, 3), flat)});
+        zone(r, tr("Back to the timeline"), {ToolbarDrop::Timeline, {}, {}, QRect(r.topLeft() + QPoint(4, 3), flat)});
     }
     // Along an edge: where the mouse is along it, the middle and the ends snap.
     auto along = [](double u) {
@@ -466,12 +473,12 @@ void EditorWindow::toolbarDragMoved(QPoint global) {
     const QPoint bottom(top.x(), bounds.bottom() - flat.height() + 1);
     const QPoint left(bounds.left(), bounds.top() + static_cast<int>(uy * innerH));
     const QPoint right(bounds.right() - upright.width() + 1, left.y());
-    zone(QRect(bounds.left(), bounds.top(), bounds.width(), kBand), "Top edge", {ToolbarDrop::Edge, {}, {flatU, 0}, QRect(top, flat)});
-    zone(QRect(bounds.left(), bounds.bottom() - kBand + 1, bounds.width(), kBand), "Bottom edge",
+    zone(QRect(bounds.left(), bounds.top(), bounds.width(), kBand), tr("Top edge"), {ToolbarDrop::Edge, {}, {flatU, 0}, QRect(top, flat)});
+    zone(QRect(bounds.left(), bounds.bottom() - kBand + 1, bounds.width(), kBand), tr("Bottom edge"),
          {ToolbarDrop::Edge, {}, {flatU, 1}, QRect(bottom, flat)});
-    zone(QRect(bounds.left(), bounds.top() + kBand, kBand, bounds.height() - 2 * kBand), "Left edge",
+    zone(QRect(bounds.left(), bounds.top() + kBand, kBand, bounds.height() - 2 * kBand), tr("Left edge"),
          {ToolbarDrop::Edge, {}, {0, uy}, QRect(left, upright)});
-    zone(QRect(bounds.right() - kBand + 1, bounds.top() + kBand, kBand, bounds.height() - 2 * kBand), "Right edge",
+    zone(QRect(bounds.right() - kBand + 1, bounds.top() + kBand, kBand, bounds.height() - 2 * kBand), tr("Right edge"),
          {ToolbarDrop::Edge, {}, {1, uy}, QRect(right, upright)});
     // Anywhere over the viewport.
     const QRect vp(viewport_->mapTo(this, QPoint()), viewport_->size());
@@ -479,7 +486,7 @@ void EditorWindow::toolbarDragMoved(QPoint global) {
         const QRect inside = vp.adjusted(6, 6, -6 - flat.width(), -6 - flat.height());
         const QPoint at(std::clamp(m.x() - g_toolbarGrab.x(), inside.left(), std::max(inside.left(), inside.right())),
                         std::clamp(m.y() - g_toolbarGrab.y(), inside.top(), std::max(inside.top(), inside.bottom())));
-        zone(vp.adjusted(4, 4, -4, -4), "Float over the viewport", {ToolbarDrop::Viewport, at - vp.topLeft() - QPoint(6, 6), {}, QRect(at, flat)});
+        zone(vp.adjusted(4, 4, -4, -4), tr("Float over the viewport"), {ToolbarDrop::Viewport, at - vp.topLeft() - QPoint(6, 6), {}, QRect(at, flat)});
     }
     // The first zone under the mouse wins (the timeline, then the edges, then the viewport).
     overlay->hot = -1;
@@ -587,8 +594,8 @@ void EditorWindow::decorateArea(ads::CDockAreaWidget* area) {
     // (the panel fills the window; again, or a double-click on a tab, brings the layout back).
     ads::CDockAreaTitleBar* bar = area->titleBar();
     if (!bar) return;
-    auto* min = new ui::IconButton(ui::Icon::Minimize, "Minimize panel", 22);
-    auto* max = new ui::IconButton(ui::Icon::Maximize, "Maximize panel (or double-click its tab)", 22);
+    auto* min = new ui::IconButton(ui::Icon::Minimize, tr("Minimize panel"), 22);
+    auto* max = new ui::IconButton(ui::Icon::Maximize, tr("Maximize panel (or double-click its tab)"), 22);
     min->setObjectName("bemotionMinimize");
     max->setObjectName("bemotionMaximize");
     QPointer<ads::CDockAreaWidget> guard(area);
@@ -619,7 +626,7 @@ void EditorWindow::updateAreaButtons() {
         if (max->active() != maximized) {
             max->setActive(maximized);
             max->setIcon(maximized ? ui::Icon::Restore : ui::Icon::Maximize);
-            max->setToolTip(maximized ? "Restore the layout (or double-click the tab)" : "Maximize panel (or double-click its tab)");
+            max->setToolTip(maximized ? tr("Restore the layout (or double-click the tab)") : tr("Maximize panel (or double-click its tab)"));
         }
     }
 }
@@ -635,7 +642,7 @@ void EditorWindow::minimizeArea(ads::CDockAreaWidget* area) {
     QStringList names;
     for (ads::CDockWidget* d : m.docks) names << d->windowTitle();
     auto* handle = new RestoreHandle(m.edge, names.join("  ·  "), docks_);
-    handle->setToolTip("Show " + names.join(", ") + " again");
+    handle->setToolTip(tr("Show ") + names.join(", ") + tr(" again"));
     m.handle = handle;
     connect(handle, &QAbstractButton::clicked, this, [this, handle] {
         for (size_t i = 0; i < minimized_.size(); ++i)
@@ -791,21 +798,21 @@ void EditorWindow::buildMenus() {
     QMenuBar* bar = menuBar();
 
     // Brand mark: back to the projects.
-    auto* home = new ui::IconButton(ui::Icon::Logo, "Back to projects", 28);
+    auto* home = new ui::IconButton(ui::Icon::Logo, tr("Back to projects"), 28);
     connect(home, &QAbstractButton::clicked, this, [this] {
         if (confirmClose()) emit goHome();
     });
     bar->setCornerWidget(home, Qt::TopLeftCorner);
 
-    QMenu* file = bar->addMenu("File");
-    file->addAction(action(Action::NewProject, "New Project...", [this] {
+    QMenu* file = bar->addMenu(tr("File"));
+    file->addAction(action(Action::NewProject, tr("New Project..."), [this] {
         if (confirmClose()) emit newProjectRequested();
     }));
-    file->addAction(action(Action::OpenProject, "Open Project...", [this] {
-        if (auto p = platform::openFileDialog("Open bemotion Project", "bemotion Project", kProjectExtension); p && confirmClose())
+    file->addAction(action(Action::OpenProject, tr("Open Project..."), [this] {
+        if (auto p = platform::openFileDialog(TR_NOOP("Open bemotion Project"), TR_NOOP("bemotion Project"), kProjectExtension); p && confirmClose())
             emit openProjectRequested(*p);
     }));
-    QMenu* recent = file->addMenu("Open Recent");
+    QMenu* recent = file->addMenu(tr("Open Recent"));
     connect(recent, &QMenu::aboutToShow, this, [this, recent] {
         recent->clear();
         int shown = 0;
@@ -819,17 +826,17 @@ void EditorWindow::buildMenus() {
             a->setToolTip(QString::fromStdString(platform::toUtf8(path)));
             if (++shown == 10) break;
         }
-        if (!shown) recent->addAction("No other projects yet")->setEnabled(false);
+        if (!shown) recent->addAction(tr("No other projects yet"))->setEnabled(false);
     });
     recent->setToolTipsVisible(true);
     file->addSeparator();
-    file->addAction(action(Action::Save, "Save", [this] { save(); }));
-    file->addAction(action(Action::SaveAs, "Save As...", [this] { saveAs(); }));
+    file->addAction(action(Action::Save, tr("Save"), [this] { save(); }));
+    file->addAction(action(Action::SaveAs, tr("Save As..."), [this] { saveAs(); }));
     // The same settings as the Properties panel with nothing selected, and the length limit.
-    file->addAction("Composition Settings...", this, [this] {
+    file->addAction(tr("Composition Settings..."), this, [this] {
         const Composition& c = ctx_.comp();
         QDialog dialog(this);
-        dialog.setWindowTitle("Composition Settings");
+        dialog.setWindowTitle(tr("Composition Settings"));
         auto* form = new QFormLayout;
         form->setHorizontalSpacing(16);
         form->setVerticalSpacing(8);
@@ -847,19 +854,19 @@ void EditorWindow::buildMenus() {
         sizeRow->addWidget(w);
         sizeRow->addWidget(new QLabel("×"));
         sizeRow->addWidget(h);
-        form->addRow("Size", sizeRow);
+        form->addRow(tr("Size"), sizeRow);
         auto* fps = new ui::DragValue;
         fps->setRange(1.0f, 240.0f);
         fps->setSpeed(0.1f);
         fps->setFormat("%.2f fps");
         fps->setValue(static_cast<float>(c.fps));
-        form->addRow("Frame rate", fps);
+        form->addRow(tr("Frame rate"), fps);
         auto* bg = new ui::ColorButton;
         bg->setAlphaEnabled(false);
         bg->setColor(c.background);
-        form->addRow("Background", bg);
+        form->addRow(tr("Background"), bg);
         double limit = c.maxDuration;
-        form->addRow("Length", ui::lengthLimitRow(limit, [&limit](double value) { limit = value; }));
+        form->addRow(tr("Length"), ui::lengthLimitRow(limit, [&limit](double value) { limit = value; }));
         auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
         connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
         connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
@@ -882,112 +889,112 @@ void EditorWindow::buildMenus() {
         ctx_.touch();
     });
     file->addSeparator();
-    file->addAction(action(Action::ImportMedia, "Import Media...", [this] { media_->openImportDialog(); }));
-    file->addAction("Show in Folder", this, [this] {
+    file->addAction(action(Action::ImportMedia, tr("Import Media..."), [this] { media_->openImportDialog(); }));
+    file->addAction(tr("Show in Folder"), this, [this] {
         if (!ctx_.path.empty()) platform::revealInFileManager(ctx_.path);
     });
     file->addSeparator();
-    file->addAction(action(Action::Export, "Export Video...", [this] { ui::showExportDialog(ctx_, this); }));
-    file->addAction(action(Action::ExportFrame, "Export Frame...", [this] { exportFrame(); }));
-    file->addAction("Copy Frame", this, [this] { exportFrame(true); });
+    file->addAction(action(Action::Export, tr("Export Video..."), [this] { ui::showExportDialog(ctx_, this); }));
+    file->addAction(action(Action::ExportFrame, tr("Export Frame..."), [this] { exportFrame(); }));
+    file->addAction(tr("Copy Frame"), this, [this] { exportFrame(true); });
     file->addSeparator();
-    file->addAction(action(Action::CloseProject, "Close Project", [this] {
+    file->addAction(action(Action::CloseProject, tr("Close Project"), [this] {
         if (confirmClose()) emit goHome();
     }));
     file->addAction(action(Action::Quit, "Quit", [this] { emit quitRequested(); }));
 
-    QMenu* edit = bar->addMenu("Edit");
-    edit->addAction(action(Action::Undo, "Undo", [this] { ctx_.undo(); }));
-    edit->addAction(action(Action::Redo, "Redo", [this] { ctx_.redo(); }));
+    QMenu* edit = bar->addMenu(tr("Edit"));
+    edit->addAction(action(Action::Undo, tr("Undo"), [this] { ctx_.undo(); }));
+    edit->addAction(action(Action::Redo, tr("Redo"), [this] { ctx_.redo(); }));
     edit->addSeparator();
-    edit->addAction(action(Action::Cut, "Cut", [this] {
+    edit->addAction(action(Action::Cut, tr("Cut"), [this] {
         if (copyToClipboard()) ctx_.deleteSelected();
     }));
-    edit->addAction(action(Action::Copy, "Copy", [this] { copyToClipboard(); }));
-    edit->addAction(action(Action::Paste, "Paste", [this] { pasteFromClipboard(); }));
-    edit->addAction(action(Action::Duplicate, "Duplicate", [this] { ctx_.duplicateSelected(); }));
-    edit->addAction(action(Action::Delete, "Delete", [this] {
+    edit->addAction(action(Action::Copy, tr("Copy"), [this] { copyToClipboard(); }));
+    edit->addAction(action(Action::Paste, tr("Paste"), [this] { pasteFromClipboard(); }));
+    edit->addAction(action(Action::Duplicate, tr("Duplicate"), [this] { ctx_.duplicateSelected(); }));
+    edit->addAction(action(Action::Delete, tr("Delete"), [this] {
         if (timeline_->deleteSelectedTransition()) return;
         if (!ctx_.selectedKeys.empty()) ctx_.deleteSelectedKeys();
         else ctx_.deleteSelected();
     }));
-    edit->addAction(action(Action::RippleDelete, "Ripple Delete", [this] { ctx_.rippleDeleteSelected(); }));
+    edit->addAction(action(Action::RippleDelete, tr("Ripple Delete"), [this] { ctx_.rippleDeleteSelected(); }));
     edit->addSeparator();
-    QMenu* markers = edit->addMenu(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), "Markers");
-    markers->addAction(action(Action::AddMarker, "Add Marker", [this] { ctx_.addMarkerAtPlayhead(); }));
-    markers->addAction(action(Action::NextMarker, "Next Marker", [this] { ctx_.jumpToMarker(true); }));
-    markers->addAction(action(Action::PrevMarker, "Previous Marker", [this] { ctx_.jumpToMarker(false); }));
+    QMenu* markers = edit->addMenu(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), tr("Markers"));
+    markers->addAction(action(Action::AddMarker, tr("Add Marker"), [this] { ctx_.addMarkerAtPlayhead(); }));
+    markers->addAction(action(Action::NextMarker, tr("Next Marker"), [this] { ctx_.jumpToMarker(true); }));
+    markers->addAction(action(Action::PrevMarker, tr("Previous Marker"), [this] { ctx_.jumpToMarker(false); }));
     markers->addSeparator();
-    QAction* clearMarkers = markers->addAction("Remove All Markers", this, [this] {
+    QAction* clearMarkers = markers->addAction(tr("Remove All Markers"), this, [this] {
         ctx_.comp().markers.clear();
         ctx_.touch();
     });
     connect(markers, &QMenu::aboutToShow, this, [this, clearMarkers] { clearMarkers->setEnabled(!ctx_.comp().markers.empty()); });
     edit->addSeparator();
-    edit->addAction(action(Action::SelectAll, "Select All", [this] { ctx_.selectAll(); }));
-    edit->addAction(action(Action::Deselect, "Deselect", [this] {
+    edit->addAction(action(Action::SelectAll, tr("Select All"), [this] { ctx_.selectAll(); }));
+    edit->addAction(action(Action::Deselect, tr("Deselect"), [this] {
         if (ctx_.tool != Tool::Select) ctx_.tool = Tool::Select;
         else if (!ctx_.selection.empty()) ctx_.select(0);
         else ctx_.exitScope(); // nothing selected: leave the open compound
     }));
     edit->addSeparator();
-    edit->addAction(action(Action::Settings, "Settings...", [] { ui::openSettings(); }));
+    edit->addAction(action(Action::Settings, tr("Settings..."), [] { ui::openSettings(); }));
 
-    QMenu* layer = bar->addMenu("Layer");
-    layer->addAction(action(Action::Split, "Split at Playhead", [this] { ctx_.splitSelectedAtPlayhead(); }));
+    QMenu* layer = bar->addMenu(tr("Layer"));
+    layer->addAction(action(Action::Split, tr("Split at Playhead"), [this] { ctx_.splitSelectedAtPlayhead(); }));
     // Time, blending, track matte and masks: filled when shown, for the selection then.
-    QMenu* timeMenu = layer->addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), "Time");
+    QMenu* timeMenu = layer->addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), tr("Time"));
     connect(timeMenu, &QMenu::aboutToShow, this, [this, timeMenu] {
         timeMenu->clear();
         ui::fillTimeMenu(timeMenu, ctx_, this);
     });
     layer->addSeparator();
-    QMenu* blendMenu = layer->addMenu("Blending Mode");
+    QMenu* blendMenu = layer->addMenu(tr("Blending Mode"));
     connect(blendMenu, &QMenu::aboutToShow, this, [this, blendMenu] {
         blendMenu->clear();
         ui::fillBlendMenu(blendMenu, ctx_);
     });
-    QMenu* matteMenu = layer->addMenu("Track Matte");
+    QMenu* matteMenu = layer->addMenu(tr("Track Matte"));
     connect(matteMenu, &QMenu::aboutToShow, this, [this, matteMenu] {
         matteMenu->clear();
         ui::fillMatteMenu(matteMenu, ctx_);
     });
-    QMenu* maskMenu = layer->addMenu(ui::menuIcon(ui::Icon::Mask, theme::kTextDim), "Mask");
+    QMenu* maskMenu = layer->addMenu(ui::menuIcon(ui::Icon::Mask, theme::kTextDim), tr("Mask"));
     connect(maskMenu, &QMenu::aboutToShow, this, [this, maskMenu] {
         maskMenu->clear();
         ui::fillMaskMenu(maskMenu, ctx_);
     });
-    layer->addAction(ui::menuIcon(ui::Icon::PathShape, theme::kTextDim), "Convert to Bézier Path", this, [this] { ui::convertSelectedToPaths(ctx_); });
+    layer->addAction(ui::menuIcon(ui::Icon::PathShape, theme::kTextDim), tr("Convert to Bézier Path"), this, [this] { ui::convertSelectedToPaths(ctx_); });
     layer->addSeparator();
-    layer->addAction(action(Action::CreateCompound, "Create Compound", [this] { ctx_.createCompound(); }));
-    layer->addAction(action(Action::ReleaseCompound, "Release Compound", [this] { ctx_.releaseSelectedCompounds(); }));
-    QMenu* fx = layer->addMenu("Effect");
+    layer->addAction(action(Action::CreateCompound, tr("Create Compound"), [this] { ctx_.createCompound(); }));
+    layer->addAction(action(Action::ReleaseCompound, tr("Release Compound"), [this] { ctx_.releaseSelectedCompounds(); }));
+    QMenu* fx = layer->addMenu(tr("Effect"));
     connect(fx, &QMenu::aboutToShow, this, [this, fx] {
         fx->clear();
         fillEffectMenu(fx, ctx_);
     });
     layer->addSeparator();
-    layer->addAction(action(Action::CutTool, "Cut Tool", [this] { ctx_.tool = Tool::Razor; }));
-    layer->addAction(action(Action::CropTool, "Crop Tool", [this] { ctx_.tool = ctx_.tool == Tool::Crop ? Tool::Select : Tool::Crop; }));
-    layer->addAction(action(Action::SelectTool, "Selection Tool", [this] { ctx_.tool = Tool::Select; }));
-    layer->addAction(action(Action::PenTool, "Pen Tool", [this] { ctx_.tool = ctx_.tool == Tool::Pen ? Tool::Select : Tool::Pen; }));
-    layer->addAction(action(Action::RippleTool, "Ripple Edit Tool", [this] { ctx_.tool = Tool::Ripple; }));
-    layer->addAction(action(Action::RollTool, "Rolling Edit Tool", [this] { ctx_.tool = Tool::Roll; }));
-    layer->addAction(action(Action::SlipTool, "Slip Tool", [this] { ctx_.tool = Tool::Slip; }));
+    layer->addAction(action(Action::CutTool, tr("Cut Tool"), [this] { ctx_.tool = Tool::Razor; }));
+    layer->addAction(action(Action::CropTool, tr("Crop Tool"), [this] { ctx_.tool = ctx_.tool == Tool::Crop ? Tool::Select : Tool::Crop; }));
+    layer->addAction(action(Action::SelectTool, tr("Selection Tool"), [this] { ctx_.tool = Tool::Select; }));
+    layer->addAction(action(Action::PenTool, tr("Pen Tool"), [this] { ctx_.tool = ctx_.tool == Tool::Pen ? Tool::Select : Tool::Pen; }));
+    layer->addAction(action(Action::RippleTool, tr("Ripple Edit Tool"), [this] { ctx_.tool = Tool::Ripple; }));
+    layer->addAction(action(Action::RollTool, tr("Rolling Edit Tool"), [this] { ctx_.tool = Tool::Roll; }));
+    layer->addAction(action(Action::SlipTool, tr("Slip Tool"), [this] { ctx_.tool = Tool::Slip; }));
     layer->addSeparator();
-    layer->addAction(action(Action::BringToFront, "Bring to Front", [this] { ctx_.shiftSelected(-1000); }));
-    layer->addAction(action(Action::BringForward, "Bring Forward", [this] { ctx_.shiftSelected(-1); }));
-    layer->addAction(action(Action::SendBackward, "Send Backward", [this] { ctx_.shiftSelected(1); }));
-    layer->addAction(action(Action::SendToBack, "Send to Back", [this] { ctx_.shiftSelected(1000); }));
+    layer->addAction(action(Action::BringToFront, tr("Bring to Front"), [this] { ctx_.shiftSelected(-1000); }));
+    layer->addAction(action(Action::BringForward, tr("Bring Forward"), [this] { ctx_.shiftSelected(-1); }));
+    layer->addAction(action(Action::SendBackward, tr("Send Backward"), [this] { ctx_.shiftSelected(1); }));
+    layer->addAction(action(Action::SendToBack, tr("Send to Back"), [this] { ctx_.shiftSelected(1000); }));
     layer->addSeparator();
-    QMenu* arrangeMenu = layer->addMenu("Arrange");
+    QMenu* arrangeMenu = layer->addMenu(tr("Arrange"));
     arrangeMenu->setToolTipsVisible(true);
-    arrangeMenu->addAction("Distribute Horizontally", this, [this] { arrange(false, false); })
-        ->setToolTip("Even spacing from left to right (two layers spread across the frame)");
-    arrangeMenu->addAction("Distribute Vertically", this, [this] { arrange(false, true); })
-        ->setToolTip("Even spacing from top to bottom");
-    arrangeMenu->addAction("Stagger Start Times", this, [this] { arrange(true); })
-        ->setToolTip("Each selected layer starts 0.1 s after the one above it");
+    arrangeMenu->addAction(tr("Distribute Horizontally"), this, [this] { arrange(false, false); })
+        ->setToolTip(tr("Even spacing from left to right (two layers spread across the frame)"));
+    arrangeMenu->addAction(tr("Distribute Vertically"), this, [this] { arrange(false, true); })
+        ->setToolTip(tr("Even spacing from top to bottom"));
+    arrangeMenu->addAction(tr("Stagger Start Times"), this, [this] { arrange(true); })
+        ->setToolTip(tr("Each selected layer starts 0.1 s after the one above it"));
     connect(layer, &QMenu::aboutToShow, this, [this] {
         const bool any = !ctx_.selection.empty();
         for (Action a : {Action::CreateCompound, Action::BringToFront, Action::BringForward, Action::SendBackward, Action::SendToBack})
@@ -1011,16 +1018,16 @@ void EditorWindow::buildMenus() {
     });
 
     // The same objects as the Objects panel, in its order.
-    QMenu* add = bar->addMenu("Add");
-    add->addAction(action(Action::AddText, "Text", [this] { ctx_.addText(); }));
-    add->addAction("Counter", this, [this] { ctx_.addCounter(); });
-    add->addAction("Subtitles", this, [this] { ctx_.addSubtitles(); });
+    QMenu* add = bar->addMenu(tr("Add"));
+    add->addAction(action(Action::AddText, tr("Text"), [this] { ctx_.addText(); }));
+    add->addAction(tr("Counter"), this, [this] { ctx_.addCounter(); });
+    add->addAction(tr("Subtitles"), this, [this] { ctx_.addSubtitles(); });
     add->addSeparator();
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i)
-        add->addAction(shapeKindLabel(static_cast<ShapeKind>(i)), this, [this, i] { ctx_.addShape(static_cast<ShapeKind>(i)); });
+        add->addAction(tr(shapeKindLabel(static_cast<ShapeKind>(i))), this, [this, i] { ctx_.addShape(static_cast<ShapeKind>(i)); });
     add->addSeparator();
-    add->addAction("Camera", this, [this] { ctx_.addCamera(); });
-    add->addAction("Background", this, [this] { ctx_.addBackground(); });
+    add->addAction(tr("Camera"), this, [this] { ctx_.addCamera(); });
+    add->addAction(tr("Background"), this, [this] { ctx_.addBackground(); });
     add->addSeparator();
     // Plugin objects, a submenu per plugin (rebuilt as plugins change).
     QAction* pluginsMark = add->addSeparator();
@@ -1043,10 +1050,10 @@ void EditorWindow::buildMenus() {
             });
         }
     });
-    QMenu* mediaMenu = add->addMenu("Media");
+    QMenu* mediaMenu = add->addMenu(tr("Media"));
     connect(mediaMenu, &QMenu::aboutToShow, this, [this, mediaMenu] {
         mediaMenu->clear();
-        QAction* imp = mediaMenu->addAction("Import Media...", this, [this] { media_->openImportDialog(); });
+        QAction* imp = mediaMenu->addAction(tr("Import Media..."), this, [this] { media_->openImportDialog(); });
         imp->setShortcut(ui::sequenceOf(Action::ImportMedia));
         if (!ctx_.comp().media.empty()) mediaMenu->addSeparator();
         for (const MediaItem& item : ctx_.comp().media) {
@@ -1054,38 +1061,38 @@ void EditorWindow::buildMenus() {
             mediaMenu->addAction(QString::fromStdString(item.name + "  (" + mediaKindLabel(item.kind) + ")"), this,
                                  [this, id] { ctx_.addMedia(id); });
         }
-        if (ctx_.comp().media.empty()) mediaMenu->addAction("Nothing imported yet")->setEnabled(false);
+        if (ctx_.comp().media.empty()) mediaMenu->addAction(tr("Nothing imported yet"))->setEnabled(false);
     });
 
-    QMenu* view = bar->addMenu("View");
-    view->addAction(action(Action::FitView, "Fit Composition", [this] { viewport_->requestFit(); }));
-    view->addAction(action(Action::ActualSize, "Actual Size (100%)", [this] { viewport_->setZoom(1.0f); }));
-    view->addAction(action(Action::ZoomIn, "Zoom In", [this] { viewport_->zoomBy(1.25f); }));
-    view->addAction(action(Action::ZoomOut, "Zoom Out", [this] { viewport_->zoomBy(1.0f / 1.25f); }));
-    view->addAction(action(Action::FullScreenPreview, "Full Screen Preview", [this] { openPreview(); }));
-    view->addAction(action(Action::ViewportFullscreen, "Maximize Viewport", [this] { toggleViewportFullscreen(); }));
+    QMenu* view = bar->addMenu(tr("View"));
+    view->addAction(action(Action::FitView, tr("Fit Composition"), [this] { viewport_->requestFit(); }));
+    view->addAction(action(Action::ActualSize, tr("Actual Size (100%)"), [this] { viewport_->setZoom(1.0f); }));
+    view->addAction(action(Action::ZoomIn, tr("Zoom In"), [this] { viewport_->zoomBy(1.25f); }));
+    view->addAction(action(Action::ZoomOut, tr("Zoom Out"), [this] { viewport_->zoomBy(1.0f / 1.25f); }));
+    view->addAction(action(Action::FullScreenPreview, tr("Full Screen Preview"), [this] { openPreview(); }));
+    view->addAction(action(Action::ViewportFullscreen, tr("Maximize Viewport"), [this] { toggleViewportFullscreen(); }));
     view->addSeparator();
-    QAction* snap = action(Action::ToggleSnapping, "Snapping", [this] { ctx_.snapping = !ctx_.snapping; });
+    QAction* snap = action(Action::ToggleSnapping, tr("Snapping"), [this] { ctx_.snapping = !ctx_.snapping; });
     snap->setCheckable(true);
     view->addAction(snap);
-    QAction* rulers = view->addAction("Rulers", this, [this] {
+    QAction* rulers = view->addAction(tr("Rulers"), this, [this] {
         ctx_.showRulers = !ctx_.showRulers;
         settings().showRulers = ctx_.showRulers; // remembered for the next projects
         saveSettings();
     });
     rulers->setCheckable(true);
-    QMenu* guides = view->addMenu("Guides");
-    QAction* showGuides = guides->addAction("Show Guides", this, [this] { ctx_.showGuides = !ctx_.showGuides; });
+    QMenu* guides = view->addMenu(tr("Guides"));
+    QAction* showGuides = guides->addAction(tr("Show Guides"), this, [this] { ctx_.showGuides = !ctx_.showGuides; });
     showGuides->setCheckable(true);
-    QAction* lockGuides = guides->addAction("Lock Guides", this, [this] { ctx_.lockGuides = !ctx_.lockGuides; });
+    QAction* lockGuides = guides->addAction(tr("Lock Guides"), this, [this] { ctx_.lockGuides = !ctx_.lockGuides; });
     lockGuides->setCheckable(true);
-    guides->addAction("Add Center Guides", this, [this] {
+    guides->addAction(tr("Add Center Guides"), this, [this] {
         Composition& c = ctx_.comp();
         c.guides.push_back({true, c.width * 0.5f});
         c.guides.push_back({false, c.height * 0.5f});
         ctx_.touch();
     });
-    QAction* clearGuides = guides->addAction("Clear Guides", this, [this] {
+    QAction* clearGuides = guides->addAction(tr("Clear Guides"), this, [this] {
         ctx_.comp().guides.clear();
         ctx_.touch();
     });
@@ -1098,7 +1105,7 @@ void EditorWindow::buildMenus() {
         actions_[Action::FullScreen]->setChecked(window()->isFullScreen());
     });
     view->addSeparator();
-    QAction* meters = view->addAction("Audio Meters", this, [this](bool on) {
+    QAction* meters = view->addAction(tr("Audio Meters"), this, [this](bool on) {
         settings().showMeters = on;
         saveSettings();
         meters_->setVisible(on);
@@ -1106,18 +1113,18 @@ void EditorWindow::buildMenus() {
     meters->setCheckable(true);
     meters->setChecked(settings().showMeters);
     connect(view, &QMenu::aboutToShow, meters, [meters] { meters->setChecked(settings().showMeters); });
-    QMenu* panels = view->addMenu("Panels");
-    view->addAction("Tools...", this, [this] { showTools(); });
-    for (const char* name : {"Objects", "Media", "Animate", "Properties", "Effects", "Transitions", "Timeline"})
+    QMenu* panels = view->addMenu(tr("Panels"));
+    view->addAction(tr("Tools..."), this, [this] { showTools(); });
+    for (const char* name : {"Objects", "Media", "Animate", "Scopes", "Properties", "Effects", "Transitions", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
-    view->addAction("Reset Layout", this, [this] { resetLayout(); });
+    view->addAction(tr("Reset Layout"), this, [this] { resetLayout(); });
     view->addSeparator();
-    QAction* full = action(Action::FullScreen, "Full Screen", [this] { ui::toggleFullScreen(window()); });
+    QAction* full = action(Action::FullScreen, tr("Full Screen"), [this] { ui::toggleFullScreen(window()); });
     full->setCheckable(true);
     view->addAction(full);
 
     // Plugins: their commands (rebuilt when plugins change) and the plugin manager.
-    QMenu* plugins = bar->addMenu("Plugins");
+    QMenu* plugins = bar->addMenu(tr("Plugins"));
     auto fillPlugins = [this, plugins] {
         plugins->clear();
         plugins->setToolTipsVisible(true);
@@ -1127,11 +1134,11 @@ void EditorWindow::buildMenus() {
             QAction* a = plugins->addAction(QString::fromStdString(c->name), this, [this, id] { runPluginCommand(id); });
             a->setToolTip(QString::fromStdString(c->description));
         }
-        if (commands.empty()) plugins->addAction("No plugin commands installed")->setEnabled(false);
+        if (commands.empty()) plugins->addAction(tr("No plugin commands installed"))->setEnabled(false);
         plugins->addSeparator();
         // Scripts, like After Effects' File > Scripts: Lua files with the plugin `doc` API, the
         // bundled ones and the user's own (app data / scripts).
-        QMenu* scripts = plugins->addMenu("Scripts");
+        QMenu* scripts = plugins->addMenu(tr("Scripts"));
         scripts->setToolTipsVisible(true);
         const std::filesystem::path userScripts = platform::appDataDir() / "scripts";
         int listed = 0;
@@ -1154,60 +1161,60 @@ void EditorWindow::buildMenus() {
             }
         }
         if (listed) scripts->addSeparator();
-        scripts->addAction("Run Script File...", this, [this] {
-            if (auto file = platform::openFileDialog("Run Script", "Lua script", ".lua")) runScriptFile(*file);
+        scripts->addAction(tr("Run Script File..."), this, [this] {
+            if (auto file = platform::openFileDialog(TR_NOOP("Run Script"), TR_NOOP("Lua script"), ".lua")) runScriptFile(*file);
         });
-        scripts->addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Open Scripts Folder", this, [userScripts] {
+        scripts->addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), tr("Open Scripts Folder"), this, [userScripts] {
             std::error_code ec;
             std::filesystem::create_directories(userScripts, ec); // asked for: the folder is made then
             platform::revealInFileManager(userScripts);
         });
         plugins->addSeparator();
-        plugins->addAction("Manage Plugins...", this, [] { ui::openSettings(ui::SettingsTab::Plugins); });
+        plugins->addAction(tr("Manage Plugins..."), this, [] { ui::openSettings(ui::SettingsTab::Plugins); });
     };
     fillPlugins();
     connect(plugins, &QMenu::aboutToShow, this, fillPlugins);
 
     // Help: the same pages as the Help window, then the outside links.
-    QMenu* help = bar->addMenu("Help");
-    QAction* keys = action(Action::Help, "Keyboard Shortcuts", [] { ui::openHelp(ui::HelpTab::Shortcuts); });
+    QMenu* help = bar->addMenu(tr("Help"));
+    QAction* keys = action(Action::Help, tr("Keyboard Shortcuts"), [] { ui::openHelp(ui::HelpTab::Shortcuts); });
     keys->setIcon(ui::menuIcon(ui::Icon::Keyboard, theme::kTextDim));
     help->addAction(keys);
-    help->addAction(ui::menuIcon(ui::Icon::Help, theme::kTextDim), "Learn bemotion", this, [] { ui::openHelp(ui::HelpTab::Learn); });
-    help->addAction(ui::menuIcon(ui::Icon::Expression, theme::kTextDim), "Expressions Guide", this,
+    help->addAction(ui::menuIcon(ui::Icon::Help, theme::kTextDim), tr("Learn bemotion"), this, [] { ui::openHelp(ui::HelpTab::Learn); });
+    help->addAction(ui::menuIcon(ui::Icon::Expression, theme::kTextDim), tr("Expressions Guide"), this,
                     [] { platform::openWithDefaultApp("https://github.com/eugeniobenfica/bemotion/blob/main/docs/EXPRESSIONS.md"); });
     help->addSeparator();
-    help->addAction(ui::menuIcon(ui::Icon::Logo, theme::kTextDim), "About bemotion", this, [] { ui::openHelp(ui::HelpTab::About); });
-    help->addAction(ui::menuIcon(ui::Icon::Star, theme::kTextDim), "Credits", this, [] { ui::openHelp(ui::HelpTab::Credits); });
-    help->addAction(ui::menuIcon(ui::Icon::Lock, theme::kTextDim), "License", this, [] { ui::openHelp(ui::HelpTab::License); });
+    help->addAction(ui::menuIcon(ui::Icon::Logo, theme::kTextDim), tr("About bemotion"), this, [] { ui::openHelp(ui::HelpTab::About); });
+    help->addAction(ui::menuIcon(ui::Icon::Star, theme::kTextDim), tr("Credits"), this, [] { ui::openHelp(ui::HelpTab::Credits); });
+    help->addAction(ui::menuIcon(ui::Icon::Lock, theme::kTextDim), tr("License"), this, [] { ui::openHelp(ui::HelpTab::License); });
     help->addSeparator();
-    help->addAction(ui::menuIcon(ui::Icon::Help, theme::kTextDim), "Report an Issue...", this,
+    help->addAction(ui::menuIcon(ui::Icon::Help, theme::kTextDim), tr("Report an Issue..."), this,
                     [] { platform::openWithDefaultApp("https://github.com/eugeniobenfica/bemotion/issues"); });
-    help->addAction(ui::menuIcon(ui::Icon::Coffee, theme::kAccent), "Support bemotion (Buy Me a Coffee)...", this,
+    help->addAction(ui::menuIcon(ui::Icon::Coffee, theme::kAccent), tr("Support bemotion (Buy Me a Coffee)..."), this,
                     [] { platform::openWithDefaultApp("https://buymeacoffee.com/eugeniobenfica"); });
 
     // Shortcuts without a menu entry.
-    action(Action::PlayPause, "Play / Pause", [this] {
+    action(Action::PlayPause, tr("Play / Pause"), [this] {
         ctx_.playing = !ctx_.playing;
         ctx_.playRate = 1.0;
     });
-    action(Action::ShuttleBack, "Play Backwards", [this] { ctx_.shuttle(-1); });
-    action(Action::ShuttleStop, "Stop", [this] { ctx_.shuttle(0); });
-    action(Action::ShuttleForward, "Play Forward", [this] { ctx_.shuttle(1); });
-    action(Action::RippleTrimStart, "Ripple Trim Start to Playhead", [this] { ctx_.rippleTrimToPlayhead(ClipEdge::In); });
-    action(Action::RippleTrimEnd, "Ripple Trim End to Playhead", [this] { ctx_.rippleTrimToPlayhead(ClipEdge::Out); });
-    action(Action::SpeedDuration, "Speed / Duration", [this] { ui::showSpeedDialog(ctx_, this); });
-    action(Action::PrevFrame, "Step Back", [this] { ctx_.stepFrames(-settings().arrowFrames); });
-    action(Action::NextFrame, "Step Forward", [this] { ctx_.stepFrames(settings().arrowFrames); });
-    action(Action::PrevFrames, "Big Step Back", [this] { ctx_.stepFrames(-settings().bigArrowFrames); });
-    action(Action::NextFrames, "Big Step Forward", [this] { ctx_.stepFrames(settings().bigArrowFrames); });
-    action(Action::GoToStart, "Go to Start", [this] { ctx_.setTime(0.0); });
-    action(Action::GoToEnd, "Go to End", [this] { ctx_.setTime(ctx_.comp().duration); });
-    action(Action::PrevKeyframe, "Previous Keyframe", [this] { jumpToKeyframe(-1); });
-    action(Action::NextKeyframe, "Next Keyframe", [this] { jumpToKeyframe(+1); });
-    action(Action::EasyEase, "Easy Ease", [this] { TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EasyEase); });
-    action(Action::EaseIn, "Ease In", [this] { TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseIn); });
-    action(Action::EaseOut, "Ease Out", [this] { TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseOut); });
+    action(Action::ShuttleBack, tr("Play Backwards"), [this] { ctx_.shuttle(-1); });
+    action(Action::ShuttleStop, tr("Stop"), [this] { ctx_.shuttle(0); });
+    action(Action::ShuttleForward, tr("Play Forward"), [this] { ctx_.shuttle(1); });
+    action(Action::RippleTrimStart, tr("Ripple Trim Start to Playhead"), [this] { ctx_.rippleTrimToPlayhead(ClipEdge::In); });
+    action(Action::RippleTrimEnd, tr("Ripple Trim End to Playhead"), [this] { ctx_.rippleTrimToPlayhead(ClipEdge::Out); });
+    action(Action::SpeedDuration, tr("Speed / Duration"), [this] { ui::showSpeedDialog(ctx_, this); });
+    action(Action::PrevFrame, tr("Step Back"), [this] { ctx_.stepFrames(-settings().arrowFrames); });
+    action(Action::NextFrame, tr("Step Forward"), [this] { ctx_.stepFrames(settings().arrowFrames); });
+    action(Action::PrevFrames, tr("Big Step Back"), [this] { ctx_.stepFrames(-settings().bigArrowFrames); });
+    action(Action::NextFrames, tr("Big Step Forward"), [this] { ctx_.stepFrames(settings().bigArrowFrames); });
+    action(Action::GoToStart, tr("Go to Start"), [this] { ctx_.setTime(0.0); });
+    action(Action::GoToEnd, tr("Go to End"), [this] { ctx_.setTime(ctx_.comp().duration); });
+    action(Action::PrevKeyframe, tr("Previous Keyframe"), [this] { jumpToKeyframe(-1); });
+    action(Action::NextKeyframe, tr("Next Keyframe"), [this] { jumpToKeyframe(+1); });
+    action(Action::EasyEase, tr("Easy Ease"), [this] { TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EasyEase); });
+    action(Action::EaseIn, tr("Ease In"), [this] { TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseIn); });
+    action(Action::EaseOut, tr("Ease Out"), [this] { TimelinePanel::applyEase(ctx_, TimelinePanel::Ease::EaseOut); });
 
     // Right side of the menu bar: errors, settings, Export.
     auto* corner = new QWidget;
@@ -1217,12 +1224,12 @@ void EditorWindow::buildMenus() {
     status_ = new QLabel;
     ui::setTone(status_, ui::Tone::Danger);
     row->addWidget(status_);
-    auto* gear = new ui::IconButton(ui::Icon::Gear, "Settings", 28);
+    auto* gear = new ui::IconButton(ui::Icon::Gear, tr("Settings"), 28);
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
     row->addWidget(gear);
-    auto* exportButton = ui::accentButton("Export");
+    auto* exportButton = ui::accentButton(tr("Export"));
     exportButton->setIcon(ui::makeIcon(ui::Icon::Export, theme::kOnAccent, 18));
-    exportButton->setToolTip("Export video");
+    exportButton->setToolTip(tr("Export video"));
     connect(exportButton, &QPushButton::clicked, this, [this] { ui::showExportDialog(ctx_, this); });
     row->addWidget(exportButton);
     bar->setCornerWidget(corner, Qt::TopRightCorner);
@@ -1300,6 +1307,7 @@ void EditorWindow::tick() {
     effects_->sync();
     transitions_->sync();
     animations_->sync();
+    scopes_->sync();
     timeline_->sync();
     if (preview_) preview_->sync();
     if (meters_ && meters_->isVisible()) {
@@ -1343,7 +1351,7 @@ void EditorWindow::save() {
     std::string err;
     if (!ctx_.save(&err)) {
         platform::log("save failed: " + err);
-        setStatus(QString::fromStdString("Save failed: " + err));
+        setStatus(tr("Save failed: %1").arg(QString::fromStdString(err)));
         return;
     }
     platform::log("saved " + platform::toUtf8(ctx_.path));
@@ -1356,11 +1364,11 @@ void EditorWindow::saveAs() {
     const auto suggested = ctx_.path.empty()
                                ? projectsFolderOrDocuments() / platform::fromUtf8(ctx_.project.name + kProjectExtension)
                                : ctx_.path;
-    auto file = platform::saveFileDialog("Save Project As", suggested, "bemotion Project", kProjectExtension);
+    auto file = platform::saveFileDialog(TR_NOOP("Save Project As"), suggested, TR_NOOP("bemotion Project"), kProjectExtension);
     if (!file) return;
     std::string err;
     if (!ctx_.saveTo(*file, &err)) {
-        setStatus(QString::fromStdString("Save failed: " + err));
+        setStatus(tr("Save failed: %1").arg(QString::fromStdString(err)));
         return;
     }
     setStatus({});
@@ -1372,13 +1380,13 @@ bool EditorWindow::confirmClose() {
     ctx_.commitIfIdle(false);
     if (!ctx_.isDirty()) return true;
     QMessageBox box(this);
-    box.setWindowTitle("Unsaved Changes");
-    box.setText(QString("Save changes to \"%1\" before closing?").arg(QString::fromStdString(ctx_.project.name)));
-    box.setInformativeText("Your changes will be lost if you don't save them.");
-    QPushButton* saveButton = box.addButton("Save", QMessageBox::AcceptRole);
+    box.setWindowTitle(tr("Unsaved Changes"));
+    box.setText(tr("Save changes to \"%1\" before closing?").arg(QString::fromStdString(ctx_.project.name)));
+    box.setInformativeText(tr("Your changes will be lost if you don't save them."));
+    QPushButton* saveButton = box.addButton(tr("Save"), QMessageBox::AcceptRole);
     saveButton->setProperty("accent", true);
-    box.addButton("Don't Save", QMessageBox::DestructiveRole);
-    QPushButton* cancel = box.addButton("Cancel", QMessageBox::RejectRole);
+    box.addButton(tr("Don't Save"), QMessageBox::DestructiveRole);
+    QPushButton* cancel = box.addButton(tr("Cancel"), QMessageBox::RejectRole);
     box.setDefaultButton(saveButton);
     box.exec();
     if (box.clickedButton() == cancel) return false;
@@ -1405,7 +1413,7 @@ void EditorWindow::arrange(bool stagger, bool vertical) {
     const bool ok = stagger ? staggerLayers(ctx_.comp(), ctx_.selection, 0.1, &error)
                             : distributeLayers(ctx_.comp(), ctx_.selection, vertical, ctx_.time, &error);
     if (!ok) {
-        setStatus(QString::fromStdString("Arrange: " + error));
+        setStatus(tr("Arrange: %1").arg(QString::fromStdString(error)));
         return;
     }
     setStatus({});
@@ -1484,28 +1492,28 @@ void EditorWindow::exportFrame(bool toClipboard) {
     std::vector<uint8_t> png;
     std::string error;
     if (!renderFramesPng(c, {t}, c.width, png, error)) {
-        setStatus(QString::fromStdString("Could not render the frame: " + error));
+        setStatus(tr("Could not render the frame: %1").arg(QString::fromStdString(error)));
         return;
     }
     if (toClipboard) {
         QImage image;
         image.loadFromData(png.data(), static_cast<int>(png.size()), "PNG");
         QApplication::clipboard()->setImage(image);
-        setStatus(QString("Frame %1 copied").arg(c.frameAt(t)));
+        setStatus(tr("Frame %1 copied").arg(c.frameAt(t)));
         return;
     }
-    const std::string stem = (ctx_.project.name.empty() ? std::string("Frame") : ctx_.project.name) + " - frame " + std::to_string(c.frameAt(t));
+    const std::string stem = (ctx_.project.name.empty() ? tr("Frame").toStdString() : ctx_.project.name) + tr(" - frame ").toStdString() + std::to_string(c.frameAt(t));
     const std::filesystem::path folder = ctx_.path.empty() ? projectsFolderOrDocuments() : ctx_.path.parent_path();
-    const auto file = platform::saveFileDialog("Export Frame", folder / platform::fromUtf8(stem + ".png"), "PNG Image", "png");
+    const auto file = platform::saveFileDialog(TR_NOOP("Export Frame"), folder / platform::fromUtf8(stem + ".png"), TR_NOOP("PNG Image"), "png");
     if (!file) return;
     std::ofstream out(*file, std::ios::binary | std::ios::trunc);
     if (!out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size())))
-        setStatus(QString::fromStdString("Could not save " + platform::toUtf8(*file)));
+        setStatus(tr("Could not save %1").arg(QString::fromStdString(platform::toUtf8(*file))));
 }
 
 void EditorWindow::markRecovered() {
     ctx_.touch(); // unsaved until the user saves
-    setStatus("Recovered: save to keep the changes");
+    setStatus(tr("Recovered: save to keep the changes"));
 }
 
 void EditorWindow::runPluginCommand(const std::string& id, bool pressed) {
@@ -1519,7 +1527,7 @@ void EditorWindow::runPluginCommand(const std::string& id, bool pressed) {
     CommandOutcome outcome;
     if (!PluginHost::get().runCommand(id, ctx_.project, ctx_.time, ctx_.selection, automationEnvironment(), error, pressed, &outcome)) {
         platform::log("plugin command failed: " + error);
-        setStatus(QString::fromStdString("Plugin: " + error));
+        setStatus(tr("Plugin: %1").arg(QString::fromStdString(error)));
         timeline_->setPluginButtonPressed(id, false); // a toggle that failed stays up
         if (!wasRecording && recorder.recording()) recorder.cancel();
         if (!recorder.recording()) timeline_->clearRecordingPreview();
@@ -1548,7 +1556,7 @@ void EditorWindow::runScriptFile(const std::filesystem::path& file) {
     std::stringstream code;
     code << in.rdbuf();
     if (!in) {
-        setStatus("Could not read the script");
+        setStatus(tr("Could not read the script"));
         return;
     }
     ctx_.playing = false;
@@ -1559,7 +1567,7 @@ void EditorWindow::runScriptFile(const std::filesystem::path& file) {
     const std::string name = platform::toUtf8(file.filename());
     platform::log("running script " + name);
     if (!PluginHost::runScript(code.str(), name, copy, ctx_.time, automationEnvironment(), log, error, ctx_.selection)) {
-        QMessageBox::warning(this, "Script", QString::fromStdString(name + ":\n" + error));
+        QMessageBox::warning(this, tr("Script"), QString::fromStdString(name + ":\n" + error));
         return;
     }
     if (serializeProject(copy) != serializeProject(ctx_.project)) {
@@ -1569,7 +1577,7 @@ void EditorWindow::runScriptFile(const std::filesystem::path& file) {
     }
     std::string said;
     for (const std::string& line : log) said += (said.empty() ? "" : "  ·  ") + line;
-    setStatus(QString::fromStdString(said.empty() ? "Ran " + platform::toUtf8(file.stem()) : said)); // what it print()ed, if anything
+    setStatus(said.empty() ? tr("Ran %1").arg(QString::fromStdString(platform::toUtf8(file.stem()))) : QString::fromStdString(said)); // what it print()ed, if anything
 }
 
 void EditorWindow::dropFiles(const std::vector<std::filesystem::path>& files, bool onMediaPanel) {

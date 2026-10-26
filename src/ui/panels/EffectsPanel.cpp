@@ -2,12 +2,15 @@
 
 #include "app/EffectLibrary.h"
 #include "app/Platform.h"
+#include "render/SceneRenderer.h"
+#include "ui/CurvesEditor.h"
 #include "ui/EditorContext.h"
 #include "ui/PropertyRow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
 #include <QCheckBox>
+#include <QComboBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -62,12 +65,13 @@ struct Category {
 };
 // After Effects' categories (those with effects here), then the presets.
 constexpr Category kCategories[] = {
-    {"Blur & Sharpen", "Blur", ui::Icon::FxBlur},       {"Color Correction", "Color", ui::Icon::FxColor},
-    {"Channel", "Channel", ui::Icon::FxChannel},        {"Distort", "Distort", ui::Icon::FxDistort},
-    {"Generate", "Generate", ui::Icon::FxGenerate},     {"Perspective", "Perspective", ui::Icon::FxPerspective},
-    {"Stylize", "Stylize", ui::Icon::FxStylize},        {"Time", "Time", ui::Icon::FxTime},
+    {TR_NOOP("Blur & Sharpen"), TR_NOOP("Blur"), ui::Icon::FxBlur},       {TR_NOOP("Color Correction"), TR_NOOP("Color"), ui::Icon::FxColor},
+    {TR_NOOP("Channel"), TR_NOOP("Channel"), ui::Icon::FxChannel},        {TR_NOOP("Distort"), TR_NOOP("Distort"), ui::Icon::FxDistort},
+    {TR_NOOP("Generate"), TR_NOOP("Generate"), ui::Icon::FxGenerate},     {TR_NOOP("Perspective"), TR_NOOP("Perspective"), ui::Icon::FxPerspective},
+    {TR_NOOP("Stylize"), TR_NOOP("Stylize"), ui::Icon::FxStylize},        {TR_NOOP("Time"), TR_NOOP("Time"), ui::Icon::FxTime},
+    {TR_NOOP("Keying"), TR_NOOP("Keying"), ui::Icon::FxKeying},
 };
-constexpr const char* kPresets = "Presets";
+constexpr const char* kPresets = TR_NOOP("Presets");
 
 ui::Icon categoryIcon(const char* category) {
     for (const Category& c : kCategories)
@@ -103,23 +107,23 @@ struct TileGrid {
 
 void fillEffectMenu(QMenu* menu, EditorContext& ctx) {
     for (const Category& c : kCategories) {
-        QMenu* sub = menu->addMenu(ui::makeIcon(c.icon, theme::kTextDim, 16), c.name);
+        QMenu* sub = menu->addMenu(ui::makeIcon(c.icon, theme::kTextDim, 16), tr(c.name));
         sub->setToolTipsVisible(true);
         for (int t = 0; t < static_cast<int>(EffectType::Count); ++t) {
             const auto type = static_cast<EffectType>(t);
             if (std::strcmp(effectCategory(type), c.name) != 0) continue;
-            QAction* a = sub->addAction(effectLabel(type), [&ctx, type] { applyToSelection(ctx, {makeEffect(type)}); });
-            a->setToolTip(effectDescription(type));
+            QAction* a = sub->addAction(tr(effectLabel(type)), [&ctx, type] { applyToSelection(ctx, {makeEffect(type)}); });
+            a->setToolTip(tr(effectDescription(type)));
         }
     }
     menu->addSeparator();
-    QMenu* presets = menu->addMenu("Effect Presets");
+    QMenu* presets = menu->addMenu(tr("Effect Presets"));
     for (const auto& lp : EffectLibrary::all()) {
         const std::vector<Effect> effects = lp.preset.effects;
-        presets->addAction(QString::fromStdString(lp.preset.name), [&ctx, effects] { applyToSelection(ctx, effects); });
+        presets->addAction(trs(lp.preset.name), [&ctx, effects] { applyToSelection(ctx, effects); });
     }
     presets->setEnabled(!presets->isEmpty());
-    menu->addAction("Remove All Effects", [&ctx] {
+    menu->addAction(tr("Remove All Effects"), [&ctx] {
         for (Layer* l : ctx.selectedLayers()) l->effects.clear();
         ctx.clearKeySelection();
         ctx.touch();
@@ -138,9 +142,9 @@ EffectsPanel::EffectsPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(pa
     stackHost_->setContentsMargins(0, 0, 0, 0);
     col->addLayout(stackHost_);
     col->addSpacing(6);
-    col->addWidget(ui::sectionLabel("Effects & Presets"));
+    col->addWidget(ui::sectionLabel(tr("Effects & Presets")));
     search_ = new QLineEdit;
-    search_->setPlaceholderText("Search effects");
+    search_->setPlaceholderText(tr("Search effects"));
     search_->setClearButtonEnabled(true);
     connect(search_, &QLineEdit::textChanged, this, [this] { sync(); });
     col->addWidget(search_);
@@ -162,9 +166,9 @@ std::string EffectsPanel::stackKey() {
     const Layer* layer = ctx_.selected();
     if (!layer) return "none";
     k << layer->id << ':' << static_cast<int>(layer->type) << ':' << layer->name << ':';
-    for (const Effect& e : layer->effects) k << static_cast<int>(e.type) << ',';
-    k << '|';
-    for (const AudioEffect& e : layer->audioEffects) k << static_cast<int>(e.type) << ':' << e.enabled << ':' << e.value << ',';
+    for (const Effect& e : layer->effects) k << static_cast<int>(e.type) << ':' << e.file << ',';
+    k << '|' << layer->media.hasAudio << ':';
+    for (const AudioEffect& e : layer->audioEffects) k << static_cast<int>(e.type) << ',';
     return k.str();
 }
 
@@ -203,45 +207,15 @@ void EffectsPanel::rebuildStack() {
 
     Layer* layer = ctx_.selected();
     if (!layer || layer->type == LayerType::Camera) {
-        col->addWidget(new QLabel("Effect Controls"));
-        col->addWidget(faint(layer ? "Cameras have no effects." : "Select a layer to see and edit its effects."));
+        col->addWidget(new QLabel(tr("Effect Controls")));
+        col->addWidget(faint(layer ? tr("Cameras have no effects.") : tr("Select a layer to see and edit its effects.")));
         return;
     }
     const bool audioOnly = layer->type == LayerType::Media && layer->media.hasAudio && !layer->media.hasVideo;
     if (audioOnly) {
-        col->addWidget(new QLabel(QString("Audio Effects  ·  %1").arg(QString::fromStdString(layer->name))));
-        const uint64_t id = layer->id;
-        for (int i = 0; i < static_cast<int>(layer->audioEffects.size()); ++i) {
-            const AudioEffect effect = layer->audioEffects[i];
-            auto* row = new QWidget;
-            auto* controls = new QHBoxLayout(row);
-            controls->setContentsMargins(0, 0, 0, 0);
-            auto* enabled = new ui::Switch;
-            enabled->setChecked(effect.enabled);
-            controls->addWidget(enabled);
-            controls->addWidget(new QLabel(audioEffectLabel(effect.type)), 1);
-            auto* value = new ui::DragValue;
-            const bool gain = effect.type == AudioEffectType::Gain;
-            value->setRange(gain ? -60.0f : 0.01f, gain ? 24.0f : 60.0f);
-            value->setSpeed(gain ? 0.25f : 0.01f);
-            value->setFormat(gain ? "%.1f dB" : "%.2f s");
-            value->setValue(effect.value);
-            controls->addWidget(value);
-            auto* remove = new ui::IconButton(ui::Icon::Trash, "Remove audio effect", 24);
-            controls->addWidget(remove);
-            connect(enabled, &QAbstractButton::toggled, this, [this, id, i](bool on) {
-                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size())) l->audioEffects[i].enabled = on, ctx_.touch();
-            });
-            connect(value, &ui::DragValue::valueChanged, this, [this, id, i](float v) {
-                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size())) l->audioEffects[i].value = v, ctx_.touch();
-            });
-            connect(remove, &QAbstractButton::clicked, this, [this, id, i] {
-                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size()))
-                    l->audioEffects.erase(l->audioEffects.begin() + i), ctx_.touch();
-            });
-            col->addWidget(row);
-        }
-        col->addWidget(faint(layer->audioEffects.empty() ? "No audio effects yet. Pick one below." : "Audio effects are applied during playback and export."));
+        col->addWidget(new QLabel(tr("Audio Effects  ·  %1").arg(QString::fromStdString(layer->name))));
+        buildAudioEffects(col, *layer);
+        for (auto& f : refreshers_) f();
         return;
     }
     const uint64_t id = layer->id;
@@ -250,7 +224,7 @@ void EffectsPanel::rebuildStack() {
         auto* icon = new QLabel;
         icon->setPixmap(ui::makeIcon(ui::iconForLayer(*layer), theme::kAccent, 20).pixmap(20, 20));
         row->addWidget(icon);
-        row->addWidget(new QLabel(QString("Effect Controls  ·  %1").arg(QString::fromStdString(layer->name))), 1);
+        row->addWidget(new QLabel(tr("Effect Controls  ·  %1").arg(QString::fromStdString(layer->name))), 1);
         col->addLayout(row);
     }
     const auto props = layer->properties();
@@ -272,7 +246,7 @@ void EffectsPanel::rebuildStack() {
             if (const Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size())) {
                 const QSignalBlocker b(on);
                 on->setChecked(l->effects[i].enabled);
-                on->setToolTip(l->effects[i].enabled ? "Turn this effect off" : "Turn this effect on");
+                on->setToolTip(l->effects[i].enabled ? tr("Turn this effect off") : tr("Turn this effect on"));
             }
         });
         tools->addWidget(on);
@@ -283,13 +257,13 @@ void EffectsPanel::rebuildStack() {
             ctx_.clearKeySelection();
             ctx_.touch();
         };
-        auto* up = new ui::IconButton(ui::Icon::ChevronUp, "Move up (applied earlier)", 24);
+        auto* up = new ui::IconButton(ui::Icon::ChevronUp, tr("Move up (applied earlier)"), 24);
         up->setEnabled(i > 0);
         connect(up, &QAbstractButton::clicked, this, [move, i] { move(i, i - 1); });
-        auto* down = new ui::IconButton(ui::Icon::ChevronDown, "Move down (applied later)", 24);
+        auto* down = new ui::IconButton(ui::Icon::ChevronDown, tr("Move down (applied later)"), 24);
         down->setEnabled(i + 1 < count);
         connect(down, &QAbstractButton::clicked, this, [move, i] { move(i, i + 1); });
-        auto* del = new ui::IconButton(ui::Icon::Trash, "Remove effect", 24);
+        auto* del = new ui::IconButton(ui::Icon::Trash, tr("Remove effect"), 24);
         connect(del, &QAbstractButton::clicked, this, [this, id, i] {
             if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size())) {
                 l->effects.erase(l->effects.begin() + i);
@@ -309,7 +283,7 @@ void EffectsPanel::rebuildStack() {
             samples->setRange(2.0f, 64.0f);
             samples->setSpeed(0.2f);
             samples->setFormat("%.0f");
-            samples->setToolTip("More samples: smoother blur, slower preview");
+            samples->setToolTip(tr("More samples: smoother blur, slower preview"));
             connect(samples, &ui::DragValue::valueChanged, this, [this, id, i](float x) {
                 const int v = static_cast<int>(std::lround(x));
                 if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size()) && l->effects[i].samples != v) {
@@ -321,19 +295,74 @@ void EffectsPanel::rebuildStack() {
                 if (const Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size()))
                     samples->setValue(static_cast<float>(l->effects[i].samples));
             });
-            section->addPlainRow("Samples", samples);
+            section->addPlainRow(tr("Samples"), samples);
+        }
+        if (e.type == EffectType::Lut) {
+            auto* lut = new QComboBox;
+            lut->addItem(tr("None"), QString());
+            for (const std::string& name : render::bundledLuts()) {
+                const std::string file = "bundled:" + name;
+                lut->addItem(QString::fromStdString(name.substr(0, name.size() - 5)), QString::fromStdString(file)); // without ".cube"
+            }
+            if (!e.file.empty() && lut->findData(QString::fromStdString(e.file)) < 0) {
+                const std::filesystem::path p = platform::fromUtf8(e.file);
+                lut->addItem(QString::fromStdString(platform::toUtf8(p.filename())), QString::fromStdString(e.file));
+            }
+            lut->insertSeparator(lut->count());
+            lut->addItem(tr("Choose File..."), QStringLiteral("?"));
+            lut->setCurrentIndex(std::max(0, lut->findData(QString::fromStdString(e.file))));
+            lut->setToolTip(tr("A color look-up table: one of the looks that come with bemotion, or a .cube file"));
+            connect(lut, &QComboBox::activated, this, [this, id, i, lut](int index) {
+                std::string file = lut->itemData(index).toString().toStdString();
+                if (file == "?") {
+                    const auto chosen = platform::openFileDialog(TR_NOOP("Choose a LUT"), TR_NOOP("Cube LUT"), ".cube");
+                    if (!chosen) {
+                        stackKey_.clear(); // back to what it was
+                        sync();
+                        return;
+                    }
+                    file = platform::toUtf8(*chosen);
+                }
+                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size()) && l->effects[i].file != file) {
+                    l->effects[i].file = file;
+                    l->effects[i].relative.clear();
+                    ctx_.touch();
+                }
+            });
+            section->addPlainRow(tr("LUT"), lut);
+            std::string title, error;
+            if (!e.file.empty() && !render::lutInfo(e.file, title, error)) {
+                auto* problem = new QLabel(QString::fromStdString(error));
+                problem->setWordWrap(true);
+                ui::setTone(problem, ui::Tone::Danger);
+                section->body()->addWidget(problem);
+            }
+        }
+        if (e.type == EffectType::Curves) {
+            auto* editor = new ui::CurvesEditor;
+            connect(editor, &ui::CurvesEditor::changed, this, [this, id, i, editor] {
+                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size())) {
+                    l->effects[i].curves = editor->curves();
+                    for (auto& curve : l->effects[i].curves) cleanCurve(curve);
+                    ctx_.touch();
+                }
+            });
+            refreshers_.push_back([this, id, i, editor] {
+                if (const Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->effects.size())) editor->setCurves(l->effects[i].curves);
+            });
+            section->body()->addWidget(editor);
         }
         col->addWidget(section);
     }
-    col->addWidget(faint(layer->effects.empty() ? "No effects yet. Pick one below: it is added to every selected layer."
-                                                : "Effects run top to bottom. Every parameter can be keyframed here or in the timeline."));
+    col->addWidget(faint(layer->effects.empty() ? tr("No effects yet. Pick one below: it is added to every selected layer.")
+                                                : tr("Effects run top to bottom. Every parameter can be keyframed here or in the timeline.")));
     if (!layer->effects.empty()) {
-        auto* save = new QPushButton("Save Stack as Preset...");
+        auto* save = new QPushButton(tr("Save Stack as Preset..."));
         connect(save, &QPushButton::clicked, this, [this, id] {
             Layer* l = ctx_.comp().findLayer(id);
             if (!l) return;
             bool ok = false;
-            const QString name = QInputDialog::getText(this, "Save Effect Preset", "Preset name", QLineEdit::Normal,
+            const QString name = QInputDialog::getText(this, tr("Save Effect Preset"), tr("Preset name"), QLineEdit::Normal,
                                                        QString::fromStdString(l->name + " effects"), &ok);
             if (!ok || name.trimmed().isEmpty()) return;
             EffectPreset preset{name.toStdString(), l->effects};
@@ -345,7 +374,64 @@ void EffectsPanel::rebuildStack() {
         row->addStretch();
         col->addLayout(row);
     }
+    if (layer->type == LayerType::Media && layer->media.hasAudio) { // a video with sound: its audio effects too
+        col->addSpacing(6);
+        col->addWidget(ui::sectionLabel(tr("Audio Effects")));
+        buildAudioEffects(col, *layer);
+    }
     for (auto& f : refreshers_) f();
+}
+
+// The layer's audio effects: each a section with its switch, values and a remove button.
+void EffectsPanel::buildAudioEffects(QVBoxLayout* col, const Layer& layer) {
+    const uint64_t id = layer.id;
+    for (int i = 0; i < static_cast<int>(layer.audioEffects.size()); ++i) {
+        const AudioEffect& effect = layer.audioEffects[i];
+        auto* extra = new QWidget;
+        auto* tools = new QHBoxLayout(extra);
+        tools->setContentsMargins(0, 0, 0, 0);
+        tools->setSpacing(2);
+        auto* enabled = new ui::Switch;
+        tools->addWidget(enabled);
+        auto* remove = new ui::IconButton(ui::Icon::Trash, tr("Remove audio effect"), 24);
+        tools->addWidget(remove);
+        connect(enabled, &QAbstractButton::toggled, this, [this, id, i](bool on) {
+            if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size()) && l->audioEffects[i].enabled != on)
+                l->audioEffects[i].enabled = on, ctx_.touch();
+        });
+        connect(remove, &QAbstractButton::clicked, this, [this, id, i] {
+            if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size()))
+                l->audioEffects.erase(l->audioEffects.begin() + i), ctx_.touch();
+        });
+        refreshers_.push_back([this, id, i, enabled] {
+            if (const Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size())) {
+                const QSignalBlocker b(enabled);
+                enabled->setChecked(l->audioEffects[i].enabled);
+            }
+        });
+        auto* section = new CollapsibleSection(tr(audioEffectLabel(effect.type)), nullptr, extra);
+        section->setToolTip(tr(audioEffectDescription(effect.type)));
+        for (const AudioEffectParam& p : audioEffectParams(effect.type)) {
+            auto* value = new ui::DragValue;
+            value->setRange(p.min, p.max);
+            value->setSpeed(p.speed);
+            value->setFormat(p.format);
+            const int index = p.index;
+            connect(value, &ui::DragValue::valueChanged, this, [this, id, i, index](float v) {
+                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size()) && audioEffectValue(l->audioEffects[i], index) != v)
+                    audioEffectValue(l->audioEffects[i], index) = v, ctx_.touch();
+            });
+            refreshers_.push_back([this, id, i, index, value] {
+                if (const Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size()))
+                    value->setValue(audioEffectValue(l->audioEffects[i], index));
+            });
+            section->addPlainRow(tr(p.label), value);
+        }
+        if (effect.type == AudioEffectType::Ducking)
+            section->body()->addWidget(faint(tr("Quieter while any other clip with sound plays: put it on the music.")));
+        col->addWidget(section);
+    }
+    col->addWidget(faint(layer.audioEffects.empty() ? tr("No audio effects yet. Pick one below.") : tr("Audio effects are applied during playback and export.")));
 }
 
 void EffectsPanel::rebuildBrowser() {
@@ -361,38 +447,46 @@ void EffectsPanel::rebuildBrowser() {
     const bool audioOnly = canApply && std::all_of(selectedLayers.begin(), selectedLayers.end(), [](const Layer* l) {
         return l->type == LayerType::Media && l->media.hasAudio && !l->media.hasVideo;
     });
-    if (audioOnly) {
-        col->addWidget(ui::sectionLabel("Audio Effects"));
+    const bool withSound = canApply && std::all_of(selectedLayers.begin(), selectedLayers.end(), [](const Layer* l) {
+        return l->type == LayerType::Media && l->media.hasAudio;
+    });
+    auto audioTiles = [&] {
+        col->addWidget(ui::sectionLabel(tr("Audio Effects")));
         TileGrid grid(col, width);
         for (int i = 0; i < static_cast<int>(AudioEffectType::Count); ++i) {
             const auto type = static_cast<AudioEffectType>(i);
-            ui::Tile* tile = grid.add(ui::Icon::Audio, audioEffectLabel(type));
+            ui::Tile* tile = grid.add(ui::Icon::Audio, tr(audioEffectLabel(type)));
+            tile->setToolTip(tr(audioEffectLabel(type)) + "\n" + tr(audioEffectDescription(type)));
             connect(tile, &QAbstractButton::clicked, this, [this, type] {
-                for (Layer* l : ctx_.selectedLayers()) l->audioEffects.push_back(makeAudioEffect(type));
+                for (Layer* l : ctx_.selectedLayers())
+                    if (l->type == LayerType::Media && l->media.hasAudio) l->audioEffects.push_back(makeAudioEffect(type));
                 ctx_.touch();
             });
         }
+    };
+    if (audioOnly) {
+        audioTiles();
         return;
     }
     if (!canApply) {
-        col->addWidget(faint("Select a layer to browse its effects."));
+        col->addWidget(faint(tr("Select a layer to browse its effects.")));
         return;
     }
 
     auto effectTile = [&](EffectType type, TileGrid& grid) {
-        ui::Tile* t = grid.add(categoryIcon(effectCategory(type)), effectLabel(type));
+        ui::Tile* t = grid.add(categoryIcon(effectCategory(type)), tr(effectLabel(type)));
         t->setDimmed(!canApply);
-        t->setToolTip(QString("%1\n%2").arg(effectLabel(type), effectDescription(type)));
+        t->setToolTip(QString("%1\n%2").arg(tr(effectLabel(type)), tr(effectDescription(type))));
         connect(t, &QAbstractButton::clicked, this, [this, type] {
             if (!ctx_.selection.empty()) applyToSelection(ctx_, {makeEffect(type)});
         });
     };
     auto presetTile = [&](const LibraryEffectPreset& lp, TileGrid& grid) {
-        ui::Tile* t = grid.add(ui::Icon::Star, QString::fromStdString(lp.preset.name));
+        ui::Tile* t = grid.add(ui::Icon::Star, trs(lp.preset.name));
         t->setDimmed(!canApply);
-        std::string list;
-        for (const Effect& e : lp.preset.effects) list += (list.empty() ? "" : " + ") + std::string(effectLabel(e.type));
-        t->setToolTip(QString::fromStdString(lp.preset.name + "\n" + list));
+        QString list;
+        for (const Effect& e : lp.preset.effects) list += (list.isEmpty() ? "" : " + ") + tr(effectLabel(e.type));
+        t->setToolTip(trs(lp.preset.name) + "\n" + list);
         const std::vector<Effect> effects = lp.preset.effects;
         connect(t, &QAbstractButton::clicked, this, [this, effects] {
             if (!ctx_.selection.empty()) applyToSelection(ctx_, effects);
@@ -402,7 +496,7 @@ void EffectsPanel::rebuildBrowser() {
             t->setContextMenuPolicy(Qt::CustomContextMenu);
             connect(t, &QWidget::customContextMenuRequested, this, [this, t, file](QPoint p) {
                 QMenu menu;
-                menu.addAction("Delete Preset", [this, file] {
+                menu.addAction(tr("Delete Preset"), [this, file] {
                     EffectLibrary::remove(file);
                     browserKey_.clear();
                 });
@@ -417,16 +511,17 @@ void EffectsPanel::rebuildBrowser() {
         TileGrid grid(col, width);
         for (int t = 0; t < static_cast<int>(EffectType::Count); ++t) {
             const auto type = static_cast<EffectType>(t);
-            if (matches(effectLabel(type), search) || matches(effectCategory(type), search)) effectTile(type, grid);
+            if (matches(effectLabel(type), search) || matches(effectCategory(type), search) || matches(tr(effectLabel(type)).toStdString(), search))
+                effectTile(type, grid);
         }
         for (const auto& lp : EffectLibrary::all())
             if (matches(lp.preset.name, search)) presetTile(lp, grid);
-        if (!grid.count) col->addWidget(faint("No effect matches your search."));
+        if (!grid.count) col->addWidget(faint(tr("No effect matches your search.")));
     } else if (category_.empty()) { // the categories
         TileGrid grid(col, width);
         for (const Category& c : kCategories) {
             ui::Tile* t = grid.add(c.icon, c.label);
-            t->setToolTip(c.name);
+            t->setToolTip(tr(c.name));
             const std::string name = c.name;
             connect(t, &QAbstractButton::clicked, this, [this, name] {
                 category_ = name;
@@ -440,20 +535,20 @@ void EffectsPanel::rebuildBrowser() {
         });
     } else { // one category
         auto* head = new QHBoxLayout;
-        auto* back = new ui::IconButton(ui::Icon::Back, "All categories", 24);
+        auto* back = new ui::IconButton(ui::Icon::Back, tr("All categories"), 24);
         connect(back, &QAbstractButton::clicked, this, [this] {
             category_.clear();
             sync();
         });
         head->addWidget(back);
-        head->addWidget(new QLabel(QString::fromStdString(category_)), 1);
+        head->addWidget(new QLabel(trs(category_)), 1);
         col->addLayout(head);
         TileGrid grid(col, width);
         if (category_ == kPresets) {
             for (const auto& lp : EffectLibrary::all()) presetTile(lp, grid);
-            auto* import = new QPushButton("Import Preset...");
+            auto* import = new QPushButton(tr("Import Preset..."));
             connect(import, &QPushButton::clicked, this, [this] {
-                if (auto file = platform::openFileDialog("Import Effect Preset", "Effect preset", ".json")) {
+                if (auto file = platform::openFileDialog(TR_NOOP("Import Effect Preset"), TR_NOOP("Effect preset"), ".json")) {
                     std::string err;
                     message_ = EffectLibrary::importFile(*file, &err) ? "Imported." : "Import failed: " + err;
                     sync();
@@ -467,6 +562,10 @@ void EffectsPanel::rebuildBrowser() {
             for (int t = 0; t < static_cast<int>(EffectType::Count); ++t)
                 if (category_ == effectCategory(static_cast<EffectType>(t))) effectTile(static_cast<EffectType>(t), grid);
         }
+    }
+    if (withSound && search.empty() && category_.empty()) {
+        col->addSpacing(4);
+        audioTiles();
     }
     if (!message_.empty()) col->addWidget(faint(QString::fromStdString(message_)));
 }

@@ -6,6 +6,8 @@
 #include <QImage>
 #include <QWidget>
 
+#include <map>
+
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -283,6 +285,12 @@ private:
     } frameKey_;
     bool frameValid_ = false;
     QImage frame_; // the rendered composition
+    // Rendered frames by frame number, while the view and the document stay the same.
+    std::map<int, QImage> cache_;
+    FrameKey cacheLook_;             // frameKey_ without the time
+    uint64_t cacheGeneration_ = 0;   // MediaManager::generation()
+    size_t cacheBytes_ = 0;
+    void clearCache();
 };
 
 } // namespace bemotion

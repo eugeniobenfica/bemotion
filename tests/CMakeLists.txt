@@ -7,6 +7,8 @@ add_test(NAME core_tests COMMAND bemotion_core_tests)
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)
     add_test(NAME plugin_catalog COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/plugin-index.py --check)
+    # Every language file has every interface text, with the same placeholders (tools/languages.py).
+    add_test(NAME languages COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/languages.py --check)
 endif()
 
 add_executable(bemotion_recording_tests recording_tests.cpp)

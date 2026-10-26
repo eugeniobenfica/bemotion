@@ -85,12 +85,12 @@ void TransitionsPanel::rebuild() {
     grid->setSpacing(8);
     grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     int n = 0;
-    auto* about = new QLabel("Click one for the selected clips (in and out), or drag it onto the start or end of a clip, "
-                             "or onto the cut between two clips. A dot marks what the clip has.");
+    auto* about = new QLabel(tr("Click one for the selected clips (in and out), or drag it onto the start or end of a clip, "
+                             "or onto the cut between two clips. A dot marks what the clip has."));
     about->setWordWrap(true);
     ui::setTone(about, ui::Tone::TextFaint);
     if (category_.empty()) {
-        col->addWidget(ui::sectionLabel("Transitions"));
+        col->addWidget(ui::sectionLabel(tr("Transitions")));
         col->addWidget(about);
         for (const char* c : transitionCategories()) {
             auto* t = new ui::Tile(categoryIcon(c), c);
@@ -107,7 +107,7 @@ void TransitionsPanel::rebuild() {
         }
     } else {
         auto* head = new QHBoxLayout;
-        auto* back = new ui::IconButton(ui::Icon::Back, "All transitions", 24);
+        auto* back = new ui::IconButton(ui::Icon::Back, tr("All transitions"), 24);
         connect(back, &QAbstractButton::clicked, this, [this] {
             category_.clear();
             QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
@@ -121,9 +121,9 @@ void TransitionsPanel::rebuild() {
             if (category_ != list[i].category) continue;
             auto* t = new ui::Tile(iconOf(list[i].id), list[i].name);
             t->setTileSize(tile);
-            t->setToolTip(QString("%1\n\nClick: the selected clips, in and out. Or drag it onto the start or end of a clip, "
+            t->setToolTip(tr("%1\n\nClick: the selected clips, in and out. Or drag it onto the start or end of a clip, "
                                   "or onto the cut between two clips. Drag its edge on the timeline to set its duration.")
-                              .arg(list[i].about));
+                              .arg(tr(list[i].about)));
             const std::string id = list[i].id;
             connect(t, &QAbstractButton::clicked, this, [this, id] {
                 bool any = false;
@@ -156,17 +156,17 @@ void TransitionsPanel::buildApplied(QVBoxLayout* col) {
     durations_[0] = durations_[1] = nullptr;
     const auto selected = ctx_.selectedLayers();
     if (selected.size() > 1) {
-        col->addWidget(new QLabel(QString("Transitions  ·  %1 clips").arg(selected.size())));
-        col->addWidget(faint("A transition clicked below goes to each of them, in and out."));
+        col->addWidget(new QLabel(tr("Transitions  ·  %1 clips").arg(selected.size())));
+        col->addWidget(faint(tr("A transition clicked below goes to each of them, in and out.")));
         col->addSpacing(6);
         return;
     }
     if (selected.empty()) return;
     Layer* layer = selected.front();
-    col->addWidget(new QLabel(QString("Transitions  ·  %1").arg(QString::fromStdString(layer->name))));
+    col->addWidget(new QLabel(tr("Transitions  ·  %1").arg(QString::fromStdString(layer->name))));
     if (!canTakeTransition(*layer)) {
-        col->addWidget(faint(layer->type == LayerType::Camera ? "Cameras have no transitions: they show the others."
-                                                              : "Sound without a picture has no transitions: fade its volume instead."));
+        col->addWidget(faint(layer->type == LayerType::Camera ? tr("Cameras have no transitions: they show the others.")
+                                                              : tr("Sound without a picture has no transitions: fade its volume instead.")));
         col->addSpacing(6);
         return;
     }
@@ -174,12 +174,12 @@ void TransitionsPanel::buildApplied(QVBoxLayout* col) {
     const uint64_t id = layer->id;
     for (const TransitionEdge edge : {TransitionEdge::In, TransitionEdge::Out}) {
         const bool in = edge == TransitionEdge::In;
-        const ClipTransition& tr = in ? layer->transitionIn : layer->transitionOut;
-        if (!tr.active()) {
-            card->addRow(in ? "In" : "Out", in ? "None: click one below, or drag it onto the clip's start" : "None: click one below, or drag it onto the clip's end", nullptr);
+        const ClipTransition& clip = in ? layer->transitionIn : layer->transitionOut;
+        if (!clip.active()) {
+            card->addRow(in ? tr("In") : tr("Out"), in ? tr("None: click one below, or drag it onto the clip's start") : tr("None: click one below, or drag it onto the clip's end"), nullptr);
             continue;
         }
-        const TransitionInfo* info = findTransition(tr.id);
+        const TransitionInfo* info = findTransition(clip.id);
         auto* controls = new QWidget;
         auto* row = new QHBoxLayout(controls);
         row->setContentsMargins(0, 0, 0, 0);
@@ -188,22 +188,22 @@ void TransitionsPanel::buildApplied(QVBoxLayout* col) {
         length->setRange(0.05f, 60.0f);
         length->setSpeed(0.01f);
         length->setFormat("%.2f s");
-        length->setValue(tr.duration);
+        length->setValue(clip.duration);
         length->setFixedWidth(84);
-        length->setToolTip("How long it lasts (or drag its edge on the timeline)");
+        length->setToolTip(tr("How long it lasts (or drag its edge on the timeline)"));
         connect(length, &ui::DragValue::valueChanged, this, [this, id, edge](float v) {
             if (Layer* l = ctx_.comp().findLayer(id); l && resizeTransition(ctx_.comp(), *l, edge, v)) ctx_.touch();
         });
         durations_[in ? 0 : 1] = length;
         row->addWidget(length);
-        auto* remove = new ui::IconButton(ui::Icon::Trash, "Remove this transition (its keyframes go too)", 26);
+        auto* remove = new ui::IconButton(ui::Icon::Trash, tr("Remove this transition (its keyframes go too)"), 26);
         connect(remove, &QAbstractButton::clicked, this, [this, id, edge] {
             if (Layer* l = ctx_.comp().findLayer(id); l && removeTransition(ctx_.comp(), *l, edge)) ctx_.touch();
             QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
         });
         row->addWidget(remove);
-        const QString name = info ? QString::fromUtf8(info->name) : QString::fromStdString(tr.id);
-        card->addRow(QString(in ? "In: %1" : "Out: %1").arg(name), tr.joined ? (in ? "Shared with the clip before" : "Shared with the clip after") : QString(), controls);
+        const QString name = info ? tr(info->name) : QString::fromStdString(clip.id);
+        card->addRow(QString(in ? tr("In: %1") : tr("Out: %1")).arg(name), clip.joined ? (in ? tr("Shared with the clip before") : tr("Shared with the clip after")) : QString(), controls);
     }
     col->addWidget(card);
     col->addSpacing(8);
@@ -229,10 +229,10 @@ void TransitionsPanel::sync() {
     for (size_t i = 0; i < tiles_.size(); ++i) {
         bool has = false;
         for (const Layer* l : selected)
-            for (const ClipTransition* tr : {&l->transitionIn, &l->transitionOut}) {
-                if (!tr->active()) continue;
-                const TransitionInfo* info = findTransition(tr->id);
-                has = has || tr->id == tileIds_[i] || (category_.empty() && info && tileIds_[i] == info->category);
+            for (const ClipTransition* clip : {&l->transitionIn, &l->transitionOut}) {
+                if (!clip->active()) continue;
+                const TransitionInfo* info = findTransition(clip->id);
+                has = has || clip->id == tileIds_[i] || (category_.empty() && info && tileIds_[i] == info->category);
             }
         tiles_[i]->setDimmed(!canApply);
         tiles_[i]->setMarked(has);

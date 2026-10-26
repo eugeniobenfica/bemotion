@@ -22,9 +22,16 @@
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/effects/SkTrimPathEffect.h"
 
+#include "include/core/SkData.h"
+#include "include/core/SkShader.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
+#include <map>
+#include <mutex>
+#include <sstream>
 #include <vector>
 
 namespace bemotion::render {
@@ -377,6 +384,161 @@ sk_sp<SkImageFilter> colorOp(sk_sp<SkImageFilter> input, int mode, float a, floa
     return SkImageFilters::ColorFilter(builder.makeColorFilter(), std::move(input));
 }
 
+// --- Apply LUT, Curves, Chroma Key ---------------------------------------------------
+
+std::filesystem::path& lutFolder() {
+    static std::filesystem::path folder;
+    return folder;
+}
+
+std::filesystem::path lutPath(const std::string& file) {
+    constexpr std::string_view kBundled = "bundled:";
+    const bool bundled = file.rfind(kBundled, 0) == 0;
+    const std::string name = bundled ? file.substr(kBundled.size()) : file;
+    std::filesystem::path p(std::u8string(name.begin(), name.end()));
+    return bundled ? lutFolder() / p : p;
+}
+
+// A LUT as an image the shader samples: its blue slices side by side (size * size wide, size
+// high), red across each slice and green down.
+struct LoadedLut {
+    std::filesystem::file_time_type stamp;
+    sk_sp<SkImage> image;
+    int size = 0;
+    std::string title, error;
+};
+
+LoadedLut loadLut(const std::string& file) { // a copy: the cache may change on another thread
+    static std::mutex mutex; // exports render on threads of their own
+    static std::map<std::string, LoadedLut> cache;
+    std::lock_guard lock(mutex);
+    const std::filesystem::path path = lutPath(file);
+    std::error_code ec;
+    const auto stamp = std::filesystem::last_write_time(path, ec);
+    LoadedLut& entry = cache[file];
+    if ((entry.image || !entry.error.empty()) && !ec && entry.stamp == stamp) return entry;
+    entry = {};
+    entry.stamp = stamp;
+    if (ec) {
+        entry.error = "The LUT file was not found.";
+        return entry;
+    }
+    std::ifstream in(path, std::ios::binary);
+    std::stringstream text;
+    text << in.rdbuf();
+    Lut3D lut;
+    if (!in || !parseCubeLut(text.str(), lut, &entry.error)) {
+        if (entry.error.empty()) entry.error = "The LUT file could not be read.";
+        return entry;
+    }
+    const int n = lut.size;
+    std::vector<float> rgba(static_cast<size_t>(n) * n * n * 4);
+    for (int b = 0; b < n; ++b)
+        for (int g = 0; g < n; ++g)
+            for (int r = 0; r < n; ++r) {
+                const float* src = &lut.rgb[((static_cast<size_t>(b) * n + g) * n + r) * 3];
+                float* dst = &rgba[(static_cast<size_t>(g) * n * n + b * n + r) * 4];
+                dst[0] = std::clamp(src[0], 0.0f, 1.0f), dst[1] = std::clamp(src[1], 0.0f, 1.0f), dst[2] = std::clamp(src[2], 0.0f, 1.0f);
+                dst[3] = 1.0f;
+            }
+    const SkImageInfo info = SkImageInfo::Make(n * n, n, kRGBA_F32_SkColorType, kOpaque_SkAlphaType);
+    entry.image = SkImages::RasterFromData(info, SkData::MakeWithCopy(rgba.data(), rgba.size() * sizeof(float)),
+                                           static_cast<size_t>(n) * n * 4 * sizeof(float));
+    entry.size = n;
+    entry.title = lut.title;
+    if (!entry.image) entry.error = "The LUT could not be prepared.";
+    return entry;
+}
+
+// Straight colors through the LUT: two neighboring blue slices, each sampled bilinearly, mixed.
+constexpr const char* kLutShader = R"(
+uniform shader lut; uniform float n; uniform float amount;
+half4 main(half4 p) {
+    if (p.a < 0.0001) return half4(0);
+    half3 v = clamp(p.rgb / p.a, 0.0, 1.0);
+    float b = v.b * (n - 1.0);
+    float b0 = floor(b);
+    float b1 = min(b0 + 1.0, n - 1.0);
+    float2 rg = float2(v.r, v.g) * (n - 1.0) + 0.5;
+    half3 c0 = lut.eval(float2(rg.x + b0 * n, rg.y)).rgb;
+    half3 c1 = lut.eval(float2(rg.x + b1 * n, rg.y)).rgb;
+    half3 c = mix(c0, c1, half(b - b0));
+    return half4(mix(v, c, half(amount)) * p.a, p.a);
+})";
+
+// Chroma key on straight colors: transparent where the color's chroma (Cb, Cr) is near the
+// key's, soft in between; spill takes the key's chroma out of what stays (a green rim).
+constexpr const char* kChromaKey = R"(
+uniform half3 key; uniform float tolerance; uniform float softness; uniform float spill;
+half2 chroma(half3 c) { return half2(dot(c, half3(-0.1687, -0.3313, 0.5)), dot(c, half3(0.5, -0.4187, -0.0813))); }
+half4 main(half4 p) {
+    if (p.a < 0.0001) return half4(0);
+    half3 v = p.rgb / p.a;
+    half2 kc = chroma(key);
+    half2 cc = chroma(v);
+    float d = distance(cc, kc);
+    float lo = tolerance * 0.45;
+    float alpha = smoothstep(lo, lo + softness * 0.35 + 0.002, d);
+    float klen = length(kc);
+    if (spill > 0.0 && klen > 0.01) {
+        half2 dir = kc / klen;
+        float along = max(0.0, dot(cc, dir));
+        half2 c2 = cc - dir * along * spill;
+        half y = dot(v, half3(0.299, 0.587, 0.114));
+        v = clamp(half3(y + 1.402 * c2.y, y - 0.344136 * c2.x - 0.714136 * c2.y, y + 1.772 * c2.x), 0.0, 1.0);
+    }
+    half a = p.a * half(alpha);
+    return half4(v * a, a);
+})";
+
+sk_sp<SkImageFilter> applyLut(sk_sp<SkImageFilter> input, const Effect& e, float amount) {
+    if (e.file.empty() || amount <= 0.0f) return input;
+    const LoadedLut& lut = loadLut(e.file);
+    static const sk_sp<SkRuntimeEffect> fx = effect(kLutShader, true);
+    if (!lut.image || !fx) return input;
+    SkRuntimeColorFilterBuilder builder(fx);
+    builder.child("lut") = lut.image->makeShader(SkTileMode::kClamp, SkTileMode::kClamp, SkSamplingOptions(SkFilterMode::kLinear));
+    builder.uniform("n") = static_cast<float>(lut.size);
+    builder.uniform("amount") = std::clamp(amount, 0.0f, 1.0f);
+    return SkImageFilters::ColorFilter(builder.makeColorFilter(), std::move(input));
+}
+
+sk_sp<SkImageFilter> applyCurves(sk_sp<SkImageFilter> input, const Effect& e, float amount) {
+    amount = std::clamp(amount, 0.0f, 1.0f);
+    if (amount <= 0.0f || std::all_of(e.curves.begin(), e.curves.end(), [](const auto& c) { return curveIsIdentity(c); }))
+        return input;
+    uint8_t tables[3][256];
+    for (int ch = 0; ch < 3; ++ch)
+        for (int i = 0; i < 256; ++i) {
+            const float x = static_cast<float>(i) / 255.0f;
+            const float y = curveValue(e.curves[0], curveValue(e.curves[ch + 1], x)); // the channel's, then the RGB curve
+            tables[ch][i] = static_cast<uint8_t>(std::lround(std::clamp(x + (y - x) * amount, 0.0f, 1.0f) * 255.0f));
+        }
+    return SkImageFilters::ColorFilter(SkColorFilters::TableARGB(nullptr, tables[0], tables[1], tables[2]), std::move(input));
+}
+
+sk_sp<SkImageFilter> applyChromaKey(sk_sp<SkImageFilter> input, const Effect& e, double t, float zoom) {
+    static const sk_sp<SkRuntimeEffect> fx = effect(kChromaKey, true);
+    if (!fx) return input;
+    const Color key = e.color.valueAt(t);
+    SkRuntimeColorFilterBuilder builder(fx);
+    builder.uniform("key") = SkV3{key.r, key.g, key.b};
+    builder.uniform("tolerance") = std::clamp(e.value1.valueAt(t) * 0.01f, 0.0f, 1.0f);
+    builder.uniform("softness") = std::clamp(e.value2.valueAt(t) * 0.01f, 0.0f, 1.0f);
+    builder.uniform("spill") = std::clamp(e.value3.valueAt(t) * 0.01f, 0.0f, 1.0f);
+    sk_sp<SkImageFilter> keyed = SkImageFilters::ColorFilter(builder.makeColorFilter(), std::move(input));
+    // Choke: the matte pulled in by about that many pixels (a blurred alpha cut high up its edge,
+    // as Stroke grows one; no slow morphology), then the keyed picture kept only inside it.
+    const float choke = std::max(0.0f, e.size.valueAt(t)) * zoom;
+    if (choke < 0.05f) return keyed;
+    constexpr float k = 6.0f, level = 0.84f; // a straight edge blurred by sigma = choke crosses 0.84 that far in
+    SkColorMatrix cut;
+    const float rows[20] = {0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, k, 0.5f - k * level};
+    cut.setRowMajor(rows);
+    sk_sp<SkImageFilter> matte = SkImageFilters::ColorFilter(SkColorFilters::Matrix(cut), SkImageFilters::Blur(choke, choke, SkTileMode::kDecal, keyed));
+    return SkImageFilters::Blend(SkBlendMode::kDstIn, keyed, matte);
+}
+
 // The input's silhouette in one color.
 sk_sp<SkImageFilter> silhouette(sk_sp<SkImageFilter> input, Color color, float alpha) {
     return SkImageFilters::ColorFilter(SkColorFilters::Blend(color4(color, alpha), nullptr, SkBlendMode::kSrcIn), std::move(input));
@@ -412,6 +574,9 @@ sk_sp<SkImageFilter> effectChain(const Layer& layer, double t, float zoom) {
         case EffectType::Tint: current = colorOp(current, 2, 0, 0, 0, color, strength); break;
         case EffectType::Fill: current = colorOp(current, 3, 0, 0, 0, color, strength); break;
         case EffectType::Invert: current = colorOp(current, 4, 0, 0, 0, {}, strength); break;
+        case EffectType::Lut: current = applyLut(current, e, strength); break;
+        case EffectType::Curves: current = applyCurves(current, e, strength); break;
+        case EffectType::ChromaKey: current = applyChromaKey(current, e, t, zoom); break;
         case EffectType::WaveWarp: {
             static const sk_sp<SkRuntimeEffect> fx = effect(kWave, false);
             if (!fx) break;
@@ -702,6 +867,26 @@ void drawLayerIn(SkCanvas* canvas, const Layer& layer, double time, const Projec
 
 void setPluginDrawer(PluginDrawer drawer) { pluginDrawer() = std::move(drawer); }
 void setMediaProvider(MediaProvider provider) { mediaProvider() = std::move(provider); }
+void setLutFolder(const std::filesystem::path& folder) { lutFolder() = folder; }
+
+std::vector<std::string> bundledLuts() {
+    std::vector<std::string> names;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(lutFolder(), ec))
+        if (entry.path().extension() == ".cube") {
+            const std::u8string name = entry.path().filename().u8string();
+            names.emplace_back(name.begin(), name.end());
+        }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+bool lutInfo(const std::string& file, std::string& title, std::string& error) {
+    const LoadedLut& lut = loadLut(file);
+    title = lut.title;
+    error = lut.error;
+    return lut.image != nullptr;
+}
 
 bool hasActiveEffects(const Layer& layer) {
     return std::any_of(layer.effects.begin(), layer.effects.end(), [](const Effect& e) { return e.enabled; });

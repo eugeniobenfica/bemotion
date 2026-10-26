@@ -192,7 +192,23 @@ a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
 `Effect` (`Effects.h`) has a type and fixed animatable **slots** (`color`,
 `opacity`, `size`, `offset`, `shutter`, `v1`–`v3`); each type uses some of
 them (`effectParams`). Slots make effects generic for files, UI and
-operations. Effect ids (`effectId`) are stable strings.
+operations. Effect ids (`effectId`) are stable strings. Two effects carry
+more than slots: Apply LUT a `file` (a `.cube` file, `parseCubeLut`; with a
+`relative` path saved like media; `bundled:` for `assets/luts`, made by
+`tools/make-luts.py`) and Curves four `curves` (RGB, red, green, blue: points
+through which `curveValue` draws a monotone cubic). Chroma Key uses slots only.
+
+**Audio effects** (`AudioEffect`: a type and up to three values,
+`audioEffectParams` saying which and their ranges) change the sound, never
+the picture. Gain and the fades are worked out per sample by the mixer
+(`media/AudioEngine`); EQ and Noise Reduction change a clip's samples as a
+whole (`core/AudioDsp`: RBJ biquads; a spectral gate over an FFT whose noise
+level per frequency is a low percentile of the clip), made once in the
+background per (media, `dsp::processKey`) by `MediaManager`, shared by clips
+with the same settings and awaited by exports (`audioReady`); Ducking lowers a
+clip while another clip with sound is louder than its threshold, from the
+other clips' loudness every 10 ms (`dsp::loudness`, made when audio is
+decoded), eased over its fade.
 
 ### Rules, files, history
 
@@ -355,6 +371,24 @@ Rules:
   one helper the command line, MCP and `--export` share.
 - FFmpeg versions differ between platforms (Ubuntu 24.04 ships 6.1, MSYS2
   8.x): guard newer APIs with `LIBAVCODEC_VERSION_INT` checks.
+- **Hardware decoding** (`media::setHardwareDecoding`, Settings › Editor ›
+  Playback, off by default): HD and bigger videos decode on the graphics
+  card (D3D11VA, VideoToolbox, VAAPI; one shared device) and their frames are
+  copied back for Skia; any failure goes back to software for that video. With
+  frames copied back, a fast processor is often quicker, hence the default.
+- **Proxies** (`media::makeProxy`): a Motion JPEG copy, at most 540 lines high,
+  in `<app data>/proxies`, named after the original's path, size and date. The
+  `MediaManager` makes them one at a time on a thread (Media panel › Create
+  Proxy) and shows them only for the editor's composition (`setPreview`) while
+  they are on (`setUseProxies`): exports and other snapshots always read the
+  originals. The proxy starts at the original's first frame, so the same times
+  show the same frames.
+- **Caches**: decoded video frames by file and start time, least recently
+  shown first out, half the `cache_megabytes` setting (`setFrameCacheMegabytes`);
+  the viewport keeps rendered frames by frame number while the document, the
+  view and `MediaManager::generation()` stay the same (the other half), and
+  the timeline's ruler shows them as a green line (`EditorContext::cachedFrames`).
+  While playing, the scene renders at the frame's own time, as exports do.
 
 ## 7. The editor (`src/ui`)
 
@@ -495,7 +529,18 @@ Rules:
   bundled plugins can be disabled. The host checks that removal stays inside
   the user plugin folder.
 - All interface text is **English**, short, sentence case, with After Effects /
-  Premiere terms.
+  Premiere terms, and goes through **`tr()`** (`ui/Language.h`): literals as
+  `tr("Save")`, texts from tables marked `TR_NOOP` (here) or `N_` (the core)
+  and translated where shown (`tr(label)`, `trLabel` for numbered labels;
+  sections, rows, tiles and icon buttons translate theirs). Language files are
+  JSON (`assets/languages/<code>.json`, the user's in `<app data>/languages`,
+  `core/Language.h`); the `language` setting picks one at startup. Every new
+  text needs its translation in each bundled file: `tools/languages.py
+  --missing pt-BR` lists them and ctest fails until they are there. Names
+  saved anywhere (dock objects, settings, theme files) stay English.
+- **Scopes** (`panels/ScopesPanel`, closed by default: View › Panels): the
+  frame at the playhead rendered 384 px wide, as a luma waveform, RGB parade,
+  vectorscope or histogram, at most a few times a second while it changes.
 
 ## 8. The application (`src/app`)
 

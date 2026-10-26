@@ -77,28 +77,28 @@ void ObjectsPanel::rebuild() {
         return t;
     };
 
-    Section text = section("Text");
-    text.add(makeTile(ui::Icon::Text, "Text", "Click to add at the center, or drag onto the canvas (T)", -1, [this] { ctx_.addText(); }));
-    text.add(makeTile(ui::Icon::Counter, "Counter", "Animated number from 0 to 100; edit its Value keyframes in Properties or the timeline",
+    Section text = section(tr("Text"));
+    text.add(makeTile(ui::Icon::Text, tr("Text"), tr("Click to add at the center, or drag onto the canvas (T)"), -1, [this] { ctx_.addText(); }));
+    text.add(makeTile(ui::Icon::Counter, tr("Counter"), tr("Animated number from 0 to 100; edit its Value keyframes in Properties or the timeline"),
                       ui::kDropCounter, [this] { ctx_.addCounter(); }));
-    text.add(makeTile(ui::Icon::Subtitles, "Subtitles",
-                      "Captions at the bottom of the frame, one after another: type them, import an .srt, or transcribe the speech of a clip",
+    text.add(makeTile(ui::Icon::Subtitles, tr("Subtitles"),
+                      tr("Captions at the bottom of the frame, one after another: type them, import an .srt, or transcribe the speech of a clip"),
                       ui::kDropSubtitles, [this] { ctx_.addSubtitles(); }));
     col->addSpacing(4);
 
-    Section graphics = section("Graphics");
+    Section graphics = section(tr("Graphics"));
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i) {
         const auto kind = static_cast<ShapeKind>(i);
-        graphics.add(makeTile(ui::iconForShape(kind), shapeKindLabel(kind), "Click to add at the center, or drag onto the canvas", i,
+        graphics.add(makeTile(ui::iconForShape(kind), tr(shapeKindLabel(kind)), tr("Click to add at the center, or drag onto the canvas"), i,
                               [this, kind] { ctx_.addShape(kind); }));
     }
     col->addSpacing(4);
 
-    Section scene = section("Scene");
-    scene.add(makeTile(ui::Icon::Camera, "Camera", "A camera frames the scene: animate its position, rotation and zoom",
+    Section scene = section(tr("Scene"));
+    scene.add(makeTile(ui::Icon::Camera, tr("Camera"), tr("A camera frames the scene: animate its position, rotation and zoom"),
                        ui::kDropCamera, [this] { ctx_.addCamera(); }));
-    scene.add(makeTile(ui::Icon::Background, "Background",
-                       "Fills the whole frame, under everything: a color, a gradient, a picture or a video",
+    scene.add(makeTile(ui::Icon::Background, tr("Background"),
+                       tr("Fills the whole frame, under everything: a color, a gradient, a picture or a video"),
                        ui::kDropBackground, [this] { ctx_.addBackground(); }));
 
     // Object types from plugins (charts, ...), grouped by plugin.

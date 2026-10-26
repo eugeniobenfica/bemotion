@@ -43,7 +43,7 @@ QWidget* dialogParent() { return QApplication::activeWindow(); }
 QString filterFor(const char* name, const std::vector<std::string>& extensions) {
     QString patterns;
     for (const auto& e : extensions) patterns += QString(patterns.isEmpty() ? "*." : " *.") + QString::fromStdString(e);
-    return QString("%1 (%2);;All files (*)").arg(QString::fromUtf8(name), patterns);
+    return QCoreApplication::translate("bemotion", "%1 (%2);;All files (*)").arg(QCoreApplication::translate("bemotion", name), patterns);
 }
 
 std::string withoutDot(const char* ext) { return ext && ext[0] == '.' ? ext + 1 : (ext ? ext : ""); }
@@ -134,27 +134,27 @@ fs::path assetsDir() {
 }
 
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const char* extension) {
-    const QString file = QFileDialog::getOpenFileName(dialogParent(), QString::fromUtf8(title), QString(),
+    const QString file = QFileDialog::getOpenFileName(dialogParent(), QCoreApplication::translate("bemotion", title), QString(),
                                                       filterFor(filterName, {withoutDot(extension)}));
     if (file.isEmpty()) return std::nullopt;
     return fromQ(file);
 }
 
 std::optional<fs::path> openFileDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions) {
-    const QString file = QFileDialog::getOpenFileName(dialogParent(), QString::fromUtf8(title), QString(), filterFor(filterName, extensions));
+    const QString file = QFileDialog::getOpenFileName(dialogParent(), QCoreApplication::translate("bemotion", title), QString(), filterFor(filterName, extensions));
     if (file.isEmpty()) return std::nullopt;
     return fromQ(file);
 }
 
 std::optional<fs::path> chooseFolderDialog(const char* title, const fs::path& start) {
-    const QString dir = QFileDialog::getExistingDirectory(dialogParent(), QString::fromUtf8(title), qpath(start));
+    const QString dir = QFileDialog::getExistingDirectory(dialogParent(), QCoreApplication::translate("bemotion", title), qpath(start));
     if (dir.isEmpty()) return std::nullopt;
     return fromQ(dir);
 }
 
 std::vector<fs::path> openFilesDialog(const char* title, const char* filterName, const std::vector<std::string>& extensions) {
     std::vector<fs::path> out;
-    for (const QString& f : QFileDialog::getOpenFileNames(dialogParent(), QString::fromUtf8(title), QString(),
+    for (const QString& f : QFileDialog::getOpenFileNames(dialogParent(), QCoreApplication::translate("bemotion", title), QString(),
                                                           filterFor(filterName, extensions)))
         out.push_back(fromQ(f));
     return out;
@@ -162,7 +162,7 @@ std::vector<fs::path> openFilesDialog(const char* title, const char* filterName,
 
 std::optional<fs::path> saveFileDialog(const char* title, const fs::path& suggested, const char* filterName,
                                        const char* extension) {
-    const QString file = QFileDialog::getSaveFileName(dialogParent(), QString::fromUtf8(title), qpath(suggested),
+    const QString file = QFileDialog::getSaveFileName(dialogParent(), QCoreApplication::translate("bemotion", title), qpath(suggested),
                                                       filterFor(filterName, {withoutDot(extension)}));
     if (file.isEmpty()) return std::nullopt;
     fs::path p = fromQ(file);

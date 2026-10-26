@@ -331,25 +331,37 @@ json encodeLayer(const Layer& constLayer) {
     j["properties"] = std::move(props);
     if (!layer.effects.empty()) {
         json effects = json::array();
-        for (const Effect& e : layer.effects)
-            effects.push_back({{"type", effectId(e.type)},
-                               {"enabled", e.enabled},
-                               {"samples", e.samples},
-                               {"params",
-                                {{"color", encodeAnimated(e.color)},
-                                 {"opacity", encodeAnimated(e.opacity)},
-                                 {"size", encodeAnimated(e.size)},
-                                 {"offset", encodeAnimated(e.offset)},
-                                 {"shutter", encodeAnimated(e.shutter)},
-                                 {"v1", encodeAnimated(e.value1)},
-                                 {"v2", encodeAnimated(e.value2)},
-                                 {"v3", encodeAnimated(e.value3)}}}});
+        for (const Effect& e : layer.effects) {
+            json ej = {{"type", effectId(e.type)},
+                       {"enabled", e.enabled},
+                       {"samples", e.samples},
+                       {"params",
+                        {{"color", encodeAnimated(e.color)},
+                         {"opacity", encodeAnimated(e.opacity)},
+                         {"size", encodeAnimated(e.size)},
+                         {"offset", encodeAnimated(e.offset)},
+                         {"shutter", encodeAnimated(e.shutter)},
+                         {"v1", encodeAnimated(e.value1)},
+                         {"v2", encodeAnimated(e.value2)},
+                         {"v3", encodeAnimated(e.value3)}}}};
+            if (!e.file.empty()) ej["file"] = e.file;
+            if (!e.relative.empty()) ej["relative"] = e.relative;
+            json curves = json::object();
+            for (int c = 0; c < 4; ++c)
+                if (!e.curves[c].empty()) {
+                    json pts = json::array();
+                    for (const Vec2& p : e.curves[c]) pts.push_back({p.x, p.y});
+                    curves[curveId(c)] = std::move(pts);
+                }
+            if (!curves.empty()) ej["curves"] = std::move(curves);
+            effects.push_back(std::move(ej));
+        }
         j["effects"] = std::move(effects);
     }
     if (!layer.audioEffects.empty()) {
         json effects = json::array();
         for (const AudioEffect& e : layer.audioEffects)
-            effects.push_back({{"type", audioEffectId(e.type)}, {"enabled", e.enabled}, {"value", e.value}});
+            effects.push_back({{"type", audioEffectId(e.type)}, {"enabled", e.enabled}, {"value", e.value}, {"value2", e.value2}, {"value3", e.value3}});
         j["audio_effects"] = std::move(effects);
     }
     if (layer.transitionIn.active() || layer.transitionOut.active())
@@ -466,19 +478,24 @@ Layer decodeLayer(const json& j) {
         if (params.contains("v1")) decodeAnimated(params["v1"], e.value1);
         if (params.contains("v2")) decodeAnimated(params["v2"], e.value2);
         if (params.contains("v3")) decodeAnimated(params["v3"], e.value3);
+        e.file = ej.value("file", std::string());
+        e.relative = ej.value("relative", std::string());
+        if (const auto curves = ej.find("curves"); curves != ej.end() && curves->is_object())
+            for (int c = 0; c < 4; ++c)
+                for (const auto& pt : curves->value(curveId(c), json::array()))
+                    if (pt.is_array() && pt.size() >= 2 && pt[0].is_number() && pt[1].is_number())
+                        e.curves[c].push_back({pt[0].get<float>(), pt[1].get<float>()});
         layer.effects.push_back(std::move(e));
     }
     for (const auto& ej : j.value("audio_effects", json::array())) {
-        const std::string type = ej.value("type", std::string());
-        for (int i = 0; i < static_cast<int>(AudioEffectType::Count); ++i) {
-            const auto candidate = static_cast<AudioEffectType>(i);
-            if (type != audioEffectId(candidate)) continue;
-            AudioEffect e = makeAudioEffect(candidate);
-            e.enabled = ej.value("enabled", true);
-            e.value = ej.value("value", e.value);
-            layer.audioEffects.push_back(e);
-            break;
-        }
+        const AudioEffectType type = audioEffectFromId(ej.value("type", std::string()));
+        if (type == AudioEffectType::Count) continue; // from a newer version: skip
+        AudioEffect e = makeAudioEffect(type);
+        e.enabled = ej.value("enabled", true);
+        e.value = ej.value("value", e.value);
+        e.value2 = ej.value("value2", e.value2);
+        e.value3 = ej.value("value3", e.value3);
+        layer.audioEffects.push_back(e);
     }
     if (const auto transitions = j.find("transitions"); transitions != j.end() && transitions->is_object()) {
         auto decodeTransition = [&](const char* edge, ClipTransition& out) {
@@ -671,9 +688,12 @@ bool saveProject(const Project& source, const std::filesystem::path& path, std::
         return rel || r.empty() ? std::string() : utf8FromPath(r.generic_u8string());
     };
     for (MediaItem& m : project.comp.media) m.relative = relativeTo(m.path);
-    for (Layer& l : project.comp.layers) // files used by plugin objects (3D models...) travel the same way
+    for (Layer& l : project.comp.layers) { // files used by plugin objects (3D models...) and LUTs travel the same way
         for (PluginParam& pp : l.plugin.params)
             if (pp.kind == PluginParamKind::File) pp.relative = pp.text.empty() ? std::string() : relativeTo(pp.text);
+        for (Effect& e : l.effects)
+            e.relative = e.file.empty() || e.file.rfind("bundled:", 0) == 0 ? std::string() : relativeTo(e.file);
+    }
     std::error_code ec;
     if (path.has_parent_path()) std::filesystem::create_directories(path.parent_path(), ec);
 
@@ -715,9 +735,11 @@ bool loadProject(const std::filesystem::path& path, Project& out, std::string* e
             absolute = utf8FromPath((path.parent_path() / pathFromUtf8(relative)).lexically_normal());
     };
     for (MediaItem& m : out.comp.media) resolve(m.relative, m.path);
-    for (Layer& l : out.comp.layers)
+    for (Layer& l : out.comp.layers) {
         for (PluginParam& pp : l.plugin.params)
             if (pp.kind == PluginParamKind::File) resolve(pp.relative, pp.text);
+        for (Effect& e : l.effects) resolve(e.relative, e.file);
+    }
     return true;
 }
 

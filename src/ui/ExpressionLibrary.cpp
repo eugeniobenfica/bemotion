@@ -128,7 +128,7 @@ protected:
         small.setPointSizeF(base.pointSizeF() * 0.85);
         if (shown.empty()) {
             p.setPen(qcolor(theme::kTextFaint));
-            p.drawText(QRectF(12, 12, width() - 24, 30), Qt::AlignLeft, "Nothing matches");
+            p.drawText(QRectF(12, 12, width() - 24, 30), Qt::AlignLeft, tr("Nothing matches"));
             return;
         }
         float y = 6;
@@ -187,7 +187,7 @@ public:
         : QWidget(parent, Qt::Popup | Qt::FramelessWindowHint), entries_(std::move(entries)), pick_(std::move(pick)) {
         setAttribute(Qt::WA_TranslucentBackground);
         setAttribute(Qt::WA_DeleteOnClose);
-        setWindowTitle("Expressions");
+        setWindowTitle(tr("Expressions"));
         setFixedSize(kWidth, kHeight);
         for (const ExpressionEntry& e : entries_)
             if (std::find(categories_.begin(), categories_.end(), e.category) == categories_.end()) categories_.push_back(e.category);
@@ -196,7 +196,7 @@ public:
         col->setContentsMargins(10, 10, 10, 10);
         col->setSpacing(8);
         search_ = new QLineEdit;
-        search_->setPlaceholderText("Search functions, names and layers");
+        search_->setPlaceholderText(tr("Search functions, names and layers"));
         search_->setClearButtonEnabled(true);
         search_->installEventFilter(this);
         col->addWidget(search_);

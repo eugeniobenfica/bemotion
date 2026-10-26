@@ -28,7 +28,7 @@ constexpr float kButton = 18.0f; // a round button's radius
 
 PreviewWindow::PreviewWindow(EditorContext& ctx, QWidget* parent) : QWidget(parent, Qt::Window), ctx_(ctx) {
     setAttribute(Qt::WA_DeleteOnClose);
-    setWindowTitle("Preview");
+    setWindowTitle(tr("Preview"));
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     sinceMouse_.start();

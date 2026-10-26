@@ -18,15 +18,15 @@ uint32_t nextKeyframeUid() {
 
 const char* shapeKindLabel(ShapeKind kind) {
     switch (kind) {
-    case ShapeKind::Rectangle: return "Rectangle";
-    case ShapeKind::Ellipse: return "Ellipse";
-    case ShapeKind::Polygon: return "Polygon";
-    case ShapeKind::Star: return "Star";
-    case ShapeKind::Line: return "Line";
-    case ShapeKind::Path: return "Path";
+    case ShapeKind::Rectangle: return N_("Rectangle");
+    case ShapeKind::Ellipse: return N_("Ellipse");
+    case ShapeKind::Polygon: return N_("Polygon");
+    case ShapeKind::Star: return N_("Star");
+    case ShapeKind::Line: return N_("Line");
+    case ShapeKind::Path: return N_("Path");
     case ShapeKind::Count: break;
     }
-    return "Shape";
+    return N_("Shape");
 }
 
 int ShapeProps::copiesAt(double t) const {
@@ -75,9 +75,9 @@ std::vector<PropertyRef> Layer::properties() {
             m.group = m.name;
             const std::string prefix = "mask" + std::to_string(i) + ".";
             m.ids[0] = prefix + "feather", m.ids[1] = prefix + "opacity", m.ids[2] = prefix + "expansion";
-            PropertyRef refs[3] = {{m.ids[0].c_str(), m.group.c_str(), "Feather", PropertyKind::Float, &m.feather, 0.5f, 0, 1000, "%.1f px"},
-                                   {m.ids[1].c_str(), m.group.c_str(), "Opacity", PropertyKind::Float, &m.opacity, 0.5f, 0, 100, "%.0f%%"},
-                                   {m.ids[2].c_str(), m.group.c_str(), "Expansion", PropertyKind::Float, &m.expansion, 0.5f, -1000, 1000, "%.1f px"}};
+            PropertyRef refs[3] = {{m.ids[0].c_str(), m.group.c_str(), N_("Feather"), PropertyKind::Float, &m.feather, 0.5f, 0, 1000, "%.1f px"},
+                                   {m.ids[1].c_str(), m.group.c_str(), N_("Opacity"), PropertyKind::Float, &m.opacity, 0.5f, 0, 100, "%.0f%%"},
+                                   {m.ids[2].c_str(), m.group.c_str(), N_("Expansion"), PropertyKind::Float, &m.expansion, 0.5f, -1000, 1000, "%.1f px"}};
             for (PropertyRef& r : refs) {
                 r.maskIndex = static_cast<int>(i);
                 p.push_back(r);
@@ -85,24 +85,24 @@ std::vector<PropertyRef> Layer::properties() {
         }
     };
     if (type == LayerType::Media && !media.hasVideo) { // audio only: its level (and its time remap)
-        if (media.timeRemap) p.push_back({"time_remap", "Time", "Time Remap", PropertyKind::Float, &media.remap, 0.01f, 0, 1e6f, "%.2f s"});
-        p.push_back({"volume", "Audio", "Volume", PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
+        if (media.timeRemap) p.push_back({"time_remap", N_("Time"), N_("Time Remap"), PropertyKind::Float, &media.remap, 0.01f, 0, 1e6f, "%.2f s"});
+        p.push_back({"volume", N_("Audio"), N_("Volume"), PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
         return p;
     }
     if (type == LayerType::Background) { // fills the frame: no position, size or rotation
         auto& b = background;
-        p.push_back({"opacity", "Transform", "Opacity", PropertyKind::Float, &tr.opacity, 0.5f, 0, 100, "%.0f%%"});
-        p.push_back({"bg_color", "Background", b.fill == BackgroundFill::Image ? "Behind" : b.fill == BackgroundFill::Solid ? "Color" : "Color 1",
+        p.push_back({"opacity", N_("Transform"), N_("Opacity"), PropertyKind::Float, &tr.opacity, 0.5f, 0, 100, "%.0f%%"});
+        p.push_back({"bg_color", N_("Background"), b.fill == BackgroundFill::Image ? N_("Behind") : b.fill == BackgroundFill::Solid ? N_("Color") : N_("Color 1"),
                      PropertyKind::Color, &b.color});
         if (b.fill == BackgroundFill::Linear || b.fill == BackgroundFill::Radial)
-            p.push_back({"bg_color2", "Background", "Color 2", PropertyKind::Color, &b.color2});
+            p.push_back({"bg_color2", N_("Background"), N_("Color 2"), PropertyKind::Color, &b.color2});
         if (b.fill == BackgroundFill::Linear)
-            p.push_back({"bg_angle", "Background", "Angle", PropertyKind::Float, &b.angle, 0.5f, 0, 0, "%.0f°"});
+            p.push_back({"bg_angle", N_("Background"), N_("Angle"), PropertyKind::Float, &b.angle, 0.5f, 0, 0, "%.0f°"});
         if (b.fill == BackgroundFill::Image) {
-            p.push_back({"bg_zoom", "Background", "Zoom", PropertyKind::Float, &b.zoom, 0.5f, 1, 1000, "%.0f%%"});
-            p.push_back({"bg_offset", "Background", "Offset", PropertyKind::Vec2, &b.offset});
+            p.push_back({"bg_zoom", N_("Background"), N_("Zoom"), PropertyKind::Float, &b.zoom, 0.5f, 1, 1000, "%.0f%%"});
+            p.push_back({"bg_offset", N_("Background"), N_("Offset"), PropertyKind::Vec2, &b.offset});
         }
-        p.push_back({"bg_darken", "Background", "Darken", PropertyKind::Float, &b.darken, 0.5f, 0, 100, "%.0f%%"});
+        p.push_back({"bg_darken", N_("Background"), N_("Darken"), PropertyKind::Float, &b.darken, 0.5f, 0, 100, "%.0f%%"});
         addMasks();
         // Effects (blur a picture, tint it...) as on any layer.
         for (size_t i = 0; i < effects.size(); ++i) {
@@ -123,69 +123,69 @@ std::vector<PropertyRef> Layer::properties() {
         return p;
     }
     if (type == LayerType::Camera) { // never drawn: no shape, text or effects
-        p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
-        p.push_back({"position_z", "Transform", "Z Position", PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.1f"});
-        p.push_back({"rotation_x", "Transform", "X Rotation", PropertyKind::Float, &tr.rotationX, 0.5f, 0, 0, "%.1f°"});
-        p.push_back({"rotation_y", "Transform", "Y Rotation", PropertyKind::Float, &tr.rotationY, 0.5f, 0, 0, "%.1f°"});
-        p.push_back({"rotation", "Transform", "Z Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
-        p.push_back({"camera_zoom", "Camera", "Zoom", PropertyKind::Float, &camera.zoom, 0.5f, 1, 10000, "%.0f%%"});
+        p.push_back({"position", N_("Transform"), N_("Position"), PropertyKind::Vec2, &tr.position});
+        p.push_back({"position_z", N_("Transform"), N_("Z Position"), PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.1f"});
+        p.push_back({"rotation_x", N_("Transform"), N_("X Rotation"), PropertyKind::Float, &tr.rotationX, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"rotation_y", N_("Transform"), N_("Y Rotation"), PropertyKind::Float, &tr.rotationY, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"rotation", N_("Transform"), N_("Z Rotation"), PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"camera_zoom", N_("Camera"), N_("Zoom"), PropertyKind::Float, &camera.zoom, 0.5f, 1, 10000, "%.0f%%"});
         return p;
     }
-    p.push_back({"anchor", "Transform", "Anchor Point", PropertyKind::Vec2, &tr.anchor});
-    p.push_back({"position", "Transform", "Position", PropertyKind::Vec2, &tr.position});
-    if (threeD) p.push_back({"position_z", "Transform", "Z Position", PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.1f"});
-    p.push_back({"scale", "Transform", "Scale", PropertyKind::Vec2, &tr.scale, 0.5f, 0, 0, "%.1f%%"});
+    p.push_back({"anchor", N_("Transform"), N_("Anchor Point"), PropertyKind::Vec2, &tr.anchor});
+    p.push_back({"position", N_("Transform"), N_("Position"), PropertyKind::Vec2, &tr.position});
+    if (threeD) p.push_back({"position_z", N_("Transform"), N_("Z Position"), PropertyKind::Float, &tr.depth, 2.0f, 0, 0, "%.1f"});
+    p.push_back({"scale", N_("Transform"), N_("Scale"), PropertyKind::Vec2, &tr.scale, 0.5f, 0, 0, "%.1f%%"});
     if (threeD) {
-        p.push_back({"rotation_x", "Transform", "X Rotation", PropertyKind::Float, &tr.rotationX, 0.5f, 0, 0, "%.1f°"});
-        p.push_back({"rotation_y", "Transform", "Y Rotation", PropertyKind::Float, &tr.rotationY, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"rotation_x", N_("Transform"), N_("X Rotation"), PropertyKind::Float, &tr.rotationX, 0.5f, 0, 0, "%.1f°"});
+        p.push_back({"rotation_y", N_("Transform"), N_("Y Rotation"), PropertyKind::Float, &tr.rotationY, 0.5f, 0, 0, "%.1f°"});
     }
-    p.push_back({"rotation", "Transform", threeD ? "Z Rotation" : "Rotation", PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
-    p.push_back({"opacity", "Transform", "Opacity", PropertyKind::Float, &tr.opacity, 0.5f, 0, 100, "%.0f%%"});
+    p.push_back({"rotation", N_("Transform"), threeD ? N_("Z Rotation") : N_("Rotation"), PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
+    p.push_back({"opacity", N_("Transform"), N_("Opacity"), PropertyKind::Float, &tr.opacity, 0.5f, 0, 100, "%.0f%%"});
     addMasks();
 
     if (type == LayerType::Shape) {
         auto& s = shape;
-        if (s.kind != ShapeKind::Path) p.push_back({"size", "Shape", "Size", PropertyKind::Vec2, &s.size, 1.0f, 0, 100000});
+        if (s.kind != ShapeKind::Path) p.push_back({"size", N_("Shape"), N_("Size"), PropertyKind::Vec2, &s.size, 1.0f, 0, 100000});
         if (s.kind == ShapeKind::Rectangle)
-            p.push_back({"roundness", "Shape", "Roundness", PropertyKind::Float, &s.roundness, 0.5f, 0, 10000});
+            p.push_back({"roundness", N_("Shape"), N_("Roundness"), PropertyKind::Float, &s.roundness, 0.5f, 0, 10000});
         if (s.kind == ShapeKind::Polygon || s.kind == ShapeKind::Star)
-            p.push_back({"sides", "Shape", s.kind == ShapeKind::Star ? "Points" : "Sides", PropertyKind::Float,
+            p.push_back({"sides", N_("Shape"), s.kind == ShapeKind::Star ? N_("Points") : N_("Sides"), PropertyKind::Float,
                          &s.sides, 0.05f, 3, 64, "%.0f"});
         if (s.kind == ShapeKind::Star)
-            p.push_back({"inner_radius", "Shape", "Inner Radius", PropertyKind::Float, &s.innerRadius, 0.5f, 1, 100,
+            p.push_back({"inner_radius", N_("Shape"), N_("Inner Radius"), PropertyKind::Float, &s.innerRadius, 0.5f, 1, 100,
                          "%.0f%%"});
-        p.push_back({"fill_color", "Fill", s.fill == ShapeFill::Solid ? "Color" : "Color 1", PropertyKind::Color, &s.fillColor});
-        if (s.fill != ShapeFill::Solid) p.push_back({"fill_color2", "Fill", "Color 2", PropertyKind::Color, &s.fillColor2});
-        if (s.fill == ShapeFill::Linear) p.push_back({"fill_angle", "Fill", "Angle", PropertyKind::Float, &s.fillAngle, 0.5f, 0, 0, "%.0f°"});
-        p.push_back({"stroke_color", "Stroke", "Color", PropertyKind::Color, &s.strokeColor});
-        p.push_back({"stroke_width", "Stroke", "Width", PropertyKind::Float, &s.strokeWidth, 0.25f, 0, 1000});
-        p.push_back({"trim_start", "Stroke", "Trim Start", PropertyKind::Float, &s.trimStart, 0.5f, 0, 100, "%.0f%%"});
-        p.push_back({"trim_end", "Stroke", "Trim End", PropertyKind::Float, &s.trimEnd, 0.5f, 0, 100, "%.0f%%"});
-        p.push_back({"stroke_dash", "Stroke", "Dash", PropertyKind::Float, &s.dash, 0.25f, 0, 10000, "%.1f px"});
-        p.push_back({"stroke_gap", "Stroke", "Gap", PropertyKind::Float, &s.dashGap, 0.25f, 0, 10000, "%.1f px"});
-        p.push_back({"stroke_dash_offset", "Stroke", "Dash Offset", PropertyKind::Float, &s.dashOffset, 0.5f, 0, 0, "%.1f px"});
+        p.push_back({"fill_color", N_("Fill"), s.fill == ShapeFill::Solid ? N_("Color") : N_("Color 1"), PropertyKind::Color, &s.fillColor});
+        if (s.fill != ShapeFill::Solid) p.push_back({"fill_color2", N_("Fill"), N_("Color 2"), PropertyKind::Color, &s.fillColor2});
+        if (s.fill == ShapeFill::Linear) p.push_back({"fill_angle", N_("Fill"), N_("Angle"), PropertyKind::Float, &s.fillAngle, 0.5f, 0, 0, "%.0f°"});
+        p.push_back({"stroke_color", N_("Stroke"), N_("Color"), PropertyKind::Color, &s.strokeColor});
+        p.push_back({"stroke_width", N_("Stroke"), N_("Width"), PropertyKind::Float, &s.strokeWidth, 0.25f, 0, 1000});
+        p.push_back({"trim_start", N_("Stroke"), N_("Trim Start"), PropertyKind::Float, &s.trimStart, 0.5f, 0, 100, "%.0f%%"});
+        p.push_back({"trim_end", N_("Stroke"), N_("Trim End"), PropertyKind::Float, &s.trimEnd, 0.5f, 0, 100, "%.0f%%"});
+        p.push_back({"stroke_dash", N_("Stroke"), N_("Dash"), PropertyKind::Float, &s.dash, 0.25f, 0, 10000, "%.1f px"});
+        p.push_back({"stroke_gap", N_("Stroke"), N_("Gap"), PropertyKind::Float, &s.dashGap, 0.25f, 0, 10000, "%.1f px"});
+        p.push_back({"stroke_dash_offset", N_("Stroke"), N_("Dash Offset"), PropertyKind::Float, &s.dashOffset, 0.5f, 0, 0, "%.1f px"});
         if (s.repeater) {
-            p.push_back({"repeat_copies", "Repeater", "Copies", PropertyKind::Float, &s.repeatCopies, 0.05f, 1, 100, "%.0f"});
-            p.push_back({"repeat_offset", "Repeater", "Position", PropertyKind::Vec2, &s.repeatOffset});
-            p.push_back({"repeat_rotation", "Repeater", "Rotation", PropertyKind::Float, &s.repeatRotation, 0.5f, 0, 0, "%.1f°"});
-            p.push_back({"repeat_scale", "Repeater", "Scale", PropertyKind::Vec2, &s.repeatScale, 0.5f, 0, 0, "%.1f%%"});
-            p.push_back({"repeat_end_opacity", "Repeater", "End Opacity", PropertyKind::Float, &s.repeatEndOpacity, 0.5f, 0, 100, "%.0f%%"});
+            p.push_back({"repeat_copies", N_("Repeater"), N_("Copies"), PropertyKind::Float, &s.repeatCopies, 0.05f, 1, 100, "%.0f"});
+            p.push_back({"repeat_offset", N_("Repeater"), N_("Position"), PropertyKind::Vec2, &s.repeatOffset});
+            p.push_back({"repeat_rotation", N_("Repeater"), N_("Rotation"), PropertyKind::Float, &s.repeatRotation, 0.5f, 0, 0, "%.1f°"});
+            p.push_back({"repeat_scale", N_("Repeater"), N_("Scale"), PropertyKind::Vec2, &s.repeatScale, 0.5f, 0, 0, "%.1f%%"});
+            p.push_back({"repeat_end_opacity", N_("Repeater"), N_("End Opacity"), PropertyKind::Float, &s.repeatEndOpacity, 0.5f, 0, 100, "%.0f%%"});
         }
     } else if (type == LayerType::Compound) {
         // Only a transform: its contents are other layers.
     } else if (type == LayerType::Media) {
         if (media.timeRemap) {
-            PropertyRef remap{"time_remap", "Time", "Time Remap", PropertyKind::Float, &media.remap, 0.01f, 0, 1e6f, "%.2f s"};
+            PropertyRef remap{"time_remap", N_("Time"), N_("Time Remap"), PropertyKind::Float, &media.remap, 0.01f, 0, 1e6f, "%.2f s"};
             p.push_back(remap);
         }
-        p.push_back({"crop_left", "Crop", "Left", PropertyKind::Float, &media.cropLeft, 0.2f, 0, 100, "%.1f%%"});
-        p.push_back({"crop_top", "Crop", "Top", PropertyKind::Float, &media.cropTop, 0.2f, 0, 100, "%.1f%%"});
-        p.push_back({"crop_right", "Crop", "Right", PropertyKind::Float, &media.cropRight, 0.2f, 0, 100, "%.1f%%"});
-        p.push_back({"crop_bottom", "Crop", "Bottom", PropertyKind::Float, &media.cropBottom, 0.2f, 0, 100, "%.1f%%"});
+        p.push_back({"crop_left", N_("Crop"), N_("Left"), PropertyKind::Float, &media.cropLeft, 0.2f, 0, 100, "%.1f%%"});
+        p.push_back({"crop_top", N_("Crop"), N_("Top"), PropertyKind::Float, &media.cropTop, 0.2f, 0, 100, "%.1f%%"});
+        p.push_back({"crop_right", N_("Crop"), N_("Right"), PropertyKind::Float, &media.cropRight, 0.2f, 0, 100, "%.1f%%"});
+        p.push_back({"crop_bottom", N_("Crop"), N_("Bottom"), PropertyKind::Float, &media.cropBottom, 0.2f, 0, 100, "%.1f%%"});
         if (media.hasAudio)
-            p.push_back({"volume", "Audio", "Volume", PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
+            p.push_back({"volume", N_("Audio"), N_("Volume"), PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
     } else if (type == LayerType::Plugin) {
-        p.push_back({"size", "Object", "Size", PropertyKind::Vec2, &plugin.size, 1.0f, 0, 100000});
+        p.push_back({"size", N_("Object"), N_("Size"), PropertyKind::Vec2, &plugin.size, 1.0f, 0, 100000});
         for (PluginParam& pp : plugin.params) {
             pp.propertyId = "p." + pp.id;
             const char* id = pp.propertyId.c_str();
@@ -199,23 +199,23 @@ std::vector<PropertyRef> Layer::properties() {
         auto& t = text;
         if (t.counter) {
             const char* format = kDecimalFormats[std::clamp(t.counterDecimals, 0, 6)];
-            p.push_back({"counter_from", "Counter", "Start", PropertyKind::Float, &t.counterFrom, 1.0f, -1e12f, 1e12f, format});
-            p.push_back({"counter_to", "Counter", "End", PropertyKind::Float, &t.counterTo, 1.0f, -1e12f, 1e12f, format});
-            PropertyRef value{"counter_value", "Counter", "Value", PropertyKind::Float, &t.counterValue, 1.0f, -1e12f, 1e12f, format};
+            p.push_back({"counter_from", N_("Counter"), N_("Start"), PropertyKind::Float, &t.counterFrom, 1.0f, -1e12f, 1e12f, format});
+            p.push_back({"counter_to", N_("Counter"), N_("End"), PropertyKind::Float, &t.counterTo, 1.0f, -1e12f, 1e12f, format});
+            PropertyRef value{"counter_value", N_("Counter"), N_("Value"), PropertyKind::Float, &t.counterValue, 1.0f, -1e12f, 1e12f, format};
             value.whileAnimated = true; // keyframes on it replace the count
             p.push_back(value);
         }
-        p.push_back({"font_size", "Text", "Font Size", PropertyKind::Float, &t.fontSize, 0.5f, 1, 2000, "%.0f px"});
-        p.push_back({"text_color", "Text", "Color", PropertyKind::Color, &t.color});
-        p.push_back({"tracking", "Text", "Tracking", PropertyKind::Float, &t.tracking, 0.25f, -200, 1000});
-        p.push_back({"line_height", "Text", "Line Height", PropertyKind::Float, &t.lineHeight, 0.5f, 10, 500, "%.0f%%"});
-        p.push_back({"wrap_width", "Text", "Wrap Width", PropertyKind::Float, &t.wrapWidth, 2.0f, 0, 100000, "%.0f px"});
-        p.push_back({"reveal", "Text", "Reveal", PropertyKind::Float, &t.reveal, 0.5f, 0, 100, "%.0f%%"});
-        p.push_back({"outline_color", "Outline", "Color", PropertyKind::Color, &t.outlineColor});
-        p.push_back({"outline_width", "Outline", "Width", PropertyKind::Float, &t.outlineWidth, 0.25f, 0, 500});
-        p.push_back({"box_color", "Box", "Color", PropertyKind::Color, &t.boxColor});
-        p.push_back({"box_padding", "Box", "Padding", PropertyKind::Float, &t.boxPadding, 0.5f, 0, 2000});
-        p.push_back({"box_roundness", "Box", "Roundness", PropertyKind::Float, &t.boxRoundness, 0.5f, 0, 2000});
+        p.push_back({"font_size", N_("Text"), N_("Font Size"), PropertyKind::Float, &t.fontSize, 0.5f, 1, 2000, "%.0f px"});
+        p.push_back({"text_color", N_("Text"), N_("Color"), PropertyKind::Color, &t.color});
+        p.push_back({"tracking", N_("Text"), N_("Tracking"), PropertyKind::Float, &t.tracking, 0.25f, -200, 1000});
+        p.push_back({"line_height", N_("Text"), N_("Line Height"), PropertyKind::Float, &t.lineHeight, 0.5f, 10, 500, "%.0f%%"});
+        p.push_back({"wrap_width", N_("Text"), N_("Wrap Width"), PropertyKind::Float, &t.wrapWidth, 2.0f, 0, 100000, "%.0f px"});
+        p.push_back({"reveal", N_("Text"), N_("Reveal"), PropertyKind::Float, &t.reveal, 0.5f, 0, 100, "%.0f%%"});
+        p.push_back({"outline_color", N_("Outline"), N_("Color"), PropertyKind::Color, &t.outlineColor});
+        p.push_back({"outline_width", N_("Outline"), N_("Width"), PropertyKind::Float, &t.outlineWidth, 0.25f, 0, 500});
+        p.push_back({"box_color", N_("Box"), N_("Color"), PropertyKind::Color, &t.boxColor});
+        p.push_back({"box_padding", N_("Box"), N_("Padding"), PropertyKind::Float, &t.boxPadding, 0.5f, 0, 2000});
+        p.push_back({"box_roundness", N_("Box"), N_("Roundness"), PropertyKind::Float, &t.boxRoundness, 0.5f, 0, 2000});
     }
 
     // Effect parameters. Ids are index based ("fx0.size") and only used at runtime;

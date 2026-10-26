@@ -123,7 +123,7 @@ public:
     bool apply(const nlohmann::json& op) {
         const OpsResult r = applyOps(ctx_.project, op);
         if (!r.ok) {
-            QMessageBox::warning(window(), "Media", QString::fromStdString(r.error.substr(r.error.find(": ") + 2)));
+            QMessageBox::warning(window(), tr("Media"), QString::fromStdString(r.error.substr(r.error.find(": ") + 2)));
             return false;
         }
         ctx_.touch();
@@ -132,10 +132,10 @@ public:
     }
     void newFolder(uint64_t moveHere = 0) {
         bool ok = false;
-        std::string name = "Folder";
+        std::string name = tr("Folder").toStdString();
         for (int n = 2; std::find(ctx_.comp().mediaFolders.begin(), ctx_.comp().mediaFolders.end(), name) != ctx_.comp().mediaFolders.end(); ++n)
-            name = "Folder " + std::to_string(n);
-        const QString typed = QInputDialog::getText(window(), "New Folder", "Name", QLineEdit::Normal, QString::fromStdString(name), &ok);
+            name = tr("Folder %1").arg(n).toStdString();
+        const QString typed = QInputDialog::getText(window(), tr("New Folder"), tr("Name"), QLineEdit::Normal, QString::fromStdString(name), &ok);
         if (!ok || typed.trimmed().isEmpty()) return;
         nlohmann::json ops = nlohmann::json::array({{{"op", "folder.add"}, {"name", typed.trimmed().toStdString()}}});
         if (moveHere) ops.push_back({{"op", "media.move"}, {"media", moveHere}, {"folder", typed.trimmed().toStdString()}});
@@ -213,7 +213,7 @@ protected:
             if (!item) continue;
             const float x0 = static_cast<float>(row.indent);
             const bool missing = mm.fileMissing(*item);
-            const std::string error = missing ? "File not found: " + item->path : mm.error(item->id);
+            const std::string error = missing ? tr("File not found: %1").arg(QString::fromStdString(item->path)).toStdString() : mm.error(item->id);
             if (item->id == selected) d.rectFilled(ui::Pt(x0 + 2, rowTop + 1), ui::Pt(width() - 2, rowTop + kRow - 1), theme::accent(45), 6.0f);
             else if (static_cast<int>(i) == hover_) d.rectFilled(ui::Pt(x0 + 2, rowTop + 1), ui::Pt(width() - 2, rowTop + kRow - 1), theme::kBgHover, 6.0f);
             if (row.indent) d.line(ui::Pt(12, rowTop), ui::Pt(12, rowTop + kRow), theme::kBorder, 1.0f); // inside a folder
@@ -239,9 +239,14 @@ protected:
             const float lh = d.textHeight();
             const float ty = rowTop + (kRow - lh * 2.0f - 2.0f) * 0.5f;
             d.text(ui::Pt(tx, ty), missing ? theme::kDanger : theme::kText, item->name);
-            std::string info = missing ? "Missing — right-click to relink" : describe(*item, ctx_.comp().fps);
-            if (!missing && item->hasAudio && mm.audioPending(item->id)) info += "  ·  reading audio...";
-            else if (!missing && !error.empty()) info = "Error — " + error;
+            QString info = missing ? tr("Missing — right-click to relink") : QString::fromStdString(describe(*item, ctx_.comp().fps));
+            if (!missing && item->hasAudio && mm.audioPending(item->id)) info += tr("  ·  reading audio...");
+            else if (!missing && !error.empty()) info = tr("Error — %1").arg(QString::fromStdString(error));
+            else if (const float made = mm.proxyProgress(item->id); !missing && made >= 0.0f)
+                info += tr("  ·  making proxy %1%").arg(static_cast<int>(made * 100.0f));
+            else if (!missing && mm.hasProxy(*item)) info += mm.useProxies() ? tr("  ·  proxy") : tr("  ·  proxy (off)");
+            else if (const std::string failed = mm.proxyError(item->id); !missing && !failed.empty())
+                info += tr("  ·  no proxy: %1").arg(QString::fromStdString(failed));
             d.text(ui::Pt(tx, ty + lh + 2.0f), !error.empty() ? theme::kDanger : theme::kTextFaint, info);
             d.popClip();
             if (layersUsing(ctx_.comp(), item->id) > 0) d.circleFilled(ui::Pt(width() - 9.0f, rowTop + 10.0f), 3.0f, theme::kAccent);
@@ -254,13 +259,13 @@ protected:
             const Row* row = rowAt(he->pos().y());
             if (const MediaItem* item = itemAt(he->pos().y())) {
                 const bool missing = media::MediaManager::get().fileMissing(*item);
-                const std::string error = missing ? "File not found: " + item->path : media::MediaManager::get().error(item->id);
+                const std::string error = missing ? tr("File not found: %1").arg(QString::fromStdString(item->path)).toStdString() : media::MediaManager::get().error(item->id);
                 QToolTip::showText(he->globalPos(),
                                    QString::fromStdString(item->name + "\n" + item->path + "\n" +
-                                                          (error.empty() ? "Drag onto the canvas or the timeline, or double-click to add at the playhead." : error)),
+                                                          (error.empty() ? tr("Drag onto the canvas or the timeline, or double-click to add at the playhead.").toStdString() : error)),
                                    this);
             } else if (row && row->kind == Row::Folder) {
-                QToolTip::showText(he->globalPos(), "A folder to keep media tidy (nothing moves on disk). Drag media onto it.", this);
+                QToolTip::showText(he->globalPos(), tr("A folder to keep media tidy (nothing moves on disk). Drag media onto it."), this);
             } else {
                 QToolTip::hideText();
             }
@@ -366,16 +371,16 @@ protected:
 
     void addMoveMenu(QMenu& menu, uint64_t id) {
         const MediaItem* item = ctx_.comp().findMedia(id);
-        QMenu* move = menu.addMenu(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Move to Folder");
+        QMenu* move = menu.addMenu(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), tr("Move to Folder"));
         for (const std::string& f : ctx_.comp().mediaFolders) {
             QAction* a = move->addAction(QString::fromStdString(f), [this, id, f] { apply({{"op", "media.move"}, {"media", id}, {"folder", f}}); });
             a->setCheckable(true);
             a->setChecked(item && item->folder == f);
         }
         if (!ctx_.comp().mediaFolders.empty()) move->addSeparator();
-        QAction* top = move->addAction("No Folder", [this, id] { apply({{"op", "media.move"}, {"media", id}, {"folder", ""}}); });
+        QAction* top = move->addAction(tr("No Folder"), [this, id] { apply({{"op", "media.move"}, {"media", id}, {"folder", ""}}); });
         top->setEnabled(item && !item->folder.empty());
-        move->addAction("New Folder...", [this, id] { newFolder(id); });
+        move->addAction(tr("New Folder..."), [this, id] { newFolder(id); });
     }
 
     void showMenu(uint64_t id, QPoint at) {
@@ -383,49 +388,71 @@ protected:
         if (!item) return;
         const bool missing = media::MediaManager::get().fileMissing(*item);
         QMenu menu(this);
-        QAction* add = menu.addAction("Add to Composition", [this, id] { ctx_.addMedia(id); });
+        QAction* add = menu.addAction(tr("Add to Composition"), [this, id] { ctx_.addMedia(id); });
         add->setEnabled(!missing);
-        QAction* reveal = menu.addAction("Show in Folder", [item] { platform::revealInFileManager(pathOf(item->path)); });
+        QAction* reveal = menu.addAction(tr("Show in Folder"), [item] { platform::revealInFileManager(pathOf(item->path)); });
         reveal->setEnabled(!missing);
-        menu.addAction(missing ? "Relink..." : "Replace Footage...", [this, id] { relink(id); });
+        menu.addAction(missing ? tr("Relink...") : tr("Replace Footage..."), [this, id] { relink(id); });
+        if (item->kind == MediaKind::Video) { // a small copy to edit with: smooth playback of big videos
+            media::MediaManager& mm = media::MediaManager::get();
+            const MediaItem copy = *item;
+            menu.addSeparator();
+            if (mm.proxyProgress(id) >= 0.0f) {
+                menu.addAction(ui::menuIcon(ui::Icon::Proxy, theme::kTextDim), tr("Stop Making Proxy"), [copy] { media::MediaManager::get().deleteProxy(copy); });
+            } else if (mm.hasProxy(*item)) {
+                menu.addAction(ui::menuIcon(ui::Icon::Proxy, theme::kTextDim), tr("Delete Proxy"), [copy] { media::MediaManager::get().deleteProxy(copy); });
+            } else {
+                QAction* make = menu.addAction(ui::menuIcon(ui::Icon::Proxy, theme::kTextDim), tr("Create Proxy"), [copy] {
+                    media::MediaManager::get().makeProxies({copy});
+                });
+                make->setEnabled(!missing);
+                make->setToolTip(tr("A small copy of the video the editor plays instead: smooth even for 4K. Exports use the original."));
+            }
+        }
         menu.addSeparator();
         addMoveMenu(menu, id);
         menu.addSeparator();
-        menu.addAction("Remove", [this, id] { remove(id); });
+        menu.addAction(tr("Remove"), [this, id] { remove(id); });
         menu.exec(at);
     }
 
     void showFolderMenu(const std::string& folder, QPoint at) {
         QMenu menu(this);
-        menu.addAction("Rename...", [this, folder] {
+        menu.addAction(tr("Rename..."), [this, folder] {
             bool ok = false;
-            const QString typed = QInputDialog::getText(window(), "Rename Folder", "Name", QLineEdit::Normal, QString::fromStdString(folder), &ok);
+            const QString typed = QInputDialog::getText(window(), tr("Rename Folder"), tr("Name"), QLineEdit::Normal, QString::fromStdString(folder), &ok);
             if (ok && typed.trimmed().toStdString() != folder)
                 if (apply({{"op", "folder.rename"}, {"folder", folder}, {"name", typed.trimmed().toStdString()}}) && closed_.erase(folder))
                     closed_.insert(typed.trimmed().toStdString());
         });
-        menu.addAction("New Folder...", [this] { newFolder(); });
+        menu.addAction(tr("New Folder..."), [this] { newFolder(); });
         menu.addSeparator();
-        menu.addAction("Delete Folder", [this, folder] { apply({{"op", "folder.remove"}, {"folder", folder}}); })
-            ->setToolTip("The media inside stay, at the top");
+        menu.addAction(tr("Delete Folder"), [this, folder] { apply({{"op", "folder.remove"}, {"folder", folder}}); })
+            ->setToolTip(tr("The media inside stay, at the top"));
         menu.setToolTipsVisible(true);
         menu.exec(at);
     }
 
     void showEmptyMenu(QPoint at) {
         QMenu menu(this);
-        menu.addAction("Import...", [this] { panel_.openImportDialog(); });
-        menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "New Folder...", [this] { newFolder(); });
+        menu.addAction(tr("Import..."), [this] { panel_.openImportDialog(); });
+        menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), tr("New Folder..."), [this] { newFolder(); });
+        std::vector<MediaItem> videos; // big videos without a proxy yet
+        for (const MediaItem& item : ctx_.comp().media)
+            if (media::proxyWanted(item) && !media::MediaManager::get().hasProxy(item) && !media::MediaManager::get().fileMissing(item)) videos.push_back(item);
+        QAction* all = menu.addAction(ui::menuIcon(ui::Icon::Proxy, theme::kTextDim), tr("Create Proxies for Big Videos"),
+                                      [videos] { media::MediaManager::get().makeProxies(videos); });
+        all->setEnabled(!videos.empty());
         menu.exec(at);
     }
 
     void relink(uint64_t id) {
-        const auto files = platform::openFilesDialog("Relink Media", "Media files", media::supportedExtensions());
+        const auto files = platform::openFilesDialog(TR_NOOP("Relink Media"), TR_NOOP("Media files"), media::supportedExtensions());
         MediaItem* item = ctx_.comp().findMedia(id);
         if (files.empty() || !item) return;
         media::ProbeResult r = media::probe(files.front());
         if (!r.ok) {
-            QMessageBox::warning(window(), "Relink", QString::fromStdString(r.item.name + ": " + r.error));
+            QMessageBox::warning(window(), tr("Relink"), QString::fromStdString(r.item.name + ": " + r.error));
             return;
         }
         // Same item (its layers keep pointing at it), new file.
@@ -447,10 +474,10 @@ protected:
         // Unused items go right away; used ones ask first (their layers go too).
         if (const int uses = layersUsing(comp, id); uses > 0) {
             QMessageBox box(window());
-            box.setWindowTitle("Remove Media?");
-            box.setText(QString("\"%1\" is used by %2 layer%3.").arg(QString::fromStdString(item->name)).arg(uses).arg(uses == 1 ? "" : "s"));
-            box.setInformativeText(uses == 1 ? "Removing it also deletes that layer." : "Removing it also deletes those layers.");
-            QPushButton* ok = box.addButton("Remove", QMessageBox::DestructiveRole);
+            box.setWindowTitle(tr("Remove Media?"));
+            box.setText(tr("\"%1\" is used by %2 layer%3.").arg(QString::fromStdString(item->name)).arg(uses).arg(uses == 1 ? "" : "s"));
+            box.setInformativeText(uses == 1 ? tr("Removing it also deletes that layer.") : tr("Removing it also deletes those layers."));
+            QPushButton* ok = box.addButton(tr("Remove"), QMessageBox::DestructiveRole);
             box.addButton(QMessageBox::Cancel);
             box.exec();
             if (box.clickedButton() != ok) return;
@@ -484,14 +511,14 @@ MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), c
     col->setSpacing(6);
 
     auto* top = new QHBoxLayout;
-    auto* import = new ui::IconButton(ui::Icon::Import, "Import images, videos or audio (Ctrl+I)", 28);
+    auto* import = new ui::IconButton(ui::Icon::Import, tr("Import images, videos or audio (Ctrl+I)"), 28);
     connect(import, &QAbstractButton::clicked, this, &MediaPanel::openImportDialog);
     top->addWidget(import);
-    auto* folder = new ui::IconButton(ui::Icon::Folder, "New folder: keep media tidy (only in bemotion, nothing moves on disk)", 28);
+    auto* folder = new ui::IconButton(ui::Icon::Folder, tr("New folder: keep media tidy (only in bemotion, nothing moves on disk)"), 28);
     connect(folder, &QAbstractButton::clicked, this, [this] { list_->newFolder(); });
     top->addWidget(folder);
     search_ = new QLineEdit;
-    search_->setPlaceholderText("Search media");
+    search_->setPlaceholderText(tr("Search media"));
     search_->setClearButtonEnabled(true);
     top->addWidget(search_);
     col->addLayout(top);
@@ -503,7 +530,7 @@ MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), c
     message_->setWordWrap(true);
     ui::setTone(message_, ui::Tone::Danger);
     mrow->addWidget(message_, 1);
-    auto* dismiss = new QPushButton("Dismiss");
+    auto* dismiss = new QPushButton(tr("Dismiss"));
     connect(dismiss, &QPushButton::clicked, messageRow_, &QWidget::hide);
     mrow->addWidget(dismiss, 0, Qt::AlignTop);
     messageRow_->hide();
@@ -512,11 +539,11 @@ MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), c
     empty_ = new QWidget;
     auto* ecol = new QVBoxLayout(empty_);
     ecol->setContentsMargins(0, 12, 0, 0);
-    auto* hint = new QLabel("No media yet. Import images, videos or audio, or drop files onto the window.");
+    auto* hint = new QLabel(tr("No media yet. Import images, videos or audio, or drop files onto the window."));
     hint->setWordWrap(true);
     ui::setTone(hint, ui::Tone::TextFaint);
     ecol->addWidget(hint);
-    auto* importBig = ui::accentButton("Import...");
+    auto* importBig = ui::accentButton(tr("Import..."));
     connect(importBig, &QPushButton::clicked, this, &MediaPanel::openImportDialog);
     ecol->addWidget(importBig);
     ecol->addStretch();
@@ -546,6 +573,12 @@ void MediaPanel::sync() {
     empty_->setVisible(none);
     scroll_->setVisible(!none);
     list_->refresh();
+    // Proxies being made: their progress moves.
+    for (const MediaItem& item : ctx_.comp().media)
+        if (media::MediaManager::get().proxyProgress(item.id) >= 0.0f) {
+            list_->update();
+            break;
+        }
 }
 
 void MediaPanel::showMessage(const std::string& text) {
@@ -572,7 +605,7 @@ void MediaPanel::importFiles(const std::vector<std::filesystem::path>& files, bo
 }
 
 void MediaPanel::openImportDialog() {
-    importFiles(platform::openFilesDialog("Import Media", "Media files", media::supportedExtensions()), false);
+    importFiles(platform::openFilesDialog(TR_NOOP("Import Media"), TR_NOOP("Media files"), media::supportedExtensions()), false);
 }
 
 void MediaPanel::dragEnterEvent(QDragEnterEvent* e) {

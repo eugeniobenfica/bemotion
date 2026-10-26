@@ -24,7 +24,8 @@ namespace {
 class ExperienceCard : public QAbstractButton {
 public:
     ExperienceCard(Icon icon, QString name, QString line, QStringList points)
-        : icon_(icon), name_(std::move(name)), line_(std::move(line)), points_(std::move(points)) {
+        : icon_(icon), name_(trLabel(name)), line_(trLabel(line)), points_(std::move(points)) {
+        for (QString& p : points_) p = trLabel(p);
         setCheckable(true);
         setAutoExclusive(true);
         setCursor(Qt::PointingHandCursor);
@@ -90,14 +91,14 @@ ExperienceScreen::ExperienceScreen(QWidget* parent) : QWidget(parent) {
     auto* col = new QVBoxLayout(center);
     col->setContentsMargins(24, 0, 24, 0);
     col->setSpacing(10);
-    auto* title = new QLabel("Welcome to bemotion");
+    auto* title = new QLabel(tr("Welcome to bemotion"));
     QFont tf = title->font();
     tf.setBold(true);
     tf.setPointSizeF(tf.pointSizeF() * 2.0);
     title->setFont(tf);
     title->setAlignment(Qt::AlignHCenter);
     col->addWidget(title);
-    auto* about = new QLabel("How much do you want to see? You can change it any time in Settings › Interface.");
+    auto* about = new QLabel(tr("How much do you want to see? You can change it any time in Settings › Interface."));
     setTone(about, Tone::TextDim);
     about->setAlignment(Qt::AlignHCenter);
     col->addWidget(about);
@@ -114,10 +115,10 @@ ExperienceScreen::ExperienceScreen(QWidget* parent) : QWidget(parent) {
         QStringList points;
     };
     const Choice choices[] = {
-        {"friendly", Icon::Star, "Friendly", "The essentials, nothing in the way.", {"A short toolbar", "No expressions or curves to deal with", "Simple settings"}},
-        {"balanced", Icon::Sliders, "Balanced", "bemotion picks for you: the usual tools, the rest when you need it.",
-         {"The usual toolbar", "Audio meters", "Everything else a click away"}},
-        {"expert", Icon::Graph, "Expert", "Everything at hand.", {"Every option in Settings", "Rulers, meters, the graph editor", "A fuller toolbar"}},
+        {"friendly", Icon::Star, TR_NOOP("Friendly"), TR_NOOP("The essentials, nothing in the way."), {TR_NOOP("A short toolbar"), TR_NOOP("No expressions or curves to deal with"), TR_NOOP("Simple settings")}},
+        {"balanced", Icon::Sliders, TR_NOOP("Balanced"), TR_NOOP("bemotion picks for you: the usual tools, the rest when you need it."),
+         {TR_NOOP("The usual toolbar"), TR_NOOP("Audio meters"), TR_NOOP("Everything else a click away")}},
+        {"expert", Icon::Graph, TR_NOOP("Expert"), TR_NOOP("Everything at hand."), {TR_NOOP("Every option in Settings"), TR_NOOP("Rulers, meters, the graph editor"), TR_NOOP("A fuller toolbar")}},
     };
     for (int i = 0; i < 3; ++i) {
         auto* card = new ExperienceCard(choices[i].icon, choices[i].name, choices[i].line, choices[i].points);
@@ -132,14 +133,14 @@ ExperienceScreen::ExperienceScreen(QWidget* parent) : QWidget(parent) {
 
     auto* options = new SettingsCard;
     essentials_ = new Switch;
-    options->addRow("Essentials only", "Plugins off: no charts, maps, 3D models or voice recording, for the simplest bemotion. "
-                                       "They come back in Settings › Plugins.",
+    options->addRow(tr("Essentials only"), tr("Plugins off: no charts, maps, 3D models or voice recording, for the simplest bemotion. "
+                                       "They come back in Settings › Plugins."),
                     essentials_);
     col->addWidget(options);
     col->addSpacing(14);
     auto* row = new QHBoxLayout;
     row->addStretch();
-    auto* start = accentButton("Start");
+    auto* start = accentButton(tr("Start"));
     start->setMinimumWidth(140);
     start->setDefault(true);
     connect(start, &QPushButton::clicked, this, [this] { apply(); });

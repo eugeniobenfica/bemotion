@@ -9,14 +9,17 @@
 #include "app/Settings.h"
 #include "core/Serialization.h"
 #include "media/AudioEngine.h"
+#include "media/MediaIO.h"
 #include "media/MediaManager.h"
 #include "render/Fonts.h"
+#include "render/SceneRenderer.h"
 #include "ui/AppSignals.h"
 #include "ui/Dialogs.h"
 #include "ui/EditorWindow.h"
 #include "ui/ExperienceScreen.h"
 #include "ui/HomeScreen.h"
 #include "ui/IntroScreen.h"
+#include "ui/Language.h"
 #include "ui/Keymap.h"
 #include "ui/Style.h"
 #include "ui/Theme.h"
@@ -191,9 +194,15 @@ int Application::run(int argc, char** argv) {
 
 void Application::initShared() {
     loadSettings();
+    ui::installLanguage(settings().language); // before any window reads its texts
     Fonts::load(platform::assetsDir());
+    render::setLutFolder(platform::assetsDir() / "luts");
     PluginHost::get().load();
     media::MediaManager::get().install();
+    media::setHardwareDecoding(settings().hardwareDecoding);
+    media::setProxyFolder(platform::appDataDir() / "proxies");
+    media::MediaManager::get().setUseProxies(settings().useProxies);
+    media::MediaManager::get().setFrameCacheMegabytes(settings().cacheMegabytes / 2); // the other half: the viewport's
 }
 
 void Application::buildWindow() {
@@ -336,8 +345,8 @@ void Application::openProject(const std::filesystem::path& path) {
     platform::log("opening " + platform::toUtf8(path));
     if (!loadProject(path, project, &err)) {
         platform::log("could not open it: " + err);
-        const std::string message = "Could not open \"" + platform::toUtf8(path.filename()) + "\": " + err;
-        if (editor_) QMessageBox::warning(window_, "Open Project", QString::fromStdString(message)); // from the editor's File menu
+        const std::string message = tr("Could not open \"%1\": %2").arg(QString::fromStdString(platform::toUtf8(path.filename())), QString::fromStdString(err)).toStdString();
+        if (editor_) QMessageBox::warning(window_, tr("Open Project"), QString::fromStdString(message)); // from the editor's File menu
         else home_->setError(message);
         return;
     }
@@ -349,7 +358,7 @@ void Application::openProject(const std::filesystem::path& path) {
 void Application::createProject(Project project, const std::filesystem::path& path) {
     std::string err;
     if (!saveProject(project, path, &err)) {
-        home_->setError("Could not create the project: " + err);
+        home_->setError(tr("Could not create the project: %1").arg(QString::fromStdString(err)).toStdString());
         return;
     }
     recents_.touch(path, project.name);
@@ -414,16 +423,16 @@ void Application::offerRecovery() {
     if (entries.empty()) return;
     const recovery::Entry& e = entries.front();
     QMessageBox box(window_);
-    box.setWindowTitle("Recover Unsaved Changes");
-    box.setText(QString("bemotion closed before \"%1\" was saved.").arg(QString::fromStdString(e.name)));
-    QString info = QString("Its changes up to %1 were kept. Recover them?")
+    box.setWindowTitle(tr("Recover Unsaved Changes"));
+    box.setText(tr("bemotion closed before \"%1\" was saved.").arg(QString::fromStdString(e.name)));
+    QString info = tr("Its changes up to %1 were kept. Recover them?")
                        .arg(QDateTime::fromSecsSinceEpoch(e.savedAt).toString("hh:mm, dd MMM"));
-    if (entries.size() > 1) info += QString("\n\n%1 more project(s) can be recovered next time.").arg(entries.size() - 1);
+    if (entries.size() > 1) info += tr("\n\n%1 more project(s) can be recovered next time.").arg(entries.size() - 1);
     box.setInformativeText(info);
-    QPushButton* recover = box.addButton("Recover", QMessageBox::AcceptRole);
+    QPushButton* recover = box.addButton(tr("Recover"), QMessageBox::AcceptRole);
     recover->setProperty("accent", true);
-    QPushButton* discard = box.addButton("Discard", QMessageBox::DestructiveRole);
-    box.addButton("Later", QMessageBox::RejectRole);
+    QPushButton* discard = box.addButton(tr("Discard"), QMessageBox::DestructiveRole);
+    box.addButton(tr("Later"), QMessageBox::RejectRole);
     box.setDefaultButton(recover);
     box.exec();
     if (box.clickedButton() == discard) {
@@ -434,7 +443,7 @@ void Application::offerRecovery() {
     Project project;
     std::string err;
     if (!loadProject(e.copy, project, &err)) {
-        home_->setError("Could not recover \"" + e.name + "\": " + err);
+        home_->setError(tr("Could not recover \"%1\": %2").arg(QString::fromStdString(e.name), QString::fromStdString(err)).toStdString());
         return;
     }
     platform::log("recovering " + e.name);

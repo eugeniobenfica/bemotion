@@ -207,10 +207,35 @@ After Effects' *Convert Expression to Keyframes*.
 **`effect.add`** → `{"index": i, "params": [...]}` — `layer`, `effect`
 (`gaussian_blur`, `directional_blur`, `brightness_contrast`, `hue_saturation`,
 `tint`, `invert`, `fill`, `wave_warp`, `outline`, `glow`, `drop_shadow`,
-`motion_blur`), `params` (`{"size": 30}`; ids from the result).
+`motion_blur`, `lut`, `curves`, `chroma_key`), `params` (`{"size": 30}`; ids
+from the result).
 
 **`effect.remove`** — `layer`, `index`. **`effect.set`** — `layer`, `index`,
-`enabled`, `samples` (motion blur, 2–64).
+`enabled`, `samples` (motion blur, 2–64), `file` (`lut`: a `.cube` file, or
+`"bundled:Teal & Orange.cube"` for a look that comes with bemotion — `Warm`,
+`Cool`, `Bleach Bypass`, `Film Fade`; `""` clears it), `curves` (`curves`:
+`{"rgb": [[0, 0], [0.5, 0.6], [1, 1]], "red": ..., "green": ..., "blue": ...}`,
+points `[x, y]` from 0 to 1, at most 16 per curve, `null` resets one; the
+channel's curve applies first, then RGB).
+
+`lut` and `curves` blend with `opacity` (Amount, %). `chroma_key`: `color`
+(the key, a studio green by default), `v1` tolerance, `v2` softness, `v3`
+spill suppression (%), `size` choke (px: pulls the edge in).
+`query.layer` lists each effect's `file` and `curves` in `effect_list`.
+
+**Audio effects** (clips with sound: audio, and video with audio) — not on the
+picture but on the sound, in playback and export:
+`gain` (`value`: dB), `fade_in` / `fade_out` (`value`: seconds), `eq`
+(`low` 100 Hz shelf, `mid` 1 kHz, `high` 8 kHz shelf: dB, −24 to 24),
+`noise_reduction` (`reduction` dB 0–40, `sensitivity` %: how far above the
+steady noise still counts as noise), `ducking` (`amount`: how many dB quieter
+while any other clip with sound — without ducking itself — is above
+`threshold` dB, easing over `fade` seconds; put it on the music).
+
+**`audio_effect.add`** → `{"index": i, "values": {...}}` — `layer`, `effect`,
+`values` (`{"low": 3}`). **`audio_effect.set`** — `layer`, `index`,
+`enabled`, `values`. **`audio_effect.remove`** — `layer`, `index`.
+`query.layer` lists them in `audio_effects` (effect, enabled, values).
 
 ## Transitions and arranging
 
@@ -270,7 +295,8 @@ markers.
 **`query.layers`** — every layer, top first: id, name, type, in, out, track
 row, parent (and, when set: blend, matte, masks, speed, muted, solo). **`query.layer`** — `layer`, `time`: everything about one layer,
 with each property's value at `time` and its keyframes (a path shape's `path`,
-the masks in `mask_list`); a property driven by an
+the masks in `mask_list`, the effects in `effect_list`, a clip's sound effects
+in `audio_effects`); a property driven by an
 expression also has `expression` and, when it fails there, `expression_error`.
 **`query.expression`** — `layer`, `prop`, `expression` (default: the
 property's own), `time` (default 0) or `times` (a list): works it out without

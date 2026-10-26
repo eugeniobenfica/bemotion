@@ -6,6 +6,7 @@
 #include "core/Layer.h"
 #include "core/Media.h"
 #include "ui/Draw.h"
+#include "ui/Language.h"
 
 #include <QAbstractButton>
 #include <QIcon>
@@ -138,6 +139,9 @@ enum class Icon {
     SpeakerMuted,   // sound off
     Solo,           // solo: headphones
     Speed,          // a clip's speed: a gauge
+    FxKeying,       // keying effects: a square with a hole
+    Scopes,         // the Scopes panel: a waveform trace on a grid
+    Proxy,          // proxies: a small film frame
 };
 
 Icon iconForLayer(const Layer& layer);

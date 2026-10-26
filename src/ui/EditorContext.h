@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -53,6 +54,9 @@ public:
     // negative backwards. Play / pause goes back to 1.
     double playRate = 1.0;
     void shuttle(int direction); // -1: J (backwards, faster each time), 0: K (stop), 1: L
+    // Frames the viewport keeps rendered (they play again without rendering): the timeline's
+    // ruler shows them as a green line, like After Effects' RAM preview.
+    std::set<int> cachedFrames;
 
     void open(Project p, std::filesystem::path file);
 

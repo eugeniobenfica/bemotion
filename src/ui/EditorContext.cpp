@@ -3,6 +3,7 @@
 #include "app/PluginHost.h"
 #include "core/Clipboard.h"
 #include "core/Serialization.h"
+#include "ui/Language.h"
 
 #include <algorithm>
 #include <cmath>
@@ -201,7 +202,7 @@ Layer& EditorContext::addShape(ShapeKind kind, std::optional<Vec2> position) {
 }
 
 Layer& EditorContext::addText(std::optional<Vec2> position) {
-    return insertLayer(makeTextLayer("Your text", position.value_or(comp().center()), kDefaultLayerLength));
+    return insertLayer(makeTextLayer(tr("Your text").toStdString(), position.value_or(comp().center()), kDefaultLayerLength));
 }
 
 Layer& EditorContext::addCounter(std::optional<Vec2> position) {

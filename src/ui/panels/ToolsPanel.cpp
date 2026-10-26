@@ -51,7 +51,7 @@ void ToolsPanel::rebuild() {
     col->setContentsMargins(8, 8, 8, 8);
     col->setSpacing(6);
     for (bool modal : {true, false}) {
-        col->addWidget(ui::sectionLabel(modal ? "Tools" : "Actions"));
+        col->addWidget(ui::sectionLabel(modal ? tr("Tools") : tr("Actions")));
         auto* grid = new QGridLayout;
         grid->setSpacing(8);
         grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
@@ -59,9 +59,9 @@ void ToolsPanel::rebuild() {
         for (int i = 0; i < static_cast<int>(catalog.size()); ++i) {
             const ui::ToolInfo& tool = catalog[i];
             if (tool.modal != modal) continue;
-            auto* t = new ui::Tile(tool.icon, tool.label);
+            auto* t = new ui::Tile(tool.icon, tr(tool.label));
             t->setTileSize(tile);
-            t->setToolTip(QString::fromStdString(ui::toolTooltip(tool)) + "\n\nDrag it into the toolbar to keep it at hand.");
+            t->setToolTip(QString::fromStdString(ui::toolTooltip(tool)) + tr("\n\nDrag it into the toolbar to keep it at hand."));
             t->setDragData([i] { return ui::makeMime(ui::kToolMime, i); });
             connect(t, &QAbstractButton::clicked, this, [this, i] {
                 const ui::ToolInfo& tool = ui::toolCatalog()[i];
@@ -74,11 +74,11 @@ void ToolsPanel::rebuild() {
         col->addLayout(grid);
         col->addSpacing(6);
     }
-    auto* hint = new QLabel("Drag tools into the toolbar; drag them out of it to remove them.");
+    auto* hint = new QLabel(tr("Drag tools into the toolbar; drag them out of it to remove them."));
     hint->setWordWrap(true);
     ui::setTone(hint, ui::Tone::TextFaint);
     col->addWidget(hint);
-    auto* reset = new QPushButton("Reset Toolbar");
+    auto* reset = new QPushButton(tr("Reset Toolbar"));
     connect(reset, &QPushButton::clicked, this, [] {
         settings().toolbar = ui::defaultToolbar();
         saveSettings();
@@ -95,12 +95,12 @@ ToolsPopover::ToolsPopover(ToolsPanel* panel, QWidget* host) : QFrame(host) {
     col->setSpacing(4);
     auto* head = new QHBoxLayout;
     head->setContentsMargins(8, 0, 0, 0);
-    auto* title = new QLabel("Tools");
+    auto* title = new QLabel(tr("Tools"));
     QFont f = title->font();
     f.setWeight(QFont::DemiBold);
     title->setFont(f);
     head->addWidget(title, 1);
-    auto* close = new ui::IconButton(ui::Icon::Minimize, "Close (Esc)", 24);
+    auto* close = new ui::IconButton(ui::Icon::Minimize, tr("Close (Esc)"), 24);
     connect(close, &QAbstractButton::clicked, this, &QWidget::hide);
     head->addWidget(close);
     col->addLayout(head);

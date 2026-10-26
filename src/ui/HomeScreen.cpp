@@ -55,13 +55,13 @@ struct FormatPreset {
 };
 
 constexpr FormatPreset kPresets[] = {
-    {"Full HD  ·  1920 × 1080", 1920, 1080},
-    {"4K UHD  ·  3840 × 2160", 3840, 2160},
-    {"HD  ·  1280 × 720", 1280, 720},
-    {"Vertical  ·  1080 × 1920  (Stories, Reels, Shorts)", 1080, 1920},
-    {"Square  ·  1080 × 1080", 1080, 1080},
-    {"Portrait  ·  1080 × 1350", 1080, 1350},
-    {"Custom", 0, 0},
+    {TR_NOOP("Full HD  ·  1920 × 1080"), 1920, 1080},
+    {TR_NOOP("4K UHD  ·  3840 × 2160"), 3840, 2160},
+    {TR_NOOP("HD  ·  1280 × 720"), 1280, 720},
+    {TR_NOOP("Vertical  ·  1080 × 1920  (Stories, Reels, Shorts)"), 1080, 1920},
+    {TR_NOOP("Square  ·  1080 × 1080"), 1080, 1080},
+    {TR_NOOP("Portrait  ·  1080 × 1350"), 1080, 1350},
+    {TR_NOOP("Custom"), 0, 0},
 };
 constexpr int kCustomPreset = static_cast<int>(std::size(kPresets)) - 1;
 constexpr double kFpsOptions[] = {24, 25, 30, 50, 60};
@@ -74,12 +74,12 @@ std::string relativeTime(int64_t unixSeconds) {
     const int64_t now = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
     const int64_t d = std::max<int64_t>(0, now - unixSeconds);
     char buf[64];
-    if (d < 60) return "just now";
-    if (d < 3600) std::snprintf(buf, sizeof(buf), "%lld min ago", static_cast<long long>(d / 60));
-    else if (d < 86400) std::snprintf(buf, sizeof(buf), "%lld h ago", static_cast<long long>(d / 3600));
+    if (d < 60) return tr("just now").toStdString();
+    if (d < 3600) return tr("%1 min ago").arg(d / 60).toStdString();
+    else if (d < 86400) return tr("%1 h ago").arg(d / 3600).toStdString();
     else if (d < 86400 * 30) {
         const long long days = d / 86400;
-        std::snprintf(buf, sizeof(buf), "%lld day%s ago", days, days == 1 ? "" : "s");
+        return (days == 1 ? tr("1 day ago") : tr("%1 days ago").arg(days)).toStdString();
     } else {
         const std::time_t t = static_cast<std::time_t>(unixSeconds);
         std::strftime(buf, sizeof(buf), "%Y-%m-%d", std::localtime(&t));
@@ -92,7 +92,7 @@ std::string sanitizeFileName(std::string name) {
         if (std::string_view("<>:\"/\\|?*").find(ch) != std::string_view::npos || static_cast<unsigned char>(ch) < 32) ch = '_';
     while (!name.empty() && (name.back() == ' ' || name.back() == '.')) name.pop_back();
     while (!name.empty() && name.front() == ' ') name.erase(name.begin());
-    return name.empty() ? "Untitled" : name;
+    return name.empty() ? tr("Untitled").toStdString() : name;
 }
 
 std::filesystem::path uniqueProjectPath(const std::filesystem::path& folder, const std::string& name) {
@@ -280,14 +280,14 @@ void HomeScreen::buildUi() {
     brand->addLayout(names, 1);
     side->addLayout(brand);
     side->addSpacing(18);
-    auto* create = ui::accentButton("+  New Project");
+    auto* create = ui::accentButton(tr("+  New Project"));
     create->setMinimumHeight(38);
     connect(create, &QPushButton::clicked, this, &HomeScreen::openNewProjectDialog);
     side->addWidget(create);
-    auto* open = new QPushButton("Open Project...");
+    auto* open = new QPushButton(tr("Open Project..."));
     open->setMinimumHeight(34);
     connect(open, &QPushButton::clicked, this, [this] {
-        if (auto file = platform::openFileDialog("Open bemotion Project", "bemotion Project", kProjectExtension))
+        if (auto file = platform::openFileDialog(TR_NOOP("Open bemotion Project"), TR_NOOP("bemotion Project"), kProjectExtension))
             if (onOpen) onOpen(*file);
     });
     side->addWidget(open);
@@ -299,8 +299,8 @@ void HomeScreen::buildUi() {
     // The projects folder (a button of its own: it needs its words), then the small icons.
     auto* footer = new QHBoxLayout;
     footer->setSpacing(6);
-    auto* folder = new QPushButton(ui::makeIcon(ui::Icon::Folder, theme::kTextDim, 16), "Projects Folder");
-    folder->setToolTip(projectsFolder().empty() ? QString("Choose where your projects live")
+    auto* folder = new QPushButton(ui::makeIcon(ui::Icon::Folder, theme::kTextDim, 16), tr("Projects Folder"));
+    folder->setToolTip(projectsFolder().empty() ? tr("Choose where your projects live")
                                                 : QString::fromStdString(platform::toUtf8(projectsFolder())));
     connect(folder, &QPushButton::clicked, this, [this, folder] {
         if (projectsFolder().empty()) {
@@ -308,21 +308,21 @@ void HomeScreen::buildUi() {
             return;
         }
         QMenu menu;
-        menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Show in File Manager",
+        menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), tr("Show in File Manager"),
                        [] { platform::revealInFileManager(projectsFolder()); });
-        menu.addAction("Change Folder...", [this] { chooseProjectsFolder(); });
+        menu.addAction(tr("Change Folder..."), [this] { chooseProjectsFolder(); });
         menu.exec(folder->mapToGlobal(QPoint(0, folder->height())));
     });
     side->addWidget(folder);
     side->addSpacing(2);
     footer->addStretch(1);
-    auto* coffee = new ui::IconButton(ui::Icon::Coffee, "Support bemotion: buy a coffee (it stays free thanks to you)", 30);
+    auto* coffee = new ui::IconButton(ui::Icon::Coffee, tr("Support bemotion: buy a coffee (it stays free thanks to you)"), 30);
     connect(coffee, &QAbstractButton::clicked, this, [] { platform::openWithDefaultApp(kSupportUrl); });
     footer->addWidget(coffee);
-    auto* gear = new ui::IconButton(ui::Icon::Gear, "Settings (Ctrl+,)", 30);
+    auto* gear = new ui::IconButton(ui::Icon::Gear, tr("Settings (Ctrl+,)"), 30);
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
     footer->addWidget(gear);
-    auto* help = new ui::IconButton(ui::Icon::Help, "Help, shortcuts, credits and license (F1)", 30);
+    auto* help = new ui::IconButton(ui::Icon::Help, tr("Help, shortcuts, credits and license (F1)"), 30);
     connect(help, &QPushButton::clicked, this, [] { ui::openHelp(ui::HelpTab::About); });
     footer->addWidget(help);
     side->addLayout(footer);
@@ -334,14 +334,14 @@ void HomeScreen::buildUi() {
     main->setContentsMargins(36, 30, 36, 0);
     main->setSpacing(6);
     auto* head = new QHBoxLayout;
-    auto* title = styled("Projects", theme::kText, 1.8f, true);
+    auto* title = styled(tr("Projects"), theme::kText, 1.8f, true);
     if (!projectsFolder().empty())
-        title->setToolTip("Every project in " + QString::fromStdString(platform::toUtf8(projectsFolder())) +
-                          ", and the ones you opened from elsewhere");
+        title->setToolTip(tr("Every project in ") + QString::fromStdString(platform::toUtf8(projectsFolder())) +
+                          tr(", and the ones you opened from elsewhere"));
     head->addWidget(title);
     head->addStretch(1);
     search_ = new QLineEdit;
-    search_->setPlaceholderText("Search projects");
+    search_->setPlaceholderText(tr("Search projects"));
     search_->setClearButtonEnabled(true);
     search_->setFixedWidth(260);
     connect(search_, &QLineEdit::textChanged, this, [this] { rebuildGrid(); });
@@ -354,7 +354,7 @@ void HomeScreen::buildUi() {
     error_ = styled("", theme::kDanger);
     error_->setWordWrap(true);
     er->addWidget(error_, 1);
-    auto* dismiss = new QPushButton("Dismiss");
+    auto* dismiss = new QPushButton(tr("Dismiss"));
     connect(dismiss, &QPushButton::clicked, errorRow_, &QWidget::hide);
     er->addWidget(dismiss);
     errorRow_->hide();
@@ -412,7 +412,7 @@ void HomeScreen::refresh() {
     // The Welcome project is there whatever folder is chosen, until the user deletes it.
     if (const fs::path welcome = settings().welcomeRemoved ? fs::path() : platform::welcomeProject(); !welcome.empty() &&
         std::none_of(entries_.begin(), entries_.end(), [&](const RecentProject& e) { std::error_code fe; return fs::equivalent(e.path, welcome, fe); }))
-        entries_.push_back({welcome, "Welcome to bemotion", modified(welcome)});
+        entries_.push_back({welcome, tr("Welcome to bemotion").toStdString(), modified(welcome)});
     std::stable_sort(entries_.begin(), entries_.end(),
                      [](const RecentProject& a, const RecentProject& b) { return a.lastOpened > b.lastOpened; });
 
@@ -470,9 +470,9 @@ void HomeScreen::rebuildGrid() {
     // it goes as soon as there is a folder.
     if (projectsFolder().empty()) {
         auto* banner = new ui::SettingsCard;
-        auto* choose = ui::accentButton("Choose Folder...");
+        auto* choose = ui::accentButton(tr("Choose Folder..."));
         connect(choose, &QPushButton::clicked, this, [this] { chooseProjectsFolder(); });
-        banner->addRow("Choose a folder for your projects", "New projects are saved there, and every project in it shows here", choose);
+        banner->addRow(tr("Choose a folder for your projects"), tr("New projects are saved there, and every project in it shows here"), choose);
         col->addWidget(banner);
         col->addSpacing(14);
     }
@@ -483,14 +483,14 @@ void HomeScreen::rebuildGrid() {
     }
     if (items.empty()) {
         col->addStretch(1);
-        auto* t1 = styled("No projects yet", theme::kText, 1.5f, true);
+        auto* t1 = styled(tr("No projects yet"), theme::kText, 1.5f, true);
         t1->setAlignment(Qt::AlignCenter);
         col->addWidget(t1);
-        auto* t2 = styled("Create your first animation in a few clicks.", theme::kTextDim);
+        auto* t2 = styled(tr("Create your first animation in a few clicks."), theme::kTextDim);
         t2->setAlignment(Qt::AlignCenter);
         col->addWidget(t2);
         col->addSpacing(12);
-        auto* b = ui::accentButton("Create a project");
+        auto* b = ui::accentButton(tr("Create a project"));
         b->setFixedSize(200, 40);
         connect(b, &QPushButton::clicked, this, &HomeScreen::openNewProjectDialog);
         col->addWidget(b, 0, Qt::AlignHCenter);
@@ -515,7 +515,7 @@ void HomeScreen::rebuildGrid() {
                           pv->project->comp.fps, relativeTime(item.lastOpened).c_str());
             meta = buf;
         } else {
-            meta = "Unreadable file  ·  " + relativeTime(item.lastOpened);
+            meta = tr("Unreadable file").toStdString() + "  ·  " + relativeTime(item.lastOpened);
         }
         const std::filesystem::path path = item.path;
         const RecentProject copy = item;
@@ -526,27 +526,27 @@ void HomeScreen::rebuildGrid() {
             },
             [this, copy](QPoint at) {
                 QMenu menu;
-                menu.addAction(ui::menuIcon(ui::Icon::Play, theme::kTextDim), "Open", [this, copy] {
+                menu.addAction(ui::menuIcon(ui::Icon::Play, theme::kTextDim), tr("Open"), [this, copy] {
                     if (onOpen) onOpen(copy.path);
                 });
-                menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), "Show in Folder",
+                menu.addAction(ui::menuIcon(ui::Icon::Folder, theme::kTextDim), tr("Show in Folder"),
                                [copy] { platform::revealInFileManager(copy.path); });
                 menu.addSeparator();
-                menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), "Delete Project...", [this, copy] { confirmDelete(copy); });
+                menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), tr("Delete Project..."), [this, copy] { confirmDelete(copy); });
                 menu.exec(at);
             });
         card->setCardWidth(cardW);
         grid->addWidget(card, shown / columns_, shown % columns_);
         ++shown;
     }
-    if (shown == 0) col->addWidget(styled(QString("No projects match \"%1\".").arg(search_->text()), theme::kTextDim));
+    if (shown == 0) col->addWidget(styled(tr("No projects match \"%1\".").arg(search_->text()), theme::kTextDim));
     col->addStretch(1);
     scroll_->setWidget(grid_);
 }
 
 bool HomeScreen::chooseProjectsFolder() {
     const auto current = projectsFolder();
-    const auto folder = platform::chooseFolderDialog("Choose a Folder for Your Projects", current.empty() ? platform::documentsDir() : current);
+    const auto folder = platform::chooseFolderDialog(TR_NOOP("Choose a Folder for Your Projects"), current.empty() ? platform::documentsDir() : current);
     if (!folder) return false;
     settings().projectsFolder = platform::toUtf8(*folder);
     saveSettings();
@@ -571,7 +571,7 @@ void HomeScreen::confirmDelete(const RecentProject& item) {
     // Which project (as its card shows it), what happens to it, and the two answers: keeping it is
     // the default, deleting is red.
     QDialog dialog(this);
-    dialog.setWindowTitle("Delete Project");
+    dialog.setWindowTitle(tr("Delete Project"));
     dialog.setMinimumWidth(480);
     auto* col = new QVBoxLayout(&dialog);
     col->setContentsMargins(24, 22, 24, 18);
@@ -582,7 +582,7 @@ void HomeScreen::confirmDelete(const RecentProject& item) {
     icon->setPixmap(ui::makeIcon(ui::Icon::Trash, theme::kDanger, 26).pixmap(26, 26));
     icon->setAlignment(Qt::AlignTop);
     head->addWidget(icon, 0, Qt::AlignTop);
-    auto* title = styled(QString("Delete \"%1\"?").arg(QString::fromStdString(item.name)), theme::kText, 1.25f, true);
+    auto* title = styled(tr("Delete \"%1\"?").arg(QString::fromStdString(item.name)), theme::kText, 1.25f, true);
     title->setWordWrap(true);
     head->addWidget(title, 1);
     col->addLayout(head);
@@ -612,23 +612,23 @@ void HomeScreen::confirmDelete(const RecentProject& item) {
     card->addContent(project);
     col->addWidget(card);
 
-    auto* what = styled(QString("It goes to the %1, where you can still restore it. The media files it uses are not touched.").arg(bin),
+    auto* what = styled(tr("It goes to the %1, where you can still restore it. The media files it uses are not touched.").arg(bin),
                         theme::kTextDim);
     what->setWordWrap(true);
     col->addWidget(what);
     if (welcome) {
-        auto* back = styled("The Welcome project can come back later: Settings › Interface › Welcome project.", theme::kTextFaint, 0.92f);
+        auto* back = styled(tr("The Welcome project can come back later: Settings › Interface › Welcome project."), theme::kTextFaint, 0.92f);
         back->setWordWrap(true);
         col->addWidget(back);
     }
     col->addSpacing(4);
     auto* buttons = new QHBoxLayout;
     buttons->addStretch();
-    auto* keep = new QPushButton("Cancel");
+    auto* keep = new QPushButton(tr("Cancel"));
     keep->setMinimumWidth(96);
     keep->setDefault(true);
     keep->setAutoDefault(true);
-    auto* del = new QPushButton("Delete Project");
+    auto* del = new QPushButton(tr("Delete Project"));
     del->setProperty("danger", true);
     del->setAutoDefault(false);
     del->setMinimumWidth(120);
@@ -651,25 +651,25 @@ void HomeScreen::confirmDelete(const RecentProject& item) {
         previews_.erase(item.path);
         std::erase_if(entries_, [&](const RecentProject& e) { return e.path == item.path; });
     } else {
-        setError("Could not delete \"" + item.name + "\": " + err);
+        setError(tr("Could not delete \"%1\": %2").arg(QString::fromStdString(item.name), QString::fromStdString(err)).toStdString());
     }
     QMetaObject::invokeMethod(this, [this] { rebuildGrid(); }, Qt::QueuedConnection);
 }
 
 void HomeScreen::openNewProjectDialog() {
     QDialog dialog(this);
-    dialog.setWindowTitle("New Project");
+    dialog.setWindowTitle(tr("New Project"));
     dialog.setMinimumWidth(520);
     auto* form = new QFormLayout;
     form->setLabelAlignment(Qt::AlignLeft);
     form->setHorizontalSpacing(16);
     form->setVerticalSpacing(8);
-    auto* name = new QLineEdit("Untitled");
+    auto* name = new QLineEdit(tr("Untitled"));
     name->selectAll();
-    form->addRow("Name", name);
+    form->addRow(tr("Name"), name);
     auto* format = new QComboBox;
-    for (const FormatPreset& p : kPresets) format->addItem(QString::fromUtf8(p.label));
-    form->addRow("Format", format);
+    for (const FormatPreset& p : kPresets) format->addItem(tr(p.label));
+    form->addRow(tr("Format"), format);
     auto* sizeRow = new QHBoxLayout;
     auto* w = new ui::DragValue;
     auto* h = new ui::DragValue;
@@ -684,17 +684,17 @@ void HomeScreen::openNewProjectDialog() {
     sizeRow->addWidget(w);
     sizeRow->addWidget(new QLabel("×"));
     sizeRow->addWidget(h);
-    form->addRow("Size", sizeRow);
+    form->addRow(tr("Size"), sizeRow);
     auto* fps = new QComboBox;
-    for (double f : kFpsOptions) fps->addItem(QString("%1 fps").arg(f));
+    for (double f : kFpsOptions) fps->addItem(tr("%1 fps").arg(f));
     fps->setCurrentIndex(2);
-    form->addRow("Frame rate", fps);
+    form->addRow(tr("Frame rate"), fps);
     auto* bg = new ui::ColorButton;
     bg->setAlphaEnabled(false);
     bg->setColor(Color::fromHex(0x101012));
-    form->addRow("Background", bg);
+    form->addRow(tr("Background"), bg);
     double limit = 0.0;
-    form->addRow("Length", ui::lengthLimitRow(limit, [&limit](double v) { limit = v; }));
+    form->addRow(tr("Length"), ui::lengthLimitRow(limit, [&limit](double v) { limit = v; }));
     // New projects go to the projects folder: asked for first if there is none yet.
     if (projectsFolder().empty() && !chooseProjectsFolder()) return;
     std::filesystem::path folderPath = projectsFolder();
@@ -702,9 +702,9 @@ void HomeScreen::openNewProjectDialog() {
     auto* folder = new QLineEdit(QString::fromStdString(platform::toUtf8(folderPath)));
     folder->setReadOnly(true);
     folderRow->addWidget(folder, 1);
-    auto* change = new QPushButton("Change...");
+    auto* change = new QPushButton(tr("Change..."));
     folderRow->addWidget(change);
-    form->addRow("Location", folderRow);
+    form->addRow(tr("Location"), folderRow);
 
     bool syncing = false;
     connect(format, &QComboBox::currentIndexChanged, &dialog, [&](int i) {
@@ -726,8 +726,8 @@ void HomeScreen::openNewProjectDialog() {
     connect(w, &ui::DragValue::valueChanged, &dialog, sizeEdited);
     connect(h, &ui::DragValue::valueChanged, &dialog, sizeEdited);
     connect(change, &QPushButton::clicked, &dialog, [&] {
-        if (auto file = platform::saveFileDialog("Choose where to save the project", uniqueProjectPath(folderPath, name->text().toStdString()),
-                                                 "bemotion Project", kProjectExtension)) {
+        if (auto file = platform::saveFileDialog(TR_NOOP("Choose where to save the project"), uniqueProjectPath(folderPath, name->text().toStdString()),
+                                                 TR_NOOP("bemotion Project"), kProjectExtension)) {
             folderPath = file->parent_path();
             folder->setText(QString::fromStdString(platform::toUtf8(folderPath)));
             name->setText(QString::fromStdString(platform::toUtf8(file->stem())));
@@ -735,7 +735,7 @@ void HomeScreen::openNewProjectDialog() {
     });
 
     auto* buttons = new QDialogButtonBox;
-    QPushButton* createButton = buttons->addButton("Create", QDialogButtonBox::AcceptRole);
+    QPushButton* createButton = buttons->addButton(tr("Create"), QDialogButtonBox::AcceptRole);
     createButton->setProperty("accent", true);
     createButton->setDefault(true);
     buttons->addButton(QDialogButtonBox::Cancel);
@@ -750,7 +750,7 @@ void HomeScreen::openNewProjectDialog() {
     if (dialog.exec() != QDialog::Accepted) return;
 
     Project p;
-    p.name = name->text().trimmed().isEmpty() ? "Untitled" : name->text().trimmed().toStdString();
+    p.name = name->text().trimmed().isEmpty() ? tr("Untitled").toStdString() : name->text().trimmed().toStdString();
     p.comp.width = static_cast<int>(std::lround(w->value()));
     p.comp.height = static_cast<int>(std::lround(h->value()));
     p.comp.fps = kFpsOptions[std::clamp(fps->currentIndex(), 0, static_cast<int>(std::size(kFpsOptions)) - 1)];

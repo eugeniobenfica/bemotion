@@ -2,6 +2,7 @@
 
 #include "core/Animated.h"
 #include "core/Arrange.h"
+#include "core/AudioDsp.h"
 #include "core/Clipboard.h"
 #include "core/Data.h"
 #include "core/Describe.h"
@@ -12,6 +13,7 @@
 #include "core/Validate.h"
 #include "core/Geometry.h"
 #include "core/History.h"
+#include "core/Language.h"
 #include "core/Presets.h"
 #include "core/Project.h"
 #include "core/Serialization.h"
@@ -28,6 +30,7 @@
 #include <functional>
 #include <iterator>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -1585,6 +1588,182 @@ void testClipTiming() {
 
 } // namespace
 
+void testColorEffects() {
+    // Curves: straight without points, through its points, never beyond them, flat past the ends.
+    CHECK(near(curveValue({}, 0.3f), 0.3f));
+    const std::vector<Vec2> s = {{0, 0}, {0.25f, 0.1f}, {0.75f, 0.9f}, {1, 1}};
+    CHECK(near(curveValue(s, 0.25f), 0.1f) && near(curveValue(s, 0.75f), 0.9f));
+    float last = -1.0f;
+    bool monotone = true;
+    for (int i = 0; i <= 100; ++i) {
+        const float y = curveValue(s, i / 100.0f);
+        monotone = monotone && y >= last - 1e-5f;
+        last = y;
+    }
+    CHECK(monotone);
+    CHECK(near(curveValue({{0.2f, 0.3f}, {0.8f, 0.6f}}, 0.0f), 0.3f) && near(curveValue({{0.2f, 0.3f}, {0.8f, 0.6f}}, 1.0f), 0.6f));
+    CHECK(curveIsIdentity({}) && curveIsIdentity({{0, 0}, {1, 1}}) && !curveIsIdentity(s));
+    std::vector<Vec2> messy = {{0.9f, 2.0f}, {0.1f, -1.0f}, {0.1f, 0.5f}};
+    cleanCurve(messy);
+    CHECK(messy.size() == 2 && messy[0].x < messy[1].x && messy[1].y == 1.0f && messy[0].y == 0.0f);
+
+    // .cube files: a 3D table, a 1D one (made 3D), and the mistakes people make.
+    Lut3D lut;
+    std::string err;
+    CHECK(parseCubeLut("TITLE \"Swap\"\n# a comment\nLUT_3D_SIZE 2\n0 0 0\n1 0 0\n0 1 0\n1 1 0\n0 0 1\n1 0 1\n0 1 1\n1 1 1\n", lut, &err));
+    CHECK(lut.size == 2 && lut.title == "Swap" && lut.rgb.size() == 24 && lut.rgb[3] == 1.0f);
+    CHECK(parseCubeLut("LUT_1D_SIZE 2\n0 0 0\n1 1 1\n", lut) && lut.size == 33);
+    CHECK(!parseCubeLut("LUT_3D_SIZE 2\n0 0 0\n", lut, &err) && err.find("8 rows") != std::string::npos);
+    CHECK(!parseCubeLut("hello", lut, &err));
+
+    // File and curves travel with the project, and through presets.
+    Project p;
+    Layer& l = p.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {960, 540}, 5.0));
+    l.effects.push_back(makeEffect(EffectType::Lut));
+    l.effects.back().file = "bundled:Warm.cube";
+    l.effects.push_back(makeEffect(EffectType::Curves));
+    l.effects.back().curves[2] = {{0, 0.1f}, {1, 0.9f}};
+    l.effects.push_back(makeEffect(EffectType::ChromaKey));
+    Project q;
+    CHECK(deserializeProject(serializeProject(p), q, &err));
+    CHECK(serializeProject(p) == serializeProject(q));
+    const Layer& back = q.comp.layers.front();
+    CHECK(back.effects.size() == 3 && back.effects[0].file == "bundled:Warm.cube" && back.effects[1].curves[2].size() == 2);
+    CHECK(near(back.effects[2].value1.base, 30.0f)); // the key's tolerance default
+    EffectPreset preset;
+    CHECK(parseEffectPreset(effectPresetToJson({"Look", back.effects}), preset) && preset.effects[1].curves[2] == back.effects[1].curves[2] &&
+          preset.effects[0].file == "bundled:Warm.cube");
+
+    // Operations: set a LUT file and curves; wrong ones are refused with a reason.
+    OpsResult r = run(p, R"([{"op": "layer.add", "type": "rectangle", "name": "Card"},
+        {"op": "effect.add", "layer": "Card", "effect": "curves"},
+        {"op": "effect.set", "layer": "Card", "index": 0, "curves": {"rgb": [[0, 0], [0.5, 0.7], [1, 1]], "blue": null}},
+        {"op": "effect.add", "layer": "Card", "effect": "lut"},
+        {"op": "effect.set", "layer": "Card", "index": 1, "file": "C:/looks/film.cube"},
+        {"op": "query.layer", "layer": "Card"}])");
+    CHECK(r.ok);
+    if (r.ok) {
+        const auto& fx = r.results[5]["effect_list"];
+        CHECK(fx[0]["curves"]["rgb"].size() == 3 && fx[1]["file"] == "C:/looks/film.cube");
+    }
+    CHECK(!run(p, R"([{"op": "effect.set", "layer": "Card", "index": 0, "file": "x.cube"}])").ok);
+    r = run(p, R"([{"op": "effect.set", "layer": "Card", "index": 0, "curves": {"rgbb": []}}])");
+    CHECK(!r.ok && r.error.find("rgb") != std::string::npos);
+    CHECK(!run(p, R"([{"op": "effect.set", "layer": "Card", "index": 0, "curves": {"red": [[0, 2]]}}])").ok);
+}
+
+void testAudioEffects() {
+    // Defaults and ranges.
+    CHECK(audioEffectFromId("noise_reduction") == AudioEffectType::NoiseReduction && audioEffectFromId("nope") == AudioEffectType::Count);
+    AudioEffect duck = makeAudioEffect(AudioEffectType::Ducking);
+    CHECK(duck.value == 15.0f && duck.value2 == -40.0f && near(duck.value3, 0.4f));
+    duck.value = 90.0f;
+    duck.value3 = -1.0f;
+    clampAudioEffect(duck);
+    CHECK(duck.value == 40.0f && near(duck.value3, 0.05f));
+
+    // EQ: +6 dB under the low shelf is about 6 dB louder; a tone in the middle is left alone.
+    auto sine = [](double freq, double seconds, float amp) {
+        std::vector<float> s(static_cast<size_t>(seconds * 48000) * 2);
+        for (size_t i = 0; i < s.size() / 2; ++i) s[i * 2] = s[i * 2 + 1] = amp * static_cast<float>(std::sin(2 * 3.14159265 * freq * i / 48000.0));
+        return s;
+    };
+    auto rms = [](const std::vector<float>& s, size_t from, size_t to) {
+        double sum = 0;
+        for (size_t i = from * 2; i < to * 2; ++i) sum += s[i] * s[i];
+        return std::sqrt(sum / static_cast<double>((to - from) * 2));
+    };
+    std::vector<float> low = sine(30, 1.0, 0.25f);
+    const double before = rms(low, 24000, 48000);
+    dsp::equalize(low, 48000, 6.0f, 0.0f, 0.0f);
+    const double gainDb = 20 * std::log10(rms(low, 24000, 48000) / before);
+    CHECK(gainDb > 5.0 && gainDb < 6.5);
+    std::vector<float> mid = sine(1000, 1.0, 0.25f);
+    const double midBefore = rms(mid, 24000, 48000);
+    dsp::equalize(mid, 48000, 6.0f, 0.0f, 6.0f);
+    CHECK(std::fabs(20 * std::log10(rms(mid, 24000, 48000) / midBefore)) < 1.0);
+
+    // Noise reduction: steady hiss between the bursts gets much quieter, the bursts stay.
+    std::vector<float> noisy = sine(440, 4.0, 0.3f);
+    uint32_t seed = 1;
+    for (size_t i = 0; i < noisy.size() / 2; ++i) {
+        const bool burst = (i / 48000) % 2 == 0;
+        seed = seed * 1664525u + 1013904223u;
+        const float n = (static_cast<float>(seed >> 8) / 16777216.0f - 0.5f) * 0.02f;
+        noisy[i * 2] = noisy[i * 2 + 1] = (burst ? noisy[i * 2] : 0.0f) + n;
+    }
+    const double hiss = rms(noisy, 60000, 90000), tone = rms(noisy, 110000, 140000);
+    dsp::reduceNoise(noisy, 48000, 20.0f, 50.0f);
+    CHECK(rms(noisy, 60000, 90000) < hiss * 0.4);
+    CHECK(rms(noisy, 110000, 140000) > tone * 0.9);
+
+    // Loudness, and the key that names the processing (off or flat: none).
+    const std::vector<float> loud = dsp::loudness(sine(440, 0.1, 0.5f), 480);
+    CHECK(loud.size() == 10 && std::fabs(loud[5] - 0.5f / std::sqrt(2.0f)) < 0.02f);
+    std::vector<AudioEffect> fx = {makeAudioEffect(AudioEffectType::Eq), makeAudioEffect(AudioEffectType::Gain)};
+    CHECK(dsp::processKey(fx).empty() && !dsp::changesSamples(fx));
+    fx[0].value = 3.0f;
+    CHECK(!dsp::processKey(fx).empty());
+    fx[0].enabled = false;
+    CHECK(dsp::processKey(fx).empty());
+
+    // Through operations and files.
+    Project p;
+    MediaItem song;
+    song.name = "song.wav";
+    song.path = "C:/audio/song.wav";
+    song.kind = MediaKind::Audio;
+    song.duration = 30.0;
+    song.hasAudio = true;
+    const uint64_t media = p.comp.addMedia(song);
+    p.comp.addLayer(makeMediaLayer(*p.comp.findMedia(media), {0, 0}, 0.0, 5.0)).name = "Song";
+    p.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {960, 540}, 5.0)).name = "Card";
+    OpsResult r = run(p, R"([{"op": "audio_effect.add", "layer": "Song", "effect": "eq", "values": {"low": 4, "high": -3}},
+        {"op": "audio_effect.add", "layer": "Song", "effect": "ducking"},
+        {"op": "audio_effect.set", "layer": "Song", "index": 1, "enabled": false, "values": {"amount": 20}},
+        {"op": "query.layer", "layer": "Song"}])");
+    CHECK(r.ok);
+    if (r.ok) {
+        CHECK(r.results[0]["values"]["low"] == 4.0 && r.results[0]["values"]["high"] == -3.0);
+        const auto& list = r.results[3]["audio_effects"];
+        CHECK(list.size() == 2 && list[1]["effect"] == "ducking" && list[1]["enabled"] == false && list[1]["values"]["amount"] == 20.0);
+    }
+    r = run(p, R"([{"op": "audio_effect.add", "layer": "Card", "effect": "eq"}])");
+    CHECK(!r.ok && r.error.find("no sound") != std::string::npos);
+    r = run(p, R"([{"op": "audio_effect.set", "layer": "Song", "index": 0, "values": {"lows": 3}}])");
+    CHECK(!r.ok && r.error.find("low") != std::string::npos);
+    CHECK(!run(p, R"([{"op": "audio_effect.set", "layer": "Song", "index": 0, "values": {"low": 99}}])").ok);
+    CHECK(!run(p, R"([{"op": "audio_effect.add", "layer": "Song", "effect": "reverb"}])").ok);
+    CHECK(run(p, R"([{"op": "audio_effect.remove", "layer": "Song", "index": 1}])").ok);
+    Project q;
+    std::string err;
+    CHECK(deserializeProject(serializeProject(p), q, &err));
+    const Layer* song2 = nullptr;
+    for (const Layer& l : q.comp.layers)
+        if (l.name == "Song") song2 = &l;
+    CHECK(song2 && song2->audioEffects.size() == 1 && song2->audioEffects[0].value == 4.0f && song2->audioEffects[0].value3 == -3.0f);
+}
+
+void testLanguageFiles() {
+    LanguageFile file;
+    std::string err;
+    CHECK(parseLanguage(R"({"format": "bemotion-language", "code": "pt-BR", "name": "Português", "strings": {"File": "Arquivo", "Empty": ""}})", file, &err));
+    CHECK(file.code == "pt-BR" && file.strings.size() == 1 && file.strings["File"] == "Arquivo");
+    CHECK(!parseLanguage(R"({"code": "pt"})", file, &err));
+    CHECK(placeholdersOf("%2 of %1, {name} %") == std::vector<std::string>({"%1", "%2", "{name}"}));
+    CHECK(matchLanguage({"es", "pt-BR"}, "pt_BR") == 1 && matchLanguage({"es", "pt-BR"}, "pt_PT") == 1 && matchLanguage({"es"}, "de_DE") == -1);
+    // The bundled translations parse and keep their texts' placeholders.
+    std::ifstream in(std::filesystem::path(BEMOTION_SOURCE_DIR) / "assets" / "languages" / "pt-BR.json", std::ios::binary);
+    std::stringstream text;
+    text << in.rdbuf();
+    CHECK(parseLanguage(text.str(), file, &err) && file.strings.size() > 1000);
+    for (const auto& [english, translation] : file.strings)
+        if (placeholdersOf(english) != placeholdersOf(translation)) {
+            std::printf("  placeholders differ: %s\n", english.c_str());
+            CHECK(false);
+        }
+}
+
 int main() {
     const std::vector<std::pair<const char*, std::function<void()>>> tests = {
         {"static value", testStaticValue},
@@ -1643,6 +1822,9 @@ int main() {
         {"plugin catalog", testPluginCatalog},
         {"paths, masks, blending and mattes", testPathsAndMasks},
         {"clip speed, ripple, roll, slip, markers", testClipTiming},
+        {"lut, curves and chroma key", testColorEffects},
+        {"audio effects: eq, noise reduction, ducking", testAudioEffects},
+        {"language files", testLanguageFiles},
     };
     for (const auto& [name, fn] : tests) {
         const int before = g_failures;

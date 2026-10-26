@@ -5,8 +5,9 @@
 // GPU, see render/EffectRenderer). Effects are grouped in categories:
 //
 //   Blur & Sharpen     Gaussian Blur, Directional Blur
-//   Color Correction   Brightness & Contrast, Hue/Saturation, Tint
+//   Color Correction   Brightness & Contrast, Hue/Saturation, Tint, Curves, Apply LUT
 //   Channel            Invert
+//   Keying             Chroma Key
 //   Distort            Wave Warp
 //   Generate           Fill, Stroke (outline around the silhouette)
 //   Perspective        Drop Shadow
@@ -39,6 +40,9 @@ enum class EffectType {
     Fill,
     Invert,
     WaveWarp,
+    Lut,       // a .cube color look-up table (Effect::file)
+    Curves,    // tone curves (Effect::curves)
+    ChromaKey, // a color made transparent
     Count
 };
 
@@ -74,6 +78,12 @@ struct Effect {
     AnimFloat shutter{180.0f};     // motion blur shutter angle (degrees)
     AnimFloat value1{0.0f}, value2{0.0f}, value3{0.0f}; // type specific (see effectParams)
     int samples = 12;              // motion blur quality (moments per frame)
+    // Apply LUT: the .cube file (UTF-8; "bundled:Name.cube" for the app's own LUTs), and the
+    // file relative to the project (set when saving, like media paths).
+    std::string file, relative;
+    // Curves: the RGB (master), red, green and blue curves, each points (x = input, y = output,
+    // 0..1) sorted by x; an empty curve leaves its channel alone.
+    std::array<std::vector<Vec2>, 4> curves;
 
     AnimatedBase& slot(EffectSlot s);
 
@@ -87,17 +97,56 @@ Effect makeEffect(EffectType type);
 // Extra pixels an effect can draw outside the layer's own bounds.
 float effectMargin(const Effect& e, double t);
 
+// Curves: the names of the four curves ("rgb", "red", "green", "blue"), a curve's output for
+// input x (a smooth curve through its points that never overshoots them, flat past the ends),
+// and its points made valid (inside 0..1, sorted, one per x, at most kMaxCurvePoints).
+constexpr int kMaxCurvePoints = 16;
+const char* curveId(int channel);
+float curveValue(const std::vector<Vec2>& points, float x);
+void cleanCurve(std::vector<Vec2>& points);
+bool curveIsIdentity(const std::vector<Vec2>& points);
+
+// A 3D color look-up table: size^3 RGB entries, red changing fastest (as in .cube files).
+struct Lut3D {
+    std::string title;
+    int size = 0;
+    std::vector<float> rgb;
+};
+// Reads an Adobe / Resolve .cube file (3D, or 1D turned into 3D); false with an error otherwise.
+bool parseCubeLut(const std::string& text, Lut3D& out, std::string* error = nullptr);
+
 // Audio effects are separate from image effects: their values alter the
 // mixer, never the Skia render chain.
-enum class AudioEffectType { Gain, FadeIn, FadeOut, Count };
+//   Gain              value = dB
+//   Fade In / Out     value = seconds
+//   EQ                value / value2 / value3 = low (100 Hz shelf) / mid (1 kHz) / high (8 kHz shelf), dB
+//   Noise Reduction   value = reduction (dB), value2 = sensitivity (%)
+//   Ducking           value = how much quieter (dB) while other audio plays, value2 = what counts
+//                     as sound (dB), value3 = fade (seconds)
+enum class AudioEffectType { Gain, FadeIn, FadeOut, Eq, NoiseReduction, Ducking, Count };
 const char* audioEffectId(AudioEffectType type);
 const char* audioEffectLabel(AudioEffectType type);
+const char* audioEffectDescription(AudioEffectType type);
+AudioEffectType audioEffectFromId(const std::string& id); // Count if unknown
 
 struct AudioEffect {
     AudioEffectType type = AudioEffectType::Gain;
     bool enabled = true;
-    float value = 0.0f; // Gain: dB. Fades: seconds.
+    float value = 0.0f, value2 = 0.0f, value3 = 0.0f; // see AudioEffectType
 };
+
+// The values an audio effect type shows, in order (`index` 0..2: value, value2, value3).
+struct AudioEffectParam {
+    int index;
+    const char* id; // in operations: "value", "low"...
+    const char* label;
+    float min, max, speed;
+    const char* format;
+};
+const std::vector<AudioEffectParam>& audioEffectParams(AudioEffectType type);
+float& audioEffectValue(AudioEffect& e, int index);
+float audioEffectValue(const AudioEffect& e, int index);
+void clampAudioEffect(AudioEffect& e); // every value inside its range
 
 AudioEffect makeAudioEffect(AudioEffectType type);
 

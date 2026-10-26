@@ -103,11 +103,11 @@ QWidget* SettingsCard::addRow(const QString& title, const QString& description, 
     auto* row = new QWidget;
     auto* text = new QVBoxLayout;
     text->setSpacing(2);
-    auto* t = new QLabel(title);
+    auto* t = new QLabel(trLabel(title));
     t->setWordWrap(true);
     text->addWidget(t);
     if (!description.isEmpty()) {
-        auto* d = new QLabel(description);
+        auto* d = new QLabel(trLabel(description));
         d->setWordWrap(true);
         QFont f = d->font();
         f.setPointSizeF(f.pointSizeF() * 0.92);
@@ -178,7 +178,7 @@ SettingsCard* addSection(QVBoxLayout* col, const QString& title, const QString& 
 }
 
 QLabel* pageTitle(const QString& text) {
-    auto* l = new QLabel(text);
+    auto* l = new QLabel(trLabel(text));
     QFont f = l->font();
     f.setPointSizeF(f.pointSizeF() * 1.15);
     f.setWeight(QFont::DemiBold);

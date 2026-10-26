@@ -55,6 +55,13 @@ struct Settings {
     // it). Chosen on the first start (ui/ExperienceScreen), changed in Settings › Interface.
     std::string experience = "balanced";
     bool essentialsOnly = false; // plugins off (no charts, maps, 3D models, recorder): the core alone
+    // Playback (Settings › Editor › Playback).
+    bool hardwareDecoding = false; // videos read by the graphics card (media/MediaIO.h); off: a fast processor often beats it
+    bool useProxies = true;       // the editor shows videos' proxies when they have one
+    int cacheMegabytes = 1024;    // memory for cached frames: half decoded video, half rendered previews
+    // The interface language: "auto" (the system's, when there is a file for it), "en", or a
+    // language file's code ("pt-BR"); see ui/Language.h. Takes effect at the next start.
+    std::string language = "auto";
     bool firstRun = false;       // no settings file yet: this is bemotion's first start (not saved)
 };
 

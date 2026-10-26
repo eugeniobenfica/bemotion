@@ -38,28 +38,28 @@ void fillTimeMenu(QMenu* menu, EditorContext& ctx, QWidget* parent) {
     menu->setToolTipsVisible(true);
     const std::vector<Layer*> clips = footage(ctx);
     const bool any = !clips.empty();
-    QAction* speed = menu->addAction(menuIcon(Icon::Speed, theme::kTextDim), "Speed / Duration...", [&ctx, parent] { showSpeedDialog(ctx, parent); });
+    QAction* speed = menu->addAction(menuIcon(Icon::Speed, theme::kTextDim), tr("Speed / Duration..."), [&ctx, parent] { showSpeedDialog(ctx, parent); });
     speed->setShortcut(sequenceOf(Action::SpeedDuration));
     speed->setEnabled(any);
     const bool reversed = any && std::all_of(clips.begin(), clips.end(), [](const Layer* l) { return l->media.reversed; });
-    QAction* reverse = menu->addAction("Reverse", [&ctx, reversed] {
+    QAction* reverse = menu->addAction(tr("Reverse"), [&ctx, reversed] {
         for (Layer* l : footage(ctx)) setClipSpeed(ctx.comp(), l->id, l->media.speed, !reversed);
         ctx.touch();
     });
     reverse->setCheckable(true);
     reverse->setChecked(reversed);
     reverse->setEnabled(any);
-    reverse->setToolTip("Plays the clip backwards: the same footage, from its end");
+    reverse->setToolTip(tr("Plays the clip backwards: the same footage, from its end"));
     const bool remapped = any && std::all_of(clips.begin(), clips.end(), [](const Layer* l) { return l->media.timeRemap; });
-    QAction* remap = menu->addAction("Time Remap", [&ctx, remapped] { ctx.setSelectedTimeRemap(!remapped); });
+    QAction* remap = menu->addAction(tr("Time Remap"), [&ctx, remapped] { ctx.setSelectedTimeRemap(!remapped); });
     remap->setCheckable(true);
     remap->setChecked(remapped);
     remap->setEnabled(any);
-    remap->setToolTip("Keyframe which moment of the footage is shown: slow motion, speed ramps, holds");
-    QAction* freeze = menu->addAction("Freeze Frame at Playhead", [&ctx] { ctx.freezeSelectedAtPlayhead(); });
+    remap->setToolTip(tr("Keyframe which moment of the footage is shown: slow motion, speed ramps, holds"));
+    QAction* freeze = menu->addAction(tr("Freeze Frame at Playhead"), [&ctx] { ctx.freezeSelectedAtPlayhead(); });
     freeze->setEnabled(any);
-    freeze->setToolTip("The whole clip holds the frame under the playhead");
-    if (!any) menu->addSection("For video and audio clips");
+    freeze->setToolTip(tr("The whole clip holds the frame under the playhead"));
+    if (!any) menu->addSection(tr("For video and audio clips"));
 }
 
 void fillBlendMenu(QMenu* menu, EditorContext& ctx) {
@@ -69,7 +69,7 @@ void fillBlendMenu(QMenu* menu, EditorContext& ctx) {
     const int current = layers.empty() ? -1 : static_cast<int>(layers.front()->blend);
     for (int i = 0; i < static_cast<int>(BlendMode::Count); ++i) {
         if (i == 1 || i == 3 || i == 5 || i == 10 || i == 12 || i == 16) menu->addSeparator(); // as After Effects groups them
-        QAction* a = menu->addAction(kBlendModeLabels[i], [&ctx, i] {
+        QAction* a = menu->addAction(tr(kBlendModeLabels[i]), [&ctx, i] {
             for (Layer* l : ctx.selectedLayers())
                 if (takesMatte(*l)) l->blend = static_cast<BlendMode>(i);
             ctx.touch();
@@ -84,7 +84,7 @@ void fillMatteMenu(QMenu* menu, EditorContext& ctx) {
     menu->setToolTipsVisible(true);
     Layer* layer = ctx.selected();
     if (!layer || !takesMatte(*layer)) {
-        menu->addAction("Select a layer")->setEnabled(false);
+        menu->addAction(tr("Select a layer"))->setEnabled(false);
         return;
     }
     const uint64_t id = layer->id;
@@ -94,7 +94,7 @@ void fillMatteMenu(QMenu* menu, EditorContext& ctx) {
     for (int i = comp.indexOf(id) - 1; i >= 0 && !matte; --i)
         if (comp.layers[i].parent == layer->parent && takesMatte(comp.layers[i])) matte = comp.layers[i].id;
     for (int i = 0; i < static_cast<int>(MatteMode::Count); ++i) {
-        QAction* a = menu->addAction(kMatteModeLabels[i], [&ctx, id, i] {
+        QAction* a = menu->addAction(tr(kMatteModeLabels[i]), [&ctx, id, i] {
             Layer* l = ctx.comp().findLayer(id);
             if (!l) return;
             uint64_t m = l->matteLayer;
@@ -111,7 +111,7 @@ void fillMatteMenu(QMenu* menu, EditorContext& ctx) {
         if (i == 0) menu->addSeparator();
     }
     // Which layer is the matte: any layer beside it.
-    QMenu* from = menu->addMenu("Matte Layer");
+    QMenu* from = menu->addMenu(tr("Matte Layer"));
     for (const Layer& other : comp.layers) {
         if (other.id == id || other.parent != layer->parent || !takesMatte(other)) continue;
         const uint64_t oid = other.id;
@@ -125,9 +125,9 @@ void fillMatteMenu(QMenu* menu, EditorContext& ctx) {
         a->setCheckable(true);
         a->setChecked(layer->matte != MatteMode::None && layer->matteLayer == oid);
     }
-    if (from->isEmpty()) from->addAction("No other layer beside it")->setEnabled(false);
+    if (from->isEmpty()) from->addAction(tr("No other layer beside it"))->setEnabled(false);
     menu->addSeparator();
-    menu->addAction("The matte layer is not drawn itself: it decides where this one shows")->setEnabled(false);
+    menu->addAction(tr("The matte layer is not drawn itself: it decides where this one shows"))->setEnabled(false);
 }
 
 void addFittedMask(EditorContext& ctx, bool ellipse) {
@@ -137,7 +137,7 @@ void addFittedMask(EditorContext& ctx, bool ellipse) {
         Vec2 mn{-200, -200}, mx{200, 200};
         render::localBounds(*l, ctx.time, mn, mx, &ctx.comp());
         Mask m;
-        m.name = "Mask " + std::to_string(l->masks.size() + 1);
+        m.name = tr("Mask %1").arg(l->masks.size() + 1).toStdString();
         m.path = ellipse ? ellipsePath(mn, mx) : rectanglePath(mn, mx);
         l->masks.push_back(std::move(m));
         added = true;
@@ -149,15 +149,15 @@ void fillMaskMenu(QMenu* menu, EditorContext& ctx) {
     menu->setToolTipsVisible(true);
     Layer* layer = ctx.selected();
     const bool can = layer && layer->type != LayerType::Camera && !(layer->type == LayerType::Media && !layer->media.hasVideo);
-    menu->addAction(menuIcon(Icon::Rectangle, theme::kTextDim), "New Rectangle Mask", [&ctx] { addFittedMask(ctx, false); })->setEnabled(can);
-    menu->addAction(menuIcon(Icon::Ellipse, theme::kTextDim), "New Ellipse Mask", [&ctx] { addFittedMask(ctx, true); })->setEnabled(can);
-    QAction* draw = menu->addAction(menuIcon(Icon::Pen, theme::kTextDim), "Draw Mask with the Pen", [&ctx] { ctx.tool = Tool::Pen; });
+    menu->addAction(menuIcon(Icon::Rectangle, theme::kTextDim), tr("New Rectangle Mask"), [&ctx] { addFittedMask(ctx, false); })->setEnabled(can);
+    menu->addAction(menuIcon(Icon::Ellipse, theme::kTextDim), tr("New Ellipse Mask"), [&ctx] { addFittedMask(ctx, true); })->setEnabled(can);
+    QAction* draw = menu->addAction(menuIcon(Icon::Pen, theme::kTextDim), tr("Draw Mask with the Pen"), [&ctx] { ctx.tool = Tool::Pen; });
     draw->setEnabled(can && layer->type != LayerType::Shape);
-    draw->setToolTip("The Pen draws a mask on a selected layer that is not a shape");
+    draw->setToolTip(tr("The Pen draws a mask on a selected layer that is not a shape"));
     if (can && !layer->masks.empty()) {
         menu->addSeparator();
         const uint64_t id = layer->id;
-        menu->addAction(QString("Remove %1 Mask%2").arg(layer->masks.size()).arg(layer->masks.size() == 1 ? "" : "s"), [&ctx, id] {
+        menu->addAction(tr("Remove %1 Mask%2").arg(layer->masks.size()).arg(layer->masks.size() == 1 ? "" : "s"), [&ctx, id] {
             if (Layer* l = ctx.comp().findLayer(id)) l->masks.clear();
             ctx.touch();
         });
@@ -181,7 +181,7 @@ void showSpeedDialog(EditorContext& ctx, QWidget* parent) {
     if (clips.empty()) return;
     const Layer& first = *clips.front();
     QDialog dialog(parent);
-    dialog.setWindowTitle("Speed / Duration");
+    dialog.setWindowTitle(tr("Speed / Duration"));
     auto* form = new QFormLayout;
     form->setHorizontalSpacing(16);
     form->setVerticalSpacing(8);
@@ -190,7 +190,7 @@ void showSpeedDialog(EditorContext& ctx, QWidget* parent) {
     speed->setSpeed(1.0f);
     speed->setFormat("%.0f%%");
     speed->setValue(static_cast<float>(first.media.speed * 100.0));
-    form->addRow("Speed", speed);
+    form->addRow(tr("Speed"), speed);
     // The duration this speed gives the first clip (and the other way around).
     const double span = std::fabs(first.media.sourceTime(first.outPoint) - first.media.sourceTime(first.inPoint));
     auto* duration = new DragValue;
@@ -199,20 +199,20 @@ void showSpeedDialog(EditorContext& ctx, QWidget* parent) {
     duration->setFormat("%.2f s");
     duration->setValue(static_cast<float>(first.outPoint - first.inPoint));
     duration->setEnabled(clips.size() == 1 && span > 1e-6);
-    form->addRow("Duration", duration);
+    form->addRow(tr("Duration"), duration);
     QObject::connect(speed, &DragValue::valueChanged, duration, [duration, span](float v) {
         if (span > 1e-6 && v > 0) duration->setValue(static_cast<float>(span / (v * 0.01)));
     });
     QObject::connect(duration, &DragValue::valueChanged, speed, [speed, span](float v) {
         if (span > 1e-6 && v > 0) speed->setValue(static_cast<float>(span / v * 100.0));
     });
-    auto* reverse = new QCheckBox("Play backwards");
+    auto* reverse = new QCheckBox(tr("Play backwards"));
     reverse->setChecked(first.media.reversed);
-    form->addRow("Reverse", reverse);
-    auto* ripple = new QCheckBox("Move the clips after it");
-    ripple->setToolTip("Off: a longer clip stops at the next one on its track");
-    form->addRow("Ripple", ripple);
-    auto* note = new QLabel("Sound plays at the new speed too (its pitch changes).");
+    form->addRow(tr("Reverse"), reverse);
+    auto* ripple = new QCheckBox(tr("Move the clips after it"));
+    ripple->setToolTip(tr("Off: a longer clip stops at the next one on its track"));
+    form->addRow(tr("Ripple"), ripple);
+    auto* note = new QLabel(tr("Sound plays at the new speed too (its pitch changes)."));
     setTone(note, Tone::TextFaint);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
     QObject::connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);

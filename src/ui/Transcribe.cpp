@@ -33,7 +33,7 @@ namespace {
 
 // Languages offered first (whisper knows ~100; "auto" detects it).
 constexpr std::pair<const char*, const char*> kLanguages[] = {
-    {"auto", "Detect automatically"}, {"en", "English"}, {"pt", "Português"}, {"es", "Español"},  {"fr", "Français"},
+    {"auto", TR_NOOP("Detect automatically")}, {"en", "English"}, {"pt", "Português"}, {"es", "Español"},  {"fr", "Français"},
     {"de", "Deutsch"},                {"it", "Italiano"}, {"nl", "Nederlands"}, {"ja", "日本語"}, {"ko", "한국어"},
     {"zh", "中文"},                    {"ru", "Русский"},  {"ar", "العربية"},    {"hi", "हिन्दी"}, {"tr", "Türkçe"},
     {"pl", "Polski"},
@@ -66,26 +66,26 @@ struct Job {
 // offered for download, once; `then` runs when it is there.
 void offerSpeechModel(QWidget* parent, std::function<void()> then) {
     QMessageBox ask(parent);
-    ask.setWindowTitle("Transcribe Speech");
-    ask.setText("Speech recognition needs its model, which is not on this computer yet.");
-    ask.setInformativeText(QString("Download it now? About %1 MB, from whisper.cpp's models on Hugging Face. It is kept in "
+    ask.setWindowTitle(tr("Transcribe Speech"));
+    ask.setText(tr("Speech recognition needs its model, which is not on this computer yet."));
+    ask.setInformativeText(tr("Download it now? About %1 MB, from whisper.cpp's models on Hugging Face. It is kept in "
                                    "bemotion's folder and works offline from then on.")
                                .arg(net::kSpeechModelBytes / 1000000));
-    QPushButton* download = ask.addButton("Download", QMessageBox::AcceptRole);
+    QPushButton* download = ask.addButton(tr("Download"), QMessageBox::AcceptRole);
     download->setProperty("accent", true);
-    ask.addButton("Not Now", QMessageBox::RejectRole);
+    ask.addButton(tr("Not Now"), QMessageBox::RejectRole);
     ask.setDefaultButton(download);
     ask.exec();
     if (ask.clickedButton() != download) return;
 
     auto* dialog = new QDialog(parent);
-    dialog->setWindowTitle("Downloading the Speech Model");
+    dialog->setWindowTitle(tr("Downloading the Speech Model"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setMinimumWidth(420);
     auto* col = new QVBoxLayout(dialog);
     col->setContentsMargins(24, 20, 24, 18);
     col->setSpacing(8);
-    auto* stage = new QLabel("Starting...");
+    auto* stage = new QLabel(tr("Starting..."));
     col->addWidget(stage);
     auto* bar = new QProgressBar;
     bar->setRange(0, 1000);
@@ -94,7 +94,7 @@ void offerSpeechModel(QWidget* parent, std::function<void()> then) {
     col->addWidget(bar);
     auto* row = new QHBoxLayout;
     row->addStretch();
-    auto* cancel = new QPushButton("Cancel");
+    auto* cancel = new QPushButton(tr("Cancel"));
     row->addWidget(cancel);
     col->addLayout(row);
     auto finished = std::make_shared<bool>(false);
@@ -104,7 +104,7 @@ void offerSpeechModel(QWidget* parent, std::function<void()> then) {
             *finished = true;
             dialog->close();
             if (!ok) {
-                if (!error.isEmpty()) QMessageBox::warning(parent, "Transcribe Speech", "The speech model could not be downloaded: " + error);
+                if (!error.isEmpty()) QMessageBox::warning(parent, tr("Transcribe Speech"), tr("The speech model could not be downloaded: ") + error);
                 return;
             }
             then();
@@ -112,7 +112,7 @@ void offerSpeechModel(QWidget* parent, std::function<void()> then) {
         [stage, bar](int64_t received, int64_t total) {
             if (total <= 0) total = net::kSpeechModelBytes;
             bar->setValue(static_cast<int>(received * 1000 / std::max<int64_t>(1, total)));
-            stage->setText(QString("%1 of %2 MB").arg(received / 1000000).arg(total / 1000000));
+            stage->setText(tr("%1 of %2 MB").arg(received / 1000000).arg(total / 1000000));
         });
     QObject::connect(cancel, &QPushButton::clicked, dialog, [stop, dialog] {
         stop();
@@ -132,7 +132,7 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
     if (!item) return;
     media::TranscribeOptions options;
     if (!media::speechToTextAvailable()) {
-        QMessageBox::information(parent, "Transcribe", "This build of bemotion has no speech recognition (it was built without whisper.cpp).");
+        QMessageBox::information(parent, tr("Transcribe"), tr("This build of bemotion has no speech recognition (it was built without whisper.cpp)."));
         return;
     }
     if (!media::findSpeechModels(platform::speechModelFolders(), options)) {
@@ -146,15 +146,15 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
     // One window, two steps: the language (detected, or said: more accurate), then the progress.
     // It does not block the editor: the captions land when it is done.
     auto* dialog = new QDialog(parent);
-    dialog->setWindowTitle("Transcribe Speech");
+    dialog->setWindowTitle(tr("Transcribe Speech"));
     dialog->setAttribute(Qt::WA_DeleteOnClose);
     dialog->setMinimumWidth(440);
     auto* col = new QVBoxLayout(dialog);
     col->setContentsMargins(24, 20, 24, 18);
     col->setSpacing(8);
-    auto* title = pageTitle("Subtitles from speech");
+    auto* title = pageTitle(tr("Subtitles from speech"));
     col->addWidget(title);
-    auto* about = new QLabel(QString("The words spoken in \"%1\" become captions, each at its time. It all runs on this "
+    auto* about = new QLabel(tr("The words spoken in \"%1\" become captions, each at its time. It all runs on this "
                                      "computer: nothing is sent anywhere.")
                                  .arg(QString::fromStdString(clip->name)));
     about->setWordWrap(true);
@@ -170,10 +170,10 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
     setupCol->setContentsMargins(0, 0, 0, 0);
     auto* card = new SettingsCard;
     auto* language = new QComboBox;
-    for (const auto& [code, name] : kLanguages) language->addItem(QString::fromUtf8(name), QString(code));
+    for (const auto& [code, name] : kLanguages) language->addItem(tr(name), QString(code)); // the languages keep their own names
     language->setCurrentIndex(std::max(0, language->findData(QString::fromStdString(settings().speechLanguage))));
     language->setMinimumWidth(190);
-    card->addRow("Language", "Choosing it is more accurate than detecting it", language);
+    card->addRow(tr("Language"), tr("Choosing it is more accurate than detecting it"), language);
     setupCol->addWidget(card);
     pages->addWidget(setup);
     // Step 2: what it is doing, how far, how long.
@@ -181,7 +181,7 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
     auto* progressCol = new QVBoxLayout(progress);
     progressCol->setContentsMargins(0, 4, 0, 0);
     progressCol->setSpacing(8);
-    auto* stage = new QLabel("Loading the speech model...");
+    auto* stage = new QLabel(tr("Loading the speech model..."));
     progressCol->addWidget(stage);
     auto* bar = new QProgressBar;
     bar->setRange(0, 1000);
@@ -191,7 +191,7 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
     auto* timing = new QLabel(" ");
     setTone(timing, Tone::TextFaint);
     progressCol->addWidget(timing);
-    auto* note = new QLabel("You can keep editing meanwhile.");
+    auto* note = new QLabel(tr("You can keep editing meanwhile."));
     setTone(note, Tone::TextFaint);
     progressCol->addWidget(note);
     pages->addWidget(progress);
@@ -199,9 +199,9 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
     col->addSpacing(10);
     auto* buttons = new QHBoxLayout;
     buttons->addStretch();
-    auto* cancel = new QPushButton("Cancel");
+    auto* cancel = new QPushButton(tr("Cancel"));
     cancel->setMinimumWidth(100);
-    auto* go = accentButton("Transcribe");
+    auto* go = accentButton(tr("Transcribe"));
     go->setMinimumWidth(120);
     go->setDefault(true);
     buttons->addWidget(cancel);
@@ -226,7 +226,7 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
         saveSettings();
         pages->setCurrentIndex(1);
         go->hide();
-        cancel->setText("Stop");
+        cancel->setText(tr("Stop"));
         started->start();
         std::thread([job, file, sourceIn, sourceOut, options] {
             std::vector<Caption> caps;
@@ -250,14 +250,14 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
             if (!job->done) {
                 const float f = job->progress;
                 bar->setValue(std::min(990, static_cast<int>(f * 1000.0f)));
-                stage->setText(f <= 0.0f ? "Loading the speech model..." : QString("Listening...  %1%").arg(static_cast<int>(f * 100.0f)));
+                stage->setText(f <= 0.0f ? tr("Loading the speech model...") : tr("Listening...  %1%").arg(static_cast<int>(f * 100.0f)));
                 const double elapsed = started->elapsed() / 1000.0;
                 auto clock = [](double sec) {
                     const int t = static_cast<int>(std::lround(std::max(0.0, sec)));
                     return QString("%1:%2").arg(t / 60).arg(t % 60, 2, 10, QChar('0'));
                 };
-                timing->setText(f > 0.02f ? QString("%1 elapsed  ·  about %2 left").arg(clock(elapsed)).arg(clock(elapsed / f * (1.0f - f)))
-                                          : QString("%1 elapsed").arg(clock(elapsed)));
+                timing->setText(f > 0.02f ? tr("%1 elapsed  ·  about %2 left").arg(clock(elapsed)).arg(clock(elapsed / f * (1.0f - f)))
+                                          : tr("%1 elapsed").arg(clock(elapsed)));
                 return;
             }
             timer->stop();
@@ -266,7 +266,7 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
             if (stopped) return;
             dialog->hide();
             if (!job->ok) {
-                QMessageBox::warning(parent, "Transcribe Speech", QString::fromStdString(job->error));
+                QMessageBox::warning(parent, tr("Transcribe Speech"), QString::fromStdString(job->error));
                 dialog->close();
                 return;
             }
@@ -278,7 +278,7 @@ void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, Q
                 if (c.end > c.start) caps.push_back(std::move(c));
             }
             if (caps.empty()) {
-                QMessageBox::information(parent, "Transcribe Speech", "No speech was heard in this clip.");
+                QMessageBox::information(parent, tr("Transcribe Speech"), tr("No speech was heard in this clip."));
                 dialog->close();
                 return;
             }

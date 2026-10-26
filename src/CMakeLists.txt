@@ -8,11 +8,13 @@ add_library(bemotion_core STATIC
     core/History.cpp
     core/Animated.cpp
     core/Arrange.cpp
+    core/AudioDsp.cpp
     core/Clipboard.cpp
     core/Data.cpp
     core/Describe.cpp
     core/Ops.cpp
     core/Validate.cpp
+    core/Language.cpp
     core/Layer.cpp
     core/Presets.cpp
     core/Project.cpp
@@ -74,6 +76,7 @@ add_executable(bemotion WIN32
     ui/HomeScreen.cpp
     ui/IntroScreen.cpp
     ui/Keymap.cpp
+    ui/Language.cpp
     ui/LayerMenus.cpp
     ui/PagedWindow.cpp
     ui/PropertyRow.cpp
@@ -81,6 +84,7 @@ add_executable(bemotion WIN32
     ui/ExpressionLibrary.cpp
     ui/PreviewWindow.cpp
     ui/ColorPicker.cpp
+    ui/CurvesEditor.cpp
     ui/ExperienceScreen.cpp
     ui/SettingsWindow.cpp
     ui/Theme.cpp
@@ -89,6 +93,7 @@ add_executable(bemotion WIN32
     ui/panels/EffectsPanel.cpp
     ui/panels/MediaPanel.cpp
     ui/panels/ObjectsPanel.cpp
+    ui/panels/ScopesPanel.cpp
     ui/panels/PropertiesPanel.cpp
     ui/panels/TimelineGraph.cpp
     ui/panels/TimelinePanel.cpp

@@ -221,9 +221,9 @@ ExpressionEditor::ExpressionEditor(EditorContext& ctx, uint64_t layerId, bool ve
     col->setContentsMargins(0, 0, 0, 4);
     col->setSpacing(2);
     text_ = new ExpressionText(ctx, layerId, this);
-    text_->setPlaceholderText(vector ? "= an expression, e.g. wiggle(2, 25)" : "= an expression, e.g. time * 90");
-    text_->setToolTip("Worked out every frame. Several lines: name = ... first, the result last.\n"
-                      "Names complete as you type; ƒ inserts functions and other layers' properties. Esc: done.");
+    text_->setPlaceholderText(vector ? tr("= an expression, e.g. wiggle(2, 25)") : tr("= an expression, e.g. time * 90"));
+    text_->setToolTip(tr("Worked out every frame. Several lines: name = ... first, the result last.\n"
+                      "Names complete as you type; ƒ inserts functions and other layers' properties. Esc: done."));
     connect(text_, &QPlainTextEdit::textChanged, this, [this] { emit edited(text()); });
     col->addWidget(text_);
     // Under the text: the problem (if it does not read), then insert, close and remove.
@@ -236,7 +236,7 @@ ExpressionEditor::ExpressionEditor(EditorContext& ctx, uint64_t layerId, bool ve
     auto* fx = new QToolButton;
     fx_ = fx;
     fx->setText(QString::fromUtf8("ƒ  Insert"));
-    fx->setToolTip("The expression library: examples, functions, this clip's values, other layers' properties");
+    fx->setToolTip(tr("The expression library: examples, functions, this clip's values, other layers' properties"));
     fx->setFixedHeight(22);
     fx->setCursor(Qt::PointingHandCursor);
     connect(fx, &QToolButton::clicked, this, [this] { showMenu(); });
@@ -246,10 +246,10 @@ ExpressionEditor::ExpressionEditor(EditorContext& ctx, uint64_t layerId, bool ve
     auto* buttons = new QHBoxLayout(rowButtons_);
     buttons->setContentsMargins(0, 0, 0, 0);
     buttons->setSpacing(2);
-    auto* close = new ui::IconButton(ui::Icon::ChevronUp, "Close (the expression stays; fx opens it again)  Esc", 22);
+    auto* close = new ui::IconButton(ui::Icon::ChevronUp, tr("Close (the expression stays; fx opens it again)  Esc"), 22);
     connect(close, &QAbstractButton::clicked, this, [this] { emit closeRequested(); });
     buttons->addWidget(close);
-    auto* remove = new ui::IconButton(ui::Icon::Trash, "Remove the expression", 22);
+    auto* remove = new ui::IconButton(ui::Icon::Trash, tr("Remove the expression"), 22);
     connect(remove, &QAbstractButton::clicked, this, [this] { emit removeRequested(); });
     buttons->addWidget(remove);
     footer->addWidget(rowButtons_, 0, Qt::AlignTop);

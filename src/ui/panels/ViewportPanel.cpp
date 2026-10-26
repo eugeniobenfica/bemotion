@@ -4,6 +4,7 @@
 #include "app/Settings.h"
 #include "core/Geometry.h"
 #include "core/Snapping.h"
+#include "media/MediaManager.h"
 #include "render/SceneRenderer.h"
 #include "ui/AppSignals.h"
 #include "ui/Draw.h"
@@ -194,20 +195,20 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
         else throughCamera_ = !throughCamera_;
         update();
     });
-    orbitButton_ = hud(ui::Icon::Cube, "3D view: the layers and the camera in space\n"
-                                        "Drag: turn around  ·  Right drag: pan  ·  Wheel: closer / farther  ·  Fit: start over");
+    orbitButton_ = hud(ui::Icon::Cube, tr("3D view: the layers and the camera in space\n"
+                                        "Drag: turn around  ·  Right drag: pan  ·  Wheel: closer / farther  ·  Fit: start over"));
     connect(orbitButton_, &QAbstractButton::clicked, this, [this] {
         orbit_ = !orbit_;
         update();
     });
-    const char* toolNames[3] = {"Orbit", "Pan", "Dolly"};
-    const char* toolTips[3] = {"Drag to turn the camera around what it looks at", "Drag to move the camera sideways and up / down",
-                               "Drag up / down to move the camera forward / back"};
+    const char* toolNames[3] = {TR_NOOP("Orbit"), TR_NOOP("Pan"), TR_NOOP("Dolly")};
+    const char* toolTips[3] = {TR_NOOP("Drag to turn the camera around what it looks at"), TR_NOOP("Drag to move the camera sideways and up / down"),
+                               TR_NOOP("Drag up / down to move the camera forward / back")};
     for (int i = 0; i < 3; ++i) {
-        auto* b = new QPushButton(toolNames[i], this);
+        auto* b = new QPushButton(tr(toolNames[i]), this);
         b->setCheckable(true);
         b->setFixedHeight(26);
-        b->setToolTip(QString("Camera tool: %1 (keyframes at the playhead when animated)").arg(toolTips[i]));
+        b->setToolTip(tr("Camera tool: %1 (keyframes at the playhead when animated)").arg(tr(toolTips[i])));
         connect(b, &QPushButton::clicked, this, [this, i](bool on) {
             cameraTool_ = on ? static_cast<CameraTool>(i + 1) : CameraTool::None;
             for (int k = 0; k < 3; ++k) cameraTools_[k]->setChecked(cameraTool_ == static_cast<CameraTool>(k + 1));
@@ -215,23 +216,24 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
         });
         cameraTools_[i] = b;
     }
-    snapButton_ = hud(ui::Icon::Magnet, "Snapping (S) - hold Ctrl while dragging to bypass");
+    snapButton_ = hud(ui::Icon::Magnet, tr("Snapping (S) - hold Ctrl while dragging to bypass"));
     connect(snapButton_, &QAbstractButton::clicked, this, [this] { ctx_.snapping = !ctx_.snapping; });
-    zoomOutButton_ = hud(ui::Icon::ZoomOut, "Zoom out (Ctrl+-)");
+    zoomOutButton_ = hud(ui::Icon::ZoomOut, tr("Zoom out (Ctrl+-)"));
     connect(zoomOutButton_, &QAbstractButton::clicked, this, [this] { zoomBy(1.0f / 1.25f); });
-    zoomInButton_ = hud(ui::Icon::ZoomIn, "Zoom in (Ctrl+=)");
+    zoomInButton_ = hud(ui::Icon::ZoomIn, tr("Zoom in (Ctrl+=)"));
     connect(zoomInButton_, &QAbstractButton::clicked, this, [this] { zoomBy(1.25f); });
     zoomLevel_ = new QToolButton(this);
     zoomLevel_->setPopupMode(QToolButton::InstantPopup);
     zoomLevel_->setFixedSize(70, 26);
     auto* menu = new QMenu(zoomLevel_);
-    menu->addAction("Fit", this, [this] { requestFit(); });
+    menu->addAction(tr("Fit"), this, [this] { requestFit(); });
     for (float z : {0.25f, 0.5f, 1.0f, 2.0f, 4.0f})
         menu->addAction(QString("%1%").arg(static_cast<int>(z * 100)), this, [this, z] { setZoom(z); });
     zoomLevel_->setMenu(menu);
-    fitButton_ = new QPushButton("Fit", this);
-    fitButton_->setFixedSize(46, 26);
-    fitButton_->setToolTip("Fit composition to view (Ctrl+0)\nWheel: zoom  ·  Middle/right drag or Space+drag: pan");
+    fitButton_ = new QPushButton(tr("Fit"), this);
+    fitButton_->setFixedHeight(26);
+    fitButton_->setMinimumWidth(46); // as wide as its word needs (translations)
+    fitButton_->setToolTip(tr("Fit composition to view (Ctrl+0)\nWheel: zoom  ·  Middle/right drag or Space+drag: pan"));
     connect(fitButton_, &QPushButton::clicked, this, [this] {
         if (orbit_) resetOrbit();
         requestFit();
@@ -239,23 +241,34 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     qualityButton_ = new QToolButton(this);
     qualityButton_->setPopupMode(QToolButton::InstantPopup);
     qualityButton_->setFixedSize(70, 26);
-    qualityButton_->setText("Full");
-    qualityButton_->setToolTip("Preview resolution (export quality is unchanged)");
+    qualityButton_->setText(tr("Full"));
+    qualityButton_->setToolTip(tr("Preview resolution (export quality is unchanged)"));
     auto* qualityMenu = new QMenu(qualityButton_);
     auto* qualityGroup = new QActionGroup(qualityMenu);
-    for (const auto& [label, divisor] : {std::pair{"Full", 1}, {"Half", 2}, {"Quarter", 4}}) {
-        auto* action = qualityMenu->addAction(label);
+    for (const auto& [label, divisor] : {std::pair{TR_NOOP("Full"), 1}, {TR_NOOP("Half"), 2}, {"Quarter", 4}}) {
+        auto* action = qualityMenu->addAction(tr(label));
         action->setCheckable(true);
         action->setChecked(divisor == previewDivisor_);
         action->setData(divisor);
         qualityGroup->addAction(action);
         connect(action, &QAction::triggered, this, [this, divisor] { setPreviewQuality(divisor); });
     }
+    qualityMenu->addSeparator();
+    QAction* proxies = qualityMenu->addAction(tr("Use Proxies"));
+    proxies->setCheckable(true);
+    proxies->setToolTip(tr("Videos with a proxy (Media panel › Create Proxy) play from it; exports use the originals"));
+    connect(qualityMenu, &QMenu::aboutToShow, proxies, [proxies] { proxies->setChecked(media::MediaManager::get().useProxies()); });
+    connect(proxies, &QAction::triggered, this, [](bool on) {
+        settings().useProxies = on;
+        media::MediaManager::get().setUseProxies(on);
+        saveSettings();
+    });
+    qualityMenu->setToolTipsVisible(true);
     qualityButton_->setMenu(qualityMenu);
     fullscreenButton_ = new ui::IconButton(ui::Icon::Fullscreen, "", 26, this);
-    fullscreenButton_->setToolTip("Full screen preview: only the picture, playing (Esc to return)");
+    fullscreenButton_->setToolTip(tr("Full screen preview: only the picture, playing (Esc to return)"));
     connect(fullscreenButton_, &QPushButton::clicked, this, &ViewportPanel::viewportFullscreenRequested);
-    snapshotButton_ = new ui::IconButton(ui::Icon::Snapshot, "Export Frame: this frame as a picture, at full size (Shift+E)", 26, this);
+    snapshotButton_ = new ui::IconButton(ui::Icon::Snapshot, tr("Export Frame: this frame as a picture, at full size (Shift+E)"), 26, this);
     connect(snapshotButton_, &QPushButton::clicked, this, &ViewportPanel::snapshotRequested);
     connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
         frameValid_ = false;
@@ -331,8 +344,9 @@ void ViewportPanel::setPreviewQuality(int divisor) {
     divisor = divisor == 4 ? 4 : divisor == 2 ? 2 : 1;
     if (previewDivisor_ == divisor) return;
     previewDivisor_ = divisor;
-    qualityButton_->setText(divisor == 1 ? "Full" : divisor == 2 ? "Half" : "Quarter");
-    for (QAction* action : qualityButton_->menu()->actions()) action->setChecked(action->data().toInt() == divisor);
+    qualityButton_->setText(divisor == 1 ? tr("Full") : divisor == 2 ? tr("Half") : tr("Quarter"));
+    for (QAction* action : qualityButton_->menu()->actions())
+        if (action->data().toInt() > 0) action->setChecked(action->data().toInt() == divisor); // not Use Proxies
     frameValid_ = false;
     update();
     emit previewQualityChanged(divisor);
@@ -340,7 +354,7 @@ void ViewportPanel::setPreviewQuality(int divisor) {
 
 void ViewportPanel::setViewportFullscreen(bool fullscreen) {
     fullscreenButton_->setActive(fullscreen);
-    fullscreenButton_->setToolTip(fullscreen ? "Exit fullscreen (Esc)" : "Full screen preview: only the picture, playing (Esc to return)");
+    fullscreenButton_->setToolTip(fullscreen ? tr("Exit fullscreen (Esc)") : tr("Full screen preview: only the picture, playing (Esc to return)"));
     positionHud();
 }
 
@@ -368,7 +382,8 @@ void ViewportPanel::resizeEvent(QResizeEvent*) { positionHud(); }
 void ViewportPanel::positionHud() {
     const Composition& c = ctx_.comp();
     const int y = height() - 26 - 10;
-    int x = width() - 12 - (26 * 3 + 70 + 46 + 4 * 3 + 12);
+    fitButton_->adjustSize(); // its word decides its width (translations)
+    int x = width() - 12 - (26 * 3 + 70 + fitButton_->width() + 4 * 3 + 12);
     const bool hasCamera = std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.type == LayerType::Camera; });
     const bool has3D = hasCamera || std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.threeD; });
     cameraButton_->setVisible(hasCamera);
@@ -409,6 +424,12 @@ void ViewportPanel::positionHud() {
 
 // --- painting ---------------------------------------------------------------------------------
 
+void ViewportPanel::clearCache() {
+    cache_.clear();
+    cacheBytes_ = 0;
+    ctx_.cachedFrames.clear();
+}
+
 void ViewportPanel::paintEvent(QPaintEvent*) {
     layout();
     positionHud();
@@ -419,13 +440,31 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     d.rectFilled(Pt(0, 0), Pt(width(), height()), theme::kCanvas);
 
     // Cache the scene independently of hover/selection overlays. Media may finish decoding
-    // without a document revision, so compositions with imported media remain uncached.
+    // without a document revision, so compositions with imported media are rendered again on
+    // every paint, unless the frame is in the cache below.
     const qreal rasterScale = devicePixelRatioF() / previewDivisor_;
     const QSize px(std::max(1, static_cast<int>(std::ceil(width() * rasterScale))),
                    std::max(1, static_cast<int>(std::ceil(height() * rasterScale))));
     const Layer* cropping = cropLayer();
     const FrameKey key{ctx_.revision(), t, px, origin_, zoom_, rasterScale, throughCamera_, orbit_, orbitView_, cropping ? cropping->id : 0};
-    if (!frameValid_ || key != frameKey_ || !c.media.empty()) {
+    // The RAM preview: frames rendered at their own time are kept while nothing else changes
+    // (the document, the view, a proxy). While playing, the scene is the frame's (as exported).
+    FrameKey look = key;
+    look.time = -1.0;
+    const uint64_t generation = media::MediaManager::get().generation();
+    if (look != cacheLook_ || generation != cacheGeneration_) {
+        clearCache();
+        cacheLook_ = look;
+        cacheGeneration_ = generation;
+    }
+    const int frameNumber = c.frameAt(t);
+    const double sceneTime = ctx_.playing ? c.snapToFrame(t) : t;
+    const bool onFrame = std::fabs(sceneTime - c.snapToFrame(sceneTime)) < 1e-6 && !cropping;
+    if (const auto hit = cache_.find(frameNumber); onFrame && hit != cache_.end() && (!frameValid_ || key != frameKey_ || !c.media.empty())) {
+        frame_ = hit->second;
+        frameKey_ = key;
+        frameValid_ = true;
+    } else if (!frameValid_ || key != frameKey_ || !c.media.empty()) {
         if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
         frame_.fill(Qt::transparent);
         const SkImageInfo info = qtImageInfo(px.width(), px.height());
@@ -440,9 +479,27 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
                 if (Layer* l = uncropped.findLayer(cropping->id))
                     l->media.cropLeft = l->media.cropTop = l->media.cropRight = l->media.cropBottom = AnimFloat{0.0f};
             }
-            render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, t, render::View{origin_ * z, zoom_ * z, world_}, true,
+            render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, render::View{origin_ * z, zoom_ * z, world_}, true,
                                     throughCamera_, orbit_ ? &orbitLens_ : nullptr);
             frameKey_ = key;
+            // Kept (shared until the next render writes a new picture), the frames farthest from
+            // the playhead going first when the memory for it is full.
+            if (onFrame) {
+                const size_t budget = static_cast<size_t>(std::max(0, settings().cacheMegabytes / 2)) << 20;
+                const size_t bytes = static_cast<size_t>(frame_.sizeInBytes());
+                if (bytes <= budget) {
+                    cache_[frameNumber] = frame_;
+                    cacheBytes_ += bytes;
+                    while (cacheBytes_ > budget && cache_.size() > 1) {
+                        auto far = cache_.begin();
+                        if (std::abs(std::prev(cache_.end())->first - frameNumber) > std::abs(far->first - frameNumber)) far = std::prev(cache_.end());
+                        cacheBytes_ -= static_cast<size_t>(far->second.sizeInBytes());
+                        cache_.erase(far);
+                    }
+                    ctx_.cachedFrames.clear();
+                    for (const auto& [n, image] : cache_) ctx_.cachedFrames.insert(n);
+                }
+            }
         }
     }
     const Vec2 compMax = sceneView().toScreen(compSize_);
@@ -464,8 +521,8 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     snapButton_->setActive(ctx_.snapping);
     cameraButton_->setActive(throughCamera_ && !orbit_);
     orbitButton_->setActive(orbit_);
-    cameraButton_->setToolTip(throughCamera_ ? "Looking through the camera (click for the free view)"
-                                             : "Free view: camera frames shown (click to look through the camera)");
+    cameraButton_->setToolTip(throughCamera_ ? tr("Looking through the camera (click for the free view)")
+                                             : tr("Free view: camera frames shown (click to look through the camera)"));
     if (textEdit_) placeTextEditor();
 }
 
@@ -816,7 +873,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
                       : dropKind_ == ui::kDropSubtitles ? makeSubtitleLayer(compSize_, comp.duration)
                       : dropKind_ == ui::kDropCounter ? makeCounterLayer(scenePos, comp.duration)
                       : type                       ? makePluginLayer(type->name, type->prototype, scenePos, comp.duration)
-                      : dropKind_ < 0              ? makeTextLayer("Your text", scenePos, comp.duration)
+                      : dropKind_ < 0              ? makeTextLayer(tr("Your text").toStdString(), scenePos, comp.duration)
                                                    : makeShapeLayer(static_cast<ShapeKind>(dropKind_), scenePos, comp.duration);
         if (item && item->width > 0 && item->height > 0) { // fitted like the layer it becomes
             const float fit = std::min({1.0f, static_cast<float>(comp.width) / item->width, static_cast<float>(comp.height) / item->height});
@@ -1010,7 +1067,7 @@ void ViewportPanel::startPen(Vec2 mouse) {
                       !(sel->type == LayerType::Media && !sel->media.hasVideo);
     if (mask) {
         Mask m;
-        m.name = "Mask " + std::to_string(sel->masks.size() + 1);
+        m.name = tr("Mask %1").arg(sel->masks.size() + 1).toStdString();
         m.path.vertices.clear();
         sel->masks.push_back(std::move(m));
         penTarget_ = {sel->id, static_cast<int>(sel->masks.size()) - 1};
@@ -1892,7 +1949,7 @@ void ViewportPanel::editGuide(int index, QPoint at) {
     auto& guides = ctx_.comp().guides;
     if (index < 0 || index >= static_cast<int>(guides.size())) return;
     QMenu menu(this);
-    menu.addSection(guides[index].vertical ? "Vertical guide" : "Horizontal guide");
+    menu.addSection(guides[index].vertical ? tr("Vertical guide") : tr("Horizontal guide"));
     auto* value = new ui::DragValue;
     value->setSpeed(1.0f);
     value->setFormat("%.0f px");
@@ -1907,7 +1964,7 @@ void ViewportPanel::editGuide(int index, QPoint at) {
     auto* action = new QWidgetAction(&menu);
     action->setDefaultWidget(value);
     menu.addAction(action);
-    menu.addAction("Delete Guide", this, [this, index] {
+    menu.addAction(tr("Delete Guide"), this, [this, index] {
         auto& g = ctx_.comp().guides;
         if (index < static_cast<int>(g.size())) g.erase(g.begin() + index);
         ctx_.touch();
@@ -1931,7 +1988,7 @@ void ViewportPanel::beginTextEdit(uint64_t layerId) {
                 update();
             }
         });
-        textHint_ = new QLabel("Enter to finish  ·  Ctrl+Enter for a new line  ·  Esc to cancel", this);
+        textHint_ = new QLabel(tr("Enter to finish  ·  Ctrl+Enter for a new line  ·  Esc to cancel"), this);
         ui::setTone(textHint_, ui::Tone::TextFaint);
     }
     textEdit_ = layerId;

@@ -79,13 +79,13 @@ void AnimationsPanel::rebuild() {
     col->setContentsMargins(8, 8, 8, 8);
     col->setSpacing(6);
     tiles_.clear();
-    auto* about = new QLabel("Quick Animations: click one for the selected layers (it starts at the playhead), or drag it onto a clip.");
+    auto* about = new QLabel(tr("Quick Animations: click one for the selected layers (it starts at the playhead), or drag it onto a clip."));
     about->setWordWrap(true);
     ui::setTone(about, ui::Tone::TextFaint);
     col->addWidget(about);
 
     // Built-in categories first, then whatever imported presets use.
-    std::vector<std::string> categories = {"Entrance", "Emphasis", "Exit", "Letters"};
+    std::vector<std::string> categories = {TR_NOOP("Entrance"), TR_NOOP("Emphasis"), TR_NOOP("Exit"), TR_NOOP("Letters")};
     for (const auto& lp : PresetLibrary::all())
         if (std::find(categories.begin(), categories.end(), lp.preset.category) == categories.end()) categories.push_back(lp.preset.category);
     for (const std::string& category : categories) {
@@ -102,12 +102,12 @@ void AnimationsPanel::rebuild() {
                 col->addLayout(grid);
             }
             const AnimationPreset preset = lp.preset;
-            auto* t = new ui::Tile(iconOf(preset.name), QString::fromStdString(preset.name));
+            auto* t = new ui::Tile(iconOf(preset.name), trs(preset.name));
             t->setTileSize(tile);
-            t->setToolTip(QString("%1 · %2 s%3\n\nClick: the selected layers, from the playhead. Or drag it onto a clip.")
-                              .arg(QString::fromStdString(preset.name))
+            t->setToolTip(tr("%1 · %2 s%3\n\nClick: the selected layers, from the playhead. Or drag it onto a clip.")
+                              .arg(trs(preset.name))
                               .arg(preset.duration, 0, 'g', 2)
-                              .arg(preset.appliesTo == "text" ? " · text" : preset.appliesTo == "shape" ? " · shapes" : ""));
+                              .arg(preset.appliesTo == "text" ? tr(" · text") : preset.appliesTo == "shape" ? tr(" · shapes") : QString()));
             connect(t, &QAbstractButton::clicked, this, [this, preset] {
                 bool any = false;
                 for (Layer* l : ctx_.selectedLayers())
@@ -121,8 +121,8 @@ void AnimationsPanel::rebuild() {
                 t->setContextMenuPolicy(Qt::CustomContextMenu);
                 connect(t, &QWidget::customContextMenuRequested, this, [this, t, file](QPoint p) {
                     QMenu menu;
-                    menu.addAction("Show File", [file] { platform::revealInFileManager(file); });
-                    menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), "Delete Preset", [this, file] {
+                    menu.addAction(tr("Show File"), [file] { platform::revealInFileManager(file); });
+                    menu.addAction(ui::menuIcon(ui::Icon::Trash, theme::kDanger), tr("Delete Preset"), [this, file] {
                         PresetLibrary::remove(file);
                         QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
                     });
@@ -136,17 +136,17 @@ void AnimationsPanel::rebuild() {
     }
 
     auto* row = new QHBoxLayout;
-    auto* import = new QPushButton("Import...");
-    import->setToolTip("Add a Quick Animation from a .json preset file");
+    auto* import = new QPushButton(tr("Import..."));
+    import->setToolTip(tr("Add a Quick Animation from a .json preset file"));
     connect(import, &QPushButton::clicked, this, [this] {
-        if (auto file = platform::openFileDialog("Import Quick Animation", "Quick Animation preset", ".json")) {
+        if (auto file = platform::openFileDialog(TR_NOOP("Import Quick Animation"), TR_NOOP("Quick Animation preset"), ".json")) {
             std::string err;
             messageText_ = PresetLibrary::importFile(*file, &err) ? "" : "Import failed: " + err;
             QMetaObject::invokeMethod(this, [this] { rebuild(); }, Qt::QueuedConnection);
         }
     });
-    auto* save = new QPushButton("Save Selected...");
-    save->setToolTip("Turn the selected layer's keyframes into a Quick Animation of your own");
+    auto* save = new QPushButton(tr("Save Selected..."));
+    save->setToolTip(tr("Turn the selected layer's keyframes into a Quick Animation of your own"));
     connect(save, &QPushButton::clicked, this, [this] {
         Layer* l = ctx_.selected();
         if (!l) {
@@ -156,7 +156,7 @@ void AnimationsPanel::rebuild() {
             return;
         }
         bool ok = false;
-        const QString name = QInputDialog::getText(this, "Save Quick Animation", "Preset name", QLineEdit::Normal,
+        const QString name = QInputDialog::getText(this, tr("Save Quick Animation"), tr("Preset name"), QLineEdit::Normal,
                                                    QString::fromStdString(l->name + " animation"), &ok);
         if (!ok || name.trimmed().isEmpty()) return;
         AnimationPreset preset = presetFromLayer(*l, l->inPoint, l->outPoint, name.toStdString());

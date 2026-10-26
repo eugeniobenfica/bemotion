@@ -47,8 +47,8 @@ struct ScaleOption {
     const char* label;
     float scale;
 };
-constexpr ScaleOption kScales[] = {{"Full size", 1.0f}, {"Half size", 0.5f}, {"Quarter size", 0.25f}, {"Double (2x)", 2.0f}};
-constexpr const char* kQualities[] = {"Smaller file", "Balanced", "Best"};
+constexpr ScaleOption kScales[] = {{TR_NOOP("Full size"), 1.0f}, {TR_NOOP("Half size"), 0.5f}, {TR_NOOP("Quarter size"), 0.25f}, {TR_NOOP("Double (2x)"), 2.0f}};
+constexpr const char* kQualities[] = {TR_NOOP("Smaller file"), TR_NOOP("Balanced"), TR_NOOP("Best")};
 
 // The formats as tiles, in the order people reach for them: what it is, what it is for.
 struct FormatChoice {
@@ -58,12 +58,12 @@ struct FormatChoice {
     Icon icon;
 };
 constexpr FormatChoice kFormatChoices[] = {
-    {static_cast<int>(exporting::Format::Mp4), "MP4", "Plays everywhere", Icon::Film},
-    {static_cast<int>(exporting::Format::WebM), "WebM", "Web, transparent", Icon::Film},
-    {static_cast<int>(exporting::Format::MovProRes), "ProRes MOV", "Editing, transparent", Icon::Film},
-    {static_cast<int>(exporting::Format::Gif), "GIF", "Loops, no sound", Icon::Loop},
-    {static_cast<int>(exporting::Format::PngSequence), "PNG Sequence", "An image per frame", Icon::Image},
-    {static_cast<int>(exporting::Format::Count), "Project Package", "Project and files", Icon::Folder},
+    {static_cast<int>(exporting::Format::Mp4), TR_NOOP("MP4"), TR_NOOP("Plays everywhere"), Icon::Film},
+    {static_cast<int>(exporting::Format::WebM), TR_NOOP("WebM"), TR_NOOP("Web, transparent"), Icon::Film},
+    {static_cast<int>(exporting::Format::MovProRes), TR_NOOP("ProRes MOV"), TR_NOOP("Editing, transparent"), Icon::Film},
+    {static_cast<int>(exporting::Format::Gif), TR_NOOP("GIF"), TR_NOOP("Loops, no sound"), Icon::Loop},
+    {static_cast<int>(exporting::Format::PngSequence), TR_NOOP("PNG Sequence"), TR_NOOP("An image per frame"), Icon::Image},
+    {static_cast<int>(exporting::Format::Count), TR_NOOP("Project Package"), TR_NOOP("Project and files"), Icon::Folder},
 };
 
 // One format: its icon, name and use; outlined in the accent when chosen.
@@ -76,7 +76,7 @@ public:
         setFixedHeight(58);
         setMinimumWidth(150);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        if (!available) setToolTip("Not in this build of FFmpeg");
+        if (!available) setToolTip(tr("Not in this build of FFmpeg"));
     }
 
 protected:
@@ -92,9 +92,9 @@ protected:
         QFont bold = font();
         bold.setWeight(QFont::DemiBold);
         p.setFont(bold);
-        d.text(Pt(46, h * 0.5f - d.textHeight() + 1), available_ ? theme::kText : theme::kTextFaint, QString(choice_.title));
+        d.text(Pt(46, h * 0.5f - d.textHeight() + 1), available_ ? theme::kText : theme::kTextFaint, tr(choice_.title));
         p.setFont(font());
-        d.text(Pt(46, h * 0.5f + 2), theme::kTextFaint, QString(available_ ? choice_.use : "Not available"));
+        d.text(Pt(46, h * 0.5f + 2), theme::kTextFaint, available_ ? tr(choice_.use) : tr("Not available"));
     }
     void enterEvent(QEnterEvent*) override { update(); }
     void leaveEvent(QEvent*) override { update(); }
@@ -134,7 +134,7 @@ Remembered& remembered() {
 class ExportDialog : public QDialog {
 public:
     ExportDialog(EditorContext& ctx, QWidget* parent) : QDialog(parent), ctx_(ctx) {
-        setWindowTitle("Export");
+        setWindowTitle(tr("Export"));
         setMinimumWidth(620);
         Remembered& r = remembered();
         exporting::Settings& s = r.settings;
@@ -172,7 +172,7 @@ protected:
     void reject() override {
         if (packageRunning_) {
             packageCancel_->store(true);
-            progressInfo_->setText("Cancelling...");
+            progressInfo_->setText(tr("Cancelling..."));
             return;
         }
         if (job_.running()) { // Esc / close while exporting cancels it
@@ -194,9 +194,9 @@ private:
         col->setSpacing(6);
 
         // What is exported: the composition, its size, rate and length.
-        auto* title = pageTitle("Export");
+        auto* title = pageTitle(tr("Export"));
         col->addWidget(title);
-        auto* about = new QLabel(QString("%1  ·  %2 × %3  ·  %4 fps  ·  %5")
+        auto* about = new QLabel(tr("%1  ·  %2 × %3  ·  %4 fps  ·  %5")
                                      .arg(QString::fromStdString(ctx_.project.name))
                                      .arg(comp.width)
                                      .arg(comp.height)
@@ -206,7 +206,7 @@ private:
         col->addWidget(about);
 
         col->addSpacing(8);
-        col->addWidget(sectionLabel("Format"));
+        col->addWidget(sectionLabel(tr("Format")));
         auto* tiles = new QGridLayout;
         tiles->setSpacing(8);
         auto* group = new QButtonGroup(page);
@@ -233,19 +233,19 @@ private:
         });
 
         col->addSpacing(8);
-        videoTitle_ = sectionLabel("Video");
+        videoTitle_ = sectionLabel(tr("Video"));
         col->addWidget(videoTitle_);
         video_ = new SettingsCard;
         col->addWidget(video_);
         QStringList scales;
-        for (const ScaleOption& o : kScales) scales << o.label;
-        sizeRow_ = video_->addRow("Size", " ", segmented(scales, r.scaleIndex, [this](int i) {
+        for (const ScaleOption& o : kScales) scales << tr(o.label);
+        sizeRow_ = video_->addRow(tr("Size"), " ", segmented(scales, r.scaleIndex, [this](int i) {
                                       remembered().scaleIndex = std::max(0, i);
                                       refreshSettings();
                                   }));
         sizeInfo_ = sizeRow_->findChildren<QLabel*>().size() > 1 ? sizeRow_->findChildren<QLabel*>()[1] : nullptr;
         QStringList qualities;
-        for (const char* q : kQualities) qualities << q;
+        for (const char* q : kQualities) qualities << tr(q);
         qualityRow_ = video_->addRow("Quality", "", segmented(qualities, static_cast<int>(r.settings.quality), [](int i) {
                                          remembered().settings.quality = static_cast<Quality>(std::max(0, i));
                                      }));
@@ -282,18 +282,18 @@ private:
             if (remembered().rangeStart > v) from_->setValue(v), remembered().rangeStart = v;
         });
         rangeCol->addWidget(rangeBox_);
-        rangeCol->addWidget(segmented({"Whole", "Part"}, r.customRange ? 1 : 0, [this](int i) {
+        rangeCol->addWidget(segmented({tr("Whole"), tr("Part")}, r.customRange ? 1 : 0, [this](int i) {
             remembered().customRange = i == 1;
             refreshSettings();
         }));
-        rangeRow_ = video_->addRow("Range", "", rangeBox);
+        rangeRow_ = video_->addRow(tr("Range"), "", rangeBox);
         transparent_ = new QCheckBox;
         transparent_->setChecked(r.settings.transparent);
         connect(transparent_, &QCheckBox::toggled, this, [](bool on) { remembered().settings.transparent = on; });
-        transparentRow_ = video_->addRow("Transparent background", "Without the composition's background color", transparent_);
+        transparentRow_ = video_->addRow(tr("Transparent background"), tr("Without the composition's background color"), transparent_);
 
         col->addSpacing(8);
-        col->addWidget(sectionLabel("Save to"));
+        col->addWidget(sectionLabel(tr("Save to")));
         auto* where = new SettingsCard;
         col->addWidget(where);
         auto* outBox = new QWidget;
@@ -304,11 +304,11 @@ private:
         connect(output_, &QLineEdit::textEdited, this,
                 [](const QString& t) { remembered().settings.output = platform::fromUtf8(t.toStdString()); });
         outRow->addWidget(output_, 1);
-        auto* browse = new QPushButton("Change...");
+        auto* browse = new QPushButton(tr("Change..."));
         connect(browse, &QPushButton::clicked, this, [this] {
             exporting::Settings& s = remembered().settings;
             const bool package = remembered().package;
-            if (auto file = platform::saveFileDialog("Export to", s.output, package ? "Project package" : formatLabel(s.format),
+            if (auto file = platform::saveFileDialog(TR_NOOP("Export to"), s.output, package ? TR_NOOP("Project package") : formatLabel(s.format),
                                                      package ? ".zip" : formatExtension(s.format))) {
                 s.output = *file;
                 output_->setText(QString::fromStdString(platform::toUtf8(s.output)));
@@ -329,10 +329,10 @@ private:
         sequenceNote_->setWordWrap(true);
         setTone(sequenceNote_, Tone::TextFaint);
         buttons->addWidget(sequenceNote_, 1);
-        auto* cancel = new QPushButton("Cancel");
+        auto* cancel = new QPushButton(tr("Cancel"));
         cancel->setMinimumWidth(110);
         connect(cancel, &QPushButton::clicked, this, &QDialog::reject);
-        auto* go = accentButton("Export");
+        auto* go = accentButton(tr("Export"));
         go->setMinimumWidth(130);
         go->setDefault(true);
         connect(go, &QPushButton::clicked, this, [this] { startExport(); });
@@ -346,7 +346,7 @@ private:
         auto* page = new QWidget;
         auto* col = new QVBoxLayout(page);
         col->setContentsMargins(0, 0, 0, 0);
-        progressTitle_ = pageTitle("Exporting...");
+        progressTitle_ = pageTitle(tr("Exporting..."));
         col->addWidget(progressTitle_);
         progressFile_ = colored("", Tone::TextDim);
         col->addWidget(progressFile_);
@@ -361,12 +361,12 @@ private:
         col->addSpacing(8);
         auto* buttons = new QHBoxLayout;
         buttons->addStretch();
-        auto* cancel = new QPushButton("Cancel");
+        auto* cancel = new QPushButton(tr("Cancel"));
         cancel->setMinimumWidth(110);
         connect(cancel, &QPushButton::clicked, this, [this] {
             if (packageRunning_) {
                 packageCancel_->store(true);
-                progressInfo_->setText("Cancelling...");
+                progressInfo_->setText(tr("Cancelling..."));
             } else {
                 job_.cancel();
                 showResult();
@@ -392,9 +392,9 @@ private:
         col->addSpacing(10);
         auto* buttons = new QHBoxLayout;
         buttons->addStretch();
-        reveal_ = new QPushButton("Show in Folder");
-        play_ = new QPushButton("Play");
-        auto* done = accentButton("Done");
+        reveal_ = new QPushButton(tr("Show in Folder"));
+        play_ = new QPushButton(tr("Play"));
+        auto* done = accentButton(tr("Done"));
         for (QPushButton* b : {reveal_, play_, done}) {
             b->setMinimumWidth(110);
             buttons->addWidget(b);
@@ -421,7 +421,7 @@ private:
         // A package has no picture settings at all.
         videoTitle_->setVisible(!r.package);
         video_->setVisible(!r.package);
-        if (sizeInfo_) sizeInfo_->setText(QString("%1 × %2 px").arg(w).arg(h)); // what the choice gives
+        if (sizeInfo_) sizeInfo_->setText(tr("%1 × %2 px").arg(w).arg(h)); // what the choice gives
         qualityRow_->setVisible(!sequence);
         rangeBox_->setVisible(r.customRange);
         transparentRow_->setVisible(!r.package && formatSupportsAlpha(s.format));
@@ -432,11 +432,11 @@ private:
         output_->setText(QString::fromStdString(platform::toUtf8(s.output)));
         const double length = r.customRange ? std::max(0.0, r.rangeEnd - r.rangeStart) : ctx_.comp().duration;
         const int frames = static_cast<int>(std::lround(length * ctx_.comp().fps));
-        sequenceNote_->setText(r.package ? QString("The project, its media and its plugins' files in one ZIP: extract it to open the project elsewhere.")
-                               : sequence ? QString("%1 images: %2_0000.png, _0001.png, ...")
+        sequenceNote_->setText(r.package ? tr("The project, its media and its plugins' files in one ZIP: extract it to open the project elsewhere.")
+                               : sequence ? tr("%1 images: %2_0000.png, _0001.png, ...")
                                                 .arg(frames)
                                                 .arg(QString::fromStdString(platform::toUtf8(s.output.stem())))
-                                          : QString("%1 frames  ·  %2").arg(frames).arg(QString::fromStdString(formatDuration(length))));
+                                          : tr("%1 frames  ·  %2").arg(frames).arg(QString::fromStdString(formatDuration(length))));
         video_->update();
         adjustSize();
     }
@@ -449,7 +449,7 @@ private:
         s.start = r.customRange ? r.rangeStart : 0.0;
         s.end = r.customRange ? r.rangeEnd : ctx_.comp().duration;
         if (s.output.empty() || s.output.filename().empty()) {
-            showError("Choose where to save the export.");
+            showError(tr("Choose where to save the export.").toStdString());
             return;
         }
         if (r.package) {
@@ -462,7 +462,7 @@ private:
         s.mixAudio = media::AudioEngine::mix;
         showError("");
         pages_->setCurrentIndex(1);
-        progressTitle_->setText("Preparing...");
+        progressTitle_->setText(tr("Preparing..."));
         progressFile_->setText(QString::fromStdString(platform::toUtf8(s.output.filename())));
         bar_->setRange(0, 1000);
         bar_->setValue(0);
@@ -482,15 +482,15 @@ private:
                     return result;
                 });
         } catch (const std::exception& e) {
-            showError(std::string("Could not start project packaging: ") + e.what());
+            showError(tr("Could not start project packaging: %1").arg(e.what()).toStdString());
             return;
         }
         packageRunning_ = true;
         showError("");
         pages_->setCurrentIndex(1);
-        progressTitle_->setText("Packaging project...");
+        progressTitle_->setText(tr("Packaging project..."));
         progressFile_->setText(QString::fromStdString(platform::toUtf8(packageOutput_.filename())));
-        progressInfo_->setText("Collecting linked files...");
+        progressInfo_->setText(tr("Collecting linked files..."));
         bar_->setRange(0, 0);
         timer_->start(30);
     }
@@ -510,9 +510,9 @@ private:
             bar_->setRange(0, 1000);
             bar_->setValue(result.ok ? 1000 : 0);
             const bool cancelled = !result.ok && packageCancel_->load();
-            resultTitle_->setText(result.ok ? "Project package ready" : cancelled ? "Export cancelled" : "Export failed");
+            resultTitle_->setText(result.ok ? tr("Project package ready") : cancelled ? tr("Export cancelled") : tr("Export failed"));
             ui::setTone(resultTitle_, result.ok ? ui::Tone::Accent : cancelled ? ui::Tone::Text : ui::Tone::Danger);
-            resultInfo_->setText(result.ok ? "Project and linked files are ready to share." : "");
+            resultInfo_->setText(result.ok ? tr("Project and linked files are ready to share.") : "");
             resultPath_->setText(result.ok ? QString::fromStdString(platform::toUtf8(packageOutput_))
                                           : cancelled ? QString() : QString::fromStdString(result.error));
             reveal_->setVisible(result.ok);
@@ -522,7 +522,7 @@ private:
         if (waiting_) { // audio of the composition still decoding
             media::MediaManager::get().update(ctx_.comp());
             if (!media::MediaManager::get().audioReady(ctx_.comp())) {
-                progressInfo_->setText("Reading audio...");
+                progressInfo_->setText(tr("Reading audio..."));
                 timer_->setInterval(30);
                 return;
             }
@@ -535,7 +535,7 @@ private:
                 showError(error);
                 return;
             }
-            progressTitle_->setText("Exporting...");
+            progressTitle_->setText(tr("Exporting..."));
         }
         job_.step(1.0 / 30.0); // keep the UI responsive
         if (!job_.running()) {
@@ -546,8 +546,8 @@ private:
         bar_->setValue(done * 1000 / total);
         const double elapsed = job_.elapsedSeconds();
         const double remaining = done > 0 ? elapsed / done * (total - done) : 0.0;
-        progressTitle_->setText(QString("Exporting...  %1%").arg(done * 100 / total));
-        progressInfo_->setText(QString("Frame %1 of %2  ·  %3 elapsed  ·  about %4 left")
+        progressTitle_->setText(tr("Exporting...  %1%").arg(done * 100 / total));
+        progressInfo_->setText(tr("Frame %1 of %2  ·  %3 elapsed  ·  about %4 left")
                                    .arg(done)
                                    .arg(total)
                                    .arg(QString::fromStdString(formatDuration(elapsed)))
@@ -561,17 +561,17 @@ private:
         const bool ok = job_.succeeded();
         const bool sequence = job_.settings().format == exporting::Format::PngSequence;
         if (ok) {
-            resultTitle_->setText("Export complete");
+            resultTitle_->setText(tr("Export complete"));
             ui::setTone(resultTitle_, ui::Tone::Accent);
-            resultInfo_->setText(QString("%1 frames in %2").arg(job_.framesTotal()).arg(QString::fromStdString(formatDuration(job_.elapsedSeconds()))));
+            resultInfo_->setText(tr("%1 frames in %2").arg(job_.framesTotal()).arg(QString::fromStdString(formatDuration(job_.elapsedSeconds()))));
             resultPath_->setText(QString::fromStdString(platform::toUtf8(job_.settings().output)));
         } else if (job_.cancelled()) {
-            resultTitle_->setText("Export cancelled");
+            resultTitle_->setText(tr("Export cancelled"));
             resultTitle_->setStyleSheet("");
             resultInfo_->clear();
             resultPath_->clear();
         } else {
-            resultTitle_->setText("Export failed");
+            resultTitle_->setText(tr("Export failed"));
             ui::setTone(resultTitle_, ui::Tone::Danger);
             resultInfo_->clear();
             resultPath_->setText(QString::fromStdString(job_.error()));

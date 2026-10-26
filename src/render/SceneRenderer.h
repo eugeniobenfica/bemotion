@@ -14,7 +14,10 @@
 #include "include/core/SkImage.h"
 #include "include/core/SkRefCnt.h"
 
+#include <filesystem>
 #include <functional>
+#include <string>
+#include <vector>
 
 class SkCanvas;
 
@@ -62,6 +65,12 @@ std::vector<const Layer*> depthOrder(const Composition& comp, double time, bool 
 // Media layers get their picture from the media module (null while not available).
 using MediaProvider = std::function<sk_sp<SkImage>(const Composition& comp, const Layer& layer, double time)>;
 void setMediaProvider(MediaProvider provider);
+
+// Apply LUT: where "bundled:Name.cube" files are (the app's assets/luts), their names, and a LUT
+// file's title or why it cannot be used (read once, again when the file changes).
+void setLutFolder(const std::filesystem::path& folder);
+std::vector<std::string> bundledLuts();
+bool lutInfo(const std::string& file, std::string& title, std::string& error);
 
 // The direct child of a compound under a composition point (0 if none), for
 // picking a layer inside a compound. throughCamera: as the camera shows it

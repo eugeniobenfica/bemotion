@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/Animated.h"
+#include "core/Language.h"
 #include "core/Effects.h"
 #include "core/Media.h"
 #include "core/Math.h"
@@ -22,23 +23,23 @@ enum class BlendMode { Normal, Multiply, Screen, Overlay, Darken, Lighten, Color
 inline constexpr const char* kBlendModeIds[] = {"normal",     "multiply",   "screen",     "overlay",    "darken",  "lighten",
                                                 "color_dodge", "color_burn", "hard_light", "soft_light", "difference",
                                                 "exclusion",  "hue",        "saturation", "color",      "luminosity", "add"};
-inline constexpr const char* kBlendModeLabels[] = {"Normal",     "Multiply",   "Screen",     "Overlay",    "Darken",  "Lighten",
-                                                   "Color Dodge", "Color Burn", "Hard Light", "Soft Light", "Difference",
-                                                   "Exclusion",  "Hue",        "Saturation", "Color",      "Luminosity", "Add"};
+inline constexpr const char* kBlendModeLabels[] = {N_("Normal"),     N_("Multiply"),   N_("Screen"),     N_("Overlay"),    N_("Darken"),  N_("Lighten"),
+                                                   N_("Color Dodge"), N_("Color Burn"), N_("Hard Light"), N_("Soft Light"), N_("Difference"),
+                                                   N_("Exclusion"),  N_("Hue"),        N_("Saturation"), N_("Color"),      N_("Luminosity"), N_("Add")};
 // A track matte: the layer shows only where another layer (its matte, not drawn itself) is opaque
 // or bright, or only where it is not.
 enum class MatteMode { None, Alpha, AlphaInverted, Luma, LumaInverted, Count };
 inline constexpr const char* kMatteModeIds[] = {"none", "alpha", "alpha_inverted", "luma", "luma_inverted"};
-inline constexpr const char* kMatteModeLabels[] = {"No Track Matte", "Alpha Matte", "Alpha Inverted Matte", "Luma Matte",
-                                                   "Luma Inverted Matte"};
+inline constexpr const char* kMatteModeLabels[] = {N_("No Track Matte"), N_("Alpha Matte"), N_("Alpha Inverted Matte"), N_("Luma Matte"),
+                                                   N_("Luma Inverted Matte")};
 // How a mask combines with the masks above it.
 enum class MaskMode { Add, Subtract, Intersect, Difference, Count };
 inline constexpr const char* kMaskModeIds[] = {"add", "subtract", "intersect", "difference"};
-inline constexpr const char* kMaskModeLabels[] = {"Add", "Subtract", "Intersect", "Difference"};
+inline constexpr const char* kMaskModeLabels[] = {N_("Add"), N_("Subtract"), N_("Intersect"), N_("Difference")};
 // A shape's fill: a color, or a gradient from its color to a second one.
 enum class ShapeFill { Solid, Linear, Radial, Count };
 inline constexpr const char* kShapeFillIds[] = {"solid", "linear", "radial"};
-inline constexpr const char* kShapeFillLabels[] = {"Solid Color", "Linear Gradient", "Radial Gradient"};
+inline constexpr const char* kShapeFillLabels[] = {N_("Solid Color"), N_("Linear Gradient"), N_("Radial Gradient")};
 
 enum class TextAlign { Left, Center, Right };
 
@@ -49,15 +50,15 @@ enum class LetterLoop { None, Wave, Jitter, Pulse };
 enum class LetterUnit { Letter, Word, Line };
 enum class LetterOrder { Forward, Backward, Center, Random };
 inline constexpr const char* kCountEasingIds[] = {"linear", "ease_out", "ease_in_out"};
-inline constexpr const char* kCountEasingLabels[] = {"Linear", "Ease Out", "Ease In Out"};
+inline constexpr const char* kCountEasingLabels[] = {N_("Linear"), N_("Ease Out"), N_("Ease In Out")};
 inline constexpr const char* kLetterAnimIds[] = {"none", "fade", "rise", "drop", "pop", "slide", "spin", "blur"};
-inline constexpr const char* kLetterAnimLabels[] = {"None", "Fade", "Rise", "Drop", "Pop", "Slide", "Spin", "Blur"};
+inline constexpr const char* kLetterAnimLabels[] = {N_("None"), N_("Fade"), N_("Rise"), N_("Drop"), N_("Pop"), N_("Slide"), N_("Spin"), N_("Blur")};
 inline constexpr const char* kLetterLoopIds[] = {"none", "wave", "jitter", "pulse"};
-inline constexpr const char* kLetterLoopLabels[] = {"None", "Wave", "Jitter", "Pulse"};
+inline constexpr const char* kLetterLoopLabels[] = {N_("None"), N_("Wave"), N_("Jitter"), N_("Pulse")};
 inline constexpr const char* kLetterUnitIds[] = {"letter", "word", "line"};
-inline constexpr const char* kLetterUnitLabels[] = {"Letters", "Words", "Lines"};
+inline constexpr const char* kLetterUnitLabels[] = {N_("Letters"), N_("Words"), N_("Lines")};
 inline constexpr const char* kLetterOrderIds[] = {"forward", "backward", "center", "random"};
-inline constexpr const char* kLetterOrderLabels[] = {"First to Last", "Last to First", "From the Center", "Random"};
+inline constexpr const char* kLetterOrderLabels[] = {N_("First to Last"), N_("Last to First"), N_("From the Center"), N_("Random")};
 // The index of `id` in `ids`, or -1.
 template <size_t N>
 int indexOfId(const char* const (&ids)[N], const std::string& id) {

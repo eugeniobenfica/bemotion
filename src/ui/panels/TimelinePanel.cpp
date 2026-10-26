@@ -103,17 +103,18 @@ bool trackHasSound(const Composition& comp, uint64_t track) {
 std::string clipNotes(const Composition& comp, const Layer& l) {
     std::string s;
     auto add = [&](const std::string& note) { s += "  ·  " + note; };
-    if (l.type == LayerType::Media && l.media.timeRemap) add(l.media.remap.isAnimated() ? "Time Remap" : "Frozen");
+    auto t = [](const char* text) { return tr(text).toStdString(); };
+    if (l.type == LayerType::Media && l.media.timeRemap) add(l.media.remap.isAnimated() ? t("Time Remap") : t("Frozen"));
     else if (l.type == LayerType::Media && (l.media.speed != 1.0 || l.media.reversed)) {
         char buf[32];
         std::snprintf(buf, sizeof buf, "%.4g%%", l.media.speed * 100.0);
-        add(std::string(l.media.reversed ? "Reversed " : "") + (l.media.speed != 1.0 ? buf : ""));
+        add((l.media.reversed ? t("Reversed") + (l.media.speed != 1.0 ? " " : "") : std::string()) + (l.media.speed != 1.0 ? buf : ""));
     }
-    if (comp.isMatte(l.id)) add("Matte");
+    if (comp.isMatte(l.id)) add(t("Matte"));
     if (l.matte != MatteMode::None)
-        if (const Layer* m = comp.findLayer(l.matteLayer)) add("Matte: " + m->name);
-    if (l.blend != BlendMode::Normal) add(kBlendModeLabels[static_cast<int>(l.blend)]);
-    if (!l.masks.empty()) add(l.masks.size() == 1 ? "1 mask" : std::to_string(l.masks.size()) + " masks");
+        if (const Layer* m = comp.findLayer(l.matteLayer)) add(tr("Matte: %1").arg(QString::fromStdString(m->name)).toStdString());
+    if (l.blend != BlendMode::Normal) add(t(kBlendModeLabels[static_cast<int>(l.blend)]));
+    if (!l.masks.empty()) add(l.masks.size() == 1 ? t("1 mask") : tr("%1 masks").arg(l.masks.size()).toStdString());
     return s;
 }
 
@@ -251,9 +252,9 @@ protected:
         setCursor(marker >= 0 ? Qt::PointingHandCursor : mx >= panel_->trackX0() ? Qt::SizeHorCursor : Qt::ArrowCursor);
         if (marker >= 0) {
             const Marker& m = panel_->ctx_.comp().markers[marker];
-            const QString tip = (m.name.empty() ? QString("Marker") : QString::fromStdString(m.name)) + "  ·  " +
+            const QString tip = (m.name.empty() ? tr("Marker") : QString::fromStdString(m.name)) + "  ·  " +
                                 QString::fromStdString(ui::formatTimecode(m.time, panel_->ctx_.comp().fps)) +
-                                "\nDrag to move  ·  Double-click to rename  ·  Right-click for more";
+                                "\n" + tr("Drag to move  ·  Double-click to rename  ·  Right-click for more");
             QToolTip::showText(e->globalPosition().toPoint(), tip, this);
         }
         if (panel_->drag_ != TimelinePanel::Drag::Playhead) return;
@@ -592,8 +593,8 @@ protected:
             const int i = indexAt(he->pos());
             const auto ts = tools();
             if (i >= 0) QToolTip::showText(he->globalPos(), QString::fromStdString(ui::toolTooltip(ui::toolCatalog()[ts[i]])), this);
-            else if (i == -3) QToolTip::showText(he->globalPos(), "Drag to move the toolbar: along a window edge, over the viewport or back to the timeline (right-click for positions)", this);
-            else if (i == -2) QToolTip::showText(he->globalPos(), "All tools: click to open them, then drag the ones you want here", this);
+            else if (i == -3) QToolTip::showText(he->globalPos(), tr("Drag to move the toolbar: along a window edge, over the viewport or back to the timeline (right-click for positions)"), this);
+            else if (i == -2) QToolTip::showText(he->globalPos(), tr("All tools: click to open them, then drag the ones you want here"), this);
             else QToolTip::hideText();
             return true;
         }
@@ -609,13 +610,13 @@ protected:
         if (e->button() == Qt::RightButton && pressed_ == -3) {
             QMenu menu;
             const bool floating = parentWidget() != panel_;
-            menu.addAction(floating ? "Back to the Timeline" : "Move to the Viewport",
+            menu.addAction(floating ? tr("Back to the Timeline") : tr("Move to the Viewport"),
                            [this, floating] { emit panel_->toolbarMoveRequested(!floating, QPoint(-1, -1)); });
             menu.addSeparator();
-            const char* labels[] = {"Float at top", "Float at bottom", "Float at left", "Float at right"};
+            const char* labels[] = {TR_NOOP("Float at top"), TR_NOOP("Float at bottom"), TR_NOOP("Float at left"), TR_NOOP("Float at right")};
             const QPointF positions[] = {{0.5, 0}, {0.5, 1}, {0, 0.5}, {1, 0.5}};
             for (int i = 0; i < 4; ++i)
-                menu.addAction(labels[i], [this, position = positions[i]] { emit panel_->toolbarDockRequested(position); });
+                menu.addAction(tr(labels[i]), [this, position = positions[i]] { emit panel_->toolbarDockRequested(position); });
             menu.exec(e->globalPosition().toPoint());
             pressed_ = -1;
             hover_ = -1;
@@ -625,8 +626,8 @@ protected:
         if (e->button() == Qt::RightButton && pressed_ >= 0) {
             const int at = pressed_;
             QMenu menu;
-            menu.addAction("Remove from Toolbar", [this, at] { removeAt(at); });
-            menu.addAction("Customize...", [this] { emit panel_->toolsPanelRequested(); });
+            menu.addAction(tr("Remove from Toolbar"), [this, at] { removeAt(at); });
+            menu.addAction(tr("Customize..."), [this] { emit panel_->toolsPanelRequested(); });
             menu.exec(e->globalPosition().toPoint());
             pressed_ = -1;
         }
@@ -836,22 +837,22 @@ void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
         bar->addWidget(b);
         return b;
     };
-    snap_ = button(ui::Icon::Magnet, "Snapping (S): clips, keyframes and objects snap. Hold Ctrl to bypass",
+    snap_ = button(ui::Icon::Magnet, tr("Snapping (S): clips, keyframes and objects snap. Hold Ctrl to bypass"),
                    [this] { ctx_.snapping = !ctx_.snapping; });
     bar->addSpacing(12);
-    button(ui::Icon::ToStart, "Go to start (Home)", [this] {
+    button(ui::Icon::ToStart, tr("Go to start (Home)"), [this] {
         ctx_.playing = false;
         ctx_.setTime(0.0);
     });
-    button(ui::Icon::StepBack, "Previous frame (Left)", [this] { ctx_.stepFrames(-1); });
-    play_ = button(ui::Icon::Play, "Play / Pause (Space)", [this] { ctx_.playing = !ctx_.playing; });
+    button(ui::Icon::StepBack, tr("Previous frame (Left)"), [this] { ctx_.stepFrames(-1); });
+    play_ = button(ui::Icon::Play, tr("Play / Pause (Space)"), [this] { ctx_.playing = !ctx_.playing; });
     play_->setActive(true);
-    button(ui::Icon::StepForward, "Next frame (Right)", [this] { ctx_.stepFrames(1); });
-    button(ui::Icon::ToEnd, "Go to end (End)", [this] {
+    button(ui::Icon::StepForward, tr("Next frame (Right)"), [this] { ctx_.stepFrames(1); });
+    button(ui::Icon::ToEnd, tr("Go to end (End)"), [this] {
         ctx_.playing = false;
         ctx_.setTime(ctx_.comp().duration);
     });
-    loop_ = button(ui::Icon::Loop, "Loop playback", [this] { ctx_.loop = !ctx_.loop; });
+    loop_ = button(ui::Icon::Loop, tr("Loop playback"), [this] { ctx_.loop = !ctx_.loop; });
 
     bar->addSpacing(14);
     timecode_ = new QLabel;
@@ -869,16 +870,16 @@ void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
     // Graph editor easing buttons (for the selected keyframes).
     bar->addSpacing(16);
     const std::pair<const char*, const char*> eases[] = {
-        {"Easy Ease", "Smooth in and out of the selected keyframes (F9)"},
-        {"Ease In", "Slow down into the selected keyframes (Shift+F9)"},
-        {"Ease Out", "Speed up out of the selected keyframes (Ctrl+Shift+F9)"},
-        {"Linear", "Constant speed"},
-        {"Hold", "Jump to the next keyframe's value"},
+        {TR_NOOP("Easy Ease"), TR_NOOP("Smooth in and out of the selected keyframes (F9)")},
+        {TR_NOOP("Ease In"), TR_NOOP("Slow down into the selected keyframes (Shift+F9)")},
+        {TR_NOOP("Ease Out"), TR_NOOP("Speed up out of the selected keyframes (Ctrl+Shift+F9)")},
+        {TR_NOOP("Linear"), TR_NOOP("Constant speed")},
+        {TR_NOOP("Hold"), TR_NOOP("Jump to the next keyframe's value")},
     };
     const Ease kinds[] = {Ease::EasyEase, Ease::EaseIn, Ease::EaseOut, Ease::Linear, Ease::Hold};
     for (int i = 0; i < 5; ++i) {
-        auto* b = new QPushButton(eases[i].first);
-        b->setToolTip(eases[i].second);
+        auto* b = new QPushButton(tr(eases[i].first));
+        b->setToolTip(tr(eases[i].second));
         const Ease e = kinds[i];
         connect(b, &QPushButton::clicked, this, [this, e] {
             applyEase(ctx_, e);
@@ -895,21 +896,21 @@ void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
     pluginBar_->setSpacing(2);
     bar->addLayout(pluginBar_);
     rebuildPluginButtons();
-    graph_ = button(ui::Icon::Graph, "Graph Editor: edit the curves of the selected layer's keyframes", [this] {
+    graph_ = button(ui::Icon::Graph, tr("Graph Editor: edit the curves of the selected layer's keyframes"), [this] {
         graphMode_ = !graphMode_;
         graphDrag_ = {};
         relayout();
     });
-    addKeys_ = button(ui::Icon::Plus, "Add keyframes at the playhead to the curves shown (right-click the graph for more)",
+    addKeys_ = button(ui::Icon::Plus, tr("Add keyframes at the playhead to the curves shown (right-click the graph for more)"),
                       [this] { addKeysAtPlayhead(); });
-    animOnly_ = button(ui::Icon::Diamond, "Show only animated properties", [this] {
+    animOnly_ = button(ui::Icon::Diamond, tr("Show only animated properties"), [this] {
         animatedOnly_ = !animatedOnly_;
         relayout();
     });
     bar->addSpacing(8);
-    button(ui::Icon::ZoomOut, "Zoom out (Ctrl+Wheel)", [this] { zoomAround(trackX0() + trackW() * 0.5f, 1.0 / 1.5); });
-    button(ui::Icon::ZoomIn, "Zoom in (Ctrl+Wheel)", [this] { zoomAround(trackX0() + trackW() * 0.5f, 1.5); });
-    button(ui::Icon::Reset, "Fit the whole composition", [this] {
+    button(ui::Icon::ZoomOut, tr("Zoom out (Ctrl+Wheel)"), [this] { zoomAround(trackX0() + trackW() * 0.5f, 1.0 / 1.5); });
+    button(ui::Icon::ZoomIn, tr("Zoom in (Ctrl+Wheel)"), [this] { zoomAround(trackX0() + trackW() * 0.5f, 1.5); });
+    button(ui::Icon::Reset, tr("Fit the whole composition"), [this] {
         pxPerSec_ = 0.0;
         relayout();
     });
@@ -1105,7 +1106,7 @@ void TimelinePanel::computeItems() {
             if ((animatedOnly_ || prop.whileAnimated) && !prop.anim->isAnimated()) continue;
             if (prop.effectIndex >= 0 && !effectsHeader) {
                 effectsHeader = true;
-                effectsOpen = addGroup("Effects", 0.0f);
+                effectsOpen = addGroup(TR_NOOP("Effects"), 0.0f);
             }
             if (prop.effectIndex >= 0 && !effectsOpen) continue;
             if (!group || std::strcmp(group, prop.group) != 0) {
@@ -1191,7 +1192,7 @@ void TimelinePanel::syncBreadcrumb() {
     auto* row = new QHBoxLayout(breadcrumb_);
     row->setContentsMargins(0, 0, 0, 0);
     row->setSpacing(6);
-    auto* top = new QPushButton("Composition");
+    auto* top = new QPushButton(tr("Composition"));
     const uint64_t first = path.front()->id;
     connect(top, &QPushButton::clicked, this, [this, first] {
         ctx_.scope = 0;
@@ -1217,7 +1218,7 @@ void TimelinePanel::syncBreadcrumb() {
         row->addWidget(b);
     }
     row->addSpacing(12);
-    auto* note = new QLabel("Editing inside a compound  ·  Esc (with nothing selected) goes back");
+    auto* note = new QLabel(tr("Editing inside a compound  ·  Esc (with nothing selected) goes back"));
     ui::setTone(note, ui::Tone::TextFaint);
     row->addWidget(note);
     row->addStretch();
@@ -1242,8 +1243,8 @@ void TimelinePanel::sync() {
         }
     }
     timecode_->setText(QString::fromStdString(ui::formatTimecode(ctx_.time, comp.fps)));
-    frameInfo_->setText(QString("frame %1").arg(comp.frameAt(ctx_.time)));
-    frameInfo_->setToolTip(QString("Frame %1 of %2  ·  %3 fps").arg(comp.frameAt(ctx_.time)).arg(comp.frameCount() - 1).arg(comp.fps, 0, 'g', 4));
+    frameInfo_->setText(tr("frame %1").arg(comp.frameAt(ctx_.time)));
+    frameInfo_->setToolTip(tr("Frame %1 of %2  ·  %3 fps").arg(comp.frameAt(ctx_.time)).arg(comp.frameCount() - 1).arg(comp.fps, 0, 'g', 4));
     play_->setIcon(ctx_.playing ? ui::Icon::Pause : ui::Icon::Play);
     snap_->setActive(ctx_.snapping);
     loop_->setActive(ctx_.loop);
@@ -1286,7 +1287,7 @@ void TimelinePanel::paintRuler(QPainter& p, int width) {
     small.setPointSizeF(base.pointSizeF() * 0.8);
     small.setWeight(QFont::DemiBold);
     p.setFont(small);
-    d.text({12, 6}, theme::kTextFaint, QString("LAYERS"));
+    d.text({12, 6}, theme::kTextFaint, tr("LAYERS"));
     QFont ticks = base;
     ticks.setPointSizeF(base.pointSizeF() * 0.9);
     p.setFont(ticks);
@@ -1322,6 +1323,14 @@ void TimelinePanel::paintRuler(QPainter& p, int width) {
     // Past the end of the composition (nothing to mark while it is empty: it grows with its content).
     const float endX = timeToX(visibleEnd());
     if (!comp.layers.empty() || hasRecordingPreview()) d.rectFilled({endX, 0}, {x1, h}, theme::shade(90));
+    // Frames the viewport holds rendered (they play without rendering again): a green line.
+    for (auto it = ctx_.cachedFrames.begin(); it != ctx_.cachedFrames.end();) {
+        const int first = *it;
+        int last = first;
+        while (++it != ctx_.cachedFrames.end() && *it == last + 1) ++last;
+        const float a = timeToX(first * fd), b = timeToX((last + 1) * fd);
+        if (b >= x0 && a <= x1) d.rectFilled({a, h - 3}, {std::max(b, a + 1.0f), h}, theme::kSuccess);
+    }
     // Markers: a flag in their color, the name beside it when there is room.
     for (size_t i = 0; i < comp.markers.size(); ++i) {
         const Marker& m = comp.markers[i];
@@ -1369,7 +1378,7 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
             }
         }
         if (ctx_.comp().layers.empty() && !hasRecordingPreview()) {
-            const QString hint = "Add text or graphics from the Objects panel to start animating.";
+            const QString hint = tr("Add text or graphics from the Objects panel to start animating.");
             d.text({(width - d.textWidth(hint)) * 0.5f, rowsBottom_ + 24}, theme::kTextFaint, hint);
         }
     }
@@ -1521,7 +1530,7 @@ void TimelinePanel::paintTrack(QPainter& p, const Item& item, float width) {
         const float textY = y + (h - d.textHeight()) * 0.5f;
         d.text({kNameX, textY}, col, focus->name);
         if (item.count > 1) { // e.g. a track that was cut into pieces
-            const QString badge = QString("%1 clips").arg(item.count);
+            const QString badge = tr("%1 clips").arg(item.count);
             d.text({kNameX + nameW - d.textWidth(badge), textY}, theme::kTextFaint, badge);
         }
         d.popClip();
@@ -1607,7 +1616,7 @@ void TimelinePanel::paintGroup(QPainter& p, const Item& item, float width) {
     f.setPointSizeF(f.pointSizeF() * 0.85);
     f.setWeight(QFont::DemiBold);
     p.setFont(f);
-    d.text({x0 + 48, y + (h - d.textHeight()) * 0.5f}, theme::kTextDim, item.groupLabel);
+    d.text({x0 + 48, y + (h - d.textHeight()) * 0.5f}, theme::kTextDim, trLabel(QString::fromStdString(item.groupLabel)));
     p.restore();
 }
 
@@ -1750,7 +1759,7 @@ void TimelinePanel::paintTransitionDrop(ui::Draw& d) {
             d.rectFilled({x0, r.top + 3}, {x1, r.top + r.h - 3}, presetDrop_.ok ? theme::accent(110) : theme::withAlpha(theme::kDanger, 60), 5.0f);
             d.rect({x0, r.top + 3}, {x1, r.top + r.h - 3}, line, 5.0f, 2.0f);
             if (!presetDrop_.ok)
-                d.text({x1 + 8, r.top + (r.h - d.textHeight()) * 0.5f}, theme::kDanger, QStringLiteral("This animation is not for this kind of layer"));
+                d.text({x1 + 8, r.top + (r.h - d.textHeight()) * 0.5f}, theme::kDanger, tr("This animation is not for this kind of layer"));
             break;
         }
     const TransitionDrop& drop = transitionDrop_;
@@ -1768,11 +1777,11 @@ void TimelinePanel::paintTransitionDrop(ui::Draw& d) {
         d.rectFilled({x0, y + 3}, {x1, y + h - 3}, drop.ok ? theme::accent(110) : theme::withAlpha(theme::kDanger, 60), 5.0f);
         d.rect({x0, y + 3}, {x1, y + h - 3}, line, 5.0f, 2.0f);
         if (!drop.ok) {
-            const char* why = layer->type == LayerType::Camera ? "Cameras take no transitions"
-                              : (layer->type == LayerType::Media && layer->media.hasAudio && !layer->media.hasVideo)
-                                  ? "Sound clips take no transitions (use Fade In / Out in Effects)"
-                                  : "This clip cannot take this transition";
-            d.text({x1 + 8, y + (h - d.textHeight()) * 0.5f}, theme::kDanger, QString::fromUtf8(why));
+            const QString why = layer->type == LayerType::Camera ? tr("Cameras take no transitions")
+                                : (layer->type == LayerType::Media && layer->media.hasAudio && !layer->media.hasVideo)
+                                    ? tr("Sound clips take no transitions (use Fade In / Out in Effects)")
+                                    : tr("This clip cannot take this transition");
+            d.text({x1 + 8, y + (h - d.textHeight()) * 0.5f}, theme::kDanger, why);
         }
         return;
     }
@@ -1842,19 +1851,19 @@ void TimelinePanel::showTrackMenu(QPoint global) {
     QMenu menu;
     menu.setToolTipsVisible(true);
     const uint64_t focus = ctx_.primaryId();
-    menu.addAction("Rename", [this, focus] {
+    menu.addAction(tr("Rename"), [this, focus] {
         computeItems();
         for (const Item& it : items_)
             if (it.kind == Item::Track && it.layer == focus) startRename(it);
     });
-    menu.addAction("Duplicate\tCtrl+D", [this] { ctx_.duplicateSelected(); });
-    menu.addAction("Split at Playhead\tCtrl+K", [this] { ctx_.splitSelectedAtPlayhead(); });
-    menu.addAction("Ripple Delete\tShift+Del", [this] { ctx_.rippleDeleteSelected(); })->setToolTip("Delete and close the gap: the clips after it move back");
-    ui::fillTimeMenu(menu.addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), "Time"), ctx_, this);
+    menu.addAction(tr("Duplicate\tCtrl+D"), [this] { ctx_.duplicateSelected(); });
+    menu.addAction(tr("Split at Playhead\tCtrl+K"), [this] { ctx_.splitSelectedAtPlayhead(); });
+    menu.addAction(tr("Ripple Delete\tShift+Del"), [this] { ctx_.rippleDeleteSelected(); })->setToolTip(tr("Delete and close the gap: the clips after it move back"));
+    ui::fillTimeMenu(menu.addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), tr("Time")), ctx_, this);
     if (ui::canTranscribe(ctx_, focus)) {
-        QAction* t = menu.addAction(ui::menuIcon(ui::Icon::Subtitles, theme::kTextDim), "Transcribe to Subtitles...",
+        QAction* t = menu.addAction(ui::menuIcon(ui::Icon::Subtitles, theme::kTextDim), tr("Transcribe to Subtitles..."),
                                     [this, focus] { ui::transcribeClip(ctx_, focus, 0, this); });
-        t->setToolTip("The words spoken in this clip become a Subtitles layer, at their time");
+        t->setToolTip(tr("The words spoken in this clip become a Subtitles layer, at their time"));
     }
     // 3D Layer, like the Properties checkbox: on for all when any is off.
     std::vector<Layer*> spatial;
@@ -1862,37 +1871,37 @@ void TimelinePanel::showTrackMenu(QPoint global) {
         if (l->type != LayerType::Camera && l->type != LayerType::Background && !l->parent) spatial.push_back(l);
     if (!spatial.empty()) {
         const bool all = std::all_of(spatial.begin(), spatial.end(), [](const Layer* l) { return l->threeD; });
-        QAction* threeD = menu.addAction("3D Layer", [this, all] {
+        QAction* threeD = menu.addAction(tr("3D Layer"), [this, all] {
             for (Layer* l : ctx_.selectedLayers())
                 if (l->type != LayerType::Camera && l->type != LayerType::Background && !l->parent) l->threeD = !all;
             ctx_.touch();
         });
         threeD->setCheckable(true);
         threeD->setChecked(all);
-        threeD->setToolTip("Seen in perspective by the camera at its Z position");
+        threeD->setToolTip(tr("Seen in perspective by the camera at its Z position"));
     }
     // How it is composited: blending, a track matte, masks.
     menu.addSeparator();
-    ui::fillBlendMenu(menu.addMenu("Blending Mode"), ctx_);
-    ui::fillMatteMenu(menu.addMenu("Track Matte"), ctx_);
-    ui::fillMaskMenu(menu.addMenu(ui::menuIcon(ui::Icon::Mask, theme::kTextDim), "Mask"), ctx_);
+    ui::fillBlendMenu(menu.addMenu(tr("Blending Mode")), ctx_);
+    ui::fillMatteMenu(menu.addMenu(tr("Track Matte")), ctx_);
+    ui::fillMaskMenu(menu.addMenu(ui::menuIcon(ui::Icon::Mask, theme::kTextDim), tr("Mask")), ctx_);
     {
         const auto sel = ctx_.selectedLayers();
         if (std::any_of(sel.begin(), sel.end(), [](const Layer* l) { return l->type == LayerType::Shape && l->shape.kind != ShapeKind::Path; }))
-            menu.addAction(ui::menuIcon(ui::Icon::PathShape, theme::kTextDim), "Convert to Bézier Path", [this] { ui::convertSelectedToPaths(ctx_); })
-                ->setToolTip("Its outline becomes points and handles to edit with the Pen");
+            menu.addAction(ui::menuIcon(ui::Icon::PathShape, theme::kTextDim), tr("Convert to Bézier Path"), [this] { ui::convertSelectedToPaths(ctx_); })
+                ->setToolTip(tr("Its outline becomes points and handles to edit with the Pen"));
     }
     menu.addSeparator();
-    menu.addAction("Create Compound\tCtrl+G", [this] { ctx_.createCompound(); });
-    menu.addAction("Release Compound\tCtrl+Shift+G", [this] { ctx_.releaseSelectedCompounds(); })->setEnabled(ctx_.selectionHasCompound());
-    fillEffectMenu(menu.addMenu("Effect"), ctx_);
+    menu.addAction(tr("Create Compound\tCtrl+G"), [this] { ctx_.createCompound(); });
+    menu.addAction(tr("Release Compound\tCtrl+Shift+G"), [this] { ctx_.releaseSelectedCompounds(); })->setEnabled(ctx_.selectionHasCompound());
+    fillEffectMenu(menu.addMenu(tr("Effect")), ctx_);
     menu.addSeparator();
-    menu.addAction("Bring to Front\tCtrl+Shift+]", [this] { ctx_.shiftSelected(-1000); });
-    menu.addAction("Bring Forward\tCtrl+]", [this] { ctx_.shiftSelected(-1); });
-    menu.addAction("Send Backward\tCtrl+[", [this] { ctx_.shiftSelected(1); });
-    menu.addAction("Send to Back\tCtrl+Shift+[", [this] { ctx_.shiftSelected(1000); });
+    menu.addAction(tr("Bring to Front\tCtrl+Shift+]"), [this] { ctx_.shiftSelected(-1000); });
+    menu.addAction(tr("Bring Forward\tCtrl+]"), [this] { ctx_.shiftSelected(-1); });
+    menu.addAction(tr("Send Backward\tCtrl+["), [this] { ctx_.shiftSelected(1); });
+    menu.addAction(tr("Send to Back\tCtrl+Shift+["), [this] { ctx_.shiftSelected(1000); });
     menu.addSeparator();
-    menu.addAction("Delete\tDel", [this] { ctx_.deleteSelected(); });
+    menu.addAction(tr("Delete\tDel"), [this] { ctx_.deleteSelected(); });
     menu.exec(global);
     relayout();
 }
@@ -1924,7 +1933,7 @@ void TimelinePanel::renameMarker(int index) {
     Composition& comp = ctx_.comp();
     if (index < 0 || index >= static_cast<int>(comp.markers.size())) return;
     bool ok = false;
-    const QString name = QInputDialog::getText(this, "Marker", "Name:", QLineEdit::Normal, QString::fromStdString(comp.markers[index].name), &ok);
+    const QString name = QInputDialog::getText(this, tr("Marker"), tr("Name:"), QLineEdit::Normal, QString::fromStdString(comp.markers[index].name), &ok);
     if (!ok || index >= static_cast<int>(ctx_.comp().markers.size())) return;
     ctx_.comp().markers[index].name = name.trimmed().toStdString();
     ctx_.touch();
@@ -1934,19 +1943,19 @@ void TimelinePanel::renameMarker(int index) {
 void TimelinePanel::showMarkerMenu(QPoint global, int index, double t) {
     QMenu menu;
     if (index < 0) {
-        menu.addAction(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), "Add Marker Here", [this, t] {
+        menu.addAction(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), tr("Add Marker Here"), [this, t] {
             addMarker(ctx_.comp(), t, "");
             ctx_.touch();
         });
         if (!ctx_.comp().markers.empty())
-            menu.addAction("Remove All Markers", [this] {
+            menu.addAction(tr("Remove All Markers"), [this] {
                 ctx_.comp().markers.clear();
                 ctx_.touch();
             });
     } else {
-        menu.addAction("Rename...", [this, index] { renameMarker(index); });
-        menu.addAction("Go to Marker", [this, index] { ctx_.setTime(ctx_.comp().markers[index].time); });
-        QMenu* colors = menu.addMenu("Color");
+        menu.addAction(tr("Rename..."), [this, index] { renameMarker(index); });
+        menu.addAction(tr("Go to Marker"), [this, index] { ctx_.setTime(ctx_.comp().markers[index].time); });
+        QMenu* colors = menu.addMenu(tr("Color"));
         for (int i = 0; i < kLabelColorCount; ++i) {
             QPixmap swatch(14, 14);
             swatch.fill(Qt::transparent);
@@ -1957,7 +1966,7 @@ void TimelinePanel::showMarkerMenu(QPoint global, int index, double t) {
             sp.setPen(Qt::NoPen);
             sp.drawRoundedRect(QRectF(1, 1, 12, 12), 3, 3);
             sp.end();
-            QAction* a = colors->addAction(QIcon(swatch), QString("Color %1").arg(i + 1), [this, index, i] {
+            QAction* a = colors->addAction(QIcon(swatch), tr("Color %1").arg(i + 1), [this, index, i] {
                 ctx_.comp().markers[index].color = i;
                 ctx_.touch();
             });
@@ -1965,7 +1974,7 @@ void TimelinePanel::showMarkerMenu(QPoint global, int index, double t) {
             a->setChecked(ctx_.comp().markers[index].color == i);
         }
         menu.addSeparator();
-        menu.addAction("Delete Marker", [this, index] {
+        menu.addAction(tr("Delete Marker"), [this, index] {
             ctx_.comp().markers.erase(ctx_.comp().markers.begin() + index);
             ctx_.touch();
         });
@@ -1978,12 +1987,12 @@ void TimelinePanel::showGapMenu(QPoint global, uint64_t track, double t) {
     QMenu menu;
     menu.setToolTipsVisible(true);
     Composition probe = ctx_.comp(); // whether there is a gap to close here
-    QAction* close = menu.addAction("Close Gap", [this, track, t] {
+    QAction* close = menu.addAction(tr("Close Gap"), [this, track, t] {
         if (closeGap(ctx_.comp(), track, t)) ctx_.touch();
     });
     close->setEnabled(closeGap(probe, track, t));
-    close->setToolTip("The clips after this gap move back to close it (Premiere's Ripple Delete on a gap)");
-    menu.addAction(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), "Add Marker Here", [this, t] {
+    close->setToolTip(tr("The clips after this gap move back to close it (Premiere's Ripple Delete on a gap)"));
+    menu.addAction(ui::menuIcon(ui::Icon::Marker, theme::kTextDim), tr("Add Marker Here"), [this, t] {
         addMarker(ctx_.comp(), t, "");
         ctx_.touch();
     });
@@ -2034,14 +2043,14 @@ void TimelinePanel::updateEditDrag(QPointF pos) {
 void TimelinePanel::showKeyMenu(QPoint global) {
     QMenu menu;
     const int n = static_cast<int>(ctx_.selectedKeys.size());
-    menu.addSection(QString("%1 keyframe%2").arg(n).arg(n == 1 ? "" : "s"));
+    menu.addSection(tr("%1 keyframe%2").arg(n).arg(n == 1 ? "" : "s"));
     for (int i = 0; i < static_cast<int>(Easing::Count); ++i) {
         const auto e = static_cast<Easing>(i);
         if (e == Easing::Custom) continue;
         menu.addAction(easingLabel(e), [this, e] { ctx_.setSelectedKeysEasing(e); });
     }
     // Custom Curve: the bezier editor, its four numbers and some starting points.
-    QMenu* custom = menu.addMenu("Custom Curve");
+    QMenu* custom = menu.addMenu(tr("Custom Curve"));
     auto* box = new QWidget;
     auto* col = new QVBoxLayout(box);
     col->setContentsMargins(8, 8, 8, 8);
@@ -2073,14 +2082,14 @@ void TimelinePanel::showKeyMenu(QPoint global) {
         values.push_back(v);
     }
     col->addLayout(numbers);
-    auto* startLabel = new QLabel("Start from:");
+    auto* startLabel = new QLabel(tr("Start from:"));
     ui::setTone(startLabel, ui::Tone::TextFaint);
     col->addWidget(startLabel);
     auto* starts = new QHBoxLayout;
     const std::pair<Easing, const char*> presets[] = {
-        {Easing::Linear, "Lin"}, {Easing::EaseIn, "In"}, {Easing::EaseOut, "Out"}, {Easing::EaseInOut, "In Out"}, {Easing::BackOut, "Back"}};
+        {Easing::Linear, TR_NOOP("Lin")}, {Easing::EaseIn, TR_NOOP("In")}, {Easing::EaseOut, TR_NOOP("Out")}, {Easing::EaseInOut, TR_NOOP("In Out")}, {Easing::BackOut, TR_NOOP("Back")}};
     for (const auto& [e, label] : presets) {
-        auto* b = new QPushButton(label);
+        auto* b = new QPushButton(tr(label));
         connect(b, &QPushButton::clicked, &menu, [current, apply, values, e] {
             *current = bezierFor(e);
             const float f[4] = {current->x1, current->y1, current->x2, current->y2};
@@ -2094,13 +2103,13 @@ void TimelinePanel::showKeyMenu(QPoint global) {
     action->setDefaultWidget(box);
     custom->addAction(action);
     if (ctx_.selectionHasPathKeys()) {
-        menu.addSection("Motion path");
-        menu.addAction("Auto Bezier", [this] { ctx_.setSelectedKeysPath(PathMode::Auto); });
-        menu.addAction("Linear (corner)", [this] { ctx_.setSelectedKeysPath(PathMode::Linear); });
-        menu.addAction("Custom Handles", [this] { ctx_.setSelectedKeysPath(PathMode::Custom); });
+        menu.addSection(tr("Motion path"));
+        menu.addAction(tr("Auto Bezier"), [this] { ctx_.setSelectedKeysPath(PathMode::Auto); });
+        menu.addAction(tr("Linear (corner)"), [this] { ctx_.setSelectedKeysPath(PathMode::Linear); });
+        menu.addAction(tr("Custom Handles"), [this] { ctx_.setSelectedKeysPath(PathMode::Custom); });
     }
     menu.addSeparator();
-    menu.addAction("Delete\tDel", [this] { ctx_.deleteSelectedKeys(); });
+    menu.addAction(tr("Delete\tDel"), [this] { ctx_.deleteSelectedKeys(); });
     menu.exec(global);
     relayout();
 }

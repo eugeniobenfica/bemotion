@@ -120,6 +120,10 @@ void loadSettings() {
         s.showSnapshotButton = j.value("show_snapshot_button", s.showSnapshotButton);
         s.showTimelineScrollbar = j.value("show_timeline_scrollbar", s.showTimelineScrollbar);
         s.essentialsOnly = j.value("essentials_only", s.essentialsOnly);
+        s.hardwareDecoding = j.value("hardware_decoding", s.hardwareDecoding);
+        s.useProxies = j.value("use_proxies", s.useProxies);
+        s.cacheMegabytes = std::clamp(j.value("cache_megabytes", s.cacheMegabytes), 128, 32768);
+        s.language = j.value("language", s.language);
         ui::loadKeymap(j.contains("shortcuts") ? j["shortcuts"].dump() : "{}");
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
     } catch (const std::exception&) {
@@ -140,6 +144,8 @@ void saveSettings() {
               {"show_expression_buttons", s.showExpressionButtons}, {"show_graph_button", s.showGraphButton},
               {"show_snapshot_button", s.showSnapshotButton}, {"show_timeline_scrollbar", s.showTimelineScrollbar},
               {"experience", s.experience}, {"essentials_only", s.essentialsOnly},
+              {"hardware_decoding", s.hardwareDecoding}, {"use_proxies", s.useProxies}, {"cache_megabytes", s.cacheMegabytes},
+              {"language", s.language},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));
     writeFile(settingsFile(), j.dump(2), nullptr);

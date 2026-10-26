@@ -15,6 +15,7 @@
 #include <cmath>
 #include <memory>
 #include <mutex>
+#include <optional>
 
 namespace bemotion::media {
 
@@ -26,6 +27,8 @@ struct Clip {
     double in = 0, out = 0; // composition times
     float gain = 1.0f;
     const std::vector<AudioEffect>* effects = nullptr;
+    Loudness loudness; // of the plain audio, every kLoudnessBlock frames
+    std::optional<AudioEffect> ducking; // lowered while the other clips have sound (a copy: the layer may change meanwhile)
     // The source second at a composition time: a + b * time (speed, reverse), or, time-remapped,
     // sampled every kRemapStep from t0 (between the samples, a straight line).
     double a = 0.0, b = 1.0;
@@ -43,10 +46,24 @@ struct Clip {
     bool still(double time) const {
         return !remap.empty() && std::fabs(sourceAt(time + kRemapStep) - sourceAt(time)) < kRemapStep * 0.05;
     }
+    // How loud it is at a composition time (RMS, its volume counted): what ducking listens to.
+    float levelAt(double time) const {
+        if (!loudness || time < in || time >= out || still(time)) return 0.0f;
+        const double block = sourceAt(time) * kAudioRate / static_cast<double>(kLoudnessBlock);
+        if (block < 0 || block >= static_cast<double>(loudness->size())) return 0.0f;
+        return (*loudness)[static_cast<size_t>(block)] * gain;
+    }
 };
+
+constexpr double kMaxDuckFade = 3.0; // seconds (the Ducking effect's longest fade)
 
 std::vector<Clip> clipsAt(const Composition& comp, double t, double until) {
     std::vector<Clip> clips;
+    // Ducking listens a fade ahead and behind: clips that start or end that close count too.
+    const bool ducking = std::any_of(comp.layers.begin(), comp.layers.end(), [](const Layer& l) {
+        return std::any_of(l.audioEffects.begin(), l.audioEffects.end(), [](const AudioEffect& e) { return e.enabled && e.type == AudioEffectType::Ducking; });
+    });
+    if (ducking) t -= kMaxDuckFade, until += kMaxDuckFade;
     for (const Layer& l : comp.layers) {
         if (l.type != LayerType::Media || !l.media.hasAudio || !l.visible || l.muted) continue;
         if (l.outPoint <= t || l.inPoint >= until) continue;
@@ -59,9 +76,12 @@ std::vector<Clip> clipsAt(const Composition& comp, double t, double until) {
             out = std::min(out, p->outPoint);
         }
         if (hidden || out <= in) continue;
-        AudioData data = MediaManager::get().audio(l.media.mediaId);
+        AudioData data = MediaManager::get().audioFor(l.media.mediaId, l.audioEffects);
         if (!data) continue;
         Clip c{std::move(data), in, out, std::max(0.0f, l.media.volume.valueAt(t) * 0.01f), &l.audioEffects};
+        c.loudness = MediaManager::get().loudness(l.media.mediaId);
+        for (const AudioEffect& e : l.audioEffects)
+            if (e.enabled && e.type == AudioEffectType::Ducking) c.ducking = e;
         const MediaProps& m = l.media;
         if (m.timeRemap) {
             c.t0 = std::max(in, t) - 0.05;
@@ -76,13 +96,34 @@ std::vector<Clip> clipsAt(const Composition& comp, double t, double until) {
     return clips;
 }
 
+// Ducking: how far down (0..1 of its amount) a clip is at `time`. Full while another clip (one
+// that does not duck) is louder than the threshold, easing in and out over the fade around it.
+float duckAt(const Clip& c, const std::vector<Clip>& clips, double time) {
+    const float threshold = std::pow(10.0f, c.ducking->value2 / 20.0f);
+    const double fade = std::clamp(static_cast<double>(c.ducking->value3), 0.05, kMaxDuckFade);
+    constexpr double kStep = static_cast<double>(kLoudnessBlock) / kAudioRate;
+    float cover = 0.0f;
+    for (const Clip& o : clips) {
+        if (&o == &c || o.ducking) continue;
+        for (double d = -fade; d <= fade && cover < 1.0f; d += kStep)
+            if (o.levelAt(time + d) > threshold) cover = std::max(cover, static_cast<float>(1.0 - std::fabs(d) / fade));
+    }
+    return cover;
+}
+
 // Adds the clips' samples for [t, t + frames / rate) into `out` (interleaved stereo).
 void mixInto(const std::vector<Clip>& clips, double t, size_t frames, float* out) {
     for (const Clip& c : clips) {
         const std::vector<float>& s = *c.data;
         const size_t total = s.size() / 2;
+        // Ducking moves every 10 ms, in a straight line between.
+        float duckFrom = 0.0f, duckTo = 0.0f;
         for (size_t i = 0; i < frames; ++i) {
             const double time = t + static_cast<double>(i) / kAudioRate;
+            if (c.ducking && i % kLoudnessBlock == 0) {
+                duckFrom = i == 0 ? duckAt(c, clips, time) : duckTo;
+                duckTo = duckAt(c, clips, time + static_cast<double>(kLoudnessBlock) / kAudioRate);
+            }
             if (time < c.in || time >= c.out || c.still(time)) continue;
             const double src = c.sourceAt(time) * kAudioRate;
             if (src < 0) continue;
@@ -97,6 +138,10 @@ void mixInto(const std::vector<Clip>& clips, double t, size_t frames, float* out
                 if (effect.type == AudioEffectType::Gain) gain *= std::pow(10.0f, effect.value / 20.0f);
                 else if (effect.type == AudioEffectType::FadeIn) gain *= std::clamp(static_cast<float>((time - c.in) / effect.value), 0.0f, 1.0f);
                 else if (effect.type == AudioEffectType::FadeOut) gain *= std::clamp(static_cast<float>((c.out - time) / effect.value), 0.0f, 1.0f);
+            }
+            if (c.ducking) {
+                const float u = static_cast<float>(i % kLoudnessBlock) / kLoudnessBlock;
+                gain *= std::pow(10.0f, -c.ducking->value * (duckFrom + (duckTo - duckFrom) * u) / 20.0f);
             }
             out[i * 2] += (s[k * 2] + (s[k1 * 2] - s[k * 2]) * f) * gain;
             out[i * 2 + 1] += (s[k * 2 + 1] + (s[k1 * 2 + 1] - s[k * 2 + 1]) * f) * gain;

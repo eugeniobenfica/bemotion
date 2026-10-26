@@ -44,7 +44,11 @@ capability). This file is the short, practical version.
 - Colors come from theme tokens (`theme::kText`, `kAccent`…), read at paint
   time. Labels use `ui::setTone(label, ui::Tone::…)`, never a style sheet with
   a baked color — themes change while the app runs. Interface text is English,
-  short, sentence case, After Effects / Premiere terms.
+  short, sentence case, After Effects / Premiere terms, always through `tr()`
+  (`ui/Language.h`; tables: `TR_NOOP` / `N_`) and translated in every
+  `assets/languages/*.json` in the same commit (`python tools/languages.py
+  --missing pt-BR`; ctest checks). Saved names (dock objects, settings keys,
+  ids) never go through `tr()`.
 
 ## Build, run, test (Windows)
 

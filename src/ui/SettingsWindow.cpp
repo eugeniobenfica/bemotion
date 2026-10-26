@@ -6,11 +6,14 @@
 #include "app/Downloads.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "media/MediaIO.h"
+#include "media/MediaManager.h"
 #include "media/Recorder.h"
 #include "app/Settings.h"
 #include "render/Fonts.h"
 #include "ui/AppSignals.h"
 #include "ui/Keymap.h"
+#include "ui/Language.h"
 #include "ui/ColorPicker.h"
 #include "ui/PagedWindow.h"
 #include "ui/Theme.h"
@@ -80,12 +83,15 @@ void changed(bool rebuild = false) {
 }
 
 // Theme card: a tiny preview of panel, raised surface, text and accent.
+// The built-in themes' names, shown translated (their files and settings keep the English ones).
+[[maybe_unused]] constexpr const char* kThemeNames[] = {TR_NOOP("Dark"), TR_NOOP("Light"), TR_NOOP("Midnight")};
+
 class ThemeCard : public QAbstractButton {
 public:
     ThemeCard(theme::Palette p, bool selected) : p_(std::move(p)), selected_(selected) {
-        setFixedSize(std::max(120, fontMetrics().horizontalAdvance(QString::fromStdString(p_.name)) + 20), 50 + fontMetrics().height() + 12);
+        setFixedSize(std::max(120, fontMetrics().horizontalAdvance(trs(p_.name)) + 20), 50 + fontMetrics().height() + 12);
         setCursor(Qt::PointingHandCursor);
-        setToolTip(QString::fromStdString(p_.name));
+        setToolTip(trs(p_.name)); // the built-in themes' names translate
     }
 
 protected:
@@ -99,7 +105,7 @@ protected:
         d.rectFilled({58, 30}, {w - 24, 42}, p_.accent, 3.0f);
         d.rectFilled({14, 16}, {44, 20}, p_.textDim, 2.0f);
         d.rectFilled({14, 26}, {36, 30}, p_.textFaint, 2.0f);
-        d.text({8, h - d.textHeight() - 6}, p_.text, p_.name);
+        d.text({8, h - d.textHeight() - 6}, p_.text, trs(p_.name));
         if (selected_ || underMouse()) d.rect({1, 1}, {w - 1, h - 1}, selected_ ? theme::kAccent : theme::ink(60), 8.0f, selected_ ? 2.0f : 1.0f);
     }
     void enterEvent(QEnterEvent*) override { update(); }
@@ -246,8 +252,8 @@ theme::Palette basePalette(const Settings& s) {
 void addPageHeader(QVBoxLayout* col, const QString& title, std::function<void()> reset) {
     auto* row = new QHBoxLayout;
     row->addWidget(pageTitle(title), 1);
-    auto* b = new QPushButton(makeIcon(Icon::Reset, theme::kTextDim, 16), "Reset Page");
-    b->setToolTip("Restore this page's defaults");
+    auto* b = new QPushButton(makeIcon(Icon::Reset, theme::kTextDim, 16), tr("Reset Page"));
+    b->setToolTip(tr("Restore this page's defaults"));
     QObject::connect(b, &QPushButton::clicked, b, [reset] {
         reset();
         changed(true);
@@ -273,32 +279,32 @@ void addColorSections(QVBoxLayout* col, Settings& s) {
         std::vector<Entry> entries;
     };
     static const Group kGroups[] = {
-        {"Surfaces",
-         {{"Background", &theme::Palette::bgDeep},
-          {"Panels", &theme::Palette::bgPanel},
-          {"Menu bar and tabs", &theme::Palette::header},
-          {"Cards and tiles", &theme::Palette::bgRaised},
-          {"Hover", &theme::Palette::bgHover},
-          {"Borders", &theme::Palette::border},
-          {"Canvas surround", &theme::Palette::canvas},
-          {"Menus and tooltips", &theme::Palette::menu}}},
-        {"Controls",
-         {{"Fields", &theme::Palette::field},
-          {"Field outline", &theme::Palette::fieldBorder},
-          {"Buttons", &theme::Palette::button},
-          {"Button outline", &theme::Palette::buttonBorder},
-          {"Focus outline", &theme::Palette::focus},
-          {"Selection", &theme::Palette::selection},
-          {"Text on accent", &theme::Palette::onAccent}}},
-        {"Text",
-         {{"Text", &theme::Palette::text}, {"Secondary text", &theme::Palette::textDim}, {"Faint text", &theme::Palette::textFaint}}},
-        {"Status",
-         {{"Danger", &theme::Palette::danger}, {"Warning", &theme::Palette::warning}, {"Success", &theme::Palette::success}}},
-        {"Editing",
-         {{"Playhead", &theme::Palette::playhead},
-          {"Keyframes", &theme::Palette::keyframe},
-          {"Snap lines", &theme::Palette::snap},
-          {"Guides", &theme::Palette::guide}}},
+        {TR_NOOP("Surfaces"),
+         {{TR_NOOP("Background"), &theme::Palette::bgDeep},
+          {TR_NOOP("Panels"), &theme::Palette::bgPanel},
+          {TR_NOOP("Menu bar and tabs"), &theme::Palette::header},
+          {TR_NOOP("Cards and tiles"), &theme::Palette::bgRaised},
+          {TR_NOOP("Hover"), &theme::Palette::bgHover},
+          {TR_NOOP("Borders"), &theme::Palette::border},
+          {TR_NOOP("Canvas surround"), &theme::Palette::canvas},
+          {TR_NOOP("Menus and tooltips"), &theme::Palette::menu}}},
+        {TR_NOOP("Controls"),
+         {{TR_NOOP("Fields"), &theme::Palette::field},
+          {TR_NOOP("Field outline"), &theme::Palette::fieldBorder},
+          {TR_NOOP("Buttons"), &theme::Palette::button},
+          {TR_NOOP("Button outline"), &theme::Palette::buttonBorder},
+          {TR_NOOP("Focus outline"), &theme::Palette::focus},
+          {TR_NOOP("Selection"), &theme::Palette::selection},
+          {TR_NOOP("Text on accent"), &theme::Palette::onAccent}}},
+        {TR_NOOP("Text"),
+         {{TR_NOOP("Text"), &theme::Palette::text}, {TR_NOOP("Secondary text"), &theme::Palette::textDim}, {TR_NOOP("Faint text"), &theme::Palette::textFaint}}},
+        {TR_NOOP("Status"),
+         {{TR_NOOP("Danger"), &theme::Palette::danger}, {TR_NOOP("Warning"), &theme::Palette::warning}, {TR_NOOP("Success"), &theme::Palette::success}}},
+        {TR_NOOP("Editing"),
+         {{TR_NOOP("Playhead"), &theme::Palette::playhead},
+          {TR_NOOP("Keyframes"), &theme::Palette::keyframe},
+          {TR_NOOP("Snap lines"), &theme::Palette::snap},
+          {TR_NOOP("Guides"), &theme::Palette::guide}}},
     };
     const theme::Palette shown = theme::resolved(s.palette);
     for (const Group& g : kGroups) {
@@ -324,7 +330,7 @@ void addColorSections(QVBoxLayout* col, Settings& s) {
             });
             QObject::connect(button, &ColorButton::editFinished, button, [] { changed(true); });
             row->addWidget(button);
-            row->addWidget(new QLabel(e.label), 1);
+            row->addWidget(new QLabel(tr(e.label)), 1);
             grid->addLayout(row, i / 2, i % 2);
             ++i;
         }
@@ -338,13 +344,13 @@ QWidget* themePage() {
     Settings& s = settings();
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    addPageHeader(col, "Theme", [] {
+    addPageHeader(col, tr("Theme"), [] {
         Settings& st = settings();
         const Settings d;
         st.theme = d.theme, st.customAccent = d.customAccent, st.accent = d.accent;
         st.customPalette = false;
     });
-    SettingsCard* themes = addSection(col, "Theme");
+    SettingsCard* themes = addSection(col, tr("Theme"));
     auto* cards = new QGridLayout;
     cards->setSpacing(10);
     cards->setAlignment(Qt::AlignLeft);
@@ -361,27 +367,27 @@ QWidget* themePage() {
         ++n;
     }
     themes->addLayout(cards);
-    auto* import = new QPushButton("Import...");
+    auto* import = new QPushButton(tr("Import..."));
     QObject::connect(import, &QPushButton::clicked, import, [] {
-        if (auto file = platform::openFileDialog("Import Theme", "bemotion theme", "json")) {
+        if (auto file = platform::openFileDialog(TR_NOOP("Import Theme"), TR_NOOP("bemotion theme"), "json")) {
             std::string name, error;
             if (ThemeLibrary::importFile(*file, &name, &error)) {
                 settings().theme = name;
                 settings().customPalette = false;
-                g_message = "Imported \"" + name + "\".";
+                g_message = tr("Imported \"%1\".").arg(QString::fromStdString(name)).toStdString();
             } else {
-                g_message = "Could not import: " + error;
+                g_message = tr("Could not import: %1").arg(QString::fromStdString(error)).toStdString();
             }
             changed(true);
         }
     });
-    auto* folder = new QPushButton("Open Folder");
+    auto* folder = new QPushButton(tr("Open Folder"));
     QObject::connect(folder, &QPushButton::clicked, folder, [] { platform::revealInFileManager(ThemeLibrary::userDir()); });
-    themes->addRow("More themes", "Import a theme someone shared (a .json file), or open the folder your themes are kept in.",
+    themes->addRow(tr("More themes"), tr("Import a theme someone shared (a .json file), or open the folder your themes are kept in."),
                    buttonRow({import, folder}));
     if (!g_message.empty()) col->addWidget(hintLabel(QString::fromStdString(g_message)));
 
-    SettingsCard* accentCard = addSection(col, "Accent color");
+    SettingsCard* accentCard = addSection(col, tr("Accent color"));
     const theme::Palette base = [&] {
         Settings copy = s;
         copy.customAccent = false;
@@ -389,7 +395,7 @@ QWidget* themePage() {
     }();
     auto* accents = new QHBoxLayout;
     accents->setSpacing(8);
-    auto* themeAccent = new Swatch(base.accent, !s.customAccent, "The theme's own");
+    auto* themeAccent = new Swatch(base.accent, !s.customAccent, tr("The theme's own"));
     QObject::connect(themeAccent, &QAbstractButton::clicked, themeAccent, [] {
         settings().customAccent = false;
         changed(true);
@@ -405,8 +411,8 @@ QWidget* themePage() {
         accents->addWidget(sw);
     }
     accents->addSpacing(8);
-    auto* custom = new QPushButton("Custom...");
-    custom->setToolTip("Pick any color");
+    auto* custom = new QPushButton(tr("Custom..."));
+    custom->setToolTip(tr("Pick any color"));
     QObject::connect(custom, &QPushButton::clicked, custom, [custom] {
         const Rgba cur = settings().customAccent ? settings().accent : basePalette(settings()).accent;
         Color c{red(cur) / 255.0f, green(cur) / 255.0f, blue(cur) / 255.0f, 1.0f};
@@ -422,33 +428,33 @@ QWidget* themePage() {
 
     if (!s.advanced) {
         col->addSpacing(6);
-        col->addWidget(hintLabel("Every color, the corners, outlines and control sizes, and saving your own theme are in "
-                                 "Advanced Options (bottom left)."));
+        col->addWidget(hintLabel(tr("Every color, the corners, outlines and control sizes, and saving your own theme are in "
+                                 "Advanced Options (bottom left).")));
         return page;
     }
 
     if (!s.customPalette) s.palette = effectivePalette(); // start from what is on screen
     col->addSpacing(4);
-    col->addWidget(hintLabel("Changing anything below turns the current theme into your own palette; Save as Theme keeps it."));
+    col->addWidget(hintLabel(tr("Changing anything below turns the current theme into your own palette; Save as Theme keeps it.")));
     addColorSections(col, s);
 
-    SettingsCard* shape = addSection(col, "Shape and size");
-    shape->addRow("Corner rounding", "Buttons, fields, cards and menus", sliderControl(s.palette.rounding, 0.0f, 12.0f, "%.0f px"));
-    shape->addRow("Outline width", "The outline of fields and buttons (0: none)", sliderControl(s.palette.borderWidth, 0.0f, 2.0f, "%.0f px"));
-    shape->addRow("Control height", "Buttons, fields and drop-downs in windows like this one",
+    SettingsCard* shape = addSection(col, tr("Shape and size"));
+    shape->addRow(tr("Corner rounding"), tr("Buttons, fields, cards and menus"), sliderControl(s.palette.rounding, 0.0f, 12.0f, "%.0f px"));
+    shape->addRow(tr("Outline width"), tr("The outline of fields and buttons (0: none)"), sliderControl(s.palette.borderWidth, 0.0f, 2.0f, "%.0f px"));
+    shape->addRow(tr("Control height"), tr("Buttons, fields and drop-downs in windows like this one"),
                   sliderControl(s.palette.controlHeight, 22.0f, 36.0f, "%.0f px"));
-    shape->addRow("Light theme", "Overlays on the picture (outlines, handles) are drawn dark instead of light",
+    shape->addRow(tr("Light theme"), tr("Overlays on the picture (outlines, handles) are drawn dark instead of light"),
                   switchControl(s.palette.light, [](bool on) {
                       settings().palette.light = on;
                       settings().customPalette = true;
                       changed(true);
                   }));
 
-    SettingsCard* share = addSection(col, "Save and share");
+    SettingsCard* share = addSection(col, tr("Save and share"));
     auto* name = new QLineEdit;
-    name->setPlaceholderText("Theme name");
+    name->setPlaceholderText(tr("Theme name"));
     name->setFixedWidth(180);
-    auto* save = accentButton("Save as Theme");
+    auto* save = accentButton(tr("Save as Theme"));
     QObject::connect(save, &QPushButton::clicked, save, [name] {
         if (name->text().trimmed().isEmpty()) {
             name->setFocus();
@@ -461,31 +467,31 @@ QWidget* themePage() {
             settings().theme = out.name;
             settings().customPalette = false;
             settings().customAccent = false;
-            g_message = "Saved \"" + out.name + "\".";
+            g_message = tr("Saved \"%1\".").arg(QString::fromStdString(out.name)).toStdString();
         } else {
             g_message = error;
         }
         changed(true);
     });
-    share->addRow("Save as a theme", "Keeps these colors under a name, next to Dark, Light and Midnight", buttonRow({name, save}));
-    auto* exportButton = new QPushButton("Export...");
+    share->addRow(tr("Save as a theme"), tr("Keeps these colors under a name, next to Dark, Light and Midnight"), buttonRow({name, save}));
+    auto* exportButton = new QPushButton(tr("Export..."));
     QObject::connect(exportButton, &QPushButton::clicked, exportButton, [name] {
         theme::Palette out = effectivePalette();
         if (!name->text().trimmed().isEmpty()) out.name = name->text().trimmed().toStdString();
-        if (auto file = platform::saveFileDialog("Export Theme", platform::fromUtf8(out.name + ".json"), "bemotion theme", "json")) {
+        if (auto file = platform::saveFileDialog(TR_NOOP("Export Theme"), platform::fromUtf8(out.name + ".json"), TR_NOOP("bemotion theme"), "json")) {
             std::string error;
-            g_message = ThemeLibrary::exportTo(out, *file, &error) ? "Exported to " + platform::toUtf8(*file) : error;
+            g_message = ThemeLibrary::exportTo(out, *file, &error) ? tr("Exported to %1").arg(QString::fromStdString(platform::toUtf8(*file))).toStdString() : error;
             if (g_window) g_window->rebuild();
         }
     });
-    share->addRow("Export", "A .json file anyone can import", exportButton);
+    share->addRow(tr("Export"), tr("A .json file anyone can import"), exportButton);
     if (s.customPalette) {
-        auto* reset = new QPushButton("Discard Changes");
+        auto* reset = new QPushButton(tr("Discard Changes"));
         QObject::connect(reset, &QPushButton::clicked, reset, [] {
             settings().customPalette = false;
             changed(true);
         });
-        share->addRow("Back to the theme", "Drops the colors changed here", reset);
+        share->addRow(tr("Back to the theme"), tr("Drops the colors changed here"), reset);
     }
     return page;
 }
@@ -494,25 +500,44 @@ QWidget* interfacePage() {
     Settings& s = settings();
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    addPageHeader(col, "Interface", [] {
+    addPageHeader(col, tr("Interface"), [] {
         Settings& st = settings();
         const Settings d;
         st.timelineLayerRow = d.timelineLayerRow, st.timelinePropertyRow = d.timelinePropertyRow;
         st.keyframeSize = d.keyframeSize, st.textScale = d.textScale, st.uiFont = d.uiFont;
         st.showIntro = d.showIntro;
     });
-    SettingsCard* experience = addSection(col, "Experience");
+    SettingsCard* language = addSection(col, tr("Language"));
+    {
+        auto* combo = new QComboBox;
+        combo->addItem(tr("Automatic (the system's)"), QStringLiteral("auto"));
+        combo->addItem(QStringLiteral("English"), QStringLiteral("en"));
+        for (const LanguageInfo& l : availableLanguages())
+            combo->addItem(QString::fromStdString(l.name), QString::fromStdString(l.code));
+        combo->setCurrentIndex(std::max(0, combo->findData(QString::fromStdString(s.language))));
+        auto* note = hintLabel(tr("bemotion shows the new language the next time it opens."));
+        note->setVisible(false);
+        QObject::connect(combo, &QComboBox::activated, combo, [combo, note](int i) {
+            settings().language = combo->itemData(i).toString().toStdString();
+            saveSettings();
+            note->setVisible(true);
+        });
+        language->addRow(tr("Interface language"),
+                         tr("Languages are JSON files: add your own to the languages folder in bemotion's data"), combo);
+        language->addRow({}, {}, note);
+    }
+    SettingsCard* experience = addSection(col, tr("Experience"));
     const int which = s.experience == "friendly" ? 0 : s.experience == "expert" ? 2 : 1;
     // One description for the three: the row keeps its height while choosing (it used to grow
     // and shrink under the mouse).
-    experience->addRow("How much the interface shows",
-                       "Friendly: the essentials. Balanced: the usual tools. Expert: every option, rulers, a fuller toolbar",
-                       segmented({"Friendly", "Balanced", "Expert"}, which, [](int i) {
+    experience->addRow(tr("How much the interface shows"),
+                       tr("Friendly: the essentials. Balanced: the usual tools. Expert: every option, rulers, a fuller toolbar"),
+                       segmented({tr("Friendly"), tr("Balanced"), tr("Expert")}, which, [](int i) {
                            applyExperience(i == 0 ? "friendly" : i == 2 ? "expert" : "balanced");
                            emit AppSignals::get().toolbarChanged();
                            changed(true);
                        }));
-    experience->addRow("Essentials only", "Plugins off: no charts, maps, 3D models or voice recording. The simplest bemotion",
+    experience->addRow(tr("Essentials only"), tr("Plugins off: no charts, maps, 3D models or voice recording. The simplest bemotion"),
                        switchControl(s.essentialsOnly, [](bool on) {
                            settings().essentialsOnly = on;
                            saveSettings();
@@ -520,9 +545,9 @@ QWidget* interfacePage() {
                            emit AppSignals::get().pluginsChanged();
                        }));
 
-    SettingsCard* timeline = addSection(col, "Timeline");
+    SettingsCard* timeline = addSection(col, tr("Timeline"));
     auto* presets = new QHBoxLayout;
-    auto preset = [&](const char* label, float row, float prop, float key) {
+    auto preset = [&](const QString& label, float row, float prop, float key) {
         const bool selected = std::fabs(s.timelineLayerRow - row) < 0.1f && std::fabs(s.timelinePropertyRow - prop) < 0.1f;
         auto* b = new TimelineSizeCard(label, row, prop, key, selected);
         QObject::connect(b, &QPushButton::clicked, b, [row, prop, key] {
@@ -532,21 +557,21 @@ QWidget* interfacePage() {
         });
         presets->addWidget(b);
     };
-    preset("Compact", 34, 28, 5);
-    preset("Comfortable", 46, 38, 6);
-    preset("Large", 60, 50, 7.5f);
+    preset(tr("Compact"), 34, 28, 5);
+    preset(tr("Comfortable"), 46, 38, 6);
+    preset(tr("Large"), 60, 50, 7.5f);
     presets->addStretch();
     timeline->addLayout(presets);
     if (s.advanced) {
-        timeline->addRow("Clip row height", "", sliderControl(s.timelineLayerRow, 22.0f, 80.0f, "%.0f px"));
-        timeline->addRow("Keyframe row height", "", sliderControl(s.timelinePropertyRow, 20.0f, 60.0f, "%.0f px"));
-        timeline->addRow("Keyframe size", "", sliderControl(s.keyframeSize, 3.0f, 10.0f, "%.1f px", 0.5f));
+        timeline->addRow(tr("Clip row height"), "", sliderControl(s.timelineLayerRow, 22.0f, 80.0f, "%.0f px"));
+        timeline->addRow(tr("Keyframe row height"), "", sliderControl(s.timelinePropertyRow, 20.0f, 60.0f, "%.0f px"));
+        timeline->addRow(tr("Keyframe size"), "", sliderControl(s.keyframeSize, 3.0f, 10.0f, "%.1f px", 0.5f));
     }
 
-    SettingsCard* text = addSection(col, "Text");
+    SettingsCard* text = addSection(col, tr("Text"));
     static float percent;
     percent = s.textScale * 100.0f;
-    text->addRow("Text size", "Every label in the interface",
+    text->addRow(tr("Text size"), tr("Every label in the interface"),
                  sliderControl(percent, 80.0f, 150.0f, "%.0f%%", 5.0f, [] { settings().textScale = percent / 100.0f; }));
     auto* font = new QComboBox;
     font->setEditable(true);
@@ -562,40 +587,40 @@ QWidget* interfacePage() {
         settings().uiFont = f;
         changed();
     });
-    text->addRow("Interface font", "Inter ships with bemotion; the others come from your system", font);
+    text->addRow(tr("Interface font"), tr("Inter ships with bemotion; the others come from your system"), font);
 
     // Each extra on its own, whatever the experience.
-    SettingsCard* show = addSection(col, "Show");
-    auto showRow = [&](const char* name, const char* about, bool Settings::*field) {
+    SettingsCard* show = addSection(col, tr("Show"));
+    auto showRow = [&](const QString& name, const QString& about, bool Settings::*field) {
         show->addRow(name, about, switchControl(s.*field, [field](bool on) {
                          settings().*field = on;
                          saveSettings();
                          emit AppSignals::get().appearanceChanged();
                      }));
     };
-    showRow("Expression buttons", "The ƒ beside each property (one with an expression keeps it)", &Settings::showExpressionButtons);
-    showRow("Graph editor button", "The curves of the keyframes, in the timeline", &Settings::showGraphButton);
-    showRow("Export Frame button", "The camera in the viewport: this frame as a picture (also Shift+E)", &Settings::showSnapshotButton);
-    showRow("Timeline scrollbar", "Under the timeline, to move along long projects", &Settings::showTimelineScrollbar);
-    showRow("Audio meters", "Left and right sound levels beside the timeline (also View › Audio Meters)", &Settings::showMeters);
+    showRow(tr("Expression buttons"), tr("The ƒ beside each property (one with an expression keeps it)"), &Settings::showExpressionButtons);
+    showRow(tr("Graph editor button"), tr("The curves of the keyframes, in the timeline"), &Settings::showGraphButton);
+    showRow(tr("Export Frame button"), tr("The camera in the viewport: this frame as a picture (also Shift+E)"), &Settings::showSnapshotButton);
+    showRow(tr("Timeline scrollbar"), tr("Under the timeline, to move along long projects"), &Settings::showTimelineScrollbar);
+    showRow(tr("Audio meters"), tr("Left and right sound levels beside the timeline (also View › Audio Meters)"), &Settings::showMeters);
 
-    SettingsCard* startup = addSection(col, "Startup");
-    startup->addRow("Intro animation", "The bemotion logo when the app opens (a click or any key skips it)",
+    SettingsCard* startup = addSection(col, tr("Startup"));
+    startup->addRow(tr("Intro animation"), tr("The bemotion logo when the app opens (a click or any key skips it)"),
                     switchControl(s.showIntro, [](bool on) {
                         settings().showIntro = on;
                         saveSettings();
                     }));
-    startup->addRow("Welcome project", "The example project on the home screen (deleting it there turns this off)",
+    startup->addRow(tr("Welcome project"), tr("The example project on the home screen (deleting it there turns this off)"),
                     switchControl(!s.welcomeRemoved, [](bool on) {
                         settings().welcomeRemoved = !on; // on: a fresh copy comes back if it was deleted
                         saveSettings();
                         emit AppSignals::get().projectsChanged();
                     }));
 
-    SettingsCard* reset = addSection(col, "Start over");
-    auto* resetInterface = new QPushButton("Reset Interface...");
+    SettingsCard* reset = addSection(col, tr("Start over"));
+    auto* resetInterface = new QPushButton(tr("Reset Interface..."));
     QObject::connect(resetInterface, &QPushButton::clicked, resetInterface, [] {
-        if (QMessageBox::question(g_window, "Reset Interface", "Restore the entire interface to its defaults?") != QMessageBox::Yes) return;
+        if (QMessageBox::question(g_window, tr("Reset Interface"), tr("Restore the entire interface to its defaults?")) != QMessageBox::Yes) return;
         Settings& s = settings();
         const Settings d;
         s.advanced = d.advanced;
@@ -629,10 +654,10 @@ QWidget* interfacePage() {
         emit AppSignals::get().toolbarChanged();
         emit AppSignals::get().interfaceResetRequested();
         changed(true);
-        if (ec) QMessageBox::warning(g_window, "Reset Interface", "The saved panel layout could not be removed. Close the editor and try again.");
+        if (ec) QMessageBox::warning(g_window, tr("Reset Interface"), tr("The saved panel layout could not be removed. Close the editor and try again."));
     });
-    reset->addRow("Reset the interface", "Theme, toolbar, shortcuts, preview and panel layout go back to their defaults. "
-                                         "Projects, media, plugins and recent files stay.",
+    reset->addRow(tr("Reset the interface"), tr("Theme, toolbar, shortcuts, preview and panel layout go back to their defaults. "
+                                         "Projects, media, plugins and recent files stay."),
                   resetInterface);
     return page;
 }
@@ -641,34 +666,83 @@ QWidget* editorPage() {
     Settings& s = settings();
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    addPageHeader(col, "Editor", [] {
+    addPageHeader(col, tr("Editor"), [] {
         Settings& st = settings();
         const Settings d;
         st.snapDistance = d.snapDistance, st.arrowFrames = d.arrowFrames, st.bigArrowFrames = d.bigArrowFrames;
         st.autosaveMinutes = d.autosaveMinutes;
     });
-    SettingsCard* saving = addSection(col, "Saving");
-    saving->addRow("Save after every change",
-                   "A project saves itself a moment after each change, once it has a file (the first Save picks it)",
+    SettingsCard* saving = addSection(col, tr("Saving"));
+    saving->addRow(tr("Save after every change"),
+                   tr("A project saves itself a moment after each change, once it has a file (the first Save picks it)"),
                    switchControl(s.autosaveMinutes > 0, [](bool on) {
                        settings().autosaveMinutes = on ? 5 : 0; // any value but 0 is on (the setting's older name)
                        saveSettings();
                    }));
-    saving->addRow("Crash recovery", "Unsaved changes are always kept aside: if bemotion closes unexpectedly, it offers them "
-                                     "back the next time it opens",
+    saving->addRow(tr("Crash recovery"), tr("Unsaved changes are always kept aside: if bemotion closes unexpectedly, it offers them "
+                                     "back the next time it opens"),
                    nullptr);
+    SettingsCard* playback = addSection(col, tr("Playback"));
+    const std::string decoder = media::hardwareDecoderName();
+    playback->addRow(tr("Hardware video decoding"),
+                     tr("The graphics card reads HD and 4K videos (H.264, HEVC, VP9, AV1): lighter on a laptop's processor, though a fast processor is often quicker on its own") +
+                         (decoder.empty() ? QString() : tr(" (in use: %1)").arg(QString::fromStdString(decoder))),
+                     switchControl(s.hardwareDecoding, [](bool on) {
+                         settings().hardwareDecoding = on;
+                         media::setHardwareDecoding(on);
+                         media::MediaManager::get().reopenVideos();
+                         saveSettings();
+                     }));
+    playback->addRow(tr("Use proxies"),
+                     tr("Videos with a proxy (Media panel › right-click › Create Proxy) play from it in the editor: smooth even "
+                     "for 4K. Exports always use the originals"),
+                     switchControl(s.useProxies, [](bool on) {
+                         settings().useProxies = on;
+                         media::MediaManager::get().setUseProxies(on);
+                         saveSettings();
+                     }));
+    {
+        auto* size = new QLabel;
+        setTone(size, Tone::TextDim);
+        auto showSize = [size] {
+            const double mb = static_cast<double>(media::MediaManager::get().proxyBytes()) / (1024.0 * 1024.0);
+            size->setText(mb < 0.05 ? tr("None") : tr("%1 MB").arg(mb, 0, 'f', mb < 10 ? 1 : 0));
+        };
+        showSize();
+        auto* clear = new QPushButton(tr("Delete All"));
+        QObject::connect(clear, &QPushButton::clicked, size, [showSize] {
+            media::MediaManager::get().deleteAllProxies();
+            showSize();
+        });
+        playback->addRow(tr("Proxy files"), tr("Kept with bemotion's own data; made again when needed"), buttonRow({static_cast<QWidget*>(size), clear}));
+    }
+    auto* memory = new QSpinBox;
+    memory->setRange(256, 32768);
+    memory->setSingleStep(256);
+    memory->setSuffix(tr(" MB"));
+    memory->setValue(s.cacheMegabytes);
+    memory->setFixedWidth(120);
+    QObject::connect(memory, &QSpinBox::valueChanged, memory, [](int v) {
+        settings().cacheMegabytes = v;
+        media::MediaManager::get().setFrameCacheMegabytes(v / 2);
+        saveSettings();
+    });
+    playback->addRow(tr("Memory for cached frames"),
+                     tr("Frames already shown are kept, so they play again at once (the green line on the timeline's ruler). "
+                     "More memory: longer stretches"),
+                     memory);
     if (!s.advanced) {
         col->addSpacing(6);
-        col->addWidget(hintLabel("How far the arrow keys step and how close things snap are in Advanced Options (bottom left)."));
+        col->addWidget(hintLabel(tr("How far the arrow keys step and how close things snap are in Advanced Options (bottom left).")));
         return page;
     }
-    SettingsCard* playhead = addSection(col, "Playhead");
-    playhead->addRow("Arrow keys step", "Left / Right move the playhead this many frames", spinControl(s.arrowFrames, 1, 60, " frames"));
-    playhead->addRow("Big step", "With Shift by default (see Shortcuts)", spinControl(s.bigArrowFrames, 1, 300, " frames"));
-    SettingsCard* snapping = addSection(col, "Snapping");
-    snapping->addRow("Snap distance",
-                     "How close (on screen) an object, clip, keyframe or the playhead gets before it snaps. S or the magnet "
-                     "turns snapping on and off; hold Ctrl while dragging to ignore it.",
+    SettingsCard* playhead = addSection(col, tr("Playhead"));
+    playhead->addRow(tr("Arrow keys step"), tr("Left / Right move the playhead this many frames"), spinControl(s.arrowFrames, 1, 60, tr(" frames")));
+    playhead->addRow(tr("Big step"), tr("With Shift by default (see Shortcuts)"), spinControl(s.bigArrowFrames, 1, 300, tr(" frames")));
+    SettingsCard* snapping = addSection(col, tr("Snapping"));
+    snapping->addRow(tr("Snap distance"),
+                     tr("How close (on screen) an object, clip, keyframe or the playhead gets before it snaps. S or the magnet "
+                     "turns snapping on and off; hold Ctrl while dragging to ignore it."),
                      sliderControl(s.snapDistance, 2.0f, 30.0f, "%.0f px"));
     return page;
 }
@@ -680,11 +754,11 @@ public:
         setFixedWidth(160);
         setProperty("keycap", true);
         setCursor(Qt::PointingHandCursor);
-        setToolTip("Click, then press the new keys (Esc cancels)");
+        setToolTip(tr("Click, then press the new keys (Esc cancels)"));
         refreshText();
         connect(this, &QPushButton::clicked, this, [this] {
             capturing_ = true;
-            setText("Press keys...");
+            setText(tr("Press keys..."));
             setProperty("accent", true);
             style()->unpolish(this);
             style()->polish(this);
@@ -734,7 +808,7 @@ private:
     }
     void refreshText() {
         const std::string name = chordName(chordOf(action_));
-        setText(name.empty() ? "None" : QString::fromStdString(name));
+        setText(name.empty() ? tr("None") : QString::fromStdString(name));
     }
     Action action_;
     bool capturing_ = false;
@@ -743,14 +817,14 @@ private:
 QWidget* shortcutsPage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    addPageHeader(col, "Shortcuts", [] {
+    addPageHeader(col, tr("Shortcuts"), [] {
         loadKeymap("{}");
         emit AppSignals::get().shortcutsChanged();
     });
     // A search over names and keys (kept while the page rebuilds after a change).
     static QString filter;
     auto* search = new QLineEdit(filter);
-    search->setPlaceholderText("Search shortcuts (a name or keys, e.g. \"Ctrl+S\")");
+    search->setPlaceholderText(tr("Search shortcuts (a name or keys, e.g. \"Ctrl+S\")"));
     search->setClearButtonEnabled(true);
     col->addWidget(search);
     struct Row {
@@ -769,7 +843,7 @@ QWidget* shortcutsPage() {
         if (!group || std::strcmp(group, info.group) != 0) {
             group = info.group;
             col->addSpacing(8);
-            auto* title = sectionLabel(QString::fromUtf8(group));
+            auto* title = sectionLabel(tr(group));
             col->addWidget(title);
             card = new SettingsCard;
             col->addWidget(card);
@@ -781,12 +855,12 @@ QWidget* shortcutsPage() {
         h->setSpacing(4);
         const Action other = chordOf(a) ? actionWithChord(chordOf(a), a) : Action::Count;
         if (other != Action::Count) {
-            auto* clash = new QLabel(QString("Also %1").arg(actionInfo(other).label));
+            auto* clash = new QLabel(tr("Also %1").arg(tr(actionInfo(other).label)));
             setTone(clash, Tone::Danger);
             h->addWidget(clash);
         }
         h->addWidget(new ShortcutButton(a));
-        auto* reset = new IconButton(Icon::Reset, "Back to the default", 26);
+        auto* reset = new IconButton(Icon::Reset, tr("Back to the default"), 26);
         reset->setVisible(chordOf(a) != info.defaultChord);
         QObject::connect(reset, &QAbstractButton::clicked, reset, [a] {
             resetChord(a);
@@ -794,7 +868,7 @@ QWidget* shortcutsPage() {
             emit AppSignals::get().shortcutsChanged();
             if (g_window) QTimer::singleShot(0, g_window, [] { if (g_window) g_window->rebuild(); });
         });
-        auto* clear = new IconButton(Icon::Trash, "Remove this shortcut", 26);
+        auto* clear = new IconButton(Icon::Trash, tr("Remove this shortcut"), 26);
         clear->setEnabled(chordOf(a) != 0);
         QObject::connect(clear, &QAbstractButton::clicked, clear, [a] {
             setChord(a, 0);
@@ -810,10 +884,10 @@ QWidget* shortcutsPage() {
         slot->addWidget(reset);
         h->addWidget(resetSlot);
         h->addWidget(clear);
-        QWidget* row = card->addRow(QString::fromUtf8(info.label), "", tools);
+        QWidget* row = card->addRow(tr(info.label), "", tools);
         row->setMinimumHeight(38);
         row->layout()->setContentsMargins(16, 5, 16, 5); // a long list: compact rows
-        rows->push_back({row, card, (QString::fromUtf8(info.label) + " " + QString::fromStdString(chordName(chordOf(a)))).toLower()});
+        rows->push_back({row, card, (tr(info.label) + " " + QString::fromStdString(chordName(chordOf(a)))).toLower()});
     }
     *refresh = [rows, cards] {
         const QString f = filter.trimmed().toLower();
@@ -888,10 +962,10 @@ QLabel* pluginText(const QString& text, Tone tone = Tone::TextDim) {
 }
 
 QString permissionLabel(const std::string& permission) {
-    if (permission == "edit") return "Edits the project";
-    if (permission == "media") return "Imports media";
-    if (permission == "files") return "Reads files you choose";
-    if (permission == "microphone") return "Uses the microphone";
+    if (permission == "edit") return tr("Edits the project");
+    if (permission == "media") return tr("Imports media");
+    if (permission == "files") return tr("Reads files you choose");
+    if (permission == "microphone") return tr("Uses the microphone");
     return QString::fromStdString(permission);
 }
 
@@ -929,16 +1003,16 @@ QWidget* pluginRow(const Plugin& p) {
     f.setWeight(QFont::DemiBold);
     name->setFont(f);
     head->addWidget(name);
-    auto* version = new QLabel(QString::fromStdString("Version " + p.version + (p.author.empty() ? "" : "  ·  " + p.author)));
+    auto* version = new QLabel(tr("Version %1").arg(QString::fromStdString(p.version)) + QString::fromStdString(p.author.empty() ? "" : "  ·  " + p.author));
     setTone(version, Tone::TextFaint);
     head->addWidget(version);
     head->addStretch();
     body->addLayout(head);
     if (!p.description.empty()) body->addWidget(pluginText(QString::fromStdString(p.description), Tone::TextDim));
-    if (!ok) body->addWidget(pluginText(QString::fromStdString("Could not load: " + p.error), Tone::Danger));
-    if (!objects.empty()) body->addWidget(pluginText(QString::fromStdString("Adds  " + objects), Tone::Text));
-    if (!commands.empty()) body->addWidget(pluginText(QString::fromStdString("Commands  " + commands), Tone::Text));
-    if (!p.drawError.empty()) body->addWidget(pluginText(QString::fromStdString("Last error: " + p.drawError), Tone::Danger));
+    if (!ok) body->addWidget(pluginText(tr("Could not load: %1").arg(QString::fromStdString(p.error)), Tone::Danger));
+    if (!objects.empty()) body->addWidget(pluginText(tr("Adds  %1").arg(QString::fromStdString(objects)), Tone::Text));
+    if (!commands.empty()) body->addWidget(pluginText(tr("Commands  %1").arg(QString::fromStdString(commands)), Tone::Text));
+    if (!p.drawError.empty()) body->addWidget(pluginText(tr("Last error: %1").arg(QString::fromStdString(p.drawError)), Tone::Danger));
     if (!p.permissions.empty()) {
         auto* chips = new QHBoxLayout;
         chips->setSpacing(6);
@@ -956,21 +1030,21 @@ QWidget* pluginRow(const Plugin& p) {
         b->setCursor(Qt::PointingHandCursor);
         return b;
     };
-    auto* show = quiet("Show Folder");
+    auto* show = quiet(tr("Show Folder"));
     const std::filesystem::path dir = p.dir;
     QObject::connect(show, &QPushButton::clicked, show, [dir] { platform::revealInFileManager(dir); });
     actions->addWidget(show);
     const std::string id = p.id;
     if (!p.builtin) {
-        auto* remove = quiet("Remove...");
-        remove->setToolTip("Move this plugin to the Trash");
+        auto* remove = quiet(tr("Remove..."));
+        remove->setToolTip(tr("Move this plugin to the Trash"));
         QObject::connect(remove, &QPushButton::clicked, remove, [id, pname = QString::fromStdString(p.name)] {
-            const QString question = QString("Move %name% to the Trash?").replace("%name%", pname);
-            if (QMessageBox::question(g_window, "Remove Plugin", question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) !=
+            const QString question = tr("Move %name% to the Trash?").replace("%name%", pname);
+            if (QMessageBox::question(g_window, tr("Remove Plugin"), question, QMessageBox::Yes | QMessageBox::No, QMessageBox::No) !=
                 QMessageBox::Yes)
                 return;
             std::string error;
-            g_message = PluginHost::get().uninstall(id, &error) ? "Plugin moved to the Trash." : "Could not remove: " + error;
+            g_message = PluginHost::get().uninstall(id, &error) ? tr("Plugin moved to the Trash.").toStdString() : tr("Could not remove: %1").arg(QString::fromStdString(error)).toStdString();
             emit AppSignals::get().pluginsChanged();
             if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
         });
@@ -978,7 +1052,7 @@ QWidget* pluginRow(const Plugin& p) {
     }
     QPlainTextEdit* log = nullptr;
     if (!p.log.empty()) {
-        auto* toggle = quiet(QString("Log (%1)").arg(p.log.size()));
+        auto* toggle = quiet(tr("Log (%1)").arg(p.log.size()));
         toggle->setCheckable(true);
         log = new QPlainTextEdit;
         log->setReadOnly(true);
@@ -1001,8 +1075,8 @@ QWidget* pluginRow(const Plugin& p) {
     auto* enabled = new Switch;
     enabled->setChecked(p.enabled);
     enabled->setEnabled(!(p.may("microphone") && media::Recorder::get().recording()));
-    enabled->setAccessibleName(QString::fromStdString("Enable " + p.name));
-    enabled->setToolTip(p.enabled ? "On: its objects and commands are in the editor" : "Off: hidden from the editor");
+    enabled->setAccessibleName(tr("Enable %1").arg(QString::fromStdString(p.name)));
+    enabled->setToolTip(p.enabled ? tr("On: its objects and commands are in the editor") : tr("Off: hidden from the editor"));
     QObject::connect(enabled, &QAbstractButton::toggled, enabled, [id](bool on) {
         PluginHost::get().setEnabled(id, on);
         emit AppSignals::get().pluginsChanged();
@@ -1031,15 +1105,15 @@ void rebuildSoon() {
 }
 
 QString sizeText(int64_t bytes) {
-    return bytes >= 1024 * 1024 ? QString("%1 MB").arg(bytes / (1024.0 * 1024.0), 0, 'f', 1) : QString("%1 KB").arg(std::max<int64_t>(1, bytes / 1024));
+    return bytes >= 1024 * 1024 ? tr("%1 MB").arg(bytes / (1024.0 * 1024.0), 0, 'f', 1) : tr("%1 KB").arg(std::max<int64_t>(1, bytes / 1024));
 }
 
 void addOfficialPlugins(QVBoxLayout* col) {
     OfficialPlugins& o = official();
-    SettingsCard* card = addSection(col, "Official plugins", "Made by bemotion, kept in its repository on GitHub. Each file is "
-                                                            "checked before the plugin is installed.");
+    SettingsCard* card = addSection(col, tr("Official plugins"), tr("Made by bemotion, kept in its repository on GitHub. Each file is "
+                                                            "checked before the plugin is installed."));
     if (o.state == OfficialPlugins::Idle || o.state == OfficialPlugins::Failed) {
-        auto* show = new QPushButton(o.state == OfficialPlugins::Failed ? "Try Again" : "Show Official Plugins");
+        auto* show = new QPushButton(o.state == OfficialPlugins::Failed ? tr("Try Again") : tr("Show Official Plugins"));
         QObject::connect(show, &QPushButton::clicked, show, [] {
             official().state = OfficialPlugins::Loading;
             rebuildSoon();
@@ -1051,17 +1125,17 @@ void addOfficialPlugins(QVBoxLayout* col) {
                 rebuildSoon();
             });
         });
-        card->addRow("Get more plugins",
-                     o.state == OfficialPlugins::Failed ? "Could not reach them: " + o.error
-                                                        : "bemotion connects to GitHub only when you click, to list them",
+        card->addRow(tr("Get more plugins"),
+                     o.state == OfficialPlugins::Failed ? tr("Could not reach them: ") + o.error
+                                                        : tr("bemotion connects to GitHub only when you click, to list them"),
                      show);
         return;
     }
     if (o.state == OfficialPlugins::Loading) {
-        card->addRow("Looking for official plugins...", "", nullptr);
+        card->addRow(tr("Looking for official plugins..."), "", nullptr);
         return;
     }
-    if (o.plugins.empty()) card->addRow("No official plugins for this version", "", nullptr);
+    if (o.plugins.empty()) card->addRow(tr("No official plugins for this version"), "", nullptr);
     for (const CatalogPlugin& c : o.plugins) {
         const Plugin* have = PluginHost::get().findPlugin(c.id);
         const bool newer = have && compareVersions(c.version, have->version) > 0;
@@ -1070,18 +1144,18 @@ void addOfficialPlugins(QVBoxLayout* col) {
         if (!c.permissions.empty()) {
             QStringList perms;
             for (const std::string& p : c.permissions) perms << QString::fromStdString(p);
-            about += "  ·  may: " + perms.join(", ");
+            about += tr("  ·  may: %1").arg(perms.join(", "));
         }
         QPushButton* button = nullptr;
         if (o.installing == c.id) {
-            button = new QPushButton(QString("Downloading %1%").arg(o.percent));
+            button = new QPushButton(tr("Downloading %1%").arg(o.percent));
             button->setEnabled(false);
         } else if (have && !newer) {
-            button = new QPushButton(have->builtin ? "Included" : "Installed");
+            button = new QPushButton(have->builtin ? tr("Included") : tr("Installed"));
             button->setProperty("flat", true);
             button->setEnabled(false);
         } else {
-            button = accentButton(newer ? "Update" : "Get");
+            button = accentButton(newer ? tr("Update") : tr("Get"));
             button->setEnabled(o.installing.empty());
             const CatalogPlugin plugin = c;
             QObject::connect(button, &QPushButton::clicked, button, [plugin] {
@@ -1092,7 +1166,8 @@ void addOfficialPlugins(QVBoxLayout* col) {
                     plugin, g_window,
                     [plugin](bool ok, QString error) {
                         official().installing.clear();
-                        g_message = ok ? "\"" + plugin.name + "\" installed." : "Could not install \"" + plugin.name + "\": " + error.toStdString();
+                        g_message = (ok ? tr("\"%1\" installed.").arg(QString::fromStdString(plugin.name))
+                                        : tr("Could not install \"%1\": %2").arg(QString::fromStdString(plugin.name), error)).toStdString();
                         emit AppSignals::get().pluginsChanged(); // (rebuilds the page after the reload)
                     },
                     [plugin](int64_t received, int64_t total) {
@@ -1111,32 +1186,32 @@ QWidget* pluginsPage() {
     PluginHost& host = PluginHost::get();
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    addPageHeader(col, "Plugins", [] { enableAllPlugins(); });
-    col->addWidget(hintLabel("Plugins add objects and commands to the editor. They reach the project, media, files or the "
-                             "microphone only with the permissions listed on them."));
-    auto* install = accentButton("Install Plugin...");
-    install->setToolTip("Choose the plugin.json file in a plugin's folder");
+    addPageHeader(col, tr("Plugins"), [] { enableAllPlugins(); });
+    col->addWidget(hintLabel(tr("Plugins add objects and commands to the editor. They reach the project, media, files or the "
+                             "microphone only with the permissions listed on them.")));
+    auto* install = accentButton(tr("Install Plugin..."));
+    install->setToolTip(tr("Choose the plugin.json file in a plugin's folder"));
     QObject::connect(install, &QPushButton::clicked, install, [] {
-        if (auto manifest = platform::openFileDialog("Install Plugin (choose its plugin.json)", "bemotion plugin", "json")) {
+        if (auto manifest = platform::openFileDialog(TR_NOOP("Install Plugin (choose its plugin.json)"), TR_NOOP("bemotion plugin"), "json")) {
             std::string error;
-            g_message = PluginHost::get().install(*manifest, &error) ? "Plugin installed." : "Could not install: " + error;
+            g_message = PluginHost::get().install(*manifest, &error) ? tr("Plugin installed.").toStdString() : tr("Could not install: %1").arg(QString::fromStdString(error)).toStdString();
             emit AppSignals::get().pluginsChanged();
             if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
         }
     });
-    auto* folder = new QPushButton("Open Folder");
-    folder->setToolTip("Where installed plugins are kept");
+    auto* folder = new QPushButton(tr("Open Folder"));
+    folder->setToolTip(tr("Where installed plugins are kept"));
     QObject::connect(folder, &QPushButton::clicked, folder, [] { platform::revealInFileManager(PluginHost::userDir()); });
-    auto* reload = new QPushButton("Reload");
-    reload->setToolTip("Load every plugin again (after editing one)");
+    auto* reload = new QPushButton(tr("Reload"));
+    reload->setToolTip(tr("Load every plugin again (after editing one)"));
     QObject::connect(reload, &QPushButton::clicked, reload, [] {
         PluginHost::get().requestReload();
         emit AppSignals::get().pluginsChanged();
         if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
     });
-    auto* docs = new QPushButton("Write a Plugin");
+    auto* docs = new QPushButton(tr("Write a Plugin"));
     docs->setProperty("flat", true);
-    docs->setToolTip("The plugin guide (opens in the browser)");
+    docs->setToolTip(tr("The plugin guide (opens in the browser)"));
     QObject::connect(docs, &QPushButton::clicked, docs, [] { platform::openWithDefaultApp(kPluginDocsUrl); });
     auto* bar = new QHBoxLayout;
     bar->setSpacing(8);
@@ -1149,25 +1224,25 @@ QWidget* pluginsPage() {
     col->addLayout(bar);
     if (!g_message.empty()) col->addWidget(pluginText(QString::fromStdString(g_message)));
     if (settings().essentialsOnly) {
-        SettingsCard* off = addSection(col, "Essentials only");
-        auto* on = accentButton("Turn Plugins On");
+        SettingsCard* off = addSection(col, tr("Essentials only"));
+        auto* on = accentButton(tr("Turn Plugins On"));
         QObject::connect(on, &QPushButton::clicked, on, [] {
             settings().essentialsOnly = false;
             saveSettings();
             PluginHost::get().requestReload();
             emit AppSignals::get().pluginsChanged();
         });
-        off->addRow("Plugins are off", "Essentials only (Settings › Interface) keeps bemotion to its core: none of these load", on);
+        off->addRow(tr("Plugins are off"), tr("Essentials only (Settings › Interface) keeps bemotion to its core: none of these load"), on);
     }
 
     // What comes with bemotion first; then what was installed (or how to).
     SettingsCard* builtin = nullptr;
     for (const Plugin& p : host.plugins()) {
         if (!p.builtin) continue;
-        if (!builtin) builtin = addSection(col, "Included with bemotion");
+        if (!builtin) builtin = addSection(col, tr("Included with bemotion"));
         builtin->addContent(pluginRow(p))->layout()->setContentsMargins(0, 0, 0, 0);
     }
-    SettingsCard* installed = addSection(col, "Installed");
+    SettingsCard* installed = addSection(col, tr("Installed"));
     bool anyInstalled = false;
     for (const Plugin& p : host.plugins()) {
         if (p.builtin) continue;
@@ -1175,7 +1250,7 @@ QWidget* pluginsPage() {
         anyInstalled = true;
     }
     if (!anyInstalled)
-        installed->addContent(pluginText("None yet. Install Plugin adds one from its folder (its plugin.json file).", Tone::TextFaint));
+        installed->addContent(pluginText(tr("None yet. Install Plugin adds one from its folder (its plugin.json file)."), Tone::TextFaint));
     addOfficialPlugins(col);
     return page;
 }
@@ -1190,8 +1265,8 @@ void openSettings(SettingsTab tab) {
         footerCol->setSpacing(6);
         auto* advancedRow = new QHBoxLayout;
         advancedRow->setContentsMargins(8, 0, 4, 0);
-        auto* advancedLabel = new QLabel("Advanced options");
-        advancedLabel->setToolTip("Every page shows all its options (colors, sizes, fine-tuning)");
+        auto* advancedLabel = new QLabel(tr("Advanced options"));
+        advancedLabel->setToolTip(tr("Every page shows all its options (colors, sizes, fine-tuning)"));
         advancedRow->addWidget(advancedLabel, 1);
         auto* advanced = new Switch;
         advanced->setToolTip(advancedLabel->toolTip());
@@ -1210,22 +1285,22 @@ void openSettings(SettingsTab tab) {
                 });
         });
         footerCol->addLayout(advancedRow);
-        auto* resetAll = new QPushButton("Reset All");
-        resetAll->setToolTip("Restore every setting to its default");
+        auto* resetAll = new QPushButton(tr("Reset All"));
+        resetAll->setToolTip(tr("Restore every setting to its default"));
         footerCol->addWidget(resetAll);
-        g_window = new PagedWindow("Settings",
-                                   {{"Theme", Icon::Palette, themePage},
-                                    {"Interface", Icon::Sliders, interfacePage},
-                                    {"Editor", Icon::Edit, editorPage},
-                                    {"Shortcuts", Icon::Keyboard, shortcutsPage},
-                                    {"Plugins", Icon::Plugin, pluginsPage}},
+        g_window = new PagedWindow(tr("Settings"),
+                                   {{tr("Theme"), Icon::Palette, themePage},
+                                    {tr("Interface"), Icon::Sliders, interfacePage},
+                                    {tr("Editor"), Icon::Edit, editorPage},
+                                    {tr("Shortcuts"), Icon::Keyboard, shortcutsPage},
+                                    {tr("Plugins"), Icon::Plugin, pluginsPage}},
                                    footer);
         g_window->resize(860, 660);
         QObject::connect(&AppSignals::get(), &AppSignals::pluginsChanged, g_window, [] {
             if (g_window) QTimer::singleShot(0, g_window, [] { if (g_window) g_window->rebuild(); });
         });
         QObject::connect(resetAll, &QPushButton::clicked, g_window, [] {
-            if (QMessageBox::question(g_window, "Reset All", "Reset every setting to its default?") != QMessageBox::Yes) return;
+            if (QMessageBox::question(g_window, tr("Reset All"), tr("Reset every setting to its default?")) != QMessageBox::Yes) return;
             const bool keepAdvanced = settings().advanced; // a view choice, not a preference
             settings() = Settings{};
             settings().advanced = keepAdvanced;

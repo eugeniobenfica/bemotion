@@ -102,7 +102,7 @@ protected:
         QPainter p(this);
         Draw d(p);
         if (colors_.empty()) {
-            d.text(Pt(0, 2), theme::kTextFaint, QString("Colors you pick show here"));
+            d.text(Pt(0, 2), theme::kTextFaint, tr("Colors you pick show here"));
             return;
         }
         for (size_t i = 0; i < colors_.size(); ++i) {
@@ -149,7 +149,7 @@ public:
     Picker(QWidget* parent, Color start, bool alpha, std::function<void(Color)> changed)
         : QWidget(parent, Qt::Popup | Qt::FramelessWindowHint), start_(start), alpha_(alpha), changed_(std::move(changed)) {
         setAttribute(Qt::WA_TranslucentBackground);
-        setWindowTitle("Color");
+        setWindowTitle(tr("Color"));
         setMouseTracking(true);
         setFixedWidth(kWidth);
         if (!alpha_) start_.a = 1.0f;
@@ -163,11 +163,11 @@ public:
         auto* row = new QHBoxLayout;
         row->setSpacing(6);
         row->addSpacing(kSwatchWidth + 4); // the swatch is painted
-        dropper_ = new IconButton(Icon::Eyedropper, "Pick a color from the screen (Esc cancels)", 26);
+        dropper_ = new IconButton(Icon::Eyedropper, tr("Pick a color from the screen (Esc cancels)"), 26);
         QObject::connect(dropper_, &QAbstractButton::clicked, this, [this] { startPicking(); });
         row->addWidget(dropper_);
         hex_ = new QLineEdit;
-        hex_->setToolTip("Hex color: #RRGGBB" + QString(alpha_ ? " or #RRGGBBAA" : ""));
+        hex_->setToolTip(tr("Hex color: #RRGGBB") + QString(alpha_ ? tr(" or #RRGGBBAA") : ""));
         hex_->setMaxLength(9);
         QObject::connect(hex_, &QLineEdit::textEdited, this, [this](const QString& text) {
             Color c = color();
@@ -184,7 +184,7 @@ public:
             alphaField_->setSpeed(0.5f);
             alphaField_->setFormat("%.0f%%");
             alphaField_->setFixedWidth(58);
-            alphaField_->setToolTip("Opacity");
+            alphaField_->setToolTip(tr("Opacity"));
             QObject::connect(alphaField_, &DragValue::valueChanged, this, [this](float v) {
                 a_ = v / 100.0f;
                 changedHere();
@@ -202,7 +202,7 @@ public:
             v->setRange(0.0f, 255.0f);
             v->setSpeed(0.5f);
             v->setFormat(std::string(names[i]) + "  %.0f");
-            v->setToolTip(QString("%1 (0 to 255)").arg(i == 0 ? "Red" : i == 1 ? "Green" : "Blue"));
+            v->setToolTip(tr("%1 (0 to 255)").arg(i == 0 ? tr("Red") : i == 1 ? tr("Green") : tr("Blue")));
             QObject::connect(v, &DragValue::valueChanged, this, [this, i](float value) {
                 Color c = color();
                 (i == 0 ? c.r : i == 1 ? c.g : c.b) = value / 255.0f;
@@ -214,7 +214,7 @@ public:
         }
         col->addLayout(rgb);
 
-        auto* recentTitle = new QLabel("Recent");
+        auto* recentTitle = new QLabel(tr("Recent"));
         setTone(recentTitle, Tone::TextFaint);
         col->addWidget(recentTitle);
         col->addWidget(new Recents(recentColors(), [this](Color c) {
@@ -331,7 +331,7 @@ protected:
         const bool over = QRectF(sw.left(), sw.top(), sw.width() / 2, sw.height()).contains(e->position());
         if (over != hoverBefore_) {
             hoverBefore_ = over;
-            setToolTip(over ? "The color before: click to go back to it" : QString());
+            setToolTip(over ? tr("The color before: click to go back to it") : QString());
             update();
         }
         const bool handy = over || squareRect().contains(e->position()) || hueRect().adjusted(0, -4, 0, 4).contains(e->position()) ||

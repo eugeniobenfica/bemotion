@@ -296,18 +296,28 @@ private:
                 return static_cast<int>(e.type) < 0 || e.type >= EffectType::Count;
             });
             if (l.effects.size() != effectsBefore) report(where, "unknown effects (removed)");
-            for (Effect& e : l.effects)
+            for (Effect& e : l.effects) {
                 if (e.samples < 2 || e.samples > 64) {
                     report(where, "motion blur samples out of range");
                     e.samples = std::clamp(e.samples, 2, 64);
                 }
+                for (auto& curve : e.curves) {
+                    const std::vector<Vec2> before = curve;
+                    cleanCurve(curve);
+                    if (curve != before) report(where, "curve points out of order or out of range");
+                }
+            }
             const size_t audioEffectsBefore = l.audioEffects.size();
             std::erase_if(l.audioEffects, [](const AudioEffect& e) {
                 return static_cast<int>(e.type) < 0 || e.type >= AudioEffectType::Count || !std::isfinite(e.value);
             });
             if (l.audioEffects.size() != audioEffectsBefore) report(where, "unknown or invalid audio effects (removed)");
-            for (AudioEffect& e : l.audioEffects)
-                e.value = e.type == AudioEffectType::Gain ? std::clamp(e.value, -60.0f, 24.0f) : std::clamp(e.value, 0.01f, 60.0f);
+            for (AudioEffect& e : l.audioEffects) {
+                const AudioEffect before = e;
+                clampAudioEffect(e);
+                if (e.value != before.value || e.value2 != before.value2 || e.value3 != before.value3)
+                    report(where, std::string(audioEffectId(e.type)) + " values out of range");
+            }
             for (ClipTransition* transition : {&l.transitionIn, &l.transitionOut})
                 if (!std::isfinite(transition->duration) || transition->duration <= 0.0f) transition->id.clear(), transition->duration = 0.5f;
 

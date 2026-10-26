@@ -86,6 +86,12 @@ void describeLayer(std::string& out, Composition& c, Layer& l, int depth) {
             fx += (i ? ", " : "") + std::to_string(i) + ":" + effectId(l.effects[i].type) + (l.effects[i].enabled ? "" : " (off)");
         line += "\n" + std::string(6 + depth * 2, ' ') + "effects: " + fx;
     }
+    if (!l.audioEffects.empty()) {
+        std::string fx;
+        for (size_t i = 0; i < l.audioEffects.size(); ++i)
+            fx += (i ? ", " : "") + std::to_string(i) + ":" + audioEffectId(l.audioEffects[i].type) + (l.audioEffects[i].enabled ? "" : " (off)");
+        line += "\n" + std::string(6 + depth * 2, ' ') + "audio effects: " + fx;
+    }
     out += line + "\n";
     // A compound's contents, indented under it.
     for (Layer& child : c.layers)

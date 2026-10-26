@@ -176,6 +176,15 @@ does.
 - Add keyframes right in the Graph Editor (right-click, double-click or *+*)
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…
   stackable, keyframable, with presets
+- **Color**: **Curves** (RGB and each channel), **Apply LUT** (any `.cube`
+  file, or five looks that come with bemotion: Teal & Orange, Warm, Cool,
+  Bleach Bypass, Film Fade) and **Chroma Key** for green and blue screens
+  (tolerance, softness, spill suppression, choke)
+- **Scopes** (View › Panels › Scopes): waveform, RGB parade, vectorscope and
+  histogram of the frame at the playhead
+- **Audio effects** on any clip with sound: gain, fades, a three-band **EQ**,
+  **Noise Reduction** (hum, hiss, fans) and **Ducking** (the music gets
+  quieter by itself while a voice plays)
 
 </td>
 </tr>
@@ -262,6 +271,14 @@ does.
   color before, the last colors used
 - **Audio meters**: left and right levels beside the timeline, with peak hold
   and a clip light (View › Audio Meters, or Settings › Interface)
+- **In your language**: English and Portuguese (Brazil) built in
+  (Settings › Interface › Language); a language is one JSON file anyone can
+  translate and drop into bemotion's `languages` folder
+- **Smooth with big footage**: **proxies** (Media panel › right-click ›
+  *Create Proxy*: a small copy the editor plays, exports use the original),
+  frames kept in memory as they are shown (a green line on the timeline's
+  ruler: they play again at once), and optional **hardware decoding**
+  (Settings › Editor › Playback)
 - Each object says what it has: effects and transitions at the top of
   Properties; the Transitions panel shows the clip's in and out transitions,
   their durations and a remove button; clips in the timeline name their

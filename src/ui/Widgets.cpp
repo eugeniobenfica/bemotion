@@ -339,6 +339,25 @@ void drawIcon(Draw& dl, Icon icon, Pt c, float size, Rgba col) {
         dl.rectFilled(Pt(c.x + h * 0.45f, c.y + h * 0.05f), Pt(c.x + h * 0.85f, c.y + h * 0.75f), col, 2.0f);
         break;
     }
+    case Icon::FxKeying:
+        dl.rect(Pt(c.x - h * 0.8f, c.y - h * 0.8f), Pt(c.x + h * 0.8f, c.y + h * 0.8f), col, 2.0f, th);
+        dl.circleFilled(c, h * 0.42f, col);
+        dl.line(Pt(c.x - h * 0.8f, c.y + h * 0.8f), Pt(c.x + h * 0.8f, c.y - h * 0.8f), col, th);
+        break;
+    case Icon::Scopes: {
+        dl.rect(Pt(c.x - h * 0.85f, c.y - h * 0.75f), Pt(c.x + h * 0.85f, c.y + h * 0.75f), col, 2.0f, th);
+        Pt pts[9];
+        for (int i = 0; i <= 8; ++i) {
+            const float x = -0.65f + 1.3f * i / 8.0f;
+            pts[i] = Pt(c.x + x * h, c.y + std::sin(x * kPi * 1.4f + 0.6f) * h * 0.35f);
+        }
+        dl.polyline(pts, 9, col, false, th);
+        break;
+    }
+    case Icon::Proxy:
+        dl.rect(Pt(c.x - h * 0.8f, c.y - h * 0.55f), Pt(c.x + h * 0.3f, c.y + h * 0.55f), col, 1.5f, th);
+        dl.rectFilled(Pt(c.x + h * 0.05f, c.y + h * 0.05f), Pt(c.x + h * 0.8f, c.y + h * 0.75f), col, 1.0f);
+        break;
     case Icon::Speed: { // a gauge and its needle
         dl.arc(Pt(c.x, c.y + h * 0.3f), h * 0.8f, kPi, kPi * 2.0f, col, th);
         dl.line(Pt(c.x - h * 0.8f, c.y + h * 0.3f), Pt(c.x + h * 0.8f, c.y + h * 0.3f), col, th);
@@ -883,7 +902,7 @@ float meterU(float db) { return std::clamp((db - kMeterFloor) / -kMeterFloor, 0.
 } // namespace
 
 AudioMeter::AudioMeter(QWidget* parent) : QWidget(parent) {
-    setToolTip("Audio levels, left and right (dB). Red at the top: the sound clipped; click to clear it.");
+    setToolTip(tr("Audio levels, left and right (dB). Red at the top: the sound clipped; click to clear it."));
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
 }
 
@@ -972,7 +991,7 @@ QWidget* lengthLimitRow(double seconds, std::function<void(double)> changed) {
     auto* h = new QHBoxLayout(row);
     h->setContentsMargins(0, 0, 0, 0);
     h->setSpacing(10);
-    auto* on = new QCheckBox("Limit the length to");
+    auto* on = new QCheckBox(tr("Limit the length to"));
     on->setChecked(seconds > 0.0);
     h->addWidget(on);
     auto* value = new DragValue;
@@ -1006,7 +1025,7 @@ std::string formatTimecode(double seconds, double fps) {
 }
 
 QLabel* sectionLabel(const QString& text, QWidget* parent) {
-    auto* l = new QLabel(text.toUpper(), parent);
+    auto* l = new QLabel(trLabel(text).toUpper(), parent);
     QFont f = l->font();
     f.setPointSizeF(f.pointSizeF() * 0.8);
     f.setWeight(QFont::Bold);
@@ -1026,7 +1045,7 @@ QPushButton* accentButton(const QString& text, QWidget* parent) {
 // --- IconButton -----------------------------------------------------------------------
 
 IconButton::IconButton(Icon icon, const QString& tip, int size, QWidget* parent) : QAbstractButton(parent), icon_(icon), size_(size) {
-    setToolTip(tip);
+    setToolTip(trLabel(tip));
     setFixedSize(size, size);
     setCursor(Qt::PointingHandCursor);
     setFocusPolicy(Qt::NoFocus);
@@ -1047,7 +1066,7 @@ void IconButton::paintEvent(QPaintEvent*) {
 
 // --- Tile ------------------------------------------------------------------------------
 
-Tile::Tile(Icon icon, const QString& label, QWidget* parent) : QAbstractButton(parent), icon_(icon), label_(label) {
+Tile::Tile(Icon icon, const QString& label, QWidget* parent) : QAbstractButton(parent), icon_(icon), label_(trLabel(label)) {
     setCursor(Qt::PointingHandCursor);
     setFocusPolicy(Qt::NoFocus);
 }
@@ -1152,7 +1171,7 @@ QWidget* segmented(const QStringList& choices, int current, std::function<void(i
     auto* group = new QButtonGroup(box);
     group->setExclusive(true);
     for (int i = 0; i < choices.size(); ++i) {
-        auto* b = new QPushButton(choices[i]);
+        auto* b = new QPushButton(trLabel(choices[i]));
         b->setCheckable(true);
         b->setChecked(i == current);
         b->setCursor(Qt::PointingHandCursor);

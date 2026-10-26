@@ -72,7 +72,7 @@ CollapsibleSection::CollapsibleSection(const QString& title, QWidget* parent, QW
     auto* headRow = new QHBoxLayout;
     headRow->setContentsMargins(0, 0, 0, 0);
     header_ = new QToolButton;
-    header_->setText(QString(title).replace("&", "&&")); // an & is not a shortcut here ("Sorting & Highlight")
+    header_->setText(trLabel(title).replace("&", "&&")); // an & is not a shortcut here ("Sorting & Highlight")
     header_->setCheckable(true);
     header_->setChecked(!collapsedSections().value(title, false));
     header_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
@@ -115,7 +115,7 @@ QGridLayout* CollapsibleSection::grid() {
 
 void CollapsibleSection::addPlainRow(const QString& label, QWidget* editor) {
     QGridLayout* g = grid();
-    auto* l = new QLabel(label);
+    auto* l = new QLabel(trLabel(label));
     ui::setTone(l, ui::Tone::TextDim);
     g->addWidget(l, gridRows_, 1);
     g->addWidget(editor, gridRows_, 2);
@@ -209,7 +209,7 @@ QWidget* PropertyRow::buildEditors(const PropertyRef& prop) {
         refresh();
     });
 
-    fx_ = new ui::IconButton(ui::Icon::Expression, "Expression: a formula worked out every frame", 18);
+    fx_ = new ui::IconButton(ui::Icon::Expression, tr("Expression: a formula worked out every frame"), 18);
     fx_->setFixedSize(18, 24);
     connect(fx_, &QAbstractButton::clicked, this, [this] {
         auto p = this->prop();
@@ -218,7 +218,7 @@ QWidget* PropertyRow::buildEditors(const PropertyRef& prop) {
         else openExpression(QString::fromStdString(p->anim->expression));
     });
 
-    labelText_ = QString::fromUtf8(prop.label);
+    labelText_ = trLabel(QString::fromUtf8(prop.label));
     label_ = new QLabel(labelText_);
     label_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(label_, &QWidget::customContextMenuRequested, this, [this](QPoint p) { showMenu(label_->mapToGlobal(p)); });
@@ -260,7 +260,7 @@ QWidget* PropertyRow::buildEditors(const PropertyRef& prop) {
         break;
     }
 
-    reset_ = new ui::IconButton(ui::Icon::Reset, "Reset to the original value", 24);
+    reset_ = new ui::IconButton(ui::Icon::Reset, tr("Reset to the original value"), 24);
     connect(reset_, &QAbstractButton::clicked, this, [this] {
         auto p = this->prop();
         Layer* layer = ctx_.comp().findLayer(layerId_);
@@ -290,16 +290,16 @@ void PropertyRow::refresh() {
     key_->setState(keyHere >= 0, anim.isAnimated());
     const bool inClip = t >= layer->inPoint - kTimeEpsilon && t <= layer->outPoint + kTimeEpsilon;
     key_->setEnabled(inClip || keyHere >= 0);
-    key_->setToolTip(!inClip && keyHere < 0 ? "The playhead is outside this clip\nAlt+click: expression"
-                                            : "Keyframe at the playhead\nAlt+click: expression");
+    key_->setToolTip(!inClip && keyHere < 0 ? tr("The playhead is outside this clip\nAlt+click: expression")
+                                            : tr("Keyframe at the playhead\nAlt+click: expression"));
     // Driven by an expression: "= Label" in the accent, the expression's value shown.
     const bool driven = anim.hasExpression();
     fx_->setActive(driven);
     fx_->setVisible(driven || settings().showExpressionButtons); // off (Friendly, or by choice): formulas stay out of the way
-    fx_->setToolTip(driven ? QString(exprOpen_ ? "Close the expression" : "Show the expression") + "\n" + QString::fromStdString(anim.expression)
-                           : "Add an expression: a formula worked out every frame");
+    fx_->setToolTip(driven ? QString(exprOpen_ ? tr("Close the expression") : tr("Show the expression")) + "\n" + QString::fromStdString(anim.expression)
+                           : tr("Add an expression: a formula worked out every frame"));
     label_->setText(driven ? "= " + labelText_ : labelText_);
-    label_->setToolTip(driven ? QString::fromStdString("Expression: " + anim.expression) : QString());
+    label_->setToolTip(driven ? tr("Expression: %1").arg(QString::fromStdString(anim.expression)) : QString());
     label_->setStyleSheet(QString("color: %1;").arg(theme::q(driven ? theme::kAccent : anim.isAnimated() ? theme::kText : theme::kTextDim).name()));
     if (exprBox_) {
         exprBox_->setVisible(exprOpen_);
@@ -341,24 +341,24 @@ void PropertyRow::showMenu(QPoint at) {
     const double t = ctx_.time;
     const int keyHere = anim.findKey(t);
     QMenu menu;
-    menu.addAction(keyHere >= 0 ? "Remove Keyframe" : "Add Keyframe", [&] {
+    menu.addAction(keyHere >= 0 ? tr("Remove Keyframe") : tr("Add Keyframe"), [&] {
         if (keyHere >= 0) anim.removeKey(keyHere);
         else anim.addKeyAt(t);
         ctx_.touch();
     });
-    menu.addAction("Previous Keyframe", [&] { jumpToKey(ctx_, anim, -1); })->setEnabled(anim.isAnimated());
-    menu.addAction("Next Keyframe", [&] { jumpToKey(ctx_, anim, +1); })->setEnabled(anim.isAnimated());
+    menu.addAction(tr("Previous Keyframe"), [&] { jumpToKey(ctx_, anim, -1); })->setEnabled(anim.isAnimated());
+    menu.addAction(tr("Next Keyframe"), [&] { jumpToKey(ctx_, anim, +1); })->setEnabled(anim.isAnimated());
     menu.addSeparator();
     // Expressions: a formula instead of (or on top of) keyframes.
     if (anim.hasExpression()) {
-        menu.addAction("Edit Expression", [this] { openExpression(QString::fromStdString(prop()->anim->expression)); });
-        menu.addAction("Remove Expression", [this] { removeExpression(); });
-        menu.addAction("Convert to Keyframes", [this] { bakeExpression(); })->setToolTip("A keyframe a frame across the clip, then no expression");
+        menu.addAction(tr("Edit Expression"), [this] { openExpression(QString::fromStdString(prop()->anim->expression)); });
+        menu.addAction(tr("Remove Expression"), [this] { removeExpression(); });
+        menu.addAction(tr("Convert to Keyframes"), [this] { bakeExpression(); })->setToolTip(tr("A keyframe a frame across the clip, then no expression"));
     } else {
-        menu.addAction("Add Expression", [this] { openExpression({}); });
+        menu.addAction(tr("Add Expression"), [this] { openExpression({}); });
     }
     // Examples: what each does, its code beside it (the same as the ƒ library's first page).
-    QMenu* examples = menu.addMenu("Expression Examples");
+    QMenu* examples = menu.addMenu(tr("Expression Examples"));
     examples->setToolTipsVisible(true);
     for (const ui::ExpressionEntry& ex : ui::expressionExamples(id_, kind_ == PropertyKind::Vec2, kind_ == PropertyKind::Color)) {
         QString code = ex.snippet.isEmpty() ? ex.code : ex.snippet;
@@ -367,11 +367,11 @@ void PropertyRow::showMenu(QPoint at) {
         a->setToolTip(code);
     }
     menu.addSeparator();
-    menu.addAction("Clear Animation", [&] {
+    menu.addAction(tr("Clear Animation"), [&] {
         anim.clearKeys(t);
         ctx_.touch();
     })->setEnabled(anim.isAnimated());
-    menu.addAction("Reset and Clear Animation", [&] {
+    menu.addAction(tr("Reset and Clear Animation"), [&] {
         const std::vector<float> defaults = defaultPropertyValue(*layer, p->id, ctx_.comp().center());
         if (defaults.empty()) return;
         anim.clearKeys(t);
@@ -385,7 +385,7 @@ void PropertyRow::showMenu(QPoint at) {
 void PropertyRow::openExpression(const QString& text) {
     if (!expr_) { // the timeline's compact rows: the same editor, in a small window
         QDialog dialog(label_->window());
-        dialog.setWindowTitle(labelText_ + " Expression");
+        dialog.setWindowTitle(labelText_ + tr(" Expression"));
         dialog.setMinimumWidth(520);
         auto* col = new QVBoxLayout(&dialog);
         col->setContentsMargins(18, 16, 18, 14);
@@ -444,7 +444,7 @@ void PropertyRow::bakeExpression() {
     if (!p) return;
     const nlohmann::json op = {{"op", "expression.bake"}, {"layer", layerId_}, {"prop", p->id}};
     if (const OpsResult r = applyOps(ctx_.project, op); !r.ok) {
-        QMessageBox::warning(label_->window(), "Convert to Keyframes", QString::fromStdString(r.error.substr(r.error.find(": ") + 2)));
+        QMessageBox::warning(label_->window(), tr("Convert to Keyframes"), QString::fromStdString(r.error.substr(r.error.find(": ") + 2)));
         return;
     }
     exprOpen_ = false;

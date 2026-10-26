@@ -233,6 +233,9 @@ public:
             {"effect.add", &Applier::effectAdd},
             {"effect.remove", &Applier::effectRemove},
             {"effect.set", &Applier::effectSet},
+            {"audio_effect.add", &Applier::audioEffectAdd},
+            {"audio_effect.remove", &Applier::audioEffectRemove},
+            {"audio_effect.set", &Applier::audioEffectSet},
             {"transition.add", &Applier::transitionAdd},
             {"arrange.distribute", &Applier::arrangeDistribute},
             {"arrange.stagger", &Applier::arrangeStagger},
@@ -1077,6 +1080,107 @@ private:
             if (s < 2 || s > 64) fail("\"samples\" must be 2 to 64");
             e.samples = static_cast<int>(s);
         }
+        if (has(op, "file")) {
+            if (e.type != EffectType::Lut) fail("\"file\" is for lut effects (a .cube file)");
+            e.file = text(op["file"], "file");
+            e.relative.clear();
+        }
+        if (has(op, "curves")) {
+            if (e.type != EffectType::Curves) fail("\"curves\" is for curves effects");
+            const json& curves = op["curves"];
+            if (!curves.is_object()) fail("\"curves\" must be an object like {\"rgb\": [[0, 0], [0.5, 0.6], [1, 1]]}");
+            for (const auto& [name, points] : curves.items()) {
+                int channel = -1;
+                for (int c = 0; c < 4; ++c)
+                    if (name == curveId(c)) channel = c;
+                if (channel < 0) fail("unknown curve \"" + name + "\" (rgb, red, green or blue)" + suggest(name, {"rgb", "red", "green", "blue"}));
+                std::vector<Vec2> pts;
+                if (!points.is_null()) {
+                    if (!points.is_array()) fail("curve \"" + name + "\" must be a list of [x, y] points (0 to 1), or null to reset it");
+                    for (const json& pt : points) {
+                        if (!pt.is_array() || pt.size() != 2 || !pt[0].is_number() || !pt[1].is_number())
+                            fail("curve \"" + name + "\": each point is [x, y] (0 to 1)");
+                        const float x = pt[0].get<float>(), y = pt[1].get<float>();
+                        if (x < 0 || x > 1 || y < 0 || y > 1) fail("curve \"" + name + "\": points are 0 to 1");
+                        pts.push_back({x, y});
+                    }
+                    if (pts.size() > static_cast<size_t>(kMaxCurvePoints)) fail("curve \"" + name + "\": at most " + std::to_string(kMaxCurvePoints) + " points");
+                }
+                cleanCurve(pts);
+                e.curves[channel] = std::move(pts);
+            }
+        }
+        return json::object();
+    }
+
+    // Sound-only and sound-carrying clips take audio effects.
+    Layer& audioLayer(const json& op) {
+        Layer& l = layer(op);
+        if (l.type != LayerType::Media || !l.media.hasAudio) fail("layer \"" + l.name + "\" has no sound: audio effects are for video and audio clips with sound");
+        return l;
+    }
+
+    AudioEffect& audioEffect(Layer& l, const json& op) {
+        const double i = number(field(op, "index"), "index");
+        if (i < 0 || i >= static_cast<double>(l.audioEffects.size()) || i != std::floor(i))
+            fail("layer \"" + l.name + "\" has " + std::to_string(l.audioEffects.size()) + " audio effect(s): index must be 0.." +
+                 std::to_string(static_cast<int>(l.audioEffects.size()) - 1));
+        return l.audioEffects[static_cast<size_t>(i)];
+    }
+
+    // An audio effect's values by name ("low", "amount"...), each inside its range.
+    void audioValues(AudioEffect& e, const json& op) {
+        if (!has(op, "values")) return;
+        if (!op["values"].is_object()) fail("\"values\" must be an object like {\"low\": 3}");
+        const auto& params = audioEffectParams(e.type);
+        for (const auto& [name, value] : op["values"].items()) {
+            const auto it = std::find_if(params.begin(), params.end(), [&](const AudioEffectParam& p) { return name == p.id; });
+            if (it == params.end()) {
+                std::vector<std::string> ids;
+                for (const AudioEffectParam& p : params) ids.push_back(p.id);
+                std::string list;
+                for (const std::string& id : ids) list += (list.empty() ? "" : ", ") + id;
+                fail(std::string(audioEffectId(e.type)) + " has no value \"" + name + "\" (it has " + list + ")" + suggest(name, ids));
+            }
+            const double v = number(value, name.c_str());
+            if (v < it->min || v > it->max) {
+                char range[96];
+                std::snprintf(range, sizeof range, "\"%s\" must be %g to %g", it->id, it->min, it->max);
+                fail(range);
+            }
+            audioEffectValue(e, it->index) = static_cast<float>(v);
+        }
+    }
+
+    json audioEffectAdd(const json& op) {
+        Layer& l = audioLayer(op);
+        const std::string id = text(field(op, "effect"), "effect");
+        const AudioEffectType type = audioEffectFromId(id);
+        if (type == AudioEffectType::Count) {
+            std::vector<std::string> ids;
+            for (int i = 0; i < static_cast<int>(AudioEffectType::Count); ++i) ids.push_back(audioEffectId(static_cast<AudioEffectType>(i)));
+            fail("unknown audio effect \"" + id + "\"" + suggest(id, ids));
+        }
+        AudioEffect e = makeAudioEffect(type);
+        audioValues(e, op);
+        l.audioEffects.push_back(e);
+        json values = json::object();
+        for (const AudioEffectParam& p : audioEffectParams(type)) values[p.id] = audioEffectValue(e, p.index);
+        return {{"index", l.audioEffects.size() - 1}, {"values", values}};
+    }
+
+    json audioEffectRemove(const json& op) {
+        Layer& l = audioLayer(op);
+        AudioEffect& e = audioEffect(l, op);
+        l.audioEffects.erase(l.audioEffects.begin() + (&e - l.audioEffects.data()));
+        return json::object();
+    }
+
+    json audioEffectSet(const json& op) {
+        Layer& l = audioLayer(op);
+        AudioEffect& e = audioEffect(l, op);
+        if (has(op, "enabled")) e.enabled = boolean(op["enabled"], "enabled");
+        audioValues(e, op);
         return json::object();
     }
 
@@ -1458,9 +1562,32 @@ private:
         }
         j["props"] = props;
         json effects = json::array();
-        for (size_t i = 0; i < l.effects.size(); ++i)
-            effects.push_back({{"index", i}, {"effect", effectId(l.effects[i].type)}, {"enabled", l.effects[i].enabled}});
+        for (size_t i = 0; i < l.effects.size(); ++i) {
+            const Effect& e = l.effects[i];
+            json ej = {{"index", i}, {"effect", effectId(e.type)}, {"enabled", e.enabled}};
+            if (e.type == EffectType::Lut) ej["file"] = e.file;
+            if (e.type == EffectType::Curves) {
+                json curves = json::object();
+                for (int c = 0; c < 4; ++c) {
+                    json pts = json::array();
+                    for (const Vec2& p : e.curves[c]) pts.push_back({p.x, p.y});
+                    curves[curveId(c)] = std::move(pts);
+                }
+                ej["curves"] = std::move(curves);
+            }
+            effects.push_back(std::move(ej));
+        }
         j["effect_list"] = effects;
+        if (l.type == LayerType::Media && l.media.hasAudio) {
+            json audio = json::array();
+            for (size_t i = 0; i < l.audioEffects.size(); ++i) {
+                const AudioEffect& e = l.audioEffects[i];
+                json values = json::object();
+                for (const AudioEffectParam& p : audioEffectParams(e.type)) values[p.id] = audioEffectValue(e, p.index);
+                audio.push_back({{"index", i}, {"effect", audioEffectId(e.type)}, {"enabled", e.enabled}, {"values", values}});
+            }
+            j["audio_effects"] = std::move(audio);
+        }
         return j;
     }
 

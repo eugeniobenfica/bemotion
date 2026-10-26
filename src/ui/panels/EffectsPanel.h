@@ -35,6 +35,7 @@ private:
     std::string browserKey();
     void rebuildStack();
     void rebuildBrowser();
+    void buildAudioEffects(QVBoxLayout* col, const Layer& layer);
 
     EditorContext& ctx_;
     QVBoxLayout* stackHost_ = nullptr;

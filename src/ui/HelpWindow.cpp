@@ -41,20 +41,20 @@ struct Shortcut {
 // Mouse gestures (not rebindable); keyboard shortcuts come from the keymap.
 const std::vector<Shortcut>& mouseGestures() {
     static const std::vector<Shortcut> items = {
-        {"Wheel", "Zoom the viewport around the cursor"},
-        {"Middle Drag / Space+Drag / Alt+Drag", "Pan the viewport"},
-        {"Ctrl+Wheel / Shift+Wheel", "Zoom / scroll the timeline"},
-        {"Double Click", "Open a compound (its timeline) and pick a layer in it"},
-        {"Shift+Click / Ctrl+Click", "Add to / toggle the selection"},
-        {"Alt+Drag", "Break a motion path handle into a corner"},
-        {"Shift+Drag", "Constrain a move, uniform scale, 15° rotation"},
-        {"Ctrl+Drag", "Move without snapping"},
-        {"Pen: Click / Drag", "Place a point / a smooth point (the first point again closes the path; Enter: done)"},
-        {"Pen: Click an Outline", "Add a point there"},
-        {"Pen: Ctrl+Click / Alt+Click a Point", "Remove it / make it a corner or smooth"},
-        {"Alt+Drag a Path Handle", "Move it alone (a corner)"},
-        {"Double Click a Marker", "Rename it (drag it to move, right-click for its color)"},
-        {"Double Click a tab", "Maximize that panel (again to restore)"},
+        {TR_NOOP("Wheel"), TR_NOOP("Zoom the viewport around the cursor")},
+        {TR_NOOP("Middle Drag / Space+Drag / Alt+Drag"), TR_NOOP("Pan the viewport")},
+        {TR_NOOP("Ctrl+Wheel / Shift+Wheel"), TR_NOOP("Zoom / scroll the timeline")},
+        {TR_NOOP("Double Click"), TR_NOOP("Open a compound (its timeline) and pick a layer in it")},
+        {TR_NOOP("Shift+Click / Ctrl+Click"), TR_NOOP("Add to / toggle the selection")},
+        {TR_NOOP("Alt+Drag"), TR_NOOP("Break a motion path handle into a corner")},
+        {TR_NOOP("Shift+Drag"), TR_NOOP("Constrain a move, uniform scale, 15° rotation")},
+        {TR_NOOP("Ctrl+Drag"), TR_NOOP("Move without snapping")},
+        {TR_NOOP("Pen: Click / Drag"), TR_NOOP("Place a point / a smooth point (the first point again closes the path; Enter: done)")},
+        {TR_NOOP("Pen: Click an Outline"), TR_NOOP("Add a point there")},
+        {TR_NOOP("Pen: Ctrl+Click / Alt+Click a Point"), TR_NOOP("Remove it / make it a corner or smooth")},
+        {TR_NOOP("Alt+Drag a Path Handle"), TR_NOOP("Move it alone (a corner)")},
+        {TR_NOOP("Double Click a Marker"), TR_NOOP("Rename it (drag it to move, right-click for its color)")},
+        {TR_NOOP("Double Click a tab"), TR_NOOP("Maximize that panel (again to restore)")},
     };
     return items;
 }
@@ -192,11 +192,11 @@ QPushButton* linkButton(const QString& label, const std::string& url, Icon icon 
 QWidget* shortcutsPage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    auto* edit = new QPushButton(makeIcon(Icon::Keyboard, theme::kTextDim, 16), "Change Shortcuts...");
+    auto* edit = new QPushButton(makeIcon(Icon::Keyboard, theme::kTextDim, 16), tr("Change Shortcuts..."));
     QObject::connect(edit, &QPushButton::clicked, edit, [] { openSettings(SettingsTab::Shortcuts); });
-    pageHeader(col, "Keyboard shortcuts", edit);
+    pageHeader(col, tr("Keyboard shortcuts"), edit);
     auto* search = new QLineEdit;
-    search->setPlaceholderText("Search shortcuts");
+    search->setPlaceholderText(tr("Search shortcuts"));
     search->setClearButtonEnabled(true);
     col->addWidget(search);
     col->addSpacing(4);
@@ -215,9 +215,9 @@ QWidget* shortcutsPage() {
         hcol->setSpacing(6);
         SettingsCard* card = addSection(hcol, title);
         for (const auto& [keys, action] : items) {
-            QWidget* control = keys.empty() ? static_cast<QWidget*>(hintLabel("None")) : new KeyCaps(keys);
-            QWidget* r = card->addRow(QString::fromStdString(action), {}, control);
-            rows->push_back({r, holder, QString::fromStdString(action + " " + keys)});
+            QWidget* control = keys.empty() ? static_cast<QWidget*>(hintLabel(tr("None"))) : new KeyCaps(trs(keys).toStdString());
+            QWidget* r = card->addRow(trs(action), {}, control);
+            rows->push_back({r, holder, trs(action) + " " + trs(keys)});
         }
         col->addWidget(holder);
     };
@@ -226,16 +226,16 @@ QWidget* shortcutsPage() {
     for (int i = 0; i < static_cast<int>(Action::Count); ++i) {
         const ActionInfo& info = actionInfo(static_cast<Action>(i));
         if (group && std::strcmp(group, info.group) != 0) {
-            addGroup(group, items);
+            addGroup(tr(group), items);
             items.clear();
         }
         group = info.group;
         items.emplace_back(chordName(chordOf(static_cast<Action>(i))), info.label);
     }
-    if (group) addGroup(group, items);
+    if (group) addGroup(tr(group), items);
     items.clear();
     for (const Shortcut& m : mouseGestures()) items.emplace_back(m.keys, m.action);
-    addGroup("Mouse", items);
+    addGroup(tr("Mouse"), items);
     QObject::connect(search, &QLineEdit::textChanged, page, [rows](const QString& q) {
         std::set<QWidget*> shown;
         for (const Row& r : *rows) {
@@ -252,24 +252,24 @@ QWidget* shortcutsPage() {
 QWidget* learnPage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    pageHeader(col, "Learn");
-    col->addWidget(paragraph("The guides live with bemotion's code on GitHub: what each part does, and how to drive it."));
+    pageHeader(col, tr("Learn"));
+    col->addWidget(paragraph(tr("The guides live with bemotion's code on GitHub: what each part does, and how to drive it.")));
     col->addSpacing(4);
     const std::string docs = std::string(kRepoUrl) + "/blob/main/docs/";
-    SettingsCard* use = addSection(col, "Animating");
-    use->addRow("Expressions", "Formulas on any property: wiggle, loop, follow another layer. The ƒ button opens the library",
-                linkButton("Open", docs + "EXPRESSIONS.md"));
-    use->addRow("Getting around", "Panels, tools, the timeline and the viewport, from the start",
-                linkButton("Open", std::string(kRepoUrl) + "#readme"));
-    SettingsCard* extend = addSection(col, "Extending");
-    extend->addRow("Plugins", "New kinds of objects and commands, in Lua", linkButton("Open", docs + "PLUGINS.md"));
-    extend->addRow("Operations", "Every change a script or an AI can make, with its fields", linkButton("Open", docs + "OPERATIONS.md"));
-    extend->addRow("Automation and AI", "The command line, and connecting Claude or another assistant (MCP)",
-                   linkButton("Open", docs + "AUTOMATION.md"));
-    SettingsCard* inside = addSection(col, "Inside bemotion");
-    inside->addRow("Architecture", "How the code is laid out, for anyone changing it", linkButton("Open", docs + "ARCHITECTURE.md"));
-    inside->addRow("Report an issue", "Something wrong or missing: tell us on GitHub",
-                   linkButton("Report", std::string(kRepoUrl) + "/issues", Icon::Help));
+    SettingsCard* use = addSection(col, tr("Animating"));
+    use->addRow(tr("Expressions"), tr("Formulas on any property: wiggle, loop, follow another layer. The ƒ button opens the library"),
+                linkButton(tr("Open"), docs + "EXPRESSIONS.md"));
+    use->addRow(tr("Getting around"), tr("Panels, tools, the timeline and the viewport, from the start"),
+                linkButton(tr("Open"), std::string(kRepoUrl) + "#readme"));
+    SettingsCard* extend = addSection(col, tr("Extending"));
+    extend->addRow(tr("Plugins"), tr("New kinds of objects and commands, in Lua"), linkButton(tr("Open"), docs + "PLUGINS.md"));
+    extend->addRow(tr("Operations"), tr("Every change a script or an AI can make, with its fields"), linkButton(tr("Open"), docs + "OPERATIONS.md"));
+    extend->addRow(tr("Automation and AI"), tr("The command line, and connecting Claude or another assistant (MCP)"),
+                   linkButton(tr("Open"), docs + "AUTOMATION.md"));
+    SettingsCard* inside = addSection(col, tr("Inside bemotion"));
+    inside->addRow(tr("Architecture"), tr("How the code is laid out, for anyone changing it"), linkButton(tr("Open"), docs + "ARCHITECTURE.md"));
+    inside->addRow(tr("Report an issue"), tr("Something wrong or missing: tell us on GitHub"),
+                   linkButton(tr("Report"), std::string(kRepoUrl) + "/issues", Icon::Help));
     return page;
 }
 
@@ -301,20 +301,20 @@ QWidget* aboutPage() {
     f.setPointSizeF(f.pointSizeF() * 1.5);
     title->setFont(f);
     names->addWidget(title);
-    names->addWidget(paragraph("where motion takes shape"));
-    names->addWidget(hintLabel(QString("Version %1  ·  free and open source (MIT)").arg(BEMOTION_VERSION)));
+    names->addWidget(paragraph(tr("where motion takes shape")));
+    names->addWidget(hintLabel(tr("Version %1  ·  free and open source (MIT)").arg(BEMOTION_VERSION)));
     hrow->addLayout(names, 1);
     hero->addContent(head);
     col->addWidget(hero);
     col->addSpacing(4);
-    SettingsCard* idea = addSection(col, "The idea");
-    idea->addRow("A video editor first, an animator at heart", "Cut and arrange footage like in Premiere; animate anything like in After Effects", nullptr);
-    idea->addRow("Not an airplane cockpit", "What you need in front of you, the rest out of the way, every panel yours to arrange", nullptr);
-    idea->addRow("Human and robot friendly", "Edited by hand, by scripts and by AI assistants, through the same rules and undo", nullptr);
-    idea->addRow("An engine and a basic app", "A small core you can drive headless, a simple editor on top, the rest as plugins", nullptr);
+    SettingsCard* idea = addSection(col, tr("The idea"));
+    idea->addRow(tr("A video editor first, an animator at heart"), tr("Cut and arrange footage like in Premiere; animate anything like in After Effects"), nullptr);
+    idea->addRow(tr("Not an airplane cockpit"), tr("What you need in front of you, the rest out of the way, every panel yours to arrange"), nullptr);
+    idea->addRow(tr("Human and robot friendly"), tr("Edited by hand, by scripts and by AI assistants, through the same rules and undo"), nullptr);
+    idea->addRow(tr("An engine and a basic app"), tr("A small core you can drive headless, a simple editor on top, the rest as plugins"), nullptr);
     col->addSpacing(4);
     auto* buttons = new QHBoxLayout;
-    auto* github = accentButton("View on GitHub");
+    auto* github = accentButton(tr("View on GitHub"));
     QObject::connect(github, &QPushButton::clicked, [] { platform::openWithDefaultApp(kRepoUrl); });
     buttons->addWidget(github);
     buttons->addWidget(linkButton("Report an Issue", std::string(kRepoUrl) + "/issues", Icon::Help));
@@ -322,7 +322,7 @@ QWidget* aboutPage() {
     buttons->addStretch();
     col->addLayout(buttons);
     col->addSpacing(6);
-    col->addWidget(hintLabel("Written in C++20 with Qt and Skia; video through FFmpeg; plugins are sandboxed Lua scripts."));
+    col->addWidget(hintLabel(tr("Written in C++20 with Qt and Skia; video through FFmpeg; plugins are sandboxed Lua scripts.")));
     return page;
 }
 
@@ -350,26 +350,26 @@ private:
 QWidget* creditsPage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    pageHeader(col, "Credits");
-    col->addWidget(paragraph("Created by Eugênio Benfica and the bemotion contributors. bemotion stands on the shoulders of these "
-                             "open source projects:"));
+    pageHeader(col, tr("Credits"));
+    col->addWidget(paragraph(tr("Created by Eugênio Benfica and the bemotion contributors. bemotion stands on the shoulders of these "
+                             "open source projects:")));
     col->addSpacing(4);
-    SettingsCard* card = addSection(col, "Open source inside bemotion");
-    for (const Credit& c : kCredits) card->addRow(c.name, QString("%1  ·  %2").arg(c.by, c.use), new LicensePill(c.license));
+    SettingsCard* card = addSection(col, tr("Open source inside bemotion"));
+    for (const Credit& c : kCredits) card->addRow(c.name, QString("%1  ·  %2").arg(c.by, tr(c.use)), new LicensePill(c.license));
     col->addSpacing(4);
-    col->addWidget(hintLabel("Thank you to everyone who builds, tests, reports and shares."));
+    col->addWidget(hintLabel(tr("Thank you to everyone who builds, tests, reports and shares.")));
     return page;
 }
 
 QWidget* licensePage() {
     QVBoxLayout* col;
     QWidget* page = pageWidget(col);
-    pageHeader(col, "License");
-    SettingsCard* summary = addSection(col, "In short");
-    summary->addRow("Free for anything", "Personal and commercial work alike, with no price, account or watermark", nullptr);
-    summary->addRow("Yours to change and share", "As long as the notice below travels with it", nullptr);
-    summary->addRow("Your work is yours", "Projects and exported videos belong entirely to you", nullptr);
-    SettingsCard* full = addSection(col, "MIT License");
+    pageHeader(col, tr("License"));
+    SettingsCard* summary = addSection(col, tr("In short"));
+    summary->addRow(tr("Free for anything"), tr("Personal and commercial work alike, with no price, account or watermark"), nullptr);
+    summary->addRow(tr("Yours to change and share"), tr("As long as the notice below travels with it"), nullptr);
+    summary->addRow(tr("Your work is yours"), tr("Projects and exported videos belong entirely to you"), nullptr);
+    SettingsCard* full = addSection(col, tr("MIT License"));
     auto* text = new QPlainTextEdit(kLicense);
     text->setReadOnly(true);
     text->setFrameShape(QFrame::NoFrame);
@@ -395,11 +395,11 @@ int pageOf(HelpTab tab) {
 void openHelp(HelpTab tab) {
     static QPointer<PagedWindow> window;
     if (!window) {
-        window = new PagedWindow("Help", {{"Shortcuts", Icon::Keyboard, shortcutsPage},
-                                          {"Learn", Icon::Help, learnPage},
-                                          {"About", Icon::Logo, aboutPage},
-                                          {"Credits", Icon::Star, creditsPage},
-                                          {"License", Icon::Lock, licensePage}});
+        window = new PagedWindow(tr("Help"), {{tr("Shortcuts"), Icon::Keyboard, shortcutsPage},
+                                          {tr("Learn"), Icon::Help, learnPage},
+                                          {tr("About"), Icon::Logo, aboutPage},
+                                          {tr("Credits"), Icon::Star, creditsPage},
+                                          {tr("License"), Icon::Lock, licensePage}});
         window->resize(860, 660);
         QObject::connect(&AppSignals::get(), &AppSignals::shortcutsChanged, window, [] {
             if (window && window->currentPage() == 0) window->rebuild();

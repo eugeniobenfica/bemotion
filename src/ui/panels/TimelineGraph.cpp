@@ -214,10 +214,10 @@ void TimelinePanel::paintGraph(QPainter& p, QSize size) {
     };
     if (!layer) {
         // The layers to pick from, right here (their rows are hidden while the graph shows).
-        empty("Select a layer", "Pick one on the left (or in the viewport): its animated properties show here as curves.");
+        empty(TR_NOOP("Select a layer"), TR_NOOP("Pick one on the left (or in the viewport): its animated properties show here as curves."));
         const auto layers = graphLayers();
         const QPoint mouse = rowsWidget()->mapFromGlobal(QCursor::pos());
-        d.text({16, 8 + (kListRow - d.textHeight()) * 0.5f}, theme::kTextFaint, QString("Layers"));
+        d.text({16, 8 + (kListRow - d.textHeight()) * 0.5f}, theme::kTextFaint, tr("Layers"));
         for (size_t i = 0; i < layers.size(); ++i) {
             const Layer* l = ctx_.comp().findLayer(layers[i]);
             if (!l) continue;
@@ -233,7 +233,7 @@ void TimelinePanel::paintGraph(QPainter& p, QSize size) {
     }
     const auto animated = animatedProps(*layer);
     if (animated.empty()) {
-        empty("Nothing animated yet", "Add keyframes with the diamond beside a property in Properties: their curves show here.");
+        empty(TR_NOOP("Nothing animated yet"), TR_NOOP("Add keyframes with the diamond beside a property in Properties: their curves show here."));
         return;
     }
     const auto hits = graphHits(); // fits the range too
@@ -461,10 +461,10 @@ void TimelinePanel::showGraphMenu(QPoint global, QPointF at) {
         const std::string id = curve->first;
         auto props = layer->properties();
         const PropertyRef* p = layer->findProperty(props, id.c_str());
-        menu.addAction(ui::menuIcon(ui::Icon::Diamond, theme::kAccent), QString("Add Keyframe to %1 at %2").arg(p ? p->label : id.c_str(), when),
+        menu.addAction(ui::menuIcon(ui::Icon::Diamond, theme::kAccent), tr("Add Keyframe to %1 at %2").arg(p ? p->label : id.c_str(), when),
                        [this, id, t] { addGraphKeys({id}, t); });
     }
-    menu.addAction(ui::menuIcon(ui::Icon::Diamond, theme::kTextDim), QString("Add Keyframes Here (shown curves, %1)").arg(when), [this, t] {
+    menu.addAction(ui::menuIcon(ui::Icon::Diamond, theme::kTextDim), tr("Add Keyframes Here (shown curves, %1)").arg(when), [this, t] {
         std::vector<std::string> ids;
         if (Layer* l = ctx_.selected())
             for (const PropertyRef& p : animatedProps(*l))
@@ -472,7 +472,7 @@ void TimelinePanel::showGraphMenu(QPoint global, QPointF at) {
         addGraphKeys(ids, t);
     });
     // Properties without keys yet: their first keyframe makes them appear here.
-    QMenu* animate = menu.addMenu("Animate Property");
+    QMenu* animate = menu.addMenu(tr("Animate Property"));
     for (const PropertyRef& p : layer->properties())
         if (components(p) > 0 && p.anim->keyCount() == 0) {
             const std::string id = p.id;
@@ -481,7 +481,7 @@ void TimelinePanel::showGraphMenu(QPoint global, QPointF at) {
     animate->setEnabled(!animate->isEmpty());
     if (!ctx_.selectedKeys.empty()) {
         menu.addSeparator();
-        menu.addAction("Keyframe Options...", [this, global] { showKeyMenu(global); });
+        menu.addAction(tr("Keyframe Options..."), [this, global] { showKeyMenu(global); });
     }
     menu.exec(global);
     rowsWidget()->update();
@@ -498,7 +498,7 @@ void TimelinePanel::graphMove(QMouseEvent* e) {
                 rowsWidget()->setCursor(Qt::PointingHandCursor);
                 QToolTip::showText(e->globalPosition().toPoint(),
                                    hit->kind == GraphHit::Key ? QString::fromUtf8(hit->label.c_str())
-                                                              : QString("Drag to shape the easing (influence and speed)"),
+                                                              : tr("Drag to shape the easing (influence and speed)"),
                                    rowsWidget());
             } else {
                 rowsWidget()->setCursor(Qt::ArrowCursor);
