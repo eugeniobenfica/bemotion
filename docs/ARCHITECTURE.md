@@ -247,9 +247,12 @@ decoded), eased over its fade.
   working copy, so values in queries and scripts are what renders.
   Mistyped names get `core/Suggest.h`'s "did you mean", as operations do.
 - **`Presets`** — Quick Animations: they write ordinary keyframes. The
-  *Animate* panel (`ui/panels/AnimationsPanel`, the dock "Motion") lists them
+  *Animate* panel (`ui/panels/AnimationsPanel`, the dock "AnimateLeft", on the left) lists them
   and the transitions as one thing: one list and search, one "what the clip
-  has" card in time order, and on the timeline one band style
+  has" card in time order, its folders shown as the Effects browser shows its
+  categories (`ui::CategoryHeader` over a `CategoryBody` of tiles: a heading is
+  never a tile; open or closed, remembered in `closed_animation_folders` /
+  `closed_effect_categories`), and on the timeline one band style
   (`drawMotionBand`) picked, moved, stretched and deleted alike; dragged onto a
   clip (`kAnimationMime`, the preset as JSON) one plays from the drop point.
   `applyQuickAnimation` also remembers it on the layer (`Layer::animations`:
@@ -408,7 +411,15 @@ Rules:
   the editor's composition, a far video frame is decoded on a thread of its
   own (`Seeker`, the newest wish only) while the last one shows; renders that
   used such a stand-in are not kept (`takeStale`), and `arrivals()` redraws.
-  While playing, the scene renders at the frame's own time, as exports do.
+  While playing, the scene renders at the frame's own time, as exports do,
+  once per frame (not at every tick between two), and only a stand-in waits
+  for its picture (the decoder working ahead redraws nothing). A frame that
+  takes longer than it lasts lowers the resolution while playing (half, then
+  a quarter; back up when there is room again), paused it is the preview
+  quality again (`adaptive_playback`); kept frames are per frame and
+  resolution, a sharper one serving a lower one. CPU drawing is the cost:
+  Skia is built without its AVX2 paths (`tools/skia/build-skia.sh`), so a
+  bilinear draw of a decoded frame is ~20 ms at 1100 px.
 - **The editor never waits for a decoder**: every video of the editor's
   composition is read by its clip's `Seeker` thread, which also reads a few
   frames ahead of the playhead (`kAhead`), handed over without a copy
@@ -421,8 +432,9 @@ Rules:
   no deblocking first, coarse to fine, then the exact frames) and published
   as they grow (`Filmstrip::version`); the timeline keeps them as pixmaps at
   the height it draws. *Settings › Performance* holds the switches
-  (`scaled_video_preview`, `auto_proxies`, `show_filmstrips`, hardware
-  decoding, proxies, cache memory, preview quality).
+  (`scaled_video_preview`, `adaptive_playback`, `auto_proxies`,
+  `show_filmstrips`, hardware decoding, proxies, cache memory, preview
+  quality).
 
 - **SVG and Lottie** (`core/Svg`, `core/Lottie`): pure data, no Qt. `addSvg`
   reads SVG text with its own small XML and path reader into Path shape

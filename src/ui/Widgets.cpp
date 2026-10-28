@@ -11,6 +11,8 @@
 #include <QCheckBox>
 #include <QHBoxLayout>
 #include <QDrag>
+#include <QDragEnterEvent>
+#include <QDropEvent>
 #include <QHash>
 #include <QImage>
 #include <QKeyEvent>
@@ -23,6 +25,7 @@
 #include <QButtonGroup>
 #include <QPixmap>
 #include <QPointer>
+#include <QVBoxLayout>
 
 #include <algorithm>
 #include <cctype>
@@ -1328,6 +1331,9 @@ void DragValue::beginTyping() {
         edit_ = new QLineEdit(this);
         edit_->setAlignment(Qt::AlignCenter);
         edit_->setFrame(false);
+        // Exactly the value's box: the fields' own minimum height and padding (Theme) would make it
+        // taller than a short DragValue and cut its outline off at the bottom.
+        edit_->setStyleSheet("QLineEdit { min-height: 0px; padding: 0px 4px; }");
         connect(edit_, &QLineEdit::editingFinished, this, [this] {
             if (!edit_->isVisible()) return;
             bool ok = false;
@@ -1458,6 +1464,172 @@ void ElidedLabel::paintEvent(QPaintEvent*) {
     p.setPen(palette().color(foregroundRole()));
     p.setFont(font());
     p.drawText(area, static_cast<int>(alignment() | Qt::TextSingleLine), shown);
+}
+
+// --- ResponsiveGrid, LabeledRow -----------------------------------------------------------
+
+ResponsiveGrid::ResponsiveGrid(int minCell, int gap, QWidget* parent) : QWidget(parent), minCell_(minCell), gap_(gap) {
+    QSizePolicy policy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    policy.setHeightForWidth(true);
+    setSizePolicy(policy);
+}
+
+void ResponsiveGrid::addWidget(QWidget* w) {
+    w->setParent(this);
+    cells_.push_back(w);
+    w->show();
+    updateGeometry();
+}
+
+int ResponsiveGrid::heightForWidth(int width) const {
+    const int cols = columns(width);
+    int h = 0, row = 0;
+    for (size_t i = 0; i < cells_.size(); ++i) {
+        row = std::max(row, cells_[i]->sizeHint().height());
+        if (static_cast<int>(i % cols) == cols - 1 || i + 1 == cells_.size()) {
+            h += row + (h ? gap_ : 0);
+            row = 0;
+        }
+    }
+    return h;
+}
+
+QSize ResponsiveGrid::sizeHint() const {
+    const int w = minCell_ * 3 + gap_ * 2;
+    return {w, heightForWidth(w)};
+}
+
+QSize ResponsiveGrid::minimumSizeHint() const { return {minCell_, heightForWidth(minCell_)}; }
+
+void ResponsiveGrid::place() {
+    const int cols = columns(width());
+    const int cell = std::max(1, (width() - gap_ * (cols - 1)) / cols);
+    int y = 0, row = 0;
+    for (size_t i = 0; i < cells_.size(); ++i) {
+        const int c = static_cast<int>(i % cols);
+        int rowHeight = 0;
+        for (size_t k = i - c; k < std::min(cells_.size(), i - c + cols); ++k) rowHeight = std::max(rowHeight, cells_[k]->sizeHint().height());
+        cells_[i]->setGeometry(c * (cell + gap_), y, cell, rowHeight);
+        row = rowHeight;
+        if (c == cols - 1) y += row + gap_;
+    }
+}
+
+// --- CategoryHeader / CategoryBody -----------------------------------------------------------
+
+namespace {
+constexpr float kGuideX = 9.0f; // the chevron's middle, and the guide line under it
+}
+
+CategoryHeader::CategoryHeader(Icon icon, const QString& name, int count, bool closed, QWidget* parent)
+    : QWidget(parent), icon_(icon), name_(name), count_(count), closed_(closed) {
+    setFixedHeight(30);
+    setCursor(Qt::PointingHandCursor);
+    setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(this, &QWidget::customContextMenuRequested, this, [this](QPoint at) {
+        if (menuRequested) menuRequested(at);
+    });
+    setAcceptDrops(true);
+}
+
+void CategoryHeader::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    Draw d(p);
+    const float w = static_cast<float>(width()), cy = height() * 0.5f;
+    if (target_ || underMouse()) d.rectFilled({0, 1}, {w, height() - 1.0f}, target_ ? theme::accent(45) : theme::kBgHover, 6.0f);
+    drawIcon(d, closed_ ? Icon::ChevronRight : Icon::ChevronDown, {kGuideX, cy}, 12.0f, theme::kTextDim);
+    drawIcon(d, icon_, {29, cy}, 15.0f, theme::kAccent);
+    QFont bold = p.font();
+    bold.setWeight(QFont::DemiBold);
+    p.setFont(bold);
+    const QString count = QString::number(count_);
+    const float countW = d.textWidth(count) + 12.0f;
+    const QString name = p.fontMetrics().elidedText(name_, Qt::ElideRight, static_cast<int>(w - 44 - countW - 16));
+    d.text({44, cy - d.textHeight() * 0.5f}, theme::kText, name);
+    // A rule from the name to the count: the heading of what follows, not one more item.
+    const float ruleFrom = 44 + d.textWidth(name) + 10, ruleTo = w - countW - 10;
+    if (ruleTo > ruleFrom) d.line({ruleFrom, cy}, {ruleTo, cy}, theme::kBorder, 1.0f);
+    p.setFont(font());
+    d.rectFilled({w - countW - 2, cy - 9}, {w - 2, cy + 9}, theme::kBgRaised, 9.0f);
+    d.text({w - countW - 2 + (countW - d.textWidth(count)) * 0.5f, cy - d.textHeight() * 0.5f}, theme::kTextDim, count);
+}
+
+void CategoryHeader::mouseReleaseEvent(QMouseEvent* e) {
+    if (e->button() == Qt::LeftButton && rect().contains(e->position().toPoint()) && toggled) toggled();
+}
+
+void CategoryHeader::dragEnterEvent(QDragEnterEvent* e) {
+    if (!accepts || !accepts(e->mimeData())) return e->ignore();
+    target_ = true;
+    update();
+    e->acceptProposedAction();
+}
+
+void CategoryHeader::dragLeaveEvent(QDragLeaveEvent*) {
+    target_ = false;
+    update();
+}
+
+void CategoryHeader::dropEvent(QDropEvent* e) {
+    target_ = false;
+    update();
+    if (!accepts || !accepts(e->mimeData())) return;
+    e->acceptProposedAction();
+    if (dropped) dropped(e->mimeData());
+}
+
+CategoryBody::CategoryBody(QWidget* content, QWidget* parent) : QWidget(parent) {
+    auto* col = new QVBoxLayout(this);
+    col->setContentsMargins(static_cast<int>(kGuideX) + 9, 2, 0, 10);
+    col->setSpacing(6);
+    col->addWidget(content);
+}
+
+void CategoryBody::add(QWidget* more) { static_cast<QVBoxLayout*>(layout())->addWidget(more); }
+
+void CategoryBody::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    Draw d(p);
+    d.line({kGuideX, 0}, {kGuideX, height() - 12.0f}, theme::kBorder, 1.0f);
+}
+
+LabeledRow::LabeledRow(const QString& label, QWidget* control, int controlMin, QWidget* parent)
+    : QWidget(parent), label_(new QLabel(label, this)), control_(control), controlMin_(controlMin) {
+    control_->setParent(this);
+    setTone(label_, Tone::TextDim);
+    QSizePolicy policy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+    policy.setHeightForWidth(true);
+    setSizePolicy(policy);
+}
+
+// A control's height: what it asks for, or what it is held to.
+static int heightOf(const QWidget* w) { return std::max({w->sizeHint().height(), w->minimumHeight(), w->minimumSizeHint().height()}); }
+
+int LabeledRow::heightForWidth(int width) const {
+    const int ch = heightOf(control_), lh = label_->sizeHint().height();
+    return stacked(width) ? lh + 2 + ch : std::max(ch, lh);
+}
+
+QSize LabeledRow::sizeHint() const {
+    const int w = labelWidth() + 10 + std::max(controlMin_, control_->sizeHint().width());
+    return {w, heightForWidth(w)};
+}
+
+QSize LabeledRow::minimumSizeHint() const {
+    const int w = std::max(control_->minimumSizeHint().width(), std::min(labelWidth(), 60));
+    return {w, heightForWidth(w)};
+}
+
+void LabeledRow::place() {
+    const int ch = heightOf(control_), lh = label_->sizeHint().height();
+    if (stacked(width())) {
+        label_->setGeometry(0, 0, width(), lh);
+        control_->setGeometry(0, lh + 2, width(), ch);
+    } else {
+        const int h = std::max(ch, lh), lw = std::max(labelWidth(), 88);
+        label_->setGeometry(0, (h - lh) / 2, lw, lh);
+        control_->setGeometry(lw + 10, (h - ch) / 2, width() - lw - 10, ch);
+    }
 }
 
 } // namespace bemotion::ui

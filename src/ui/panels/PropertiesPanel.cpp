@@ -458,22 +458,16 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         };
         auto* fx = chip(QStringLiteral("Effects"), audioOnly ? tr("Its audio effects (Effects panel)") : tr("Its effects (Effects panel)"));
         fx->setIcon(ui::makeIcon(ui::Icon::FxStylize, theme::kTextDim, 16));
-        QPushButton* trChip = audioOnly ? nullptr : chip(QStringLiteral("Transitions"), tr("How it comes in and goes away (Animate panel)"));
+        QPushButton* trChip = audioOnly ? nullptr : chip(QStringLiteral("Transitions"), tr("How it moves: its transitions and animations (Animate panel)"));
         if (trChip) trChip->setIcon(ui::makeIcon(ui::Icon::Transition, theme::kTextDim, 16));
         col->addLayout(row);
         auto fill = [fx, trChip, audioOnly](const Layer& l) {
             const size_t n = audioOnly ? l.audioEffects.size() : l.effects.size();
             fx->setText(n == 0 ? tr("No effects") : n == 1 ? tr("1 effect") : tr("%1 effects").arg(n));
             if (!trChip) return;
-            auto name = [](const ClipTransition& t) {
-                const TransitionInfo* info = t.active() ? findTransition(t.id) : nullptr;
-                return info ? tr(info->name) : QString::fromStdString(t.id);
-            };
-            const bool in = l.transitionIn.active(), out = l.transitionOut.active();
-            trChip->setText(!in && !out ? tr("No transitions")
-                        : in && out  ? tr("In: %1  ·  Out: %2").arg(name(l.transitionIn), name(l.transitionOut))
-                        : in         ? tr("In: %1").arg(name(l.transitionIn))
-                                     : tr("Out: %1").arg(name(l.transitionOut)));
+            // Transitions and Quick Animations alike: how many it has.
+            const size_t m = (l.transitionIn.active() ? 1 : 0) + (l.transitionOut.active() ? 1 : 0) + l.animations.size();
+            trChip->setText(m == 0 ? tr("No animations") : m == 1 ? tr("1 animation") : tr("%1 animations").arg(m));
         };
         fill(layer);
         refreshers_.push_back([this, id, fill] {

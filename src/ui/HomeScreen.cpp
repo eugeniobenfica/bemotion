@@ -302,7 +302,8 @@ void HomeScreen::buildUi() {
     // The projects folder (a button of its own: it needs its words), then the small icons.
     auto* footer = new QHBoxLayout;
     footer->setSpacing(6);
-    auto* folder = new QPushButton(ui::makeIcon(ui::Icon::Folder, theme::kTextDim, 16), tr("Projects Folder"));
+    auto* folder = new QPushButton(ui::makeIcon(ui::Icon::Folder, theme::kTextDim, 24), tr("Projects Folder"));
+    folder->setIconSize(QSize(24, 24)); // the glyph fills about 60% of it: as big as the text beside it
     folder->setToolTip(projectsFolder().empty() ? tr("Choose where your projects live")
                                                 : QString::fromStdString(platform::toUtf8(projectsFolder())));
     connect(folder, &QPushButton::clicked, this, [this, folder] {

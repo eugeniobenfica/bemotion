@@ -454,20 +454,23 @@ protected:
             e->mimeData()->hasFormat(ui::kAnimationMime))
             e->acceptProposedAction();
     }
-    void dragMoveEvent(QDragMoveEvent* e) override {
-        std::string transition;
-        if (ui::readTextMime(e->mimeData(), ui::kTransitionMime, transition)) {
-            // Shows where it goes; a clip that cannot take it refuses the drop.
-            panel_->transitionDrop_ = panel_->transitionDropAt(e->position(), transition);
-            if (panel_->transitionDrop_.ok) e->acceptProposedAction();
-            else e->ignore();
-            update();
-            return;
+    // A transition or a Quick Animation from Animate, if that is what is dragged.
+    static std::optional<TimelinePanel::Motion> motionOf(const QMimeData* data) {
+        TimelinePanel::Motion m;
+        if (ui::readTextMime(data, ui::kTransitionMime, m.transition)) return m;
+        std::string json;
+        AnimationPreset preset;
+        if (ui::readTextMime(data, ui::kAnimationMime, json) && parsePreset(json, preset)) {
+            m.preset = preset;
+            return m;
         }
-        std::string preset;
-        if (ui::readTextMime(e->mimeData(), ui::kAnimationMime, preset)) {
-            panel_->presetDrop_ = panel_->presetDropAt(e->position(), preset);
-            if (panel_->presetDrop_.ok) e->acceptProposedAction();
+        return std::nullopt;
+    }
+    void dragMoveEvent(QDragMoveEvent* e) override {
+        if (const auto motion = motionOf(e->mimeData())) {
+            // Shows where it goes; a clip that cannot take it refuses the drop.
+            panel_->motionDrop_ = panel_->motionDropAt(e->position(), *motion);
+            if (panel_->motionDrop_.ok) e->acceptProposedAction();
             else e->ignore();
             update();
             return;
@@ -485,8 +488,7 @@ protected:
     }
     void dragLeaveEvent(QDragLeaveEvent*) override {
         panel_->dropActive_ = false;
-        panel_->transitionDrop_ = {};
-        panel_->presetDrop_ = {};
+        panel_->motionDrop_ = {};
         panel_->snapLineTime_ = -1.0;
         update();
     }
@@ -496,33 +498,10 @@ protected:
         int gap = 0;
         panel_->dropActive_ = false;
         panel_->snapLineTime_ = -1.0;
-        std::string transition;
-        std::string presetJson;
-        AnimationPreset preset;
-        if (ui::readTextMime(e->mimeData(), ui::kAnimationMime, presetJson) && parsePreset(presetJson, preset)) {
-            const TimelinePanel::PresetDrop drop = panel_->presetDropAt(e->position(), presetJson);
-            panel_->presetDrop_ = {};
-            if (Layer* layer = drop.ok ? ctx.comp().findLayer(drop.layer) : nullptr) {
-                applyQuickAnimation(preset, *layer, drop.time);
-                ctx.select(layer->id);
-                ctx.touch();
-                e->acceptProposedAction();
-            }
-            panel_->relayout();
-            return;
-        }
-        if (ui::readTextMime(e->mimeData(), ui::kTransitionMime, transition)) {
-            using Spot = TimelinePanel::TransitionDrop::Spot;
-            const TimelinePanel::TransitionDrop drop = panel_->transitionDropAt(e->position(), transition);
-            panel_->transitionDrop_ = {};
-            if (Layer* layer = drop.ok ? ctx.comp().findLayer(drop.layer) : nullptr) {
-                const bool done = drop.spot == Spot::Cut ? applyCutTransition(ctx.comp(), *layer, transition, 1.0)
-                                                         : applyTransition(*layer, transition, drop.spot == Spot::In ? TransitionEdge::In : TransitionEdge::Out, 0.5);
-                if (done) {
-                    ctx.touch();
-                    e->acceptProposedAction();
-                }
-            }
+        if (const auto motion = motionOf(e->mimeData())) {
+            const TimelinePanel::MotionDrop drop = panel_->motionDropAt(e->position(), *motion);
+            panel_->motionDrop_ = {};
+            if (drop.ok && panel_->placeMotion(drop, *motion)) e->acceptProposedAction();
             panel_->relayout();
             return;
         }
@@ -1873,10 +1852,11 @@ void TimelinePanel::paintAnimations(QPainter& p, const Layer& layer, float y, fl
     for (const AppliedAnimation& a : layer.animations) {
         const double from = std::max(a.start, layer.inPoint), until = std::min(a.start + a.duration, layer.outPoint);
         if (until <= from) continue;
-        // Still there? (its keys may have been moved or deleted since)
+        // Still there? (its keys may have been moved or deleted since; only its own properties looked at)
         bool keyed = false;
         for (const PropertyRef& pr : props)
-            for (int k = 0; k < pr.anim->keyCount() && !keyed; ++k)
+            if (a.properties.empty() || std::find(a.properties.begin(), a.properties.end(), pr.id) != a.properties.end())
+                for (int k = 0; k < pr.anim->keyCount() && !keyed; ++k)
                 keyed = pr.anim->keyTime(k) >= a.start - kTimeEpsilon && pr.anim->keyTime(k) <= a.start + a.duration + kTimeEpsilon;
         if (!keyed) continue;
         const float left = timeToX(from) + 2.0f, right = std::max(left + 16.0f, timeToX(until) - 2.0f);
@@ -1948,75 +1928,78 @@ int TimelinePanel::clipHit(const Item& track, float mx, Drag& mode) const {
     return hit;
 }
 
-TimelinePanel::TransitionDrop TimelinePanel::transitionDropAt(QPointF pos, const std::string& transition) const {
+TimelinePanel::MotionDrop TimelinePanel::motionDropAt(QPointF pos, const Motion& motion) const {
     constexpr float kCutGrab = 10.0f; // px around a cut that mean "between the two clips"
     const Item* item = itemAt(static_cast<float>(pos.y()));
     if (!item || item->kind != Item::Track) return {};
     const auto& layers = ctx_.comp().layers;
     const float x = static_cast<float>(pos.x());
+    const bool transition = !motion.preset;
+    auto takes = [&](const Layer& l) {
+        return transition ? canTakeTransition(l, motion.transition) : l.type != LayerType::Camera && presetAppliesTo(*motion.preset, l);
+    };
+    auto lengthOn = [&](const Layer& l) { return transition ? 0.5 : presetDuration(*motion.preset, l); };
+    // Between two clips that touch.
     const double eps = ctx_.comp().frameDuration() * 0.5;
     const int end = std::min(item->first + item->count, static_cast<int>(layers.size()));
     for (int i = item->first; i < end; ++i)
         for (int j = item->first; j < end; ++j)
-            if (i != j && std::fabs(layers[i].outPoint - layers[j].inPoint) < eps && std::fabs(x - timeToX(layers[i].outPoint)) <= kCutGrab)
-                return {layers[i].id, TransitionDrop::Spot::Cut,
-                        canTakeTransition(layers[i], transition) && canTakeTransition(layers[j], transition)};
+            if (i != j && std::fabs(layers[i].outPoint - layers[j].inPoint) < eps && std::fabs(x - timeToX(layers[i].outPoint)) <= kCutGrab) {
+                MotionDrop d{layers[i].id, MotionDrop::Spot::Cut, layers[i].outPoint, transition ? 1.0 : lengthOn(layers[j]), false};
+                d.ok = transition ? takes(layers[i]) && takes(layers[j]) : takes(layers[j]);
+                if (transition) d.time -= d.length * 0.5;
+                return d;
+            }
     Drag mode;
     const int index = clipHit(*item, x, mode);
     if (index < 0 || index >= static_cast<int>(layers.size())) return {};
     const Layer& l = layers[index];
-    const bool atStart = mode == Drag::LayerIn || (mode == Drag::LayerMove && x < (timeToX(l.inPoint) + timeToX(l.outPoint)) * 0.5f);
-    return {l.id, atStart ? TransitionDrop::Spot::In : TransitionDrop::Spot::Out, canTakeTransition(l, transition)};
+    const double length = std::min(lengthOn(l), std::max(0.05, l.outPoint - l.inPoint));
+    // Near an end (the first or last part of the clip it would cover): on that end; else from
+    // the mouse, wherever along the clip.
+    const float xi = timeToX(l.inPoint), xo = timeToX(l.outPoint);
+    const float zone = std::clamp(timeToX(l.inPoint + length) - xi, 12.0f, (xo - xi) * 0.3f);
+    MotionDrop d{l.id, MotionDrop::Spot::At, 0.0, length, takes(l)};
+    if (x - xi < zone) d.spot = MotionDrop::Spot::In, d.time = l.inPoint;
+    else if (xo - x < zone) d.spot = MotionDrop::Spot::Out, d.time = l.outPoint - length;
+    else d.time = std::clamp(ctx_.comp().snapToFrame(xToTime(x) - length * 0.5), l.inPoint, std::max(l.inPoint, l.outPoint - length));
+    return d;
 }
 
-TimelinePanel::PresetDrop TimelinePanel::presetDropAt(QPointF pos, const std::string& presetJson) const {
-    AnimationPreset preset;
-    const Item* item = itemAt(static_cast<float>(pos.y()));
-    if (!item || item->kind != Item::Track || !parsePreset(presetJson, preset)) return {};
-    Drag mode;
-    const int index = clipHit(*item, static_cast<float>(pos.x()), mode);
-    if (index < 0 || index >= static_cast<int>(ctx_.comp().layers.size())) return {};
-    const Layer& l = ctx_.comp().layers[index];
-    const double length = presetDuration(preset, l);
-    // From the mouse, kept inside the clip (an exit lands on its end, an entrance on its start).
-    double t = ctx_.comp().snapToFrame(xToTime(static_cast<float>(pos.x())));
-    t = std::clamp(t, l.inPoint, std::max(l.inPoint, l.outPoint - length));
-    if (std::fabs(timeToX(t) - timeToX(l.inPoint)) < 12) t = l.inPoint;
-    return {l.id, t, length, l.type != LayerType::Camera && presetAppliesTo(preset, l)};
+bool TimelinePanel::placeMotion(const MotionDrop& drop, const Motion& motion) {
+    Layer* layer = ctx_.comp().findLayer(drop.layer);
+    if (!layer) return false;
+    static constexpr MotionSpot kSpots[] = {MotionSpot::In, MotionSpot::Out, MotionSpot::Cut, MotionSpot::At};
+    Layer* placed = bemotion::placeMotion(ctx_.comp(), *layer, motion.transition, motion.preset ? &*motion.preset : nullptr,
+                                          kSpots[static_cast<int>(drop.spot)], drop.time, drop.length);
+    if (!placed) return false;
+    ctx_.select(placed->id);
+    ctx_.touch();
+    return true;
 }
 
 void TimelinePanel::paintTransitionDrop(ui::Draw& d) {
-    if (const Layer* layer = presetDrop_.layer ? ctx_.comp().findLayer(presetDrop_.layer) : nullptr)
-        for (const Item& r : items_) {
-            if (r.kind != Item::Track || r.track != layer->track) continue;
-            const float x0 = timeToX(presetDrop_.time), x1 = std::max(timeToX(presetDrop_.time + presetDrop_.length), x0 + 12.0f);
-            const Rgba line = presetDrop_.ok ? theme::kAccent : theme::kDanger;
-            d.rectFilled({x0, r.top + 3}, {x1, r.top + r.h - 3}, presetDrop_.ok ? theme::accent(110) : theme::withAlpha(theme::kDanger, 60), 5.0f);
-            d.rect({x0, r.top + 3}, {x1, r.top + r.h - 3}, line, 5.0f, 2.0f);
-            if (!presetDrop_.ok)
-                d.text({x1 + 8, r.top + (r.h - d.textHeight()) * 0.5f}, theme::kDanger, tr("This animation is not for this kind of layer"));
-            break;
-        }
-    const TransitionDrop& drop = transitionDrop_;
+    const MotionDrop& drop = motionDrop_;
     const Layer* layer = drop.layer ? ctx_.comp().findLayer(drop.layer) : nullptr;
     if (!layer) return;
     for (const Item& r : items_) {
         if (r.kind != Item::Track || r.track != layer->track) continue;
-        using Spot = TransitionDrop::Spot;
+        using Spot = MotionDrop::Spot;
         const float y = r.top, h = r.h;
-        const double len = drop.spot == Spot::Cut ? 0.5 : std::min(0.5, (layer->outPoint - layer->inPoint) * 0.5);
-        const double t0 = drop.spot == Spot::In ? layer->inPoint : layer->outPoint - len;
-        const double t1 = drop.spot == Spot::Out ? layer->outPoint : drop.spot == Spot::In ? layer->inPoint + len : layer->outPoint + len;
-        const float x0 = timeToX(t0), x1 = std::max(timeToX(t1), x0 + 16.0f);
+        const float x0 = timeToX(drop.time), x1 = std::max(timeToX(drop.time + drop.length), x0 + 16.0f);
         const Rgba line = drop.ok ? theme::kAccent : theme::kDanger;
         d.rectFilled({x0, y + 3}, {x1, y + h - 3}, drop.ok ? theme::accent(110) : theme::withAlpha(theme::kDanger, 60), 5.0f);
         d.rect({x0, y + 3}, {x1, y + h - 3}, line, 5.0f, 2.0f);
+        // What it becomes there.
+        const QString where = drop.spot == Spot::Cut ? tr("Between the clips") : drop.spot == Spot::In ? tr("In") : drop.spot == Spot::Out ? tr("Out") : QString();
         if (!drop.ok) {
             const QString why = layer->type == LayerType::Camera ? tr("Cameras take no transitions")
                                 : (layer->type == LayerType::Media && layer->media.hasAudio && !layer->media.hasVideo)
                                     ? tr("Sound clips take no transitions (use Fade In / Out in Effects)")
-                                    : tr("This clip cannot take this transition");
+                                    : tr("This clip cannot take this one");
             d.text({x1 + 8, y + (h - d.textHeight()) * 0.5f}, theme::kDanger, why);
+        } else if (!where.isEmpty()) {
+            d.text({x1 + 8, y + (h - d.textHeight()) * 0.5f}, theme::kAccent, where);
         }
         return;
     }
@@ -2797,15 +2780,30 @@ void TimelinePanel::updateLayerDrag(QPointF pos) {
 
 void TimelinePanel::endLayerDrag(QPointF pos) {
     computeItems();
-    if (drag_ == Drag::TransitionMove) { // past the clip's middle: to its other end
+    if (drag_ == Drag::TransitionMove) { // to the clip's other end, or anywhere along it (an animation there)
         if (Layer* layer = ctx_.comp().findLayer(dragLayer_)) {
-            const double t = xToTime(static_cast<float>(pos.x())), middle = (layer->inPoint + layer->outPoint) * 0.5;
             const TransitionEdge from = dragTransitionIn_ ? TransitionEdge::In : TransitionEdge::Out;
-            if ((dragTransitionIn_ && t > middle) || (!dragTransitionIn_ && t < middle))
+            const ClipTransition clip = dragTransitionIn_ ? layer->transitionIn : layer->transitionOut;
+            const float x = static_cast<float>(pos.x()), xi = timeToX(layer->inPoint), xo = timeToX(layer->outPoint);
+            const float zone = std::clamp(timeToX(layer->inPoint + clip.duration) - xi, 12.0f, (xo - xi) * 0.3f);
+            const bool atIn = x - xi < zone, atOut = xo - x < zone;
+            if ((dragTransitionIn_ && atOut) || (!dragTransitionIn_ && atIn)) {
                 if (moveTransition(*layer, from)) {
                     ctx_.selectTransition(layer->id, !dragTransitionIn_);
                     ctx_.touch();
                 }
+            } else if (!atIn && !atOut && !clip.joined) {
+                // Along the clip: the same motion, played there as an animation.
+                const AnimationPreset p = transitionPreset(clip.id, from, clip.duration);
+                const double at = std::clamp(ctx_.comp().snapToFrame(xToTime(x) - clip.duration * 0.5), layer->inPoint,
+                                             std::max(layer->inPoint, layer->outPoint - clip.duration));
+                if (!p.tracks.empty() && removeTransition(ctx_.comp(), *layer, from)) {
+                    applyQuickAnimation(p, *layer, at);
+                    for (size_t i = 0; i < layer->animations.size(); ++i)
+                        if (layer->animations[i].name == p.name && std::fabs(layer->animations[i].start - at) < 1e-6) ctx_.selectAnimation(layer->id, static_cast<int>(i));
+                    ctx_.touch();
+                }
+            }
         }
     } else if (drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut || drag_ == Drag::AnimationMove || drag_ == Drag::AnimationResize) {
     } else if (restacking_) {

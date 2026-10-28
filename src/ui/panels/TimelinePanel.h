@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Presets.h"
 #include "ui/EditorContext.h"
 #include "media/MediaManager.h"
 #include "media/RecordingBuffer.h"
@@ -8,6 +9,8 @@
 #include <QPixmap>
 #include <QPointF>
 #include <QWidget>
+
+#include <optional>
 
 #include <cstdint>
 #include <map>
@@ -115,12 +118,19 @@ private:
         bool resize = false;
         explicit operator bool() const { return layer != 0; }
     };
-    // Where a transition dragged in from the Transitions panel would go.
-    struct TransitionDrop {
-        enum class Spot { In, Out, Cut };
+    // Where something dragged in from Animate would play (a transition or a Quick Animation, alike):
+    // on a clip's start or end, anywhere along it, or across the cut between two clips.
+    struct MotionDrop {
+        enum class Spot { In, Out, Cut, At };
         uint64_t layer = 0; // the clip (for a cut: the one before it)
-        Spot spot = Spot::In;
-        bool ok = false;    // the clip (or both clips of the cut) can take it
+        Spot spot = Spot::At;
+        double time = 0.0, length = 0.0; // where it plays (shown while dragging)
+        bool ok = false;                 // the clip (or both clips of the cut) can take it
+    };
+    // What is dragged: a transition's id, or a Quick Animation.
+    struct Motion {
+        std::string transition;
+        std::optional<AnimationPreset> preset;
     };
     // Where a vertical drag would land.
     struct DropTarget {
@@ -187,14 +197,8 @@ private:
     void wheel(QWheelEvent* e);
     const Item* itemAt(float y) const;
     int clipHit(const Item& track, float x, Drag& mode) const;
-    TransitionDrop transitionDropAt(QPointF pos, const std::string& transition) const;
-    // Where a Quick Animation dragged in would play: on the clip under `pos`, from there.
-    struct PresetDrop {
-        uint64_t layer = 0;
-        double time = 0.0, length = 0.0;
-        bool ok = false; // the clip can take it (text-only presets on text...)
-    };
-    PresetDrop presetDropAt(QPointF pos, const std::string& presetJson) const;
+    MotionDrop motionDropAt(QPointF pos, const Motion& motion) const;
+    bool placeMotion(const MotionDrop& drop, const Motion& motion); // false: nothing placed
     void paintTransitionDrop(ui::Draw& d);
     TransitionHit transitionHit(const Item& track, float x) const;
     struct AnimationHit {
@@ -338,8 +342,7 @@ private:
     double followedTime_ = -1.0; // playhead time the view last followed (see sync)
     std::vector<double> timeTargets_;
     double snapLineTime_ = -1.0;
-    TransitionDrop transitionDrop_; // while a transition is dragged over the rows
-    PresetDrop presetDrop_;         // while a Quick Animation is
+    MotionDrop motionDrop_; // while a transition or a Quick Animation is dragged over the rows
     // Box selection by dragging on empty timeline space.
     bool marquee_ = false;
     QPointF marqueeStart_, marqueeEnd_;

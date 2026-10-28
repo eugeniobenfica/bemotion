@@ -866,6 +866,35 @@ void testSeparateAudio() {
     CHECK(!run(p, R"({"op": "layer.link_audio", "layer": "Talk"})").ok); // it has its sound already
 }
 
+void testPlaceMotion() {
+    // Transitions and Quick Animations go anywhere alike: an end, along the clip, the cut.
+    Composition c;
+    c.duration = 10.0;
+    Layer a = makeShapeLayer(ShapeKind::Rectangle, {100, 100}, 4.0);
+    a.track = 1;
+    Layer b = makeShapeLayer(ShapeKind::Rectangle, {100, 100}, 4.0);
+    b.track = 1;
+    b.inPoint = 4.0, b.outPoint = 8.0;
+    const uint64_t ia = c.addLayer(a).id, ib = c.addLayer(b).id;
+    CHECK(motionSpotAt(*c.findLayer(ia), 0.2, 0.5) == MotionSpot::In);
+    CHECK(motionSpotAt(*c.findLayer(ia), 2.0, 0.5) == MotionSpot::At);
+    CHECK(motionSpotAt(*c.findLayer(ia), 3.8, 0.5) == MotionSpot::Out);
+    // A transition along the clip: its way in, as an animation there.
+    CHECK(placeMotion(c, *c.findLayer(ia), "slide_left", nullptr, MotionSpot::At, 1.0, 0.5));
+    const Layer* la = c.findLayer(ia);
+    CHECK(la->animations.size() == 1 && la->animations[0].name == "Slide Left In" && near(static_cast<float>(la->animations[0].start), 1.0f));
+    CHECK(!la->transitionIn.active());
+    // ... on an end: a transition.
+    CHECK(placeMotion(c, *c.findLayer(ia), "fade", nullptr, MotionSpot::Out, 3.5, 0.5));
+    CHECK(c.findLayer(ia)->transitionOut.id == "fade");
+    // A Quick Animation on the cut: on the clip that comes in, from its start.
+    AnimationPreset pop;
+    CHECK(parsePreset(R"({"name": "Pop In", "category": "Entrance", "duration": 0.5,
+                         "tracks": [{"property": "scale", "keys": [{"t": 0, "v": {"mul": 0}}, {"t": 1, "v": "rest"}]}]})", pop));
+    Layer* placed = placeMotion(c, *c.findLayer(ia), {}, &pop, MotionSpot::Cut, 4.0, 0.5);
+    CHECK(placed && placed->id == ib && placed->animations.size() == 1 && near(static_cast<float>(placed->animations[0].start), 4.0f));
+}
+
 void testSvgImport() {
     // Shapes, a group's transform, a style sheet class, a gradient, a hole, an arc.
     const std::string svg = R"svg(<?xml version="1.0"?>
@@ -1985,6 +2014,7 @@ int main() {
         {"cut transitions", testCutTransitions},
         {"separate audio", testSeparateAudio},
         {"quick animation marks", testQuickAnimationMarks},
+        {"place motion", testPlaceMotion},
         {"svg import", testSvgImport},
         {"lottie export", testLottieExport},
         {"subtitles", testSubtitles},

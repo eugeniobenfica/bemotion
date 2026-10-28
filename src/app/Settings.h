@@ -8,6 +8,7 @@
 #include "ui/Tools.h"
 
 #include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -60,8 +61,15 @@ struct Settings {
     bool useProxies = true;       // the editor shows videos' proxies when they have one
     int cacheMegabytes = 1024;    // memory for cached frames: half decoded video, half rendered previews
     bool scaledVideoPreview = true; // the editor decodes videos no bigger than it shows them (exports: full size)
+    bool adaptivePlayback = true;   // playing, the viewport lowers its resolution when a frame takes too long (paused: full)
     bool autoProxies = false;       // imported videos bigger than 1280 x 720 get a proxy at once
     bool showFilmstrips = true;     // video clips show their frames on the timeline
+    // Animate's folders: the user's own (in order, after the built-in ones), where items were
+    // moved ("t:<transition id>" / "p:<preset name>" -> folder) and the folders closed.
+    std::vector<std::string> animationFolders;
+    std::map<std::string, std::string> animationFolderOf;
+    std::vector<std::string> closedAnimationFolders;
+    std::vector<std::string> closedEffectCategories; // the Effects browser's, by their English name
     // The interface language: "auto" (the system's, when there is a file for it), "en", or a
     // language file's code ("pt-BR"); see ui/Language.h. Takes effect at the next start.
     std::string language = "auto";

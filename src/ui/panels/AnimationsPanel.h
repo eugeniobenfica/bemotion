@@ -13,6 +13,7 @@ class QVBoxLayout;
 namespace bemotion {
 
 class EditorContext;
+struct AnimationPreset;
 struct Layer;
 namespace ui {
 class DragValue;
@@ -30,9 +31,6 @@ public:
     explicit AnimationsPanel(EditorContext& ctx, QWidget* parent = nullptr);
     void sync(); // the clip's list, dims what the selection cannot take
 
-protected:
-    void resizeEvent(QResizeEvent* e) override;
-
 private:
     struct TileInfo {
         ui::Tile* tile;
@@ -41,7 +39,14 @@ private:
     };
     void rebuild();
     void buildApplied(QVBoxLayout* col); // what the clip has
-    void applyTransition(const std::string& id); // a click on one: the selected clips' edges and cuts
+    // Puts one on each selected clip: at `spot` (a MotionSpot), or (-1) where the playhead says.
+    void placeOnSelection(const std::string& transition, const AnimationPreset* preset, int spot);
+    QWidget* folderHeader(const std::string& folder, const QString& name, int count, bool closed, bool userFolder);
+    void moveToFolder(const std::string& key, const std::string& folder); // "": back to its own
+    void newFolder(const std::string& moveHere);
+    static std::vector<std::string> builtInFolders();
+    static bool isBuiltInFolder(const std::string& folder);
+    static std::string defaultFolder(const AnimationPreset& preset);
     std::vector<Layer*> shownLayers() const;     // the selected clips, or the picked one's clip
     std::string appliedKey() const;              // what the top part shows (rebuilt when it changes)
     EditorContext& ctx_;
@@ -53,7 +58,8 @@ private:
     QLabel* message_ = nullptr;
     std::string messageText_;
     size_t presetCount_ = 0;
-    int columns_ = 0;
+    std::string dimmedFor_; // the clips the tiles were last dimmed and marked for (appliedKey)
+    size_t dimmedTiles_ = 0;
 };
 
 } // namespace bemotion

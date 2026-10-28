@@ -124,8 +124,13 @@ void loadSettings() {
         s.useProxies = j.value("use_proxies", s.useProxies);
         s.cacheMegabytes = std::clamp(j.value("cache_megabytes", s.cacheMegabytes), 128, 32768);
         s.scaledVideoPreview = j.value("scaled_video_preview", s.scaledVideoPreview);
+    s.adaptivePlayback = j.value("adaptive_playback", s.adaptivePlayback);
         s.autoProxies = j.value("auto_proxies", s.autoProxies);
         s.showFilmstrips = j.value("show_filmstrips", s.showFilmstrips);
+        s.animationFolders = j.value("animation_folders", s.animationFolders);
+        s.animationFolderOf = j.value("animation_folder_of", s.animationFolderOf);
+        s.closedAnimationFolders = j.value("closed_animation_folders", s.closedAnimationFolders);
+    s.closedEffectCategories = j.value("closed_effect_categories", s.closedEffectCategories);
         s.language = j.value("language", s.language);
         ui::loadKeymap(j.contains("shortcuts") ? j["shortcuts"].dump() : "{}");
         if (j.contains("palette")) s.customPalette = theme::paletteFromJson(j["palette"].dump(), s.palette);
@@ -148,7 +153,10 @@ void saveSettings() {
               {"show_snapshot_button", s.showSnapshotButton}, {"show_timeline_scrollbar", s.showTimelineScrollbar},
               {"experience", s.experience}, {"essentials_only", s.essentialsOnly},
               {"hardware_decoding", s.hardwareDecoding}, {"use_proxies", s.useProxies}, {"cache_megabytes", s.cacheMegabytes},
-              {"scaled_video_preview", s.scaledVideoPreview}, {"auto_proxies", s.autoProxies}, {"show_filmstrips", s.showFilmstrips},
+              {"scaled_video_preview", s.scaledVideoPreview}, {"adaptive_playback", s.adaptivePlayback},
+              {"auto_proxies", s.autoProxies}, {"show_filmstrips", s.showFilmstrips},
+              {"animation_folders", s.animationFolders}, {"animation_folder_of", s.animationFolderOf},
+              {"closed_animation_folders", s.closedAnimationFolders}, {"closed_effect_categories", s.closedEffectCategories},
               {"language", s.language},
               {"shortcuts", json::parse(ui::saveKeymap())}};
     if (s.customPalette) j["palette"] = json::parse(theme::paletteToJson(s.palette));

@@ -185,6 +185,52 @@ const char* transitionEdgeId(TransitionEdge edge) {
     return "in";
 }
 
+AnimationPreset transitionPreset(const std::string& id, TransitionEdge edge, double duration) {
+    const Definition* def = definitionOf(id);
+    if (!def) return {};
+    const bool in = edge != TransitionEdge::Out;
+    AnimationPreset p = presetOf(in ? def->in : def->out, duration);
+    p.name = std::string(def->info.name) + (in ? " In" : " Out");
+    p.category = in ? "In" : "Out";
+    return p;
+}
+
+MotionSpot motionSpotAt(const Layer& layer, double time, double length) {
+    if (time < layer.inPoint + length) return MotionSpot::In;
+    if (time > layer.outPoint - length) return MotionSpot::Out;
+    return MotionSpot::At;
+}
+
+Layer* placeMotion(Composition& comp, Layer& layer, const std::string& transition, const AnimationPreset* preset, MotionSpot spot,
+                   double time, double length) {
+    if (!preset) {
+        bool done = false;
+        if (spot == MotionSpot::Cut) done = applyCutTransition(comp, layer, transition, std::max(0.1, length));
+        else if (spot == MotionSpot::In || spot == MotionSpot::Out)
+            done = applyTransition(layer, transition, spot == MotionSpot::In ? TransitionEdge::In : TransitionEdge::Out, length);
+        else if (canTakeTransition(layer, transition)) {
+            const bool firstHalf = time + length * 0.5 < (layer.inPoint + layer.outPoint) * 0.5;
+            const AnimationPreset p = transitionPreset(transition, firstHalf ? TransitionEdge::In : TransitionEdge::Out, length);
+            if (!p.tracks.empty()) applyQuickAnimation(p, layer, time), done = true;
+        }
+        return done ? comp.findLayer(layer.id) : nullptr; // (a cut transition reorders the stack)
+    }
+    if (!presetAppliesTo(*preset, layer) && spot != MotionSpot::Cut) return nullptr;
+    Layer* target = &layer;
+    double at = time;
+    const double len = presetDuration(*preset, layer);
+    if (spot == MotionSpot::In) at = layer.inPoint;
+    else if (spot == MotionSpot::Out) at = layer.outPoint - len;
+    else if (spot == MotionSpot::Cut) {
+        const bool exit = preset->category == "Exit" || preset->category == "Out";
+        if (exit) at = layer.outPoint - len;
+        else if (Layer* next = nextOnTrack(comp, layer)) target = next, at = next->inPoint;
+    }
+    if (!presetAppliesTo(*preset, *target)) return nullptr;
+    applyQuickAnimation(*preset, *target, at);
+    return target;
+}
+
 bool canTakeTransition(const Layer& layer) {
     return layer.type != LayerType::Camera && !(layer.type == LayerType::Media && layer.media.hasAudio && !layer.media.hasVideo);
 }

@@ -711,6 +711,7 @@ QWidget* performancePage() {
         const Settings d;
         st.hardwareDecoding = d.hardwareDecoding, st.useProxies = d.useProxies, st.cacheMegabytes = d.cacheMegabytes;
         st.scaledVideoPreview = d.scaledVideoPreview, st.autoProxies = d.autoProxies, st.showFilmstrips = d.showFilmstrips;
+        st.adaptivePlayback = d.adaptivePlayback;
         st.previewQuality = d.previewQuality;
         media::setHardwareDecoding(st.hardwareDecoding);
         media::MediaManager::get().reopenVideos();
@@ -734,6 +735,13 @@ QWidget* performancePage() {
                     switchControl(s.scaledVideoPreview, [](bool on) {
                         settings().scaledVideoPreview = on;
                         media::MediaManager::get().setScaledPreview(on);
+                        saveSettings();
+                    }));
+    preview->addRow(tr("Lower the resolution while playing"),
+                    tr("When a frame takes longer to draw than it lasts (heavy effects, big videos), playback draws at half or a "
+                       "quarter of the size to stay smooth. Paused, the picture is back at the preview quality"),
+                    switchControl(s.adaptivePlayback, [](bool on) {
+                        settings().adaptivePlayback = on;
                         saveSettings();
                     }));
     SettingsCard* playback = addSection(col, tr("Video"));

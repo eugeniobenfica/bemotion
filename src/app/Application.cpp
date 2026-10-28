@@ -63,6 +63,30 @@ namespace bemotion {
 
 // --- window -------------------------------------------------------------------------------
 
+// The main window keeps the system's title bar (snapping, its buttons): on Windows 11 it takes
+// the menu bar's colors, read from the theme each time it changes (earlier Windows keep theirs).
+static void tintTitleBar(QWidget* window) {
+#ifdef _WIN32
+    using SetAttribute = HRESULT(WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+    static const auto set = [] {
+        const HMODULE dwm = LoadLibraryW(L"dwmapi.dll");
+        return dwm ? reinterpret_cast<SetAttribute>(reinterpret_cast<void*>(GetProcAddress(dwm, "DwmSetWindowAttribute"))) : nullptr;
+    }();
+    if (!set) return;
+    const HWND hwnd = reinterpret_cast<HWND>(window->winId());
+    const ui::Rgba header = theme::kHeader;
+    const BOOL dark = ui::red(header) + ui::green(header) + ui::blue(header) < 3 * 128; // the buttons' glyphs
+    // COLORREF is 0x00BBGGRR, as Rgba without its alpha.
+    const COLORREF caption = header & 0xFFFFFF, text = theme::kText & 0xFFFFFF, border = theme::kBorder & 0xFFFFFF;
+    set(hwnd, 20 /* DWMWA_USE_IMMERSIVE_DARK_MODE */, &dark, sizeof dark);
+    set(hwnd, 34 /* DWMWA_BORDER_COLOR */, &border, sizeof border);
+    set(hwnd, 35 /* DWMWA_CAPTION_COLOR */, &caption, sizeof caption);
+    set(hwnd, 36 /* DWMWA_TEXT_COLOR */, &text, sizeof text);
+#else
+    (void)window;
+#endif
+}
+
 MainWindow::MainWindow() {
     setAcceptDrops(true);
     setMinimumSize(960, 600);
@@ -243,6 +267,8 @@ void Application::buildWindow() {
         else if (files.size() == 1 && files[0].extension() == kProjectExtension) openProject(files[0]);
     };
     window_->resize(1440, 900);
+    tintTitleBar(window_);
+    connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, window_, [this] { tintTitleBar(window_); });
     window_->showMaximized();
     intro_->setGeometry(window_->rect());
 }

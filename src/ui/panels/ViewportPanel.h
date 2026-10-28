@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <utility>
+#include <optional>
 #include <vector>
 
 class QComboBox;
@@ -140,6 +141,7 @@ private:
     void drawPaths(QPainter& p);
     bool penDrawing_ = false;
     PathRef penTarget_;
+    std::optional<BezierPath> penRestore_; // a picked mask being drawn again: its shape before
     PathPoint pathDrag_;
     Vec2 pathGrab_; // where a dragged point was held (layer space, from the point)
     void zoomAround(Vec2 screenPoint, float newZoom);
@@ -259,6 +261,11 @@ private:
     ui::IconButton* fullscreenButton_ = nullptr;
     ui::IconButton* snapshotButton_ = nullptr;
     int previewDivisor_ = 1;
+    // Playing: lowered further when a frame takes longer than the composition's frame (Settings'
+    // adaptivePlayback), raised again when there is room; paused, previewDivisor_ alone.
+    int playbackDivisor_ = 1;
+    double renderMs_ = 0.0; // how long the last frames took to render (smoothed), at playbackDivisor_
+    int shownDivisor() const;
 
     // What was last drawn (to redraw only on change).
     struct Signature {
@@ -285,10 +292,13 @@ private:
         bool operator==(const FrameKey&) const = default;
     } frameKey_;
     bool frameValid_ = false;
+    bool frameStale_ = false;     // the frame shown used a video frame still on its way
+    uint64_t frameArrivals_ = 0;  // MediaManager::arrivals() when it was rendered
     QImage frame_; // the rendered composition
-    // Rendered frames by frame number, while the view and the document stay the same.
-    std::map<int, QImage> cache_;
-    FrameKey cacheLook_;             // frameKey_ without the time
+    // Rendered frames by frame number and resolution divisor, while the view and the document
+    // stay the same.
+    std::map<std::pair<int, int>, QImage> cache_;
+    FrameKey cacheLook_;             // frameKey_ without the time and the resolution
     uint64_t cacheGeneration_ = 0;   // MediaManager::generation()
     size_t cacheBytes_ = 0;
     void clearCache();

@@ -153,6 +153,18 @@ void DevScript::step(QWidget* mainWindow) {
                 if (w != mainWindow && w->isVisible() && w->windowTitle() == title) other_ = w;
             continue;
         }
+        if (c.op == "resize") { // the window gets this size (not maximized): narrow panels, small screens
+            QWidget* w = other_ ? other_.data() : window;
+            w->showNormal();
+            w->resize(static_cast<int>(num(0)), static_cast<int>(num(1)));
+            continue;
+        }
+        if (c.op == "limit") { // a widget (a panel by its saved name) no wider than this: narrow panels
+            const QString name = QString::fromStdString(c.args.empty() ? "" : c.args[0]);
+            for (QWidget* w : QApplication::allWidgets())
+                if (w->objectName() == name) w->setMaximumWidth(static_cast<int>(num(1)));
+            continue;
+        }
         if (c.op == "move") {
             targetX_ = num(0);
             targetY_ = num(1);

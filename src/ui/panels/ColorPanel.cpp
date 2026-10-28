@@ -63,7 +63,7 @@ class ToneSlider : public QWidget {
 public:
     ToneSlider(float min, float max, float neutral, std::vector<QColor> stops, const char* format)
         : min_(min), max_(max), neutral_(neutral), stops_(std::move(stops)), format_(format) {
-        setMinimumWidth(120);
+        setMinimumWidth(100);
         setFixedHeight(26);
         setCursor(Qt::PointingHandCursor);
         value_ = neutral;
@@ -320,7 +320,7 @@ void ColorPanel::rebuild() {
         auto* icon = new QLabel;
         icon->setPixmap(ui::makeIcon(ui::Icon::FxColor, theme::kAccent, 20).pixmap(20, 20));
         head->addWidget(icon);
-        head->addWidget(new QLabel(tr("Color  ·  %1").arg(QString::fromStdString(layer->name))), 1);
+        head->addWidget(new ui::ElidedLabel(tr("Color  ·  %1").arg(QString::fromStdString(layer->name))), 1); // a long name shortens, never widens the panel
         bool graded = false;
         for (EffectType type : kParts) graded = graded || firstOf(*layer, type) >= 0;
         if (graded) { // all of it back to the picture as it was
@@ -437,7 +437,7 @@ void ColorPanel::buildBasic(QVBoxLayout* col, Layer& layer) {
             const Effect* e = effectOf(id, type, false);
             slider->setValue(e ? static_cast<const AnimFloat&>(const_cast<Effect*>(e)->slot(slot)).valueAt(ctx_.time) : 0.0f);
         });
-        section->addPlainRow(tr(c.label), slider);
+        section->body()->addWidget(new ui::LabeledRow(tr(c.label), slider)); // the label above it when narrow
     }
     col->addWidget(section);
 }
@@ -448,8 +448,7 @@ void ColorPanel::buildLook(QVBoxLayout* col, Layer& layer) {
     const std::string current = index >= 0 ? layer.effects[index].file : std::string();
     auto* section = new CollapsibleSection(tr("Look"), nullptr, partTools(id, {EffectType::Lut}));
     // Cards: none, the looks that come with bemotion, the layer's own file, another file.
-    auto* grid = new QGridLayout;
-    grid->setSpacing(6);
+    auto* grid = new ui::ResponsiveGrid(84); // as many columns as fit
     auto pick = [this, id](const std::string& file) {
         Effect* e = effectOf(id, EffectType::Lut, !file.empty());
         if (e && e->file != file) {
@@ -465,7 +464,7 @@ void ColorPanel::buildLook(QVBoxLayout* col, Layer& layer) {
             tile->setChecked(chosen); // the document decides (redrawn after the change)
             clicked();
         });
-        grid->addWidget(tile, n / 3, n % 3);
+        grid->addWidget(tile);
         ++n;
     };
     addTile(new LookTile(swatch(""), tr("None")), [pick] { pick(""); }, current.empty());
@@ -481,7 +480,7 @@ void ColorPanel::buildLook(QVBoxLayout* col, Layer& layer) {
         const auto chosen = platform::openFileDialog(TR_NOOP("Choose a LUT"), TR_NOOP("Cube LUT"), ".cube");
         if (chosen) pick(platform::toUtf8(*chosen));
     }, false);
-    section->body()->addLayout(grid);
+    section->body()->addWidget(grid);
     if (index >= 0) {
         std::string title, error;
         if (!current.empty() && !render::lutInfo(current, title, error)) {

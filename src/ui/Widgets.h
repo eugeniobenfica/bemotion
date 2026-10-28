@@ -413,4 +413,86 @@ private:
     Qt::TextElideMode mode_;
 };
 
+// Cards in as many columns as fit (each at least `minCell` wide, sharing the width), as many
+// rows as they need: a panel of tiles that reflows when it is made narrower or wider.
+class ResponsiveGrid : public QWidget {
+public:
+    explicit ResponsiveGrid(int minCell, int gap = 6, QWidget* parent = nullptr);
+    void addWidget(QWidget* w);
+    int columns(int width) const { return std::max(1, (width + gap_) / (minCell_ + gap_)); }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override;
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+
+protected:
+    void resizeEvent(QResizeEvent*) override { place(); }
+
+private:
+    void place();
+    int minCell_, gap_;
+    std::vector<QWidget*> cells_;
+};
+
+// A library sorted in categories (Effects, Animate) reads the same everywhere: each category is a
+// heading row (open or closed, its icon, its name, how many items, a rule to the edge), never a
+// tile; its items are tiles in a CategoryBody under it, set in from a guide line.
+class CategoryHeader : public QWidget {
+public:
+    CategoryHeader(Icon icon, const QString& name, int count, bool closed, QWidget* parent = nullptr);
+    std::function<void()> toggled;                        // clicked
+    std::function<bool(const QMimeData*)> accepts;        // something dragged over it can go in
+    std::function<void(const QMimeData*)> dropped;        // ... and was dropped
+    std::function<void(QPoint)> menuRequested;            // right-click
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+    void mouseReleaseEvent(QMouseEvent* e) override;
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+    void dragEnterEvent(QDragEnterEvent* e) override;
+    void dragLeaveEvent(QDragLeaveEvent*) override;
+    void dropEvent(QDropEvent* e) override;
+
+private:
+    Icon icon_;
+    QString name_;
+    int count_;
+    bool closed_, target_ = false;
+};
+
+// The items of an open category: `content` (a ResponsiveGrid of tiles, a note...), set in under
+// the guide line that ties them to their CategoryHeader.
+class CategoryBody : public QWidget {
+public:
+    explicit CategoryBody(QWidget* content, QWidget* parent = nullptr);
+    void add(QWidget* more); // under the content (an Import button, a note)
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+};
+
+// A label and its control side by side, or the label above when there is not room for both
+// (a narrow panel keeps its sliders long).
+class LabeledRow : public QWidget {
+public:
+    LabeledRow(const QString& label, QWidget* control, int controlMin = 150, QWidget* parent = nullptr);
+    QLabel* label() const { return label_; }
+    bool hasHeightForWidth() const override { return true; }
+    int heightForWidth(int width) const override;
+    QSize sizeHint() const override;
+    QSize minimumSizeHint() const override;
+
+protected:
+    void resizeEvent(QResizeEvent*) override { place(); }
+
+private:
+    bool stacked(int width) const { return width < labelWidth() + 10 + controlMin_; }
+    int labelWidth() const { return label_->sizeHint().width(); }
+    void place();
+    QLabel* label_;
+    QWidget* control_;
+    int controlMin_;
+};
+
 } // namespace bemotion::ui

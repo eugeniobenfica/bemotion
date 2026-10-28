@@ -22,6 +22,7 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QDragEnterEvent>
+#include <QElapsedTimer>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
@@ -371,11 +372,17 @@ void ViewportPanel::sync() {
     // The pen stops drawing when its tool, its layer or the selection goes.
     if (penDrawing_ && (ctx_.tool != Tool::Pen || !pathOf(penTarget_) || ctx_.selection.size() != 1 || ctx_.primaryId() != penTarget_.layer))
         finishPen();
-    Signature s{ctx_.revision(), ctx_.time,       ctx_.selection, ctx_.scope,  ctx_.snapping,
-                ctx_.showGuides, ctx_.showRulers, ctx_.playing,   static_cast<int>(ctx_.tool), media::MediaManager::get().arrivals()};
+    // Playing, the picture changes with the frame (not at every tick between two frames).
+    const double time = ctx_.playing ? ctx_.comp().snapToFrame(ctx_.time) : ctx_.time;
+    Signature s{ctx_.revision(),  time,             ctx_.selection, ctx_.scope,  ctx_.snapping,
+                ctx_.showGuides,  ctx_.showRulers,  ctx_.playing,   static_cast<int>(ctx_.tool), media::MediaManager::get().arrivals()};
     if (s == drawn_) return;
     drawn_ = std::move(s);
     update();
+}
+
+int ViewportPanel::shownDivisor() const {
+    return ctx_.playing && settings().adaptivePlayback ? std::max(previewDivisor_, playbackDivisor_) : previewDivisor_;
 }
 
 void ViewportPanel::resizeEvent(QResizeEvent*) { positionHud(); }
@@ -440,31 +447,47 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     d.rectFilled(Pt(0, 0), Pt(width(), height()), theme::kCanvas);
 
     // Cache the scene independently of hover/selection overlays. Media may finish decoding
-    // without a document revision, so compositions with imported media are rendered again on
-    // every paint, unless the frame is in the cache below.
-    const qreal rasterScale = devicePixelRatioF() / previewDivisor_;
+    // without a document revision: a frame that showed a stand-in, or older than the last
+    // decoded picture (arrivals), is rendered again; else the same scene is kept (moving the
+    // mouse over the viewport redraws only the overlays).
+    const int divisor = shownDivisor();
+    const qreal rasterScale = devicePixelRatioF() / divisor;
     const QSize px(std::max(1, static_cast<int>(std::ceil(width() * rasterScale))),
                    std::max(1, static_cast<int>(std::ceil(height() * rasterScale))));
     const Layer* cropping = cropLayer();
-    const FrameKey key{ctx_.revision(), t, px, origin_, zoom_, rasterScale, throughCamera_, orbit_, orbitView_, cropping ? cropping->id : 0};
+    // While playing, the scene is the frame's (as exported): drawn again only when the frame
+    // changes, not at every tick between two frames.
+    const double sceneTime = ctx_.playing ? c.snapToFrame(t) : t;
+    const FrameKey key{ctx_.revision(), sceneTime, px, origin_, zoom_, rasterScale, throughCamera_, orbit_, orbitView_, cropping ? cropping->id : 0};
     // The RAM preview: frames rendered at their own time are kept while nothing else changes
-    // (the document, the view, a proxy). While playing, the scene is the frame's (as exported).
+    // (the document, the view, a proxy), at each resolution playing and pausing use.
     FrameKey look = key;
     look.time = -1.0;
+    look.pixels = size();
+    look.scale = devicePixelRatioF();
     const uint64_t generation = media::MediaManager::get().generation();
     if (look != cacheLook_ || generation != cacheGeneration_) {
         clearCache();
+        frameValid_ = false;
         cacheLook_ = look;
         cacheGeneration_ = generation;
     }
     const int frameNumber = c.frameAt(t);
-    const double sceneTime = ctx_.playing ? c.snapToFrame(t) : t;
     const bool onFrame = std::fabs(sceneTime - c.snapToFrame(sceneTime)) < 1e-6 && !cropping;
-    if (const auto hit = cache_.find(frameNumber); onFrame && hit != cache_.end() && (!frameValid_ || key != frameKey_ || !c.media.empty())) {
+    const uint64_t arrivals = media::MediaManager::get().arrivals();
+    // (Playing, the decoder works ahead all the time: only a frame that showed a stand-in waits
+    // for its picture.)
+    const bool mediaChanged = !c.media.empty() && (frameStale_ || (!ctx_.playing && arrivals != frameArrivals_));
+    // A kept frame at this resolution, or a sharper one.
+    auto hit = cache_.end();
+    for (int d = divisor; d >= 1 && hit == cache_.end(); d /= 2) hit = cache_.find({frameNumber, d});
+    if (onFrame && hit != cache_.end() && (!frameValid_ || key != frameKey_ || mediaChanged)) {
         frame_ = hit->second;
         frameKey_ = key;
         frameValid_ = true;
-    } else if (!frameValid_ || key != frameKey_ || !c.media.empty()) {
+        frameStale_ = false;
+        frameArrivals_ = arrivals;
+    } else if (!frameValid_ || key != frameKey_ || mediaChanged) {
         if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
         frame_.fill(Qt::transparent);
         const SkImageInfo info = qtImageInfo(px.width(), px.height());
@@ -481,21 +504,41 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
             }
             media::MediaManager::get().setPreviewScale(this, zoom_ * z); // videos decoded no bigger than shown here
             media::MediaManager::get().takeStale(); // from here on: did this frame use a stand-in?
+            QElapsedTimer timer;
+            timer.start();
             render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, render::View{origin_ * z, zoom_ * z, world_}, true,
                                     throughCamera_, orbit_ ? &orbitLens_ : nullptr);
+            const double ms = timer.nsecsElapsed() / 1e6;
             frameKey_ = key;
             const bool stale = media::MediaManager::get().takeStale(); // a video frame still on its way: not kept
+            frameStale_ = stale;
+            frameArrivals_ = arrivals;
+            // Playing: a frame that takes longer than the composition's frame (most of it: the
+            // rest of the tick needs time too) lowers the resolution; one that would still fit at
+            // four times the pixels raises it back. (The next frame shows the change.)
+            if (ctx_.playing && settings().adaptivePlayback && divisor == std::max(previewDivisor_, playbackDivisor_)) {
+                renderMs_ = renderMs_ > 0.0 ? renderMs_ * 0.7 + ms * 0.3 : ms;
+                const double budget = 1000.0 * c.frameDuration() * 0.7;
+                if (renderMs_ > budget && playbackDivisor_ < 4) {
+                    playbackDivisor_ *= 2;
+                    renderMs_ /= 4.0; // a quarter of the pixels
+                } else if (renderMs_ * 4.0 * 1.5 < budget && playbackDivisor_ > 1) {
+                    playbackDivisor_ /= 2;
+                    renderMs_ *= 4.0;
+                }
+            }
             // Kept (shared until the next render writes a new picture), the frames farthest from
             // the playhead going first when the memory for it is full.
             if (onFrame && !stale) {
                 const size_t budget = static_cast<size_t>(std::max(0, settings().cacheMegabytes / 2)) << 20;
                 const size_t bytes = static_cast<size_t>(frame_.sizeInBytes());
                 if (bytes <= budget) {
-                    cache_[frameNumber] = frame_;
+                    if (const auto old = cache_.find({frameNumber, divisor}); old != cache_.end()) cacheBytes_ -= static_cast<size_t>(old->second.sizeInBytes());
+                    cache_[{frameNumber, divisor}] = frame_;
                     cacheBytes_ += bytes;
                     while (cacheBytes_ > budget && cache_.size() > 1) {
                         auto far = cache_.begin();
-                        if (std::abs(std::prev(cache_.end())->first - frameNumber) > std::abs(far->first - frameNumber)) far = std::prev(cache_.end());
+                        if (std::abs(std::prev(cache_.end())->first.first - frameNumber) > std::abs(far->first.first - frameNumber)) far = std::prev(cache_.end());
                         cacheBytes_ -= static_cast<size_t>(far->second.sizeInBytes());
                         cache_.erase(far);
                     }
@@ -506,7 +549,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     const Vec2 compMax = sceneView().toScreen(compSize_);
     if (!orbit_) d.rectFilled(Pt(origin_.x + 4, origin_.y + 6), Pt(compMax.x + 4, compMax.y + 6), theme::shade(90), 2.0f);
     // Upscale only the scene; handles, rulers, guides and HUD retain native resolution.
-    p.setRenderHint(QPainter::SmoothPixmapTransform, previewDivisor_ > 1);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, frame_.width() < width() * devicePixelRatioF());
     p.drawImage(rect(), frame_);
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     if (orbit_) draw3D(p);
@@ -519,6 +562,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     char label[16];
     std::snprintf(label, sizeof(label), "%.0f%%", zoom_ * 100.0f);
     zoomLevel_->setText(label);
+    qualityButton_->setText(divisor == 1 ? tr("Full") : divisor == 2 ? tr("Half") : tr("Quarter")); // playing: maybe lowered (adaptivePlayback)
     snapButton_->setActive(ctx_.snapping);
     cameraButton_->setActive(throughCamera_ && !orbit_);
     orbitButton_->setActive(orbit_);
@@ -1068,7 +1112,16 @@ void ViewportPanel::startPen(Vec2 mouse) {
     // A layer selected that is not a shape gets a mask; otherwise a new shape layer starts here.
     const bool mask = sel && sel->type != LayerType::Shape && sel->type != LayerType::Camera && !sel->locked && sel->activeAt(ctx_.time) &&
                       !(sel->type == LayerType::Media && !sel->media.hasVideo);
-    if (mask) {
+    penRestore_.reset();
+    if (sel && !sel->locked && ctx_.maskFocus >= 0 && ctx_.maskFocus < static_cast<int>(sel->masks.size())) {
+        // A mask picked on the timeline: the pen draws its shape again (any layer, shapes too); a
+        // drawing given up leaves the old one.
+        Mask& m = sel->masks[static_cast<size_t>(ctx_.maskFocus)];
+        penRestore_ = m.path;
+        m.path.vertices.clear();
+        m.path.closed = false;
+        penTarget_ = {sel->id, ctx_.maskFocus};
+    } else if (mask) {
         Mask m;
         m.name = tr("Mask %1").arg(sel->masks.size() + 1).toStdString();
         m.path.vertices.clear();
@@ -1103,7 +1156,9 @@ void ViewportPanel::finishPen() {
     Layer* l = ctx_.comp().findLayer(penTarget_.layer);
     BezierPath* path = pathOf(penTarget_);
     if (l && path) {
-        if (penTarget_.mask >= 0 && path->vertices.size() < 3) l->masks.erase(l->masks.begin() + penTarget_.mask); // nothing to cut with
+        if (penTarget_.mask >= 0 && path->vertices.size() < 3 && penRestore_) *path = *penRestore_; // given up: the shape it had
+        else if (penTarget_.mask >= 0 && path->vertices.size() < 3) l->masks.erase(l->masks.begin() + penTarget_.mask); // nothing to cut with
+        else if (penTarget_.mask >= 0) path->closed = true; // a mask is always a closed shape
         else if (penTarget_.mask < 0 && path->vertices.size() < 2) ctx_.comp().removeLayer(l->id), ctx_.pruneSelection();
     }
     ctx_.touch();

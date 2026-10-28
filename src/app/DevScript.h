@@ -21,6 +21,8 @@
 //   drop FILE...           drop files on the window (as from the file manager)
 //   window TITLE           later mouse commands go to that open window ("Settings", a dialog...);
 //                          "window main" (or any title not open) goes back to the main window
+//   resize W H             give the window (or the one picked with `window`) this size
+//   limit NAME W           widgets named NAME (a panel: "Color", "Properties"...) no wider than W
 //   quit                   close the app (without asking to save)
 //
 // BEMOTION_SCRIPT_TRACE=<file> logs each command run, with its frame.

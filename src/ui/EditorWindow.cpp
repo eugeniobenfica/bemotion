@@ -328,7 +328,7 @@ void EditorWindow::buildDocks() {
     connect(viewport_, &ViewportPanel::snapshotRequested, this, [this] { exportFrame(); });
     connect(properties_, &PropertiesPanel::panelRequested, this, [this](const QString& name) {
         // Transitions live in Animate.
-        auto it = dockWidgets_.find(name == "Transitions" ? std::string("Motion") : name.toStdString());
+        auto it = dockWidgets_.find(name == "Transitions" ? std::string("AnimateLeft") : name.toStdString());
         if (it == dockWidgets_.end()) return;
         if (it->second->isClosed()) it->second->toggleView(true); // (a minimized panel comes back too)
         it->second->setAsCurrentTab();
@@ -364,13 +364,13 @@ void EditorWindow::buildDocks() {
     auto* center = docks_->setCentralWidget(vp);
     auto* left = docks_->addDockWidget(ads::LeftDockWidgetArea, dock(TR_NOOP("Objects"), objects_));
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Media"), media_), left);
+    // Animate, beside the objects: animations dragged onto clips like objects are. ("AnimateLeft":
+    // a layout saved with it elsewhere, or with transitions apart, comes back as the default one.)
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Animate"), animations_, "AnimateLeft"), left);
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Scopes"), scopes_), left);       // beside the Effects tab while grading
     left->setCurrentIndex(0);
     auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock(TR_NOOP("Properties"), properties_));
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Effects"), effects_), right);
-    // Animate: transitions and Quick Animations as one thing (keyframes made for you). ("Motion":
-    // a layout saved with the two panels apart comes back as the default one.)
-    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Animate"), animations_, "Motion"), right);
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Color"), color_), right); // grading: LUT, curves, correction
     connect(color_, &ColorPanel::showScopesRequested, this, [this] {
         ads::CDockWidget* scopes = dockWidgets_["Scopes"];
@@ -1163,7 +1163,7 @@ void EditorWindow::buildMenus() {
     connect(view, &QMenu::aboutToShow, meters, [meters] { meters->setChecked(settings().showMeters); });
     QMenu* panels = view->addMenu(tr("Panels"));
     view->addAction(tr("Tools..."), this, [this] { showTools(); });
-    for (const char* name : {"Objects", "Media", "Scopes", "Properties", "Effects", "Motion", "Color", "Timeline"})
+    for (const char* name : {"Objects", "Media", "Scopes", "Properties", "Effects", "AnimateLeft", "Color", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction(tr("Reset Layout"), this, [this] { resetLayout(); });
     view->addSeparator();
@@ -1357,7 +1357,7 @@ void EditorWindow::tick() {
     // is and a way to take it off; Properties has nothing to show).
     if (const std::pair<uint64_t, uint64_t> picked{ctx_.transitionLayer, ctx_.animationLayer}; picked != motionPicked_) {
         motionPicked_ = picked;
-        if (ads::CDockWidget* motion = dockWidgets_["Motion"]; (picked.first || picked.second) && !motion->isClosed()) motion->setAsCurrentTab();
+        if (ads::CDockWidget* motion = dockWidgets_["AnimateLeft"]; (picked.first || picked.second) && !motion->isClosed()) motion->setAsCurrentTab();
     }
     color_->sync();
     animations_->sync();

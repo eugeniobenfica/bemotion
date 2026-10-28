@@ -56,7 +56,18 @@ bool readLanguage(const std::filesystem::path& file, LanguageFile& out) {
 } // namespace
 
 QString tr(const char* english) { return QCoreApplication::translate("bemotion", english); }
-QString trs(const std::string& english) { return QCoreApplication::translate("bemotion", english.c_str()); }
+QString trs(const std::string& english) {
+    const QString t = QCoreApplication::translate("bemotion", english.c_str());
+    // A transition played as an animation ("Slide Left In", core/Transitions.h): its name, then in / out.
+    if (t == QString::fromStdString(english))
+        for (const auto& [suffix, pattern] : {std::pair{" In", TR_NOOP("%1 · in")}, std::pair{" Out", TR_NOOP("%1 · out")}})
+            if (english.size() > std::strlen(suffix) && english.compare(english.size() - std::strlen(suffix), std::string::npos, suffix) == 0) {
+                const std::string base = english.substr(0, english.size() - std::strlen(suffix));
+                const QString b = QCoreApplication::translate("bemotion", base.c_str());
+                if (b != QString::fromStdString(base)) return tr(pattern).arg(b);
+            }
+    return t;
+}
 
 QString trLabel(const QString& text) {
     const QByteArray utf8 = text.toUtf8();

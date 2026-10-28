@@ -4,6 +4,7 @@
 // (Transitions panel, and the transition.add operation). Each one is keyframes
 // placed at the clip's edges, so it stays editable like any animation.
 
+#include "core/Presets.h"
 #include "core/Project.h"
 
 #include <string>
@@ -43,6 +44,21 @@ bool resizeTransition(Layer& layer, TransitionEdge edge, double duration);
 // Moves a clip's transition to its other end (In <-> Out), same kind and length; one there is
 // replaced. False for a joined one (a cut's) or none.
 bool moveTransition(Layer& layer, TransitionEdge from);
+
+// A transition's way in (or out) as a Quick Animation of `duration` seconds, to play anywhere in a
+// clip ("Slide Left In", category "In" / "Out"); a preset with no tracks for an unknown id.
+AnimationPreset transitionPreset(const std::string& id, TransitionEdge edge, double duration);
+
+// Transitions and Quick Animations are placed alike (Animate panel, dropped on the timeline): on
+// a clip's start or end, across the cut after it, or anywhere along it. A transition along the
+// clip plays its way in (first half) or out as a Quick Animation; a Quick Animation on a cut plays
+// on the clip that comes in (an exit on the one that goes). `preset` null: `transition` is meant.
+enum class MotionSpot { In, Out, Cut, At };
+// Where the playhead says (`time`): an end when it is within `length` of it, else there.
+MotionSpot motionSpotAt(const Layer& layer, double time, double length);
+// Returns the layer it went on (null: nothing placed).
+Layer* placeMotion(Composition& comp, Layer& layer, const std::string& transition, const AnimationPreset* preset, MotionSpot spot,
+                   double time, double length);
 
 // Removes the transition metadata and the keyframes generated for its current duration.
 bool removeTransition(Layer& layer, TransitionEdge edge);

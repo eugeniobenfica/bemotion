@@ -93,7 +93,7 @@ public:
     MediaList(EditorContext& ctx, MediaPanel& panel) : QWidget(&panel), ctx_(ctx), panel_(panel) {
         setMouseTracking(true);
         setAcceptDrops(true);
-        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding); // down to the bottom, its rows from the top
         setFocusPolicy(Qt::ClickFocus); // Delete removes the item clicked (in a folder too)
     }
 
