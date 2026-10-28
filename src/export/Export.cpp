@@ -107,6 +107,7 @@ bool ExportJob::start(const Project& project, const Settings& settings, std::str
     height_ = h;
     pixels_.clear();
     if (!renderer_.init(w, h, error)) return false;
+    if (settings_.decodeScale) settings_.decodeScale(&comp, static_cast<double>(w) / comp.width);
 
     audio_.clear();
     if (settings_.mixAudio && formatHasAudio(settings_.format))
@@ -118,11 +119,61 @@ bool ExportJob::start(const Project& project, const Settings& settings, std::str
     if (!encoder_->open(params, error)) {
         encoder_.reset();
         renderer_.release();
+        if (settings_.decodeScale) settings_.decodeScale(&comp, 0.0);
         return false;
     }
     running_ = true;
     startTime_ = std::chrono::steady_clock::now();
+    startWriter();
     return true;
+}
+
+ExportJob::~ExportJob() {
+    if (running_) cancel();
+}
+
+void ExportJob::startWriter() {
+    writerStop_ = writerDrop_ = false;
+    writeError_.clear();
+    queue_.clear();
+    writer_ = std::thread([this] { writerLoop(); });
+}
+
+void ExportJob::writerLoop() {
+    for (;;) {
+        std::vector<uint8_t> frame;
+        {
+            std::unique_lock lock(queueMutex_);
+            queueChanged_.wait(lock, [this] { return !queue_.empty() || writerStop_; });
+            if (queue_.empty() || writerDrop_ || !writeError_.empty()) return;
+            frame = std::move(queue_.front());
+            queue_.pop_front();
+        }
+        queueChanged_.notify_all(); // room for the next one
+        std::string err;
+        const bool ok = encoder_->write(frame.data(), err);
+        std::lock_guard lock(queueMutex_);
+        if (!ok) {
+            writeError_ = err.empty() ? "Writing the frame failed." : err;
+            queueChanged_.notify_all();
+            return;
+        }
+        spare_.push_back(std::move(frame));
+    }
+}
+
+bool ExportJob::stopWriter(bool drop) {
+    if (!writer_.joinable()) return writeError_.empty();
+    {
+        std::lock_guard lock(queueMutex_);
+        writerStop_ = true;
+        writerDrop_ = drop;
+    }
+    queueChanged_.notify_all();
+    writer_.join();
+    queue_.clear();
+    spare_.clear();
+    return writeError_.empty();
 }
 
 void ExportJob::step(double budgetSeconds) {
@@ -132,22 +183,40 @@ void ExportJob::step(double budgetSeconds) {
     const bool background = !(settings_.transparent && formatSupportsAlpha(settings_.format));
     // Output pixels per composition pixel (shapes and text are re-rasterized, so 2x stays sharp).
     const float scale = static_cast<float>(renderer_.width()) / static_cast<float>(comp.width);
+    constexpr size_t kQueued = 3; // frames rendered ahead of the encoder (memory: a few frames)
 
     while (frame_ < count_) {
         renderer_.render(comp, comp.timeOfFrame(first_ + frame_), scale, background, pixels_);
-        std::string err;
-        if (!encoder_->write(pixels_.data(), err)) {
-            fail(err.empty() ? "Writing the frame failed." : err);
-            return;
+        {
+            std::unique_lock lock(queueMutex_);
+            queueChanged_.wait(lock, [this] { return queue_.size() < kQueued || !writeError_.empty(); });
+            if (!writeError_.empty()) {
+                lock.unlock();
+                fail(writeError_);
+                return;
+            }
+            std::vector<uint8_t> frame;
+            if (!spare_.empty()) frame = std::move(spare_.back()), spare_.pop_back();
+            frame.assign(pixels_.begin(), pixels_.end()); // pixels_ stays the last frame (the dialog's preview)
+            queue_.push_back(std::move(frame));
         }
+        queueChanged_.notify_all();
         ++frame_;
         if (std::chrono::duration<double>(std::chrono::steady_clock::now() - stepStart).count() > budgetSeconds) return;
     }
 
     std::string err;
-    const bool ok = encoder_->finish(err);
+    bool ok = stopWriter(false); // every frame encoded
+    if (!ok) {
+        err = writeError_;
+        std::string ignored;
+        encoder_->finish(ignored);
+    } else {
+        ok = encoder_->finish(err);
+    }
     encoder_.reset();
     renderer_.release();
+    if (settings_.decodeScale) settings_.decodeScale(&project_.comp, 0.0);
     running_ = false;
     done_ = true;
     endTime_ = std::chrono::steady_clock::now();
@@ -156,9 +225,11 @@ void ExportJob::step(double budgetSeconds) {
 
 void ExportJob::cancel() {
     if (!running_) return;
+    stopWriter(true);
     encoder_->abort(); // at once: no flushing, the partial file removed
     encoder_.reset();
     renderer_.release();
+    if (settings_.decodeScale) settings_.decodeScale(&project_.comp, 0.0);
     running_ = false;
     done_ = true;
     endTime_ = std::chrono::steady_clock::now();
@@ -166,10 +237,12 @@ void ExportJob::cancel() {
 }
 
 void ExportJob::fail(std::string message) {
+    stopWriter(true);
     std::string ignored;
     if (encoder_) encoder_->finish(ignored);
     encoder_.reset();
     renderer_.release();
+    if (settings_.decodeScale) settings_.decodeScale(&project_.comp, 0.0);
     running_ = false;
     done_ = true;
     endTime_ = std::chrono::steady_clock::now();

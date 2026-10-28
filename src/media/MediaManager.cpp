@@ -229,6 +229,7 @@ struct MediaManager::Impl {
     // How many screen pixels a composition pixel takes in each view showing the editor's
     // composition (by view, with the tick it was told): videos are decoded no bigger than shown.
     std::map<const void*, std::pair<double, int>> previewScales;
+    std::map<const Composition*, double> outputScales; // setOutputScale
     bool scaledPreview = true;
     double previewScale() const {
         double s = 0.0;
@@ -409,11 +410,13 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
     const std::string file = showsProxy(comp, *item) ? platform8(proxyPath(*item)) : item->path;
     const double frame = item->fps > 0 ? 1.0 / item->fps : 1.0 / 30.0;
     // The editor decodes a video no bigger than it shows it (steps of an eighth, so zooming does
-    // not decode again at every step); exports and 3D layers, at full size.
+    // not decode again at every step), an export no bigger than it comes out (rounded up: never
+    // less sharp); 3D layers and other snapshots, at full size.
     double scale = 1.0;
-    if (preview && m.scaledPreview && !layer.threeD && item->width > 0) {
+    const auto output = m.outputScales.find(&comp);
+    if (((preview && m.scaledPreview) || output != m.outputScales.end()) && !layer.threeD && item->width > 0) {
         const Affine w = comp.worldMatrix(layer, t);
-        const double shown = m.previewScale() * std::max(std::hypot(w.a, w.b), std::hypot(w.c, w.d)) *
+        const double shown = (preview ? m.previewScale() : output->second) * std::max(std::hypot(w.a, w.b), std::hypot(w.c, w.d)) *
                              (layer.media.size.x > 0 ? layer.media.size.x / item->width : 1.0);
         scale = std::clamp(std::ceil(shown * 8.0) / 8.0, 0.125, 1.0);
     }
@@ -479,12 +482,20 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
         v.image = hit;
         v.shown = source;
         return v.image;
+    } else {
+        v.reader->setOutputScale(scale); // an export's: the size it comes out (setOutputScale)
     }
     if (!v.reader->frameAt(source, v.rgba)) return v.image;
     v.image = toImage(v.reader->width(), v.reader->height(), std::move(v.rgba));
     v.shown = source;
     keep(v.reader->frameTime(), v.image);
     return v.image;
+}
+
+void MediaManager::setOutputScale(const Composition* comp, double pixelsPerUnit) {
+    Impl& m = impl();
+    if (pixelsPerUnit > 0.0) m.outputScales[comp] = pixelsPerUnit;
+    else m.outputScales.erase(comp);
 }
 
 void MediaManager::setPreviewScale(const void* view, double pixelsPerUnit) {

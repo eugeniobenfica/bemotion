@@ -14,15 +14,11 @@ public:
     explicit ObjectsPanel(EditorContext& ctx, QWidget* parent = nullptr);
     void sync(); // rebuilds when plugins change
 
-protected:
-    void resizeEvent(QResizeEvent* e) override;
-
 private:
     void rebuild();
     EditorContext& ctx_;
     QWidget* content_ = nullptr;
     size_t pluginTypes_ = 0;
-    int columns_ = 0;
 };
 
 } // namespace bemotion

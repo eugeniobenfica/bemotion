@@ -372,11 +372,21 @@ void EditorWindow::buildDocks() {
     auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock(TR_NOOP("Properties"), properties_));
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Effects"), effects_), right);
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Color"), color_), right); // grading: LUT, curves, correction
+    // Scopes opened by Color's button go away with the Color tab; opened from View › Panels (or
+    // already open), they stay.
     connect(color_, &ColorPanel::showScopesRequested, this, [this] {
         ads::CDockWidget* scopes = dockWidgets_["Scopes"];
+        if (scopes->isClosed()) scopesForColor_ = true;
         scopes->toggleView(true);
         scopes->setAsCurrentTab();
     });
+    connect(dockWidgets_["Color"], &ads::CDockWidget::visibilityChanged, this, [this](bool visible) {
+        if (visible || !scopesForColor_) return;
+        scopesForColor_ = false;
+        dockWidgets_["Scopes"]->toggleView(false);
+    });
+    connect(dockWidgets_["Scopes"]->toggleViewAction(), &QAction::triggered, this, [this] { scopesForColor_ = false; });
+    connect(dockWidgets_["Scopes"], &ads::CDockWidget::closed, this, [this] { scopesForColor_ = false; });
     right->setCurrentIndex(0);
     // The timeline with the audio meters at its right.
     auto* timelineHost = new QWidget;
@@ -1276,7 +1286,8 @@ void EditorWindow::buildMenus() {
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
     row->addWidget(gear);
     auto* exportButton = ui::accentButton(tr("Export"));
-    exportButton->setIcon(ui::makeIcon(ui::Icon::Export, theme::kOnAccent, 18));
+    exportButton->setIcon(ui::makeIcon(ui::Icon::Export, theme::kOnAccent, 26));
+    exportButton->setIconSize(QSize(26, 26)); // the glyph is ~60% of it: as tall as the word beside it
     exportButton->setToolTip(tr("Export video"));
     connect(exportButton, &QPushButton::clicked, this, [this] { ui::showExportDialog(ctx_, this); });
     row->addWidget(exportButton);

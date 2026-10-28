@@ -125,6 +125,7 @@ void loadSettings() {
         s.cacheMegabytes = std::clamp(j.value("cache_megabytes", s.cacheMegabytes), 128, 32768);
         s.scaledVideoPreview = j.value("scaled_video_preview", s.scaledVideoPreview);
     s.adaptivePlayback = j.value("adaptive_playback", s.adaptivePlayback);
+    s.gpuRendering = j.value("gpu_rendering", s.gpuRendering);
         s.autoProxies = j.value("auto_proxies", s.autoProxies);
         s.showFilmstrips = j.value("show_filmstrips", s.showFilmstrips);
         s.animationFolders = j.value("animation_folders", s.animationFolders);
@@ -153,7 +154,7 @@ void saveSettings() {
               {"show_snapshot_button", s.showSnapshotButton}, {"show_timeline_scrollbar", s.showTimelineScrollbar},
               {"experience", s.experience}, {"essentials_only", s.essentialsOnly},
               {"hardware_decoding", s.hardwareDecoding}, {"use_proxies", s.useProxies}, {"cache_megabytes", s.cacheMegabytes},
-              {"scaled_video_preview", s.scaledVideoPreview}, {"adaptive_playback", s.adaptivePlayback},
+              {"scaled_video_preview", s.scaledVideoPreview}, {"adaptive_playback", s.adaptivePlayback}, {"gpu_rendering", s.gpuRendering},
               {"auto_proxies", s.autoProxies}, {"show_filmstrips", s.showFilmstrips},
               {"animation_folders", s.animationFolders}, {"animation_folder_of", s.animationFolderOf},
               {"closed_animation_folders", s.closedAnimationFolders}, {"closed_effect_categories", s.closedEffectCategories},

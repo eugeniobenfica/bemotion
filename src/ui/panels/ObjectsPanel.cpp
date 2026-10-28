@@ -19,15 +19,11 @@ namespace {
 
 constexpr int kTileWidth = 84; // narrowest tile that fits "Background"
 
-// A grid of tiles under a section title.
+// A grid of tiles under a section title: as many columns as fit, reflowed at every width (the
+// tiles share it), as Animate's.
 struct Section {
-    QGridLayout* grid;
-    int cols;
-    int count = 0;
-    void add(QWidget* w) {
-        grid->addWidget(w, count / cols, count % cols);
-        ++count;
-    }
+    ui::ResponsiveGrid* grid;
+    void add(QWidget* w) { grid->addWidget(w); }
 };
 
 } // namespace
@@ -39,12 +35,6 @@ ObjectsPanel::ObjectsPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(pa
     rebuild();
 }
 
-void ObjectsPanel::resizeEvent(QResizeEvent* e) {
-    QScrollArea::resizeEvent(e);
-    const int cols = std::max(2, (viewport()->width() - 16) / (kTileWidth + 8));
-    if (cols != columns_) rebuild();
-}
-
 void ObjectsPanel::sync() {
     if (PluginHost::get().objectTypes().size() != pluginTypes_) rebuild();
 }
@@ -52,9 +42,6 @@ void ObjectsPanel::sync() {
 void ObjectsPanel::rebuild() {
     const auto types = PluginHost::get().objectTypes();
     pluginTypes_ = types.size();
-    columns_ = std::max(2, (viewport()->width() - 16) / (kTileWidth + 8));
-    const int tileW = std::max(56, (viewport()->width() - 16 - 8 * (columns_ - 1)) / columns_);
-    const QSize tile(tileW, std::clamp(static_cast<int>(tileW * 0.78f), 50, 66));
 
     content_ = new QWidget;
     auto* col = new QVBoxLayout(content_);
@@ -62,15 +49,13 @@ void ObjectsPanel::rebuild() {
     col->setSpacing(6);
     auto section = [&](const QString& title) {
         col->addWidget(ui::sectionLabel(title));
-        auto* grid = new QGridLayout;
-        grid->setSpacing(8);
-        grid->setAlignment(Qt::AlignLeft | Qt::AlignTop);
-        col->addLayout(grid);
-        return Section{grid, columns_};
+        auto* grid = new ui::ResponsiveGrid(kTileWidth, 8);
+        col->addWidget(grid);
+        return Section{grid};
     };
     auto makeTile = [&](ui::Icon icon, const QString& label, const QString& tip, int kind, std::function<void()> add) {
         auto* t = new ui::Tile(icon, label);
-        t->setTileSize(tile);
+        t->setTileSize({kTileWidth, 62});
         t->setToolTip(tip);
         t->setDragData([kind] { return ui::makeMime(ui::kObjectMime, kind); });
         connect(t, &QAbstractButton::clicked, this, std::move(add));

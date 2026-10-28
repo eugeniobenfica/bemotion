@@ -257,7 +257,17 @@ decoded), eased over its fade.
   clip (`kAnimationMime`, the preset as JSON) one plays from the drop point.
   `applyQuickAnimation` also remembers it on the layer (`Layer::animations`:
   name, category, start, duration; moved by `shiftTime`) for the timeline's
-  band; a band whose keys are gone is not drawn.
+  band (stretched by either end; `retimeQuickAnimation` stops at a neighbor
+  animating the same property), with what it replaced
+  (`AnimationRestore`: per property its static value or its own keys in the
+  span; text letters, a shape's stroke): `removeQuickAnimation` gives the
+  clip back as it was (a property left without keys would otherwise keep
+  its last key's value: a removed Fade Out left the clip invisible). One put
+  over another takes that one off first. A band whose keys are gone is not
+  drawn.
+  The Effects browser lists effects as `ui::ChoiceRow`s (clicked onto the
+  selected layers, not dragged: tiles are for what is dragged), and the Media
+  panel paints its folders with the same `paintCategoryHeader`.
 - **`Transitions`** — a clip's way in and out (fade, slides, zoom, pop, spin),
   written as keyframes at its edges with the preset engine. Across a cut
   (`applyCutTransition`) the clips overlap (`ClipTransition::overlap`,
@@ -325,8 +335,13 @@ Rules:
   matrix on the `SkCanvas` (sharp at any zoom). A pure function of (project,
   time, view): **no randomness without a seed, no clocks, no global state**
   that changes the picture.
-- **CPU raster only** (Skia "Ganesh" GPU is compiled but unused). Mind CPU
-  costs: effect layers are bounded to what the layer covers (`saveLayer`
+- **The graphics card when there is one** (`render/Gpu`): the editor makes
+  an offscreen OpenGL context (`ui/GpuContext`, Qt's) and Skia's Ganesh
+  context on it; the viewport and the exports of the editor draw there and
+  read the pixels back (`OffscreenRenderer`, `ViewportPanel`). No OpenGL,
+  another thread, the command line or `gpu_rendering` off: the CPU, as
+  before (the same pictures, up to antialiasing). Mind CPU costs anyway:
+  effect layers are bounded to what the layer covers (`saveLayer`
   bounds); avoid per-pixel loops in SkSL and Skia's morphology filters
   (`Dilate` / `Erode` are hundreds of ms per frame) — build effects from blurs,
   color matrices, blends and transforms instead (see Outline and Directional
@@ -381,8 +396,12 @@ Rules:
   once and the package scripts ship them; without them `ui/Transcribe` offers
   to download them into app data (`app/Downloads`). `ui/Transcribe` runs it
   on a thread with progress and Stop and fills a Subtitles layer.
-- `export/ExportJob` snapshots the project and feeds an `Encoder` frame by
-  frame from the calling thread (`step()`), so the UI stays responsive.
+- `export/ExportJob` snapshots the project and renders it frame by frame
+  from the calling thread (`step()`, the UI thread: its GPU), so the UI
+  stays responsive; the `Encoder` writes on a thread of its own a few frames
+  behind. Its videos are decoded at the size they come out
+  (`Settings::decodeScale` → `MediaManager::setOutputScale`, rounded up),
+  not at full size to be shrunk while drawing.
   Cancelling calls `Encoder::abort()`: nothing more is encoded (finishing
   would encode the rest of the audio and flush every frame the encoder
   holds, which looked like a hang) and the unfinished file is removed. The
@@ -417,9 +436,10 @@ Rules:
   takes longer than it lasts lowers the resolution while playing (half, then
   a quarter; back up when there is room again), paused it is the preview
   quality again (`adaptive_playback`); kept frames are per frame and
-  resolution, a sharper one serving a lower one. CPU drawing is the cost:
-  Skia is built without its AVX2 paths (`tools/skia/build-skia.sh`), so a
-  bilinear draw of a decoded frame is ~20 ms at 1100 px.
+  resolution, a sharper one serving a lower one. On the CPU drawing is the
+  cost (Skia is built without its AVX2 paths, `tools/skia/build-skia.sh`: a
+  bilinear draw of a decoded frame is ~20 ms at 1100 px); the GPU
+  (`render/Gpu`) takes 4K with Blur + Glow from ~145 to ~30 ms a frame.
 - **The editor never waits for a decoder**: every video of the editor's
   composition is read by its clip's `Seeker` thread, which also reads a few
   frames ahead of the playhead (`kAhead`), handed over without a copy
@@ -432,7 +452,7 @@ Rules:
   no deblocking first, coarse to fine, then the exact frames) and published
   as they grow (`Filmstrip::version`); the timeline keeps them as pixmaps at
   the height it draws. *Settings › Performance* holds the switches
-  (`scaled_video_preview`, `adaptive_playback`, `auto_proxies`,
+  (`scaled_video_preview`, `adaptive_playback`, `gpu_rendering`, `auto_proxies`,
   `show_filmstrips`, hardware decoding, proxies, cache memory, preview
   quality).
 

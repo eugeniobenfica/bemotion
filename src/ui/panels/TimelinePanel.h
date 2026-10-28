@@ -204,7 +204,8 @@ private:
     struct AnimationHit {
         uint64_t layer = 0;
         int index = -1;
-        bool resize = false; // on its end: drag to make it longer or shorter
+        bool resize = false; // on an edge: drag to make it longer or shorter
+        bool start = false;  // ... its start (the end stays where it is)
         explicit operator bool() const { return layer != 0; }
     };
     AnimationHit animationHit(const Item& track, float x) const;
@@ -326,6 +327,7 @@ private:
     float dragOrigTransitionDuration_ = 0.0f;
     bool dragTransitionIn_ = true;                     // TransitionMove: which end it started at
     double dragAnimStart_ = 0.0, dragAnimDuration_ = 0.0; // AnimationMove / Resize: where it was
+    bool dragAnimFromStart_ = false;                      // AnimationResize by its start
     bool restacking_ = false; // vertical drag past the threshold: show the drop gap
     float dragY_ = 0.0f;
     std::vector<uint64_t> dragMoving_; // clips moving in time (a compound brings its contents)

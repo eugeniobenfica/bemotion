@@ -364,14 +364,35 @@ struct ClipTransition {
     bool active() const { return !id.empty(); }
 };
 
+// What a Quick Animation replaced on one property, put back when it is taken off
+// (removeQuickAnimation): the property as it was, and the keys it had inside the animation's span.
+struct AnimationRestore {
+    struct Key {
+        double time = 0.0;
+        std::vector<float> value;
+        Easing easing = Easing::EaseInOut;
+        BezierEase curve;
+    };
+    std::string property;
+    bool keyed = false;       // it had keyframes; else `value` was its static value
+    std::vector<float> value; // the static value
+    std::vector<Key> keys;    // its own keys inside the span (the animation's replaced them)
+};
+
 // A Quick Animation put on a clip (Animate panel): its keyframes are ordinary ones; this only
-// remembers where it went and what it was, so the timeline can show it like a transition.
+// remembers where it went, what it was and what it replaced, so the timeline can show it like a
+// transition and taking it off gives the clip back as it was.
 struct AppliedAnimation {
     std::string name;     // the preset's ("Pop In")
     std::string category; // "Entrance", "Emphasis", "Exit"...
     double start = 0.0;   // composition time (moves with the clip)
     double duration = 0.0;
     std::vector<std::string> properties; // what it animates (its keys there are its own)
+    std::vector<AnimationRestore> restore; // per property (files from before: none)
+    // Text: letterIn, letterOut, letterLoop, letterUnit, letterOrder, letterDelay, letterDuration
+    // before it (empty: it changed none). Shapes: the stroke switch before it (-1: untouched).
+    std::vector<float> lettersBefore;
+    int strokeBefore = -1;
 };
 
 constexpr int kLabelColorCount = 8;

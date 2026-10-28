@@ -326,6 +326,17 @@ private:
                     return !std::isfinite(a.start) || !std::isfinite(a.duration) || a.duration <= 0.0;
                 }) > 0)
                 report(where, "quick animation marks with bad times dropped");
+            // What a Quick Animation replaced: finite, or forgotten (taking it off then just drops its keys).
+            for (AppliedAnimation& a : l.animations) {
+                const auto finite = [](const std::vector<float>& v) { return std::all_of(v.begin(), v.end(), [](float x) { return std::isfinite(x); }); };
+                if (std::erase_if(a.restore, [&](const AnimationRestore& r) {
+                        return !finite(r.value) || std::any_of(r.keys.begin(), r.keys.end(), [&](const AnimationRestore::Key& k) {
+                                   return !std::isfinite(k.time) || !finite(k.value);
+                               });
+                    }) > 0)
+                    report(where, "quick animation restore values that were not numbers dropped");
+                if (!finite(a.lettersBefore) || (!a.lettersBefore.empty() && a.lettersBefore.size() != 7)) a.lettersBefore.clear();
+            }
 
             const Layer pristine = l; // for default values
             for (const PropertyRef& prop : l.properties()) {

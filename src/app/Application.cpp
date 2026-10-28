@@ -18,6 +18,7 @@
 #include "ui/Dialogs.h"
 #include "ui/EditorWindow.h"
 #include "ui/ExperienceScreen.h"
+#include "ui/GpuContext.h"
 #include "ui/HomeScreen.h"
 #include "ui/IntroScreen.h"
 #include "ui/Language.h"
@@ -212,6 +213,7 @@ int Application::run(int argc, char** argv) {
 
     const int result = QApplication::exec();
     platform::log("quitting");
+    ui::releaseGpu(); // while its context exists
     delete window_; // the editor first: it stops using media and plugins
     window_ = nullptr;
     media::AudioEngine::get().stop();
@@ -267,6 +269,7 @@ void Application::buildWindow() {
         else if (files.size() == 1 && files[0].extension() == kProjectExtension) openProject(files[0]);
     };
     window_->resize(1440, 900);
+    ui::useGpu(settings().gpuRendering); // the viewport and exports draw on the graphics card, when there is one
     tintTitleBar(window_);
     connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, window_, [this] { tintTitleBar(window_); });
     window_->showMaximized();

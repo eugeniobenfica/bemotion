@@ -368,6 +368,7 @@ bool exportProject(Project project, exporting::Settings settings, const std::fun
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     settings.mixAudio = media::AudioEngine::mix;
+    settings.decodeScale = [](const Composition* comp, double s) { media::MediaManager::get().setOutputScale(comp, s); };
     exporting::ExportJob job;
     if (!job.start(project, settings, error)) return false;
     while (job.running()) {

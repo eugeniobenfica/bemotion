@@ -61,6 +61,7 @@ add_executable(bemotion WIN32
     media/Recorder.cpp
     media/Transcriber.cpp
     render/Fonts.cpp
+    render/Gpu.cpp
     render/LogoMark.cpp
     render/Mesh3D.cpp
     render/OffscreenRenderer.cpp
@@ -75,6 +76,7 @@ add_executable(bemotion WIN32
     ui/EditorContext.cpp
     ui/EditorWindow.cpp
     ui/ExportDialog.cpp
+    ui/GpuContext.cpp
     ui/HelpWindow.cpp
     ui/HomeScreen.cpp
     ui/IntroScreen.cpp

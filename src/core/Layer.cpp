@@ -259,7 +259,11 @@ void Layer::shiftTime(double delta) {
     inPoint += delta;
     outPoint += delta;
     media.start += delta; // the footage moves with its layer
-    for (AppliedAnimation& a : animations) a.start += delta;
+    for (AppliedAnimation& a : animations) {
+        a.start += delta;
+        for (AnimationRestore& r : a.restore) // the keys it replaced come back where the clip went
+            for (AnimationRestore::Key& k : r.keys) k.time += delta;
+    }
     for (auto& p : properties())
         for (int i = 0; i < p.anim->keyCount(); ++i) p.anim->setKeyTime(i, p.anim->keyTime(i) + delta);
 }

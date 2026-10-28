@@ -1004,9 +1004,55 @@ void testQuickAnimationMarks() {
     // Moved with its clip.
     l.shiftTime(1.0);
     CHECK(near(static_cast<float>(l.animations[0].start), 2.0f));
-    // Taken off: its keys go.
+    // Taken off: its keys go, and the opacity is what it was (not its last key's value).
     CHECK(removeQuickAnimation(l, 0));
-    CHECK(l.animations.empty() && l.transform.opacity.keyCount() == 0);
+    CHECK(l.animations.empty() && l.transform.opacity.keyCount() == 0 && near(l.transform.opacity.base, 100.0f));
+    // An exit (ending at 0, 50% scale) on a static media-like layer: taken off, the layer is whole again.
+    {
+        Layer m = makeShapeLayer(ShapeKind::Rectangle, {100, 100}, 5.0);
+        m.transform.scale.base = {40.0f, 40.0f};
+        applyQuickAnimation(builtin("Shrink Out"), m, 4.0);
+        CHECK(m.transform.scale.isAnimated() && m.transform.opacity.isAnimated());
+        CHECK(removeQuickAnimation(m, 0));
+        CHECK(!m.transform.scale.isAnimated() && near(m.transform.scale.base.x, 40.0f) && near(m.transform.opacity.base, 100.0f));
+    }
+    // The layer's own keys inside the span come back; its keys outside stay; it survives a save.
+    {
+        Layer k = makeShapeLayer(ShapeKind::Rectangle, {100, 100}, 6.0);
+        k.transform.opacity.setKey(0.0, 30.0f);
+        k.transform.opacity.setKey(1.5, 60.0f);
+        k.transform.opacity.setKey(5.0, 90.0f);
+        applyQuickAnimation(fade, k, 1.0); // over 1..2 s: replaces the key at 1.5
+        CHECK(k.transform.opacity.findKey(1.5) < 0);
+        Project p;
+        p.comp.layers.push_back(k);
+        Project q;
+        std::string err;
+        CHECK(deserializeProject(serializeProject(p), q, &err));
+        Layer& back = q.comp.layers.front();
+        CHECK(back.animations.size() == 1 && back.animations[0].restore.size() == 1);
+        back.shiftTime(1.0); // moved with its clip: the keys it gives back move too
+        CHECK(removeQuickAnimation(back, 0));
+        CHECK(back.transform.opacity.keyCount() == 3 && back.transform.opacity.findKey(2.5) >= 0 &&
+              near(back.transform.opacity.valueAt(2.5), 60.0f));
+    }
+    // Text letters set by a preset go back to what they were.
+    {
+        Layer t = makeTextLayer("Hi", {100, 100}, 4.0);
+        applyQuickAnimation(builtin("Letters Pop"), t, 0.0);
+        CHECK(t.text.letterIn != LetterAnim::None);
+        CHECK(removeQuickAnimation(t, 0));
+        CHECK(t.text.letterIn == LetterAnim::None);
+    }
+    // A new one over an old one: the old one is taken off first (nothing of it left behind).
+    {
+        Layer o = makeShapeLayer(ShapeKind::Rectangle, {100, 100}, 5.0);
+        applyQuickAnimation(builtin("Shrink Out"), o, 4.0);
+        applyQuickAnimation(fade, o, 4.0);
+        CHECK(o.animations.size() == 1 && !o.transform.scale.isAnimated() && near(o.transform.scale.base.x, 100.0f));
+        CHECK(removeQuickAnimation(o, 0));
+        CHECK(!o.transform.opacity.isAnimated() && near(o.transform.opacity.base, 100.0f));
+    }
     // A transition moved to the other end.
     Layer t = makeShapeLayer(ShapeKind::Rectangle, {100, 100}, 4.0);
     CHECK(applyTransition(t, "fade", TransitionEdge::In, 0.5));

@@ -89,6 +89,10 @@ public:
     // (0: the view is gone): its videos are decoded no bigger than shown (setScaledPreview).
     void setPreviewScale(const void* view, double pixelsPerUnit);
     void setScaledPreview(bool on); // the Performance setting "Decode video at the size shown"
+    // How many output pixels a composition pixel takes when `comp` (another than the editor's: an
+    // export's copy) is rendered (0: forget it): its videos are decoded at the size they come
+    // out, rounded up (never smaller), not at their full size to be shrunk while drawing.
+    void setOutputScale(const Composition* comp, double pixelsPerUnit);
     // Every video opened again (hardware decoding turned on or off).
     void reopenVideos();
 

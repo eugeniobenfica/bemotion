@@ -126,6 +126,50 @@ void setKey(const PropertyRef& p, double t, const std::vector<float>& v, Easing 
     }
 }
 
+// A property back to a static value (its keys gone).
+void setStatic(const PropertyRef& p, const std::vector<float>& v) {
+    const int n = p.anim->components();
+    if (static_cast<int>(v.size()) < n) return;
+    p.anim->clearKeys(0.0);
+    switch (p.kind) {
+    case PropertyKind::Float: p.asFloat().base = v[0]; break;
+    case PropertyKind::Vec2: p.asVec2().base = {v[0], v[1]}; break;
+    case PropertyKind::Color: p.asColor().base = {v[0], v[1], v[2], v[3]}; break;
+    }
+}
+
+std::vector<float> keyValue(const AnimatedBase& a, int i) {
+    float out[4] = {0, 0, 0, 0};
+    a.keyedValue(a.keyTime(i), out);
+    return std::vector<float>(out, out + a.components());
+}
+
+// What applying `preset` over [t0, t1] is going to replace (AppliedAnimation's restore).
+void rememberBefore(const AnimationPreset& preset, Layer& layer, double t0, double t1, AppliedAnimation& applied) {
+    auto props = layer.properties();
+    for (const PresetTrack& track : preset.tracks) {
+        const PropertyRef* p = layer.findProperty(props, track.property.c_str());
+        if (!p) continue;
+        AnimationRestore r;
+        r.property = track.property;
+        r.keyed = p->anim->isAnimated();
+        float v[4] = {0, 0, 0, 0};
+        p->anim->keyedValue(t0, v);
+        r.value.assign(v, v + p->anim->components());
+        for (int i = 0; i < p->anim->keyCount(); ++i)
+            if (const double t = p->anim->keyTime(i); t >= t0 - kTimeEpsilon && t <= t1 + kTimeEpsilon)
+                r.keys.push_back({t, keyValue(*p->anim, i), p->anim->keyEasing(i), p->anim->keyCurve(i)});
+        applied.restore.push_back(std::move(r));
+    }
+    if (preset.letters.set && layer.type == LayerType::Text) {
+        const TextProps& t = layer.text;
+        applied.lettersBefore = {static_cast<float>(t.letterIn),   static_cast<float>(t.letterOut),   static_cast<float>(t.letterLoop),
+                                 static_cast<float>(t.letterUnit), static_cast<float>(t.letterOrder), t.letterDelay,
+                                 t.letterDuration};
+    }
+    if (preset.enableStroke && layer.type == LayerType::Shape) applied.strokeBefore = layer.shape.strokeEnabled ? 1 : 0;
+}
+
 // A rest value that would leave the layer invisible (e.g. after a previous
 // fade/pop out) is useless as a target: fall back to the natural one.
 std::vector<float> usableRest(const char* id, std::vector<float> v) {
@@ -280,27 +324,53 @@ double presetDuration(const AnimationPreset& p, const Layer& layer) {
 
 void applyQuickAnimation(const AnimationPreset& preset, Layer& layer, double time) {
     if (!presetAppliesTo(preset, layer)) return;
-    applyPreset(preset, layer, time);
     const double dur = presetDuration(preset, layer);
-    const double t0 = std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - dur)); // where applyPreset put it
-    std::erase_if(layer.animations, [&](const AppliedAnimation& a) { return a.start < t0 + dur - 1e-6 && t0 < a.start + a.duration - 1e-6; });
-    AppliedAnimation applied{preset.name, preset.category, t0, dur, {}};
+    const double t0 = std::clamp(time, layer.inPoint, std::max(layer.inPoint, layer.outPoint - dur)); // where applyPreset puts it
+    // One it covers is taken off first (the clip as it was before that one), then this one
+    // remembers what it replaces.
+    for (size_t i = layer.animations.size(); i-- > 0;)
+        if (const AppliedAnimation& a = layer.animations[i]; a.start < t0 + dur - 1e-6 && t0 < a.start + a.duration - 1e-6)
+            removeQuickAnimation(layer, i);
+    AppliedAnimation applied{preset.name, preset.category, t0, dur, {}, {}, {}, -1};
     for (const PresetTrack& track : preset.tracks) applied.properties.push_back(track.property);
+    rememberBefore(preset, layer, t0, t0 + dur, applied);
+    applyPreset(preset, layer, time);
     layer.animations.insert(std::upper_bound(layer.animations.begin(), layer.animations.end(), t0,
                                              [](double t, const AppliedAnimation& a) { return t < a.start; }),
-                            applied);
+                            std::move(applied));
 }
 
 bool removeQuickAnimation(Layer& layer, size_t index) {
     if (index >= layer.animations.size()) return false;
     const AppliedAnimation a = layer.animations[index];
     auto props = layer.properties();
-    for (const std::string& id : a.properties)
-        if (const PropertyRef* p = layer.findProperty(props, id.c_str()))
-            for (int i = p->anim->keyCount() - 1; i >= 0; --i) {
-                const double t = p->anim->keyTime(i);
-                if (t >= a.start - kTimeEpsilon && t <= a.start + a.duration + kTimeEpsilon) p->anim->removeKey(i);
-            }
+    for (const std::string& id : a.properties) {
+        const PropertyRef* p = layer.findProperty(props, id.c_str());
+        if (!p) continue;
+        // Its value just before its keys go: a property left with none keeps it (Animated), as
+        // files from before the restore records do.
+        for (int i = p->anim->keyCount() - 1; i >= 0; --i) {
+            const double t = p->anim->keyTime(i);
+            if (t >= a.start - kTimeEpsilon && t <= a.start + a.duration + kTimeEpsilon) p->anim->removeKey(i);
+        }
+        // What it replaced, back: the property's own keys in that span, or its static value.
+        const auto r = std::find_if(a.restore.begin(), a.restore.end(), [&](const AnimationRestore& x) { return x.property == id; });
+        if (r == a.restore.end()) continue;
+        for (const AnimationRestore::Key& k : r->keys)
+            if (static_cast<int>(k.value.size()) >= p->anim->components()) setKey(*p, k.time, k.value, k.easing, k.curve);
+        if (!r->keyed && !p->anim->isAnimated()) setStatic(*p, r->value);
+    }
+    if (a.lettersBefore.size() == 7 && layer.type == LayerType::Text) {
+        TextProps& t = layer.text;
+        t.letterIn = static_cast<LetterAnim>(static_cast<int>(a.lettersBefore[0]));
+        t.letterOut = static_cast<LetterAnim>(static_cast<int>(a.lettersBefore[1]));
+        t.letterLoop = static_cast<LetterLoop>(static_cast<int>(a.lettersBefore[2]));
+        t.letterUnit = static_cast<LetterUnit>(static_cast<int>(a.lettersBefore[3]));
+        t.letterOrder = static_cast<LetterOrder>(static_cast<int>(a.lettersBefore[4]));
+        t.letterDelay = a.lettersBefore[5];
+        t.letterDuration = a.lettersBefore[6];
+    }
+    if (a.strokeBefore >= 0 && layer.type == LayerType::Shape) layer.shape.strokeEnabled = a.strokeBefore == 1;
     layer.animations.erase(layer.animations.begin() + static_cast<std::ptrdiff_t>(index));
     return true;
 }
@@ -308,8 +378,24 @@ bool removeQuickAnimation(Layer& layer, size_t index) {
 bool retimeQuickAnimation(Layer& layer, size_t index, double start, double duration) {
     if (index >= layer.animations.size()) return false;
     AppliedAnimation& a = layer.animations[index];
-    duration = std::clamp(duration, 0.05, std::max(0.05, layer.outPoint - layer.inPoint));
-    start = std::clamp(start, layer.inPoint, std::max(layer.inPoint, layer.outPoint - duration));
+    // Between its neighbors animating the same properties (their keys would mix), inside the clip.
+    double lo = layer.inPoint, hi = layer.outPoint;
+    for (size_t i = 0; i < layer.animations.size(); ++i) {
+        const AppliedAnimation& o = layer.animations[i];
+        const bool shared = i != index && std::any_of(o.properties.begin(), o.properties.end(), [&](const std::string& p) {
+                                return std::find(a.properties.begin(), a.properties.end(), p) != a.properties.end();
+                            });
+        if (!shared) continue;
+        if (o.start + o.duration <= a.start + kTimeEpsilon) lo = std::max(lo, o.start + o.duration);
+        else if (o.start >= a.start + a.duration - kTimeEpsilon) hi = std::min(hi, o.start);
+    }
+    const bool moved = std::fabs(duration - a.duration) < 1e-9;
+    duration = std::clamp(duration, 0.05, std::max(0.05, hi - lo));
+    if (moved) start = std::clamp(start, lo, std::max(lo, hi - duration));
+    else { // stretched: by its start or its end, not past a neighbor
+        start = std::max(start, lo);
+        duration = std::max(0.05, std::min(start + duration, hi) - start);
+    }
     if (std::fabs(start - a.start) < 1e-9 && std::fabs(duration - a.duration) < 1e-9) return false;
     const double scale = a.duration > 0 ? duration / a.duration : 1.0;
     auto props = layer.properties();

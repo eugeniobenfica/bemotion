@@ -142,6 +142,7 @@ private:
     PropertiesPanel* properties_ = nullptr;
     EffectsPanel* effects_ = nullptr;
     std::pair<uint64_t, uint64_t> motionPicked_{0, 0}; // transition / animation picked when last looked
+    bool scopesForColor_ = false; // Scopes opened by Color's button: closed again when Color is left
     ColorPanel* color_ = nullptr;
     AnimationsPanel* animations_ = nullptr;
     TimelinePanel* timeline_ = nullptr;

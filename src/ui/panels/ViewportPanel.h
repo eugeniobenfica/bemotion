@@ -3,6 +3,9 @@
 #include "core/Math.h"
 #include "render/SceneRenderer.h"
 
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkSurface.h"
+
 #include <QImage>
 #include <QWidget>
 
@@ -295,6 +298,7 @@ private:
     bool frameStale_ = false;     // the frame shown used a video frame still on its way
     uint64_t frameArrivals_ = 0;  // MediaManager::arrivals() when it was rendered
     QImage frame_; // the rendered composition
+    sk_sp<SkSurface> gpuSurface_; // where it is drawn on the graphics card (render/Gpu.h), when there is one
     // Rendered frames by frame number and resolution divisor, while the view and the document
     // stay the same.
     std::map<std::pair<int, int>, QImage> cache_;

@@ -62,6 +62,7 @@ struct Settings {
     int cacheMegabytes = 1024;    // memory for cached frames: half decoded video, half rendered previews
     bool scaledVideoPreview = true; // the editor decodes videos no bigger than it shows them (exports: full size)
     bool adaptivePlayback = true;   // playing, the viewport lowers its resolution when a frame takes too long (paused: full)
+    bool gpuRendering = true;       // the editor and its exports draw on the graphics card when OpenGL works (render/Gpu.h)
     bool autoProxies = false;       // imported videos bigger than 1280 x 720 get a proxy at once
     bool showFilmstrips = true;     // video clips show their frames on the timeline
     // Animate's folders: the user's own (in order, after the built-in ones), where items were

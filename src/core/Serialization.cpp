@@ -366,8 +366,24 @@ json encodeLayer(const Layer& constLayer) {
     }
     if (!layer.animations.empty()) {
         json list = json::array();
-        for (const AppliedAnimation& a : layer.animations)
-            list.push_back({{"name", a.name}, {"category", a.category}, {"start", a.start}, {"duration", a.duration}, {"properties", a.properties}});
+        for (const AppliedAnimation& a : layer.animations) {
+            json e = {{"name", a.name}, {"category", a.category}, {"start", a.start}, {"duration", a.duration}, {"properties", a.properties}};
+            // What it replaced (put back when it is taken off).
+            json restore = json::array();
+            for (const AnimationRestore& r : a.restore) {
+                json keys = json::array();
+                for (const AnimationRestore::Key& k : r.keys) {
+                    json kj = {{"t", k.time}, {"v", k.value}, {"ease", easingId(k.easing)}};
+                    if (k.easing == Easing::Custom) kj["curve"] = {k.curve.x1, k.curve.y1, k.curve.x2, k.curve.y2};
+                    keys.push_back(std::move(kj));
+                }
+                restore.push_back({{"property", r.property}, {"keyed", r.keyed}, {"value", r.value}, {"keys", std::move(keys)}});
+            }
+            if (!restore.empty()) e["restore"] = std::move(restore);
+            if (!a.lettersBefore.empty()) e["letters_before"] = a.lettersBefore;
+            if (a.strokeBefore >= 0) e["stroke_before"] = a.strokeBefore == 1;
+            list.push_back(std::move(e));
+        }
         j["animations"] = std::move(list);
     }
     if (layer.transitionIn.active() || layer.transitionOut.active()) {
@@ -524,10 +540,37 @@ Layer decodeLayer(const json& j) {
         for (const json& a : *list)
             if (a.is_object())
             {
-                AppliedAnimation applied{a.value("name", std::string()), a.value("category", std::string()), a.value("start", 0.0), a.value("duration", 0.0), {}};
+                AppliedAnimation applied{a.value("name", std::string()), a.value("category", std::string()), a.value("start", 0.0), a.value("duration", 0.0), {}, {}, {}, -1};
                 if (const auto ps = a.find("properties"); ps != a.end() && ps->is_array())
                     for (const json& p : *ps)
                         if (p.is_string()) applied.properties.push_back(p.get<std::string>());
+                auto floats = [](const json& v) {
+                    std::vector<float> out;
+                    if (v.is_array())
+                        for (const json& x : v)
+                            if (x.is_number()) out.push_back(x.get<float>());
+                    return out;
+                };
+                if (const auto rs = a.find("restore"); rs != a.end() && rs->is_array())
+                    for (const json& rj : *rs) {
+                        if (!rj.is_object()) continue;
+                        AnimationRestore r;
+                        r.property = rj.value("property", std::string());
+                        r.keyed = rj.value("keyed", false);
+                        r.value = floats(rj.value("value", json::array()));
+                        for (const json& kj : rj.value("keys", json::array())) {
+                            if (!kj.is_object()) continue;
+                            AnimationRestore::Key k;
+                            k.time = kj.value("t", 0.0);
+                            k.value = floats(kj.value("v", json::array()));
+                            k.easing = easingFromId(kj.value("ease", std::string("ease_in_out")).c_str());
+                            if (const std::vector<float> c = floats(kj.value("curve", json::array())); c.size() == 4) k.curve = {c[0], c[1], c[2], c[3]};
+                            r.keys.push_back(std::move(k));
+                        }
+                        if (!r.property.empty()) applied.restore.push_back(std::move(r));
+                    }
+                applied.lettersBefore = floats(a.value("letters_before", json::array()));
+                if (const auto s = a.find("stroke_before"); s != a.end() && s->is_boolean()) applied.strokeBefore = s->get<bool>() ? 1 : 0;
                 layer.animations.push_back(std::move(applied));
             }
     return layer;

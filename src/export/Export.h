@@ -8,18 +8,23 @@
 //       linked in (FfmpegEncoder.cpp)
 //     - PNG sequence: built in, supports transparency
 //
-// A job is stepped from the UI thread (GL context) a few frames at a time so
-// the interface stays responsive and the export can be cancelled.
+// A job is stepped from the UI thread (GL context: render/Gpu.h) a few frames
+// at a time so the interface stays responsive and the export can be
+// cancelled; the encoder runs on a thread of its own meanwhile.
 
 #include "core/Project.h"
 #include "render/OffscreenRenderer.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace bemotion::exporting {
@@ -45,6 +50,10 @@ struct Settings {
     // Mixes the composition's audio for [start, end) (interleaved stereo at kExportAudioRate);
     // empty when nothing is heard. Unset: a silent export.
     std::function<std::vector<float>(const Composition&, double start, double end)> mixAudio;
+    // Told how many output pixels a composition pixel takes in the job's copy of the composition
+    // (0 when it is done), so its videos are decoded at the size they come out
+    // (media::MediaManager::setOutputScale). Unset: decoded at full size.
+    std::function<void(const Composition*, double pixelsPerUnit)> decodeScale;
 };
 
 inline constexpr int kExportAudioRate = 48000;
@@ -85,6 +94,11 @@ std::unique_ptr<Encoder> createEncoder(Format format);
 
 class ExportJob {
 public:
+    ExportJob() = default;
+    ~ExportJob();
+    ExportJob(const ExportJob&) = delete;
+    ExportJob& operator=(const ExportJob&) = delete;
+
     bool start(const Project& project, const Settings& settings, std::string& error);
 
     // Renders and encodes frames for roughly `budgetSeconds`.
@@ -106,12 +120,24 @@ public:
 
 private:
     void fail(std::string message);
+    // The encoder works on a thread of its own, a few frames behind the renderer: drawing the
+    // next frame and encoding the last one overlap.
+    void startWriter();
+    bool stopWriter(bool drop); // waits for it (`drop`: what is still queued is not encoded); false: a write failed
+    void writerLoop();
 
     Project project_; // snapshot, so edits made meanwhile don't leak into the file
     Settings settings_;
     render::OffscreenRenderer renderer_;
     std::unique_ptr<Encoder> encoder_;
     std::vector<uint8_t> pixels_;
+    std::thread writer_;
+    std::mutex queueMutex_;
+    std::condition_variable queueChanged_;
+    std::deque<std::vector<uint8_t>> queue_; // rendered, waiting to be encoded
+    std::vector<std::vector<uint8_t>> spare_; // buffers to render into again
+    bool writerStop_ = false, writerDrop_ = false;
+    std::string writeError_;
     std::vector<float> audio_;
     int first_ = 0;
     int count_ = 0;

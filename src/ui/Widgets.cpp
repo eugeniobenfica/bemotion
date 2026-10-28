@@ -1518,7 +1518,31 @@ void ResponsiveGrid::place() {
 // --- CategoryHeader / CategoryBody -----------------------------------------------------------
 
 namespace {
-constexpr float kGuideX = 9.0f; // the chevron's middle, and the guide line under it
+constexpr float kGuideX = kCategoryGuideX; // the chevron's middle, and the guide line under it
+}
+
+void paintCategoryHeader(QPainter& p, const QRectF& r, Icon icon, const QString& name, int count, bool closed, bool hovered, bool target) {
+    Draw d(p);
+    const float x = static_cast<float>(r.x()), y = static_cast<float>(r.y()), w = static_cast<float>(r.width());
+    const float cy = y + static_cast<float>(r.height()) * 0.5f;
+    if (target || hovered) d.rectFilled({x, y + 1}, {x + w, y + static_cast<float>(r.height()) - 1}, theme::kBgHover, 6.0f);
+    if (target) d.rect({x + 0.5f, y + 1.5f}, {x + w - 0.5f, y + static_cast<float>(r.height()) - 1.5f}, theme::kTextDim, 6.0f); // something dropped goes in here
+    drawIcon(d, closed ? Icon::ChevronRight : Icon::ChevronDown, {x + kGuideX, cy}, 12.0f, theme::kTextDim);
+    drawIcon(d, icon, {x + 29, cy}, 15.0f, theme::kText);
+    const QFont normal = p.font();
+    QFont bold = normal;
+    bold.setWeight(QFont::DemiBold);
+    p.setFont(bold);
+    const QString n = QString::number(count);
+    const float countW = d.textWidth(n) + 12.0f;
+    const QString shown = p.fontMetrics().elidedText(name, Qt::ElideRight, static_cast<int>(w - 44 - countW - 16));
+    d.text({x + 44, cy - d.textHeight() * 0.5f}, theme::kText, shown);
+    // A rule from the name to the count: the heading of what follows, not one more item.
+    const float ruleFrom = x + 44 + d.textWidth(shown) + 10, ruleTo = x + w - countW - 10;
+    if (ruleTo > ruleFrom) d.line({ruleFrom, cy}, {ruleTo, cy}, theme::kBorder, 1.0f);
+    p.setFont(normal);
+    d.rectFilled({x + w - countW - 2, cy - 9}, {x + w - 2, cy + 9}, theme::kBgRaised, 9.0f);
+    d.text({x + w - countW - 2 + (countW - d.textWidth(n)) * 0.5f, cy - d.textHeight() * 0.5f}, theme::kTextDim, n);
 }
 
 CategoryHeader::CategoryHeader(Icon icon, const QString& name, int count, bool closed, QWidget* parent)
@@ -1534,24 +1558,7 @@ CategoryHeader::CategoryHeader(Icon icon, const QString& name, int count, bool c
 
 void CategoryHeader::paintEvent(QPaintEvent*) {
     QPainter p(this);
-    Draw d(p);
-    const float w = static_cast<float>(width()), cy = height() * 0.5f;
-    if (target_ || underMouse()) d.rectFilled({0, 1}, {w, height() - 1.0f}, target_ ? theme::accent(45) : theme::kBgHover, 6.0f);
-    drawIcon(d, closed_ ? Icon::ChevronRight : Icon::ChevronDown, {kGuideX, cy}, 12.0f, theme::kTextDim);
-    drawIcon(d, icon_, {29, cy}, 15.0f, theme::kAccent);
-    QFont bold = p.font();
-    bold.setWeight(QFont::DemiBold);
-    p.setFont(bold);
-    const QString count = QString::number(count_);
-    const float countW = d.textWidth(count) + 12.0f;
-    const QString name = p.fontMetrics().elidedText(name_, Qt::ElideRight, static_cast<int>(w - 44 - countW - 16));
-    d.text({44, cy - d.textHeight() * 0.5f}, theme::kText, name);
-    // A rule from the name to the count: the heading of what follows, not one more item.
-    const float ruleFrom = 44 + d.textWidth(name) + 10, ruleTo = w - countW - 10;
-    if (ruleTo > ruleFrom) d.line({ruleFrom, cy}, {ruleTo, cy}, theme::kBorder, 1.0f);
-    p.setFont(font());
-    d.rectFilled({w - countW - 2, cy - 9}, {w - 2, cy + 9}, theme::kBgRaised, 9.0f);
-    d.text({w - countW - 2 + (countW - d.textWidth(count)) * 0.5f, cy - d.textHeight() * 0.5f}, theme::kTextDim, count);
+    paintCategoryHeader(p, rect(), icon_, name_, count_, closed_, underMouse(), target_);
 }
 
 void CategoryHeader::mouseReleaseEvent(QMouseEvent* e) {
@@ -1576,6 +1583,24 @@ void CategoryHeader::dropEvent(QDropEvent* e) {
     if (!accepts || !accepts(e->mimeData())) return;
     e->acceptProposedAction();
     if (dropped) dropped(e->mimeData());
+}
+
+ChoiceRow::ChoiceRow(Icon icon, const QString& label, QWidget* parent) : QAbstractButton(parent), icon_(icon), label_(label) {
+    setCursor(Qt::PointingHandCursor);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    setFixedHeight(28);
+}
+
+void ChoiceRow::paintEvent(QPaintEvent*) {
+    QPainter p(this);
+    Draw d(p);
+    const bool hovered = underMouse();
+    const float w = static_cast<float>(width()), cy = height() * 0.5f;
+    if (hovered || isDown()) d.rectFilled({0, 0}, {w, static_cast<float>(height())}, isDown() ? theme::kBgRaised : theme::kBgHover, 6.0f);
+    drawIcon(d, icon_, {14, cy}, 14.0f, hovered ? theme::kText : theme::kTextDim);
+    const QString text = p.fontMetrics().elidedText(label_, Qt::ElideRight, static_cast<int>(w - 30 - (hovered ? 26 : 6)));
+    d.text({30, cy - d.textHeight() * 0.5f}, hovered ? theme::kText : theme::kTextDim, text);
+    if (hovered) drawIcon(d, Icon::Plus, {w - 14, cy}, 12.0f, theme::kText);
 }
 
 CategoryBody::CategoryBody(QWidget* content, QWidget* parent) : QWidget(parent) {

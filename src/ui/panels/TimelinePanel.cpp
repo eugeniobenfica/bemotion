@@ -54,17 +54,20 @@ namespace {
 // A transition or a Quick Animation on its clip: the same band for both (they are the same
 // thing, keyframes made for you). `stretchRight`: the end its length is dragged by.
 void drawMotionBand(ui::Draw& d, float left, float right, float y, float h, bool picked, bool stretchRight, bool withIcon,
-                    ui::Icon icon, const QString& name) {
+                    ui::Icon icon, const QString& name, bool bothEnds = false) {
     const Rgba tone = theme::kAccent;
     d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(theme::kBgPanel, 225), 5.0f); // readable over a video's frames
     d.rectFilled({left, y + 5}, {right, y + h - 5}, theme::withAlpha(tone, picked ? 80 : 45), 5.0f);
     d.rect({left, y + 5}, {right, y + h - 5}, picked ? theme::kText : tone, 5.0f, picked ? 2.0f : 1.2f);
+    // Where it is stretched from (a Quick Animation: either end).
     const float handle = stretchRight ? right : left;
     d.line({handle, y + 8}, {handle, y + h - 8}, tone, 2.0f);
-    if (withIcon) ui::drawIcon(d, icon, {left + 10.0f, y + h * 0.5f}, 12.0f, tone);
+    if (bothEnds) d.line({left + 1.0f, y + 8}, {left + 1.0f, y + h - 8}, tone, 2.0f);
+    const float iconX = left + (bothEnds ? 13.0f : 10.0f);
+    if (withIcon) ui::drawIcon(d, icon, {iconX, y + h * 0.5f}, 12.0f, tone);
     if (right - left > 44.0f && !name.isEmpty()) { // its name, when there is room
-        d.pushClip({left + 18.0f, y}, {right - 3.0f, y + h});
-        d.text({left + 20.0f, y + (h - d.textHeight()) * 0.5f}, theme::kText, name);
+        d.pushClip({iconX + 8.0f, y}, {right - 3.0f, y + h});
+        d.text({iconX + 10.0f, y + (h - d.textHeight()) * 0.5f}, theme::kText, name);
         d.popClip();
     }
 }
@@ -1861,7 +1864,7 @@ void TimelinePanel::paintAnimations(QPainter& p, const Layer& layer, float y, fl
         if (!keyed) continue;
         const float left = timeToX(from) + 2.0f, right = std::max(left + 16.0f, timeToX(until) - 2.0f);
         const bool picked = ctx_.animationLayer == layer.id && ctx_.animationIndex == static_cast<int>(&a - layer.animations.data());
-        drawMotionBand(d, left, right, y, h, picked, true, true, ui::Icon::Ease, trs(a.name));
+        drawMotionBand(d, left, right, y, h, picked, true, true, ui::Icon::Ease, trs(a.name), true);
     }
 }
 
@@ -2015,7 +2018,8 @@ TimelinePanel::AnimationHit TimelinePanel::animationHit(const Item& track, float
             if (until <= from) continue;
             const float left = timeToX(from) + 2.0f, right = std::max(left + 16.0f, timeToX(until) - 2.0f);
             if (mx < left || mx > right) continue;
-            return {layer.id, k, std::fabs(mx - right) <= kEdgeGrab};
+            const bool end = std::fabs(mx - right) <= kEdgeGrab, start = !end && std::fabs(mx - left) <= kEdgeGrab;
+            return {layer.id, k, end || start, start};
         }
     }
     return {};
@@ -2441,6 +2445,7 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
                     beginLayerDrag(band.resize ? Drag::AnimationResize : Drag::AnimationMove, band.layer, pos);
                     dragAnimStart_ = a.start;
                     dragAnimDuration_ = a.duration;
+                    dragAnimFromStart_ = band.start;
                 }
                 relayout();
                 return;
@@ -2750,8 +2755,13 @@ void TimelinePanel::updateLayerDrag(QPointF pos) {
         rows_->setCursor(drag_ == Drag::AnimationMove ? Qt::ClosedHandCursor : Qt::SizeHorCursor);
         const int index = ctx_.animationIndex;
         if (index < 0 || index >= static_cast<int>(layer->animations.size())) break;
-        const double start = drag_ == Drag::AnimationMove ? dragAnimStart_ + raw : dragAnimStart_;
-        const double duration = drag_ == Drag::AnimationResize ? std::max(0.05, dragAnimDuration_ + raw) : dragAnimDuration_;
+        double start = drag_ == Drag::AnimationMove ? dragAnimStart_ + raw : dragAnimStart_;
+        double duration = drag_ == Drag::AnimationResize ? std::max(0.05, dragAnimDuration_ + raw) : dragAnimDuration_;
+        if (drag_ == Drag::AnimationResize && dragAnimFromStart_) { // its start moves, its end stays
+            const double end = dragAnimStart_ + dragAnimDuration_;
+            start = std::clamp(dragAnimStart_ + raw, layer->inPoint, end - 0.05);
+            duration = end - start;
+        }
         const AppliedAnimation before = layer->animations[static_cast<size_t>(index)];
         if (retimeQuickAnimation(*layer, static_cast<size_t>(index), start, duration)) {
             // Its index may change (they stay in time order): follow it by what it is.

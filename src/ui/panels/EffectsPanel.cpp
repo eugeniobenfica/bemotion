@@ -76,12 +76,12 @@ constexpr Category kCategories[] = {
 };
 constexpr const char* kPresets = TR_NOOP("Presets");
 
-// One thing the browser offers: a tile in its category.
+// One thing the browser offers: a row of its category's list.
 struct Item {
     ui::Icon icon;
     QString label, tip;
     std::function<void()> apply;
-    std::function<void(ui::Tile*)> setup; // more on its tile (a right-click menu)
+    std::function<void(QAbstractButton*)> setup; // more on its row (a right-click menu)
 };
 
 } // namespace
@@ -436,16 +436,20 @@ void EffectsPanel::rebuildBrowser() {
         };
         col->addWidget(header);
         if (closed) return;
-        auto* grid = new ui::ResponsiveGrid(84);
+        // A list to pick from (effects are clicked onto the selected layers, not dragged like
+        // Animate's and Objects' tiles).
+        auto* list = new QWidget;
+        auto* rows = new QVBoxLayout(list);
+        rows->setContentsMargins(0, 0, 0, 0);
+        rows->setSpacing(1);
         for (const Item& item : items) {
-            auto* tile = new ui::Tile(item.icon, item.label);
-            tile->setTileSize({84, 62});
-            tile->setToolTip(item.tip);
-            connect(tile, &QAbstractButton::clicked, this, item.apply);
-            if (item.setup) item.setup(tile);
-            grid->addWidget(tile);
+            auto* row = new ui::ChoiceRow(item.icon, item.label);
+            row->setToolTip(item.tip);
+            connect(row, &QAbstractButton::clicked, this, item.apply);
+            if (item.setup) item.setup(row);
+            rows->addWidget(row);
         }
-        auto* body = new ui::CategoryBody(grid);
+        auto* body = new ui::CategoryBody(list);
         if (more) more(body);
         col->addWidget(body);
     };
@@ -473,7 +477,7 @@ void EffectsPanel::rebuildBrowser() {
             const std::filesystem::path file = lp.file;
             presets.push_back({ui::Icon::Star, trs(lp.preset.name), trs(lp.preset.name) + "\n" + list,
                                [this, effects] { applyToSelection(ctx_, effects); },
-                               [this, file](ui::Tile* t) {
+                               [this, file](QAbstractButton* t) {
                                    if (file.empty()) return; // the user's own: deleted from here
                                    t->setContextMenuPolicy(Qt::CustomContextMenu);
                                    connect(t, &QWidget::customContextMenuRequested, this, [this, t, file](QPoint p) {

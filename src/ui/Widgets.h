@@ -13,6 +13,7 @@
 #include <QLabel>
 #include <QLayout>
 #include <QPushButton>
+#include <QRectF>
 #include <QToolButton>
 #include <QStringList>
 #include <QWidget>
@@ -437,6 +438,11 @@ private:
 // A library sorted in categories (Effects, Animate) reads the same everywhere: each category is a
 // heading row (open or closed, its icon, its name, how many items, a rule to the edge), never a
 // tile; its items are tiles in a CategoryBody under it, set in from a guide line.
+// Draws a category's heading row in `r` (CategoryHeader; painted lists like the Media panel's
+// folders draw theirs with it, to look the same). The guide line under it is at kCategoryGuideX.
+void paintCategoryHeader(QPainter& p, const QRectF& r, Icon icon, const QString& name, int count, bool closed, bool hovered, bool target);
+constexpr float kCategoryGuideX = 9.0f;
+
 class CategoryHeader : public QWidget {
 public:
     CategoryHeader(Icon icon, const QString& name, int count, bool closed, QWidget* parent = nullptr);
@@ -459,6 +465,26 @@ private:
     QString name_;
     int count_;
     bool closed_, target_ = false;
+};
+
+// A choice in a list (the Effects browser): its icon, its name, a "+" when the mouse is on it.
+// Clicked, it is applied; it is not dragged (that is what a Tile is for), so it does not look
+// like one.
+class ChoiceRow : public QAbstractButton {
+    Q_OBJECT
+public:
+    ChoiceRow(Icon icon, const QString& label, QWidget* parent = nullptr);
+    QSize sizeHint() const override { return {160, 28}; }
+    QSize minimumSizeHint() const override { return {60, 28}; }
+
+protected:
+    void paintEvent(QPaintEvent*) override;
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+
+private:
+    Icon icon_;
+    QString label_;
 };
 
 // The items of an open category: `content` (a ResponsiveGrid of tiles, a note...), set in under

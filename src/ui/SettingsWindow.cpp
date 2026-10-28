@@ -15,6 +15,7 @@
 #include "ui/Keymap.h"
 #include "ui/Language.h"
 #include "ui/ColorPicker.h"
+#include "ui/GpuContext.h"
 #include "ui/PagedWindow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -711,7 +712,8 @@ QWidget* performancePage() {
         const Settings d;
         st.hardwareDecoding = d.hardwareDecoding, st.useProxies = d.useProxies, st.cacheMegabytes = d.cacheMegabytes;
         st.scaledVideoPreview = d.scaledVideoPreview, st.autoProxies = d.autoProxies, st.showFilmstrips = d.showFilmstrips;
-        st.adaptivePlayback = d.adaptivePlayback;
+        st.adaptivePlayback = d.adaptivePlayback, st.gpuRendering = d.gpuRendering;
+        useGpu(st.gpuRendering);
         st.previewQuality = d.previewQuality;
         media::setHardwareDecoding(st.hardwareDecoding);
         media::MediaManager::get().reopenVideos();
@@ -729,14 +731,6 @@ QWidget* performancePage() {
                                   saveSettings();
                                   emit AppSignals::get().appearanceChanged();
                               }));
-    preview->addRow(tr("Decode video at the size shown"),
-                    tr("A video shown small in the viewport is read small: much less work for 4K and HD footage. Exports "
-                       "always read it at full size"),
-                    switchControl(s.scaledVideoPreview, [](bool on) {
-                        settings().scaledVideoPreview = on;
-                        media::MediaManager::get().setScaledPreview(on);
-                        saveSettings();
-                    }));
     preview->addRow(tr("Lower the resolution while playing"),
                     tr("When a frame takes longer to draw than it lasts (heavy effects, big videos), playback draws at half or a "
                        "quarter of the size to stay smooth. Paused, the picture is back at the preview quality"),
@@ -745,6 +739,46 @@ QWidget* performancePage() {
                         saveSettings();
                     }));
     SettingsCard* playback = addSection(col, tr("Video"));
+    playback->addRow(tr("Use proxies"),
+                     tr("Videos with a proxy (Media panel › right-click › Create Proxy) play from it in the editor: smooth even "
+                     "for 4K. Exports always use the originals"),
+                     switchControl(s.useProxies, [](bool on) {
+                         settings().useProxies = on;
+                         media::MediaManager::get().setUseProxies(on);
+                         saveSettings();
+                     }));
+    SettingsCard* timeline = addSection(col, tr("Timeline"));
+    timeline->addRow(tr("Video frames on clips"),
+                     tr("Video clips show pictures of their frames (made in the background). Off: plain clips, lighter on a slow computer"),
+                     switchControl(s.showFilmstrips, [](bool on) {
+                         settings().showFilmstrips = on;
+                         saveSettings();
+                         emit AppSignals::get().appearanceChanged();
+                     }));
+    // The rest is fine-tuning: Advanced Options.
+    if (!s.advanced) {
+        col->addSpacing(6);
+        col->addWidget(hintLabel(tr("The graphics card, hardware decoding, proxy files and memory for cached frames are in Advanced Options (bottom left).")));
+        return page;
+    }
+    preview->addRow(tr("Draw with the graphics card"),
+                    tr("The viewport and exports draw on the graphics card (OpenGL): effects, blurs and big videos many times "
+                       "faster. Off, or without OpenGL: on the processor") +
+                        (*gpuName() ? tr(" (in use: %1)").arg(QString::fromUtf8(gpuName())) : QString()),
+                    switchControl(s.gpuRendering, [](bool on) {
+                        settings().gpuRendering = on;
+                        useGpu(on);
+                        saveSettings();
+                        emit AppSignals::get().appearanceChanged(); // the viewport draws again
+                    }));
+    preview->addRow(tr("Decode video at the size shown"),
+                    tr("A video shown small in the viewport is read small: much less work for 4K and HD footage. Exports "
+                       "read it at the size it comes out, never smaller"),
+                    switchControl(s.scaledVideoPreview, [](bool on) {
+                        settings().scaledVideoPreview = on;
+                        media::MediaManager::get().setScaledPreview(on);
+                        saveSettings();
+                    }));
     const std::string decoder = media::hardwareDecoderName();
     playback->addRow(tr("Hardware video decoding"),
                      tr("The graphics card reads HD and 4K videos (H.264, HEVC, VP9, AV1): lighter on a laptop's processor, though a fast processor is often quicker on its own") +
@@ -753,14 +787,6 @@ QWidget* performancePage() {
                          settings().hardwareDecoding = on;
                          media::setHardwareDecoding(on);
                          media::MediaManager::get().reopenVideos();
-                         saveSettings();
-                     }));
-    playback->addRow(tr("Use proxies"),
-                     tr("Videos with a proxy (Media panel › right-click › Create Proxy) play from it in the editor: smooth even "
-                     "for 4K. Exports always use the originals"),
-                     switchControl(s.useProxies, [](bool on) {
-                         settings().useProxies = on;
-                         media::MediaManager::get().setUseProxies(on);
                          saveSettings();
                      }));
     playback->addRow(tr("Make proxies when importing"),
@@ -800,14 +826,6 @@ QWidget* performancePage() {
                      tr("Decoded video frames and rendered previews already shown are kept, so they play again at once. "
                      "More memory: longer stretches"),
                      memory);
-    SettingsCard* timeline = addSection(col, tr("Timeline"));
-    timeline->addRow(tr("Video frames on clips"),
-                     tr("Video clips show pictures of their frames (made in the background). Off: plain clips, lighter on a slow computer"),
-                     switchControl(s.showFilmstrips, [](bool on) {
-                         settings().showFilmstrips = on;
-                         saveSettings();
-                         emit AppSignals::get().appearanceChanged();
-                     }));
     return page;
 }
 

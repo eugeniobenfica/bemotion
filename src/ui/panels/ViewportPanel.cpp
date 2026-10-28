@@ -5,6 +5,7 @@
 #include "core/Geometry.h"
 #include "core/Snapping.h"
 #include "media/MediaManager.h"
+#include "render/Gpu.h"
 #include "render/SceneRenderer.h"
 #include "ui/AppSignals.h"
 #include "ui/Draw.h"
@@ -491,7 +492,13 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
         if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
         frame_.fill(Qt::transparent);
         const SkImageInfo info = qtImageInfo(px.width(), px.height());
-        sk_sp<SkSurface> surface = SkSurfaces::WrapPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()));
+        // On the graphics card when there is one (render/Gpu.h; its pixels read back into
+        // frame_), else straight into frame_.
+        if (!render::gpu()) gpuSurface_.reset();
+        else if (!gpuSurface_ || gpuSurface_->width() != px.width() || gpuSurface_->height() != px.height()) gpuSurface_ = render::makeGpuSurface(info);
+        const bool onGpu = gpuSurface_ && render::gpu()->makeCurrent();
+        if (onGpu) gpuSurface_->getCanvas()->clear(SK_ColorTRANSPARENT);
+        sk_sp<SkSurface> surface = onGpu ? gpuSurface_ : SkSurfaces::WrapPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()));
         frameValid_ = static_cast<bool>(surface);
         if (surface) {
             const float z = static_cast<float>(rasterScale);
@@ -508,6 +515,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
             timer.start();
             render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, render::View{origin_ * z, zoom_ * z, world_}, true,
                                     throughCamera_, orbit_ ? &orbitLens_ : nullptr);
+            if (onGpu) surface->readPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()), 0, 0);
             const double ms = timer.nsecsElapsed() / 1e6;
             frameKey_ = key;
             const bool stale = media::MediaManager::get().takeStale(); // a video frame still on its way: not kept

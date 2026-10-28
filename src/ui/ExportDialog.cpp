@@ -513,6 +513,7 @@ private:
         packageResultMode_ = false;
         if (s.output.extension() != exporting::formatExtension(s.format)) s.output += exporting::formatExtension(s.format);
         s.mixAudio = media::AudioEngine::mix;
+        s.decodeScale = [](const Composition* comp, double scale) { media::MediaManager::get().setOutputScale(comp, scale); };
         showError("");
         pages_->setCurrentIndex(1);
         progressTitle_->setText(tr("Preparing..."));

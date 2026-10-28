@@ -94,7 +94,7 @@ if(WIN32)
     target_link_libraries(skia INTERFACE gdi32 user32 ole32 oleaut32 uuid usp10 fontsub dwrite opengl32)
 elseif(APPLE)
     target_link_libraries(skia INTERFACE "-framework CoreText" "-framework CoreGraphics" "-framework CoreFoundation"
-                                          "-framework AppKit")
+                                          "-framework AppKit" "-framework OpenGL") # OpenGL: render/Gpu
 else()
     target_link_libraries(skia INTERFACE PkgConfig::FONTCONFIG GL)
 endif()

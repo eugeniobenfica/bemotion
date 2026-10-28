@@ -111,7 +111,7 @@ public:
             const size_t at = rows.size();
             const bool open = !closed_.count(f) || !filter.empty(); // searching opens them
             rows.push_back({Row::Folder, f, 0, 0});
-            if (open) itemsIn(f, 16);
+            if (open) itemsIn(f, static_cast<int>(ui::kCategoryGuideX) + 9); // as a CategoryBody sets its items in
             // Searching: only the folders with something that matches (or whose name does).
             if (!filter.empty() && rows.size() == at + 1 && !matches(f, filter)) rows.pop_back();
         }
@@ -185,22 +185,13 @@ protected:
         return entry.second;
     }
 
-    void paintFolder(QPainter& p, ui::Draw& d, const Row& r, float y, bool hot) {
-        const bool target = r.folder == dropFolder_;
-        if (target) d.rectFilled(ui::Pt(2, y + 1), ui::Pt(width() - 2, y + kFolderRow - 1), theme::accent(45), 6.0f);
-        else if (hot) d.rectFilled(ui::Pt(2, y + 1), ui::Pt(width() - 2, y + kFolderRow - 1), theme::kBgHover, 6.0f);
+    // A folder: drawn as the Effects and Animate panels' categories are (ui::CategoryHeader).
+    void paintFolder(QPainter& p, const Row& r, float y, bool hot) {
         const bool open = !closed_.count(r.folder) || !filter.empty();
-        const float cy = y + kFolderRow * 0.5f;
-        ui::drawIcon(d, open ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, ui::Pt(13, cy), 14.0f, theme::kTextDim);
-        ui::drawIcon(d, ui::Icon::Folder, ui::Pt(30, cy), 14.0f, target ? theme::kAccent : theme::kTextDim);
         int count = 0;
         for (const MediaItem& m : ctx_.comp().media) count += m.folder == r.folder;
-        const QString n = QString::number(count);
-        const float nw = static_cast<float>(p.fontMetrics().horizontalAdvance(n));
-        d.pushClip(ui::Pt(44, y), ui::Pt(width() - nw - 18, y + kFolderRow));
-        d.text(ui::Pt(44, cy - d.textHeight() * 0.5f), theme::kText, QString::fromStdString(r.folder));
-        d.popClip();
-        d.text(ui::Pt(width() - nw - 10, cy - d.textHeight() * 0.5f), theme::kTextFaint, n);
+        ui::paintCategoryHeader(p, QRectF(0, y, width(), kFolderRow), ui::Icon::Folder, QString::fromStdString(r.folder), count, !open, hot,
+                                r.folder == dropFolder_);
     }
 
     void paintEvent(QPaintEvent*) override {
@@ -213,7 +204,7 @@ protected:
             const float rowTop = y;
             y += height(row);
             if (row.kind == Row::Folder) {
-                paintFolder(p, d, row, rowTop, static_cast<int>(i) == hover_);
+                paintFolder(p, row, rowTop, static_cast<int>(i) == hover_);
                 continue;
             }
             const MediaItem* item = ctx_.comp().findMedia(row.id);
@@ -223,7 +214,7 @@ protected:
             const std::string error = missing ? tr("File not found: %1").arg(QString::fromStdString(item->path)).toStdString() : mm.error(item->id);
             if (item->id == selected) d.rectFilled(ui::Pt(x0 + 2, rowTop + 1), ui::Pt(width() - 2, rowTop + kRow - 1), theme::accent(45), 6.0f);
             else if (static_cast<int>(i) == hover_) d.rectFilled(ui::Pt(x0 + 2, rowTop + 1), ui::Pt(width() - 2, rowTop + kRow - 1), theme::kBgHover, 6.0f);
-            if (row.indent) d.line(ui::Pt(12, rowTop), ui::Pt(12, rowTop + kRow), theme::kBorder, 1.0f); // inside a folder
+            if (row.indent) d.line(ui::Pt(ui::kCategoryGuideX, rowTop), ui::Pt(ui::kCategoryGuideX, rowTop + kRow), theme::kBorder, 1.0f); // inside a folder
 
             // Thumbnail box: the picture fitted inside, or the kind's icon.
             const float th = kRow - 10.0f, tw = th * 16.0f / 9.0f;
@@ -242,10 +233,12 @@ protected:
             d.rect(a, b, missing ? theme::kDanger : theme::kBorder, 4.0f);
 
             const float tx = b.x + 8.0f;
-            d.pushClip(ui::Pt(tx, rowTop), ui::Pt(width() - 14, rowTop + kRow));
+            // Long names end in "…" (the whole name in the tooltip), never cut mid-letter.
+            const int room = std::max(0, static_cast<int>(width() - 16 - tx));
             const float lh = d.textHeight();
             const float ty = rowTop + (kRow - lh * 2.0f - 2.0f) * 0.5f;
-            d.text(ui::Pt(tx, ty), missing ? theme::kDanger : theme::kText, item->name);
+            d.text(ui::Pt(tx, ty), missing ? theme::kDanger : theme::kText,
+                   p.fontMetrics().elidedText(QString::fromStdString(item->name), Qt::ElideMiddle, room));
             QString info = missing ? tr("Missing — right-click to relink") : QString::fromStdString(describe(*item, ctx_.comp().fps));
             if (!missing && item->hasAudio && mm.audioPending(item->id)) info += tr("  ·  reading audio...");
             else if (!missing && !error.empty()) info = tr("Error — %1").arg(QString::fromStdString(error));
@@ -254,8 +247,7 @@ protected:
             else if (!missing && mm.hasProxy(*item)) info += mm.useProxies() ? tr("  ·  proxy") : tr("  ·  proxy (off)");
             else if (const std::string failed = mm.proxyError(item->id); !missing && !failed.empty())
                 info += tr("  ·  no proxy: %1").arg(QString::fromStdString(failed));
-            d.text(ui::Pt(tx, ty + lh + 2.0f), !error.empty() ? theme::kDanger : theme::kTextFaint, info);
-            d.popClip();
+            d.text(ui::Pt(tx, ty + lh + 2.0f), !error.empty() ? theme::kDanger : theme::kTextFaint, p.fontMetrics().elidedText(info, Qt::ElideRight, room));
             if (layersUsing(ctx_.comp(), item->id) > 0) d.circleFilled(ui::Pt(width() - 9.0f, rowTop + 10.0f), 3.0f, theme::kAccent);
         }
         // Media of a folder dragged off it: the room below says where it lands.

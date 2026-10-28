@@ -29,6 +29,7 @@ public:
 
 private:
     sk_sp<SkSurface> surface_;
+    bool onGpu_ = false; // on the graphics card (render/Gpu.h)
     int width_ = 0;
     int height_ = 0;
 };
