@@ -57,3 +57,19 @@ int main(int argc, char** argv) {
 - `Icon::Logo` is your app's mark: `setLogoPainter` (a disc until then).
 - `theme::dockStyleSheet()` styles Qt Advanced Docking System panels, for an
   app that docks with it.
+
+## Shared between projects
+
+bmstyle lives in [bestyle](https://github.com/eugeniobenfica/bestyle) and each
+app (bemotion, Artisan…) carries it as a git subtree in `libs/bmstyle`: the code
+is in the app's repository, so building needs nothing extra. Change it in any
+app, commit, then `tools/bestyle.sh push`; in the other apps
+`tools/bestyle.sh pull`. `tools/bestyle.sh status` shows what differs.
+
+A new app takes it with
+
+```bash
+git subtree add --prefix libs/bmstyle https://github.com/eugeniobenfica/bestyle.git main --squash
+```
+
+and copies `tools/bestyle.sh` from one of the others.
