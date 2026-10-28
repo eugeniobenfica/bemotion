@@ -115,7 +115,7 @@ set_target_properties(bemotion PROPERTIES AUTOMOC ON)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion PRIVATE
     bemotion_core
-    bmstyle
+    bestyle
     Qt6::Widgets Qt6::Svg Qt6::Network Qt6::Test
     qtadvanceddocking-qt6
     skia

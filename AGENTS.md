@@ -17,7 +17,7 @@ capability). This file is the short, practical version.
 | Drawing | `src/render` (`SceneRenderer`, `Text`, `PluginCanvas`, `Mesh3D`) |
 | Media, audio, recording, export | `src/media`, `src/export` |
 | Interface | `src/ui` (`EditorWindow`, `EditorContext`, `Widgets`, `panels/*`) |
-| The look (reusable) | `libs/bmstyle` (theme, style, `Draw`, icons, shared controls; Qt only, no bemotion code) |
+| The look (reusable) | `libs/bestyle` (theme, style, `Draw`, icons, shared controls; Qt only, no bemotion code) |
 | App, platform, plugins, automation | `src/app` (`Application`, `Platform`, `Settings`, `PluginHost`, `Automation`, `McpServer`, `Recovery`, `DevScript`) |
 | Bundled plugins | `assets/plugins` (charts, models3d, recorder) |
 | Contracts in prose | `docs/OPERATIONS.md`, `docs/PLUGINS.md`, `docs/AUTOMATION.md`, `docs/EXPRESSIONS.md` |
@@ -25,10 +25,10 @@ capability). This file is the short, practical version.
 ## Rules
 
 - Layers: `core` ← `render` ← `media` / `export` ← `ui` ← `app`, and
-  `libs/bmstyle` ← `ui`. Dependencies only point down; `bmstyle` never
+  `libs/bestyle` ← `ui`. Dependencies only point down; `bestyle` never
   includes bemotion code (other apps use it). A control panels share goes
   there; one that knows about layers, keyframes or settings stays in `ui`.
-- `libs/bmstyle` is a git subtree of the bestyle repository, shared with
+- `libs/bestyle` is a git subtree of the bestyle repository, shared with
   Artisan: commit changes there on their own (no other files), then
   `tools/bestyle.sh push`; `tools/bestyle.sh pull` brings in the other apps'
   changes.

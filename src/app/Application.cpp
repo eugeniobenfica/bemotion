@@ -28,7 +28,7 @@
 #include "ui/Widgets.h"
 #include "ui/WindowChrome.h"
 
-#include "bmstyle/BmStyle.h"
+#include "bestyle/BeStyle.h"
 
 #include <QAction>
 #include <QApplication>
@@ -181,11 +181,11 @@ int Application::run(int argc, char** argv) {
     platform::log("Qt " + std::string(qVersion()) + " on " + QSysInfo::prettyProductName().toStdString() + ", screen scale " +
                   std::to_string(app.devicePixelRatio()));
     QApplication::setStyle(new ui::Style); // Fusion with our check boxes; the palette and style sheet do the rest
-    // bmstyle (the look, libs/bmstyle): its controls' text through our translations, and its
+    // bestyle (the look, libs/bestyle): its controls' text through our translations, and its
     // toned labels recolored when anything about the appearance changes (fonts, sizes too).
-    bmstyle::setTranslator([](const QString& text) { return trLabel(text); });
-    bmstyle::setLogoPainter(ui::drawLogoMark);
-    QObject::connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, &bmstyle::Appearance::get(), &bmstyle::Appearance::changed);
+    bestyle::setTranslator([](const QString& text) { return trLabel(text); });
+    bestyle::setLogoPainter(ui::drawLogoMark);
+    QObject::connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, &bestyle::Appearance::get(), &bestyle::Appearance::changed);
     ui::installWindowChrome();              // dialogs and windows framed by bemotion, not the system
     initShared();
     // The interface font: Inter ships with bemotion (other families come from the system).

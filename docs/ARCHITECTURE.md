@@ -63,7 +63,7 @@ follow from that:
 ```
 src/app      application, command line, MCP server, plugins, settings, OS (Qt)
  └─ src/ui       Qt Widgets editor: window, panels, dialogs
-     ├─ libs/bmstyle the look: theme, widget style, icons, shared controls (Qt only)
+     ├─ libs/bestyle the look: theme, widget style, icons, shared controls (Qt only)
      ├─ src/export   export job and encoders (FFmpeg libraries, PNG)
      ├─ src/media    media decoding (FFmpeg, stb), audio playback (miniaudio)
      └─ src/render   draws compositions with Skia (screen and offscreen), text, fonts
@@ -77,8 +77,8 @@ Dependencies only point **down**. In particular:
 | `core` | the C++ standard library, nlohmann/json | Qt, Skia, FFmpeg, Lua, anything above |
 | `render` | `core`, Skia | Qt, `ui`, `app` |
 | `media`, `export` | `core`, `render`, FFmpeg, stb, miniaudio | `ui`, `app` (`Platform` path helpers are the one exception) |
-| `libs/bmstyle` | Qt Widgets, nlohmann/json | anything of bemotion (it is reusable by other apps) |
-| `ui` | everything below, Qt, `bmstyle` | `app` internals other than `Platform`, `Settings`, `PluginHost`, the libraries |
+| `libs/bestyle` | Qt Widgets, nlohmann/json | anything of bemotion (it is reusable by other apps) |
+| `ui` | everything below, Qt, `bestyle` | `app` internals other than `Platform`, `Settings`, `PluginHost`, the libraries |
 | `app` | everything | — |
 
 `core` builds as its own library (`bemotion_core`) with its own tests; a core
@@ -643,7 +643,7 @@ Rules:
   (`setExpressionComposition`); a closed editor sets it to null, and a new
   one replaces it, so nothing reads a composition that is gone.
 - **Drag and drop** between panels uses the MIME types of `ui/Mime.h`.
-- **The look is a library: `bmstyle`** (`libs/bmstyle`, see its README). The
+- **The look is a library: `bestyle`** (`libs/bestyle`, see its README). The
   theme, the widget style, the drawing vocabulary, the icon set and the
   controls panels share (`IconButton`, `Tile`, `DragValue`, `Switch`,
   `segmented`, `FlowLayout`, `ElidedLabel`, `ResponsiveGrid`, `LabeledRow`,
@@ -653,12 +653,12 @@ Rules:
   `ui/Widgets.h` bring them into `theme::` / `ui::`, so the editor's code
   reads as before; what is bemotion's own (icons for layers, `AudioMeter`,
   `KeyframeButton`, `ColorButton`, `CollapsibleSection`) stays in `ui`. The
-  app gives the library its translations (`bmstyle::setTranslator(trLabel)`),
+  app gives the library its translations (`bestyle::setTranslator(trLabel)`),
   its logo (`setLogoPainter`) and forwards `appearanceChanged` to
-  `bmstyle::Appearance`. Spacing comes from `bmstyle::metrics` (a 4 px step).
+  `bestyle::Appearance`. Spacing comes from `bestyle::metrics` (a 4 px step).
   A new shared control goes into the library; a control that knows about
   layers, keyframes or settings stays in `ui`.
-- **`Theme`** (`bmstyle/Theme.h`) — palettes (`Palette`) applied as a `QPalette` + style sheet.
+- **`Theme`** (`bestyle/Theme.h`) — palettes (`Palette`) applied as a `QPalette` + style sheet.
   Colors come from the named tokens (`theme::kText`, `kTextDim`, `kAccent`,
   `kBgPanel`, `kDanger`, …), never literals; the default accent is gold
   `#E8B931` on near-black. Besides the base colors a palette has optional
@@ -677,11 +677,11 @@ Rules:
   `ui::setTone(label, Tone::…)` (recolored on `appearanceChanged`), never a
   style sheet with a baked color; screens that bake colors otherwise rebuild
   on `appearanceChanged` (the home screen does).
-- **`Style`** (`bmstyle/Style.h`) — Fusion plus our check boxes and radio buttons
+- **`Style`** (`bestyle/Style.h`) — Fusion plus our check boxes and radio buttons
   (outline and check mark; an accent-filled box reads as a color swatch).
-- **`Draw`** (`bmstyle/Draw.h`) — the small drawing vocabulary over `QPainter` for
+- **`Draw`** (`bestyle/Draw.h`) — the small drawing vocabulary over `QPainter` for
   custom-painted parts (`Rgba` packed 0xAABBGGRR, `Pt`). **Icons** are vector
-  code in `bmstyle/Icons.cpp` (`Icon` enum, `drawIcon`, `makeIcon`) — no icon files.
+  code in `bestyle/Icons.cpp` (`Icon` enum, `drawIcon`, `makeIcon`) — no icon files.
 - **`Keymap`** — every shortcut is an `Action` with a default chord (After
   Effects conventions), rebindable in Settings and saved by id.
 - **`Tools`** — the tools and actions users can put in the timeline toolbar

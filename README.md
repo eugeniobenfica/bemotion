@@ -577,7 +577,7 @@ src/export   video / image-sequence encoders and the export job
 src/media    imported media: image / audio / video decoding (FFmpeg), audio playback and mixing
 src/ui       Qt interface: theme, widgets, intro, home screen, editor window, dock panels, dialogs
 src/app      application window, OS integration, settings, preset/theme libraries, plugin host
-libs/bmstyle the look (theme, widget style, drawing, icons, shared controls), reusable by other Qt apps
+libs/bestyle the look (theme, widget style, drawing, icons, shared controls), reusable by other Qt apps
 assets       fonts, bundled plugins, the Welcome project and the brand files
 tools        Skia build, packaging (Windows, Linux, macOS), release, smoke test and language scripts
 tests        unit tests for the core

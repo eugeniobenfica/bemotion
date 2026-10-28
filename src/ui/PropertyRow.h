@@ -20,18 +20,18 @@ class QLineEdit;
 class QToolButton;
 class QVBoxLayout;
 
-namespace bmstyle {
+namespace bestyle {
 class IconButton;
 class DragValue;
-} // namespace bmstyle
+} // namespace bestyle
 
 namespace bemotion {
 
 class EditorContext;
 namespace ui {
 class ColorButton;
-using bmstyle::DragValue;
-using bmstyle::IconButton;
+using bestyle::DragValue;
+using bestyle::IconButton;
 class KeyframeButton;
 class ExpressionEditor;
 }

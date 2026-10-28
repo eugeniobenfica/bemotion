@@ -27,21 +27,21 @@ class QPlainTextEdit;
 class QPushButton;
 class QToolButton;
 
-namespace bmstyle {
+namespace bestyle {
 class IconButton;
 class DragValue;
-} // namespace bmstyle
+} // namespace bestyle
 
 namespace bemotion {
 
 namespace ui {
 class ColorButton;
-using bmstyle::DragValue;
+using bestyle::DragValue;
 } // namespace ui
 
 class EditorContext;
 namespace ui {
-using bmstyle::IconButton;
+using bestyle::IconButton;
 }
 
 // Center panel: renders the composition (Skia) and provides direct manipulation.

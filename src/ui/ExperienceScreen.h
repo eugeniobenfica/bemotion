@@ -6,13 +6,13 @@
 
 class QAbstractButton;
 
-namespace bmstyle {
+namespace bestyle {
 class Switch;
-} // namespace bmstyle
+} // namespace bestyle
 
 namespace bemotion::ui {
 
-using bmstyle::Switch;
+using bestyle::Switch;
 
 // Shown over the whole window on bemotion's first start: how much the interface shows
 // (Friendly, Balanced, Expert: app/Settings applyExperience) and whether plugins load at all

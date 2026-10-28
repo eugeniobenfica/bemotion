@@ -28,9 +28,9 @@ class CDockManager;
 class CDockWidget;
 }
 
-namespace bmstyle {
+namespace bestyle {
 class IconButton;
-} // namespace bmstyle
+} // namespace bestyle
 
 namespace bemotion {
 
@@ -49,7 +49,7 @@ class EffectsPanel;
 class TimelinePanel;
 namespace ui {
 class PreviewWindow;
-using bmstyle::IconButton;
+using bestyle::IconButton;
 class AudioMeter;
 enum class Action;
 }

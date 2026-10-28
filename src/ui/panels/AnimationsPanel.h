@@ -10,10 +10,10 @@ class QLineEdit;
 class QScrollArea;
 class QVBoxLayout;
 
-namespace bmstyle {
+namespace bestyle {
 class DragValue;
 class Tile;
-} // namespace bmstyle
+} // namespace bestyle
 
 namespace bemotion {
 
@@ -21,8 +21,8 @@ class EditorContext;
 struct AnimationPreset;
 struct Layer;
 namespace ui {
-using bmstyle::DragValue;
-using bmstyle::Tile;
+using bestyle::DragValue;
+using bestyle::Tile;
 } // namespace ui
 
 // Animate: everything that moves a clip for you, as one thing. Transitions (core/Transitions.h:

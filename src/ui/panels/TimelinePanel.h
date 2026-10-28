@@ -25,10 +25,10 @@ class QLineEdit;
 class QPushButton;
 class QHBoxLayout;
 
-namespace bmstyle {
+namespace bestyle {
 class IconButton;
 class Draw;
-} // namespace bmstyle
+} // namespace bestyle
 
 namespace bemotion {
 
@@ -38,8 +38,8 @@ class TimelineRows;
 class TimelineScrollbar;
 class ToolPill;
 namespace ui {
-using bmstyle::Draw;
-using bmstyle::IconButton;
+using bestyle::Draw;
+using bestyle::IconButton;
 }
 
 // Bottom panel: toolbar (the user's tools, snapping, transport), time ruler,

@@ -1,10 +1,10 @@
 #pragma once
 
-// The application's widget style is bmstyle's (libs/bmstyle): Fusion, with our check boxes and
+// The application's widget style is bestyle's (libs/bestyle): Fusion, with our check boxes and
 // radio buttons, and lists the wheel does not change.
 
-#include "bmstyle/Style.h"
+#include "bestyle/Style.h"
 
 namespace bemotion::ui {
-using bmstyle::Style;
+using bestyle::Style;
 } // namespace bemotion::ui

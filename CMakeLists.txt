@@ -18,7 +18,7 @@ option(BEMOTION_BUILD_TESTS "Build the core unit tests" ON)
 
 include(cmake/Dependencies.cmake)
 
-add_subdirectory(libs/bmstyle) # the look, reusable by other Qt apps
+add_subdirectory(libs/bestyle) # the look, reusable by other Qt apps
 add_subdirectory(src)
 
 if(BEMOTION_BUILD_TESTS)

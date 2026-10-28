@@ -2,7 +2,7 @@
 
 // The interface's building blocks. The look itself — the icon set and the controls every panel
 // shares (IconButton, DragValue, Switch, segmented, FlowLayout, CategoryHeader...) — is the
-// bmstyle library (libs/bmstyle), reusable by other Qt apps; it is brought into ui:: here.
+// bestyle library (libs/bestyle), reusable by other Qt apps; it is brought into ui:: here.
 // What is bemotion's own (icons for layers, the audio meter, keyframe and color buttons) is
 // declared below.
 
@@ -11,8 +11,8 @@
 #include "ui/Draw.h"
 #include "ui/Language.h"
 
-#include "bmstyle/Icons.h"
-#include "bmstyle/Widgets.h"
+#include "bestyle/Icons.h"
+#include "bestyle/Widgets.h"
 
 #include <QAbstractButton>
 #include <QIcon>
@@ -32,29 +32,29 @@ class QMimeData;
 
 namespace bemotion::ui {
 
-using bmstyle::accentButton;
-using bmstyle::CategoryBody;
-using bmstyle::CategoryHeader;
-using bmstyle::ChoiceRow;
-using bmstyle::DragValue;
-using bmstyle::drawDiamond;
-using bmstyle::drawIcon;
-using bmstyle::ElidedLabel;
-using bmstyle::FlowLayout;
-using bmstyle::Icon;
-using bmstyle::IconButton;
-using bmstyle::kCategoryGuideX;
-using bmstyle::LabeledRow;
-using bmstyle::makeIcon;
-using bmstyle::menuIcon;
-using bmstyle::paintCategoryHeader;
-using bmstyle::ResponsiveGrid;
-using bmstyle::sectionLabel;
-using bmstyle::segmented;
-using bmstyle::setTone;
-using bmstyle::Switch;
-using bmstyle::Tile;
-using bmstyle::Tone;
+using bestyle::accentButton;
+using bestyle::CategoryBody;
+using bestyle::CategoryHeader;
+using bestyle::ChoiceRow;
+using bestyle::DragValue;
+using bestyle::drawDiamond;
+using bestyle::drawIcon;
+using bestyle::ElidedLabel;
+using bestyle::FlowLayout;
+using bestyle::Icon;
+using bestyle::IconButton;
+using bestyle::kCategoryGuideX;
+using bestyle::LabeledRow;
+using bestyle::makeIcon;
+using bestyle::menuIcon;
+using bestyle::paintCategoryHeader;
+using bestyle::ResponsiveGrid;
+using bestyle::sectionLabel;
+using bestyle::segmented;
+using bestyle::setTone;
+using bestyle::Switch;
+using bestyle::Tile;
+using bestyle::Tone;
 
 Icon iconForLayer(const Layer& layer);
 Icon iconForShape(ShapeKind kind);

@@ -5,15 +5,15 @@
 
 #include <vector>
 
-namespace bmstyle {
+namespace bestyle {
 class Tile;
-} // namespace bmstyle
+} // namespace bestyle
 
 namespace bemotion {
 
 class EditorContext;
 namespace ui {
-using bmstyle::Tile;
+using bestyle::Tile;
 }
 
 // Every tool and editing action that fits in the timeline's toolbar. Click one
