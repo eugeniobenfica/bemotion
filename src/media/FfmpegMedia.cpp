@@ -100,7 +100,7 @@ struct Decoder {
         if (!codec) return false;
         ctx = avcodec_alloc_context3(codec);
         if (!ctx || avcodec_parameters_to_context(ctx, stream->codecpar) < 0) return false;
-        ctx->thread_count = 0; // as many threads as useful
+        ctx->thread_count = threadCount(); // 0: as many threads as useful
         if (hardware) {
             for (int i = 0;; ++i) {
                 const AVCodecHWConfig* config = avcodec_get_hw_config(codec, i);
@@ -321,6 +321,61 @@ bool ffmpegProbe(const std::filesystem::path& file, MediaItem& item, std::string
     return true;
 }
 
+// A still picture through FFmpeg's image decoders (WebP, TIFF, AVIF, HEIC, JPEG XL, EXR...): its
+// first frame as straight RGBA. `frames` (when given): how many pictures the file holds (an
+// animated GIF or WebP has more than one; counted up to 2).
+bool ffmpegDecodeImage(const std::filesystem::path& file, int& width, int& height, std::vector<uint8_t>& rgba, std::string* error,
+                       int* frames) {
+    Input in;
+    if (!in.open(file, error)) return false;
+    const int index = av_find_best_stream(in.fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    if (index < 0) {
+        if (error) *error = "This image could not be read.";
+        return false;
+    }
+    AVStream* stream = in.fmt->streams[index];
+    Decoder dec;
+    if (!dec.open(stream)) {
+        if (error) *error = std::string("Its picture format (") + avcodec_get_name(stream->codecpar->codec_id) + ") is not supported.";
+        return false;
+    }
+    Frame frame;
+    Packet pkt;
+    int decoded = 0;
+    bool got = false;
+    auto take = [&] {
+        while (avcodec_receive_frame(dec.ctx, frame.f) == 0) {
+            if (++decoded == 1) {
+                width = frame.f->width;
+                height = frame.f->height;
+                SwsContext* sws = sws_getContext(width, height, static_cast<AVPixelFormat>(frame.f->format), width, height, AV_PIX_FMT_RGBA,
+                                                 SWS_BILINEAR, nullptr, nullptr, nullptr);
+                if (sws && width > 0 && height > 0) {
+                    rgba.assign(static_cast<size_t>(width) * height * 4, 0);
+                    uint8_t* dst[4] = {rgba.data(), nullptr, nullptr, nullptr};
+                    const int dstStride[4] = {width * 4, 0, 0, 0};
+                    sws_scale(sws, frame.f->data, frame.f->linesize, 0, height, dst, dstStride);
+                    got = true;
+                }
+                sws_freeContext(sws);
+            }
+            av_frame_unref(frame.f);
+        }
+    };
+    while (decoded < 2 && av_read_frame(in.fmt, pkt.p) >= 0) {
+        if (pkt.p->stream_index == index && avcodec_send_packet(dec.ctx, pkt.p) >= 0) take();
+        av_packet_unref(pkt.p);
+        if (!frames && got) break; // only the picture was wanted
+    }
+    if (decoded < 2) {
+        avcodec_send_packet(dec.ctx, nullptr);
+        take();
+    }
+    if (frames) *frames = decoded;
+    if (!got && error) *error = "This image could not be read.";
+    return got;
+}
+
 bool ffmpegDecodeAudio(const std::filesystem::path& file, std::vector<float>& stereo, std::string* error) {
     stereo.clear();
     Input in;
@@ -397,6 +452,12 @@ bool ffmpegDecodeAudio(const std::filesystem::path& file, std::vector<float>& st
 }
 
 void setHardwareDecoding(bool on) { g_hardware = on; }
+
+namespace {
+std::atomic<int> g_threads{0};
+} // namespace
+void setThreadCount(int threads) { g_threads = std::clamp(threads, 0, 64); }
+int threadCount() { return g_threads; }
 bool hardwareDecoding() { return g_hardware; }
 
 std::string hardwareDecoderName() {

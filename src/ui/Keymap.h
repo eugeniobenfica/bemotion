@@ -21,6 +21,7 @@ enum class Action {
     ShuttleBack, ShuttleStop, ShuttleForward, AddMarker, NextMarker, PrevMarker,
     // Tools
     SelectTool, CutTool, Split, ToggleSnapping, AddText, CropTool, PenTool, RippleTool, RollTool, SlipTool,
+    BrushTool, EraserTool, PuppetTool, WarpTool, TrackTool,
     // Timeline editing
     RippleDelete, RippleTrimStart, RippleTrimEnd, SpeedDuration,
     // Keyframes

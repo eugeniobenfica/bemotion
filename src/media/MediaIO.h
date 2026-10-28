@@ -46,6 +46,10 @@ bool decodeAudio(const std::filesystem::path& file, std::vector<float>& stereo, 
 // is in use ("" if none).
 void setHardwareDecoding(bool on);
 bool hardwareDecoding();
+// How many processor threads decoding, encoding and transcribing may use each (0: as many as
+// useful, FFmpeg's own choice). Settings › Performance; applies to videos opened after it.
+void setThreadCount(int threads);
+int threadCount();
 std::string hardwareDecoderName();
 
 // Sequential / random access to the frames of a video.

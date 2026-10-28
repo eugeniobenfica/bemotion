@@ -28,6 +28,7 @@
 #include "ui/panels/EffectsPanel.h"
 #include "ui/panels/MediaPanel.h"
 #include "ui/panels/ScopesPanel.h"
+#include "ui/panels/ToolSettingsPanel.h"
 #include "ui/panels/ObjectsPanel.h"
 #include "ui/panels/PropertiesPanel.h"
 #include "ui/panels/TimelinePanel.h"
@@ -291,6 +292,7 @@ void EditorWindow::buildDocks() {
     color_ = new ColorPanel(ctx_);
     animations_ = new AnimationsPanel(ctx_);
     scopes_ = new ScopesPanel(ctx_);
+    toolSettings_ = new ToolSettingsPanel(ctx_);
     timeline_ = new TimelinePanel(ctx_);
     toolsPopover_ = new ToolsPopover(tools_, this);
     connect(timeline_, &TimelinePanel::pluginButtonClicked, this, [this](const std::string& id, bool pressed) { runPluginCommand(id, pressed); });
@@ -326,6 +328,7 @@ void EditorWindow::buildDocks() {
     });
     connect(viewport_, &ViewportPanel::layerMenuRequested, timeline_, &TimelinePanel::showTrackMenu);
     connect(viewport_, &ViewportPanel::snapshotRequested, this, [this] { exportFrame(); });
+    connect(effects_, &EffectsPanel::panelRequested, properties_, &PropertiesPanel::panelRequested);
     connect(properties_, &PropertiesPanel::panelRequested, this, [this](const QString& name) {
         // Transitions live in Animate.
         auto it = dockWidgets_.find(name == "Transitions" ? std::string("AnimateLeft") : name.toStdString());
@@ -372,6 +375,7 @@ void EditorWindow::buildDocks() {
     auto* right = docks_->addDockWidget(ads::RightDockWidgetArea, dock(TR_NOOP("Properties"), properties_));
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Effects"), effects_), right);
     docks_->addDockWidgetTabToArea(dock(TR_NOOP("Color"), color_), right); // grading: LUT, curves, correction
+    docks_->addDockWidgetTabToArea(dock(TR_NOOP("Tool Settings"), toolSettings_, "ToolSettings"), right); // the tools' and sound fixes' options
     // Scopes opened by Color's button go away with the Color tab; opened from View › Panels (or
     // already open), they stay.
     connect(color_, &ColorPanel::showScopesRequested, this, [this] {
@@ -843,7 +847,13 @@ void EditorWindow::buildMenus() {
     connect(home, &QAbstractButton::clicked, this, [this] {
         if (confirmClose()) emit goHome();
     });
-    bar->setCornerWidget(home, Qt::TopLeftCorner);
+    // In a row with the same margins as the right corner, so the mark sits centered on the
+    // menu titles, not against the window's edge.
+    auto* homeCorner = new QWidget;
+    auto* homeRow = new QHBoxLayout(homeCorner);
+    homeRow->setContentsMargins(8, 2, 2, 2);
+    homeRow->addWidget(home, 0, Qt::AlignVCenter);
+    bar->setCornerWidget(homeCorner, Qt::TopLeftCorner);
 
     QMenu* file = bar->addMenu(tr("File"));
     file->addAction(action(Action::NewProject, tr("New Project..."), [this] {
@@ -977,7 +987,8 @@ void EditorWindow::buildMenus() {
     edit->addSeparator();
     edit->addAction(action(Action::SelectAll, tr("Select All"), [this] { ctx_.selectAll(); }));
     edit->addAction(action(Action::Deselect, tr("Deselect"), [this] {
-        if (ctx_.tool != Tool::Select) ctx_.tool = Tool::Select;
+        if (ctx_.pickingSample()) ctx_.samplePick = nullptr; // a sample being picked: no more
+        else if (ctx_.tool != Tool::Select) ctx_.tool = Tool::Select;
         else if (!ctx_.selection.empty()) ctx_.select(0);
         else ctx_.exitScope(); // nothing selected: leave the open compound
     }));
@@ -994,6 +1005,7 @@ void EditorWindow::buildMenus() {
             if (a->property("separate").toBool()) delete a;
         QMenu scratch;
         ui::addSeparateAudio(scratch, ctx_);
+        ui::addAudioFixes(scratch, ctx_, this);
         for (QAction* a : scratch.actions()) {
             a->setParent(layer);
             a->setProperty("separate", true);
@@ -1039,6 +1051,11 @@ void EditorWindow::buildMenus() {
     layer->addAction(action(Action::RippleTool, tr("Ripple Edit Tool"), [this] { ctx_.tool = Tool::Ripple; }));
     layer->addAction(action(Action::RollTool, tr("Rolling Edit Tool"), [this] { ctx_.tool = Tool::Roll; }));
     layer->addAction(action(Action::SlipTool, tr("Slip Tool"), [this] { ctx_.tool = Tool::Slip; }));
+    layer->addAction(action(Action::BrushTool, tr("Brush Tool"), [this] { ctx_.tool = ctx_.tool == Tool::Brush ? Tool::Select : Tool::Brush; }));
+    layer->addAction(action(Action::EraserTool, tr("Eraser Tool"), [this] { ctx_.tool = ctx_.tool == Tool::Eraser ? Tool::Select : Tool::Eraser; }));
+    layer->addAction(action(Action::PuppetTool, tr("Puppet Pin Tool"), [this] { ctx_.tool = ctx_.tool == Tool::Puppet ? Tool::Select : Tool::Puppet; }));
+    layer->addAction(action(Action::WarpTool, tr("Warp Tool"), [this] { ctx_.tool = ctx_.tool == Tool::Warp ? Tool::Select : Tool::Warp; }));
+    layer->addAction(action(Action::TrackTool, tr("Track Point Tool"), [this] { ctx_.tool = ctx_.tool == Tool::Track ? Tool::Select : Tool::Track; }));
     layer->addSeparator();
     layer->addAction(action(Action::BringToFront, tr("Bring to Front"), [this] { ctx_.shiftSelected(-1000); }));
     layer->addAction(action(Action::BringForward, tr("Bring Forward"), [this] { ctx_.shiftSelected(-1); }));
@@ -1064,8 +1081,11 @@ void EditorWindow::buildMenus() {
         actions_[Action::CropTool]->setChecked(ctx_.tool == Tool::Crop);
         actions_[Action::SelectTool]->setCheckable(true);
         actions_[Action::SelectTool]->setChecked(ctx_.tool == Tool::Select);
-        const std::pair<Action, Tool> tools[] = {{Action::PenTool, Tool::Pen}, {Action::RippleTool, Tool::Ripple},
-                                                 {Action::RollTool, Tool::Roll}, {Action::SlipTool, Tool::Slip}};
+        const std::pair<Action, Tool> tools[] = {{Action::PenTool, Tool::Pen},       {Action::RippleTool, Tool::Ripple},
+                                                 {Action::RollTool, Tool::Roll},     {Action::SlipTool, Tool::Slip},
+                                                 {Action::BrushTool, Tool::Brush},   {Action::EraserTool, Tool::Eraser},
+                                                 {Action::PuppetTool, Tool::Puppet}, {Action::WarpTool, Tool::Warp},
+                                                 {Action::TrackTool, Tool::Track}};
         for (const auto& [a, t] : tools) {
             actions_[a]->setCheckable(true);
             actions_[a]->setChecked(ctx_.tool == t);
@@ -1173,7 +1193,7 @@ void EditorWindow::buildMenus() {
     connect(view, &QMenu::aboutToShow, meters, [meters] { meters->setChecked(settings().showMeters); });
     QMenu* panels = view->addMenu(tr("Panels"));
     view->addAction(tr("Tools..."), this, [this] { showTools(); });
-    for (const char* name : {"Objects", "Media", "Scopes", "Properties", "Effects", "AnimateLeft", "Color", "Timeline"})
+    for (const char* name : {"Objects", "Media", "Scopes", "Properties", "Effects", "AnimateLeft", "Color", "ToolSettings", "Timeline"})
         panels->addAction(dockWidgets_[name]->toggleViewAction());
     view->addAction(tr("Reset Layout"), this, [this] { resetLayout(); });
     view->addSeparator();
@@ -1286,8 +1306,9 @@ void EditorWindow::buildMenus() {
     connect(gear, &QAbstractButton::clicked, this, [] { ui::openSettings(); });
     row->addWidget(gear);
     auto* exportButton = ui::accentButton(tr("Export"));
-    exportButton->setIcon(ui::makeIcon(ui::Icon::Export, theme::kOnAccent, 26));
-    exportButton->setIconSize(QSize(26, 26)); // the glyph is ~60% of it: as tall as the word beside it
+    exportButton->setIcon(ui::makeIcon(ui::Icon::Export, theme::kOnAccent, 20));
+    exportButton->setIconSize(QSize(20, 20)); // the glyph is ~60% of it: as tall as the word beside it
+    exportButton->setFixedHeight(28);         // as tall as the gear beside it, not the whole bar
     exportButton->setToolTip(tr("Export video"));
     connect(exportButton, &QPushButton::clicked, this, [this] { ui::showExportDialog(ctx_, this); });
     row->addWidget(exportButton);
@@ -1373,6 +1394,14 @@ void EditorWindow::tick() {
     color_->sync();
     animations_->sync();
     scopes_->sync();
+    // A painting, bending or tracking tool picked: its options in front.
+    if (ctx_.tool != lastTool_) {
+        lastTool_ = ctx_.tool;
+        const bool creative = ctx_.tool == Tool::Brush || ctx_.tool == Tool::Eraser || ctx_.tool == Tool::Puppet || ctx_.tool == Tool::Warp ||
+                              ctx_.tool == Tool::Track;
+        if (ads::CDockWidget* d = dockWidgets_["ToolSettings"]; creative && !d->isClosed()) d->setAsCurrentTab();
+    }
+    toolSettings_->sync();
     timeline_->sync();
     if (preview_) preview_->sync();
     if (meters_ && meters_->isVisible()) {
@@ -1390,24 +1419,7 @@ void EditorWindow::tick() {
     }
 }
 
-void EditorWindow::jumpToKeyframe(int direction) {
-    double best = direction > 0 ? DBL_MAX : -DBL_MAX;
-    auto consider = [&](Layer& layer) {
-        for (const PropertyRef& p : layer.properties())
-            for (int i = 0; i < p.anim->keyCount(); ++i) {
-                const double t = p.anim->keyTime(i);
-                if (direction > 0 && t > ctx_.time + kTimeEpsilon) best = std::min(best, t);
-                if (direction < 0 && t < ctx_.time - kTimeEpsilon) best = std::max(best, t);
-            }
-    };
-    if (Layer* sel = ctx_.selected()) consider(*sel);
-    else
-        for (Layer& l : ctx_.comp().layers) consider(l);
-    if (best != DBL_MAX && best != -DBL_MAX) {
-        ctx_.playing = false;
-        ctx_.setTime(best);
-    }
-}
+void EditorWindow::jumpToKeyframe(int direction) { ctx_.jumpToKeyframe(direction); }
 
 // --- files ------------------------------------------------------------------------------------
 

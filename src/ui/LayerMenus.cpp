@@ -1,9 +1,13 @@
 #include "ui/LayerMenus.h"
 
+#include "app/Settings.h"
+#include "core/AudioDsp.h"
 #include "core/Editing.h"
 #include "core/Geometry.h"
 #include "render/SceneRenderer.h"
 #include "ui/EditorContext.h"
+#include "media/MediaIO.h"
+#include "media/MediaManager.h"
 #include "ui/Keymap.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -17,6 +21,8 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -201,6 +207,81 @@ void addSeparateAudio(QMenu& menu, EditorContext& ctx) {
         link->setToolTip(tr("The sound of the same media goes back into the video, as one clip again"));
     }
     menu.setToolTipsVisible(true);
+}
+
+namespace {
+std::vector<Layer*> withSound(EditorContext& ctx) {
+    std::vector<Layer*> out;
+    for (Layer* l : ctx.selectedLayers())
+        if (l->type == LayerType::Media && l->media.hasAudio) out.push_back(l);
+    return out;
+}
+} // namespace
+
+void addAudioFixes(QMenu& menu, EditorContext& ctx, QWidget* parent) {
+    const bool any = !withSound(ctx).empty();
+    QAction* level = menu.addAction(menuIcon(Icon::Levels, theme::kTextDim), tr("Auto Level"), [&ctx] { autoLevelSelected(ctx); });
+    level->setEnabled(any);
+    level->setToolTip(tr("Brings the selected clips to one loudness and evens out their quiet and loud passages (an Auto Level effect, in Effects; its target: Tool Settings)"));
+    QAction* silence = menu.addAction(menuIcon(Icon::Razor, theme::kTextDim), tr("Remove Silence"), [&ctx, parent] { removeSilence(ctx, parent); });
+    silence->setEnabled(any);
+    silence->setToolTip(tr("Cuts the quiet stretches out of the selected clips (pauses, breaths), video and sound together. Its options: Tool Settings"));
+    menu.setToolTipsVisible(true);
+}
+
+void autoLevelSelected(EditorContext& ctx) {
+    const ToolSettings& opts = settings().tools;
+    for (Layer* l : withSound(ctx)) {
+        auto it = std::find_if(l->audioEffects.begin(), l->audioEffects.end(), [](const AudioEffect& e) { return e.type == AudioEffectType::AutoLevel; });
+        if (it == l->audioEffects.end()) it = l->audioEffects.insert(l->audioEffects.end(), makeAudioEffect(AudioEffectType::AutoLevel));
+        it->enabled = true;
+        it->value = opts.levelTarget, it->value2 = opts.levelEvenOut;
+        clampAudioEffect(*it);
+    }
+    ctx.touch();
+}
+
+void removeSilence(EditorContext& ctx, QWidget* parent) {
+    const ToolSettings& opts = settings().tools;
+    // The sound the editor decoded, every 10 ms of the source (core/AudioDsp).
+    const double block = static_cast<double>(media::kLoudnessBlock) / media::kAudioRate;
+    std::vector<uint64_t> ids;
+    for (Layer* l : withSound(ctx)) ids.push_back(l->id);
+    if (ids.empty()) return;
+    const bool sampled = opts.silenceSampleTo > opts.silenceSampleFrom && opts.silenceSampleFrom >= 0.0;
+    // A sample of the silence from the timeline (Tool Settings): learned from the clip that plays
+    // there, used for all of them.
+    float threshold = opts.silenceThreshold;
+    if (sampled) {
+        threshold = -100.0f;
+        for (const Layer& l : ctx.comp().layers) {
+            if (l.type != LayerType::Media || !l.media.hasAudio || l.outPoint <= opts.silenceSampleFrom || l.inPoint >= opts.silenceSampleTo) continue;
+            if (const media::Loudness loud = media::MediaManager::get().loudness(l.media.mediaId)) {
+                const double a = l.media.sourceTime(std::max(l.inPoint, opts.silenceSampleFrom));
+                const double b = l.media.sourceTime(std::min(l.outPoint, opts.silenceSampleTo));
+                threshold = std::max(threshold, dsp::thresholdFromSample(*loud, block, std::min(a, b), std::max(a, b)));
+            }
+        }
+        if (threshold <= -99.0f) {
+            QMessageBox::information(parent, tr("Remove Silence"), tr("No clip with sound plays in the sample: set it again on the timeline."));
+            return;
+        }
+    }
+    double removed = 0.0;
+    int waiting = 0;
+    for (uint64_t id : ids) {
+        const Layer* l = ctx.comp().findLayer(id);
+        if (!l) continue;
+        const media::Loudness loud = media::MediaManager::get().loudness(l->media.mediaId);
+        if (!loud) {
+            ++waiting;
+            continue;
+        }
+        removed += removeQuietParts(ctx.comp(), id, dsp::quietStretches(*loud, block, threshold, opts.silenceMin, opts.silencePadding), opts.silenceRipple);
+    }
+    if (removed > 0.0) ctx.touch();
+    if (waiting > 0) QMessageBox::information(parent, tr("Remove Silence"), tr("The sound is still being read: try again in a moment."));
+    else if (removed <= 0.0) QMessageBox::information(parent, tr("Remove Silence"), tr("No stretch was that quiet for that long."));
 }
 
 void fillMatteMenu(QMenu* menu, EditorContext& ctx) {

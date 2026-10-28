@@ -291,7 +291,10 @@ QImage ColorPanel::swatch(const std::string& lut) {
     if (const auto it = swatches_.find(lut); it != swatches_.end()) return it->second;
     std::vector<uint8_t> rgba;
     QImage image;
-    if (render::lutSwatch(lut, 96, 44, rgba)) image = QImage(rgba.data(), 96, 44, QImage::Format_RGBA8888).copy();
+    // Made at three times the card's size: drawn smaller it stays sharp on any screen scale
+    // (made at the card's size, a 150% screen stretched it blurry).
+    constexpr int kW = 288, kH = 132;
+    if (render::lutSwatch(lut, kW, kH, rgba)) image = QImage(rgba.data(), kW, kH, QImage::Format_RGBA8888).copy();
     swatches_[lut] = image;
     return image;
 }

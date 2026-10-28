@@ -83,6 +83,16 @@ target_compile_definitions(skia INTERFACE
     SK_RELEASE SK_GANESH SK_GL SK_ENABLE_SKSL
     SK_SHAPER_HARFBUZZ_AVAILABLE SK_SHAPER_UNICODE_AVAILABLE SK_UNICODE_AVAILABLE SK_UNICODE_ICU_IMPLEMENTATION
     SK_SHAPER_PRIMITIVE_AVAILABLE)
+# Vulkan, when this Skia was built with it (tools/skia/build-skia.sh: Windows, Linux): the
+# drawing engine Settings › Performance offers beside OpenGL (ui/GpuContext). The loader is
+# opened at run time, never linked.
+if(EXISTS "${SKIA_ROOT}/defines.json")
+    file(READ "${SKIA_ROOT}/defines.json" SKIA_DEFINES)
+    if(SKIA_DEFINES MATCHES "\"SK_VULKAN\"")
+        target_compile_definitions(skia INTERFACE SK_VULKAN SK_USE_VMA)
+        message(STATUS "Skia with Vulkan: the Vulkan drawing engine is built in")
+    endif()
+endif()
 # Static libraries: the modules first, then Skia itself.
 target_link_libraries(skia INTERFACE
     "${SKIA_ROOT}/lib/libskshaper.a"

@@ -1,4 +1,6 @@
-#include "ui/Theme.h"
+#include "bmstyle/Theme.h"
+
+#include "bmstyle/BmStyle.h"
 
 #include <QApplication>
 #include <QDir>
@@ -13,7 +15,7 @@
 #include <algorithm>
 #include <cstdio>
 
-namespace bemotion::theme {
+namespace bmstyle::theme {
 
 namespace {
 
@@ -21,7 +23,7 @@ using json = nlohmann::json;
 
 Palette g_current;
 
-float luminance(Rgba c) { return (0.2126f * ui::red(c) + 0.7152f * ui::green(c) + 0.0722f * ui::blue(c)) / 255.0f; }
+float luminance(Rgba c) { return (0.2126f * bmstyle::red(c) + 0.7152f * bmstyle::green(c) + 0.0722f * bmstyle::blue(c)) / 255.0f; }
 
 // Every color field, for (de)serialization.
 template <typename P, typename Fn>
@@ -55,20 +57,20 @@ void forEachColor(P& p, Fn&& fn) {
 }
 
 QString css(Rgba c) {
-    return QString("rgba(%1,%2,%3,%4)").arg(ui::red(c)).arg(ui::green(c)).arg(ui::blue(c)).arg(ui::alpha(c));
+    return QString("rgba(%1,%2,%3,%4)").arg(bmstyle::red(c)).arg(bmstyle::green(c)).arg(bmstyle::blue(c)).arg(bmstyle::alpha(c));
 }
 
 // A chevron for drop-downs and spin boxes, as a picture style sheets can use (they draw no arrow
 // of their own once the control is styled): a small PNG in the temporary folder, per color.
 QString chevron(Rgba c, bool up) {
     const QString path = QDir(QDir::tempPath()).filePath(
-        QString("bemotion-chevron-%1-%2.png").arg(up ? "up" : "down").arg(QString::fromStdString(toHex(c)).mid(1)));
+        QString("bmstyle-chevron-%1-%2.png").arg(up ? "up" : "down").arg(QString::fromStdString(toHex(c)).mid(1)));
     if (!QFile::exists(path)) {
         QImage image(20, 12, QImage::Format_ARGB32_Premultiplied);
         image.fill(Qt::transparent);
         QPainter p(&image);
         p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(QPen(ui::qcolor(c), 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        p.setPen(QPen(bmstyle::qcolor(c), 2.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
         const QPointF down[3] = {{3, 3}, {10, 9}, {17, 3}}, upward[3] = {{3, 9}, {10, 3}, {17, 9}};
         p.drawPolyline(up ? upward : down, 3);
         p.end();
@@ -81,8 +83,8 @@ QString chevron(Rgba c, bool up) {
 
 std::string toHex(Rgba c) {
     char buf[16];
-    if (ui::alpha(c) == 255) std::snprintf(buf, sizeof buf, "#%02X%02X%02X", ui::red(c), ui::green(c), ui::blue(c));
-    else std::snprintf(buf, sizeof buf, "#%02X%02X%02X%02X", ui::red(c), ui::green(c), ui::blue(c), ui::alpha(c));
+    if (bmstyle::alpha(c) == 255) std::snprintf(buf, sizeof buf, "#%02X%02X%02X", bmstyle::red(c), bmstyle::green(c), bmstyle::blue(c));
+    else std::snprintf(buf, sizeof buf, "#%02X%02X%02X%02X", bmstyle::red(c), bmstyle::green(c), bmstyle::blue(c), bmstyle::alpha(c));
     return buf;
 }
 
@@ -102,7 +104,7 @@ bool fromHex(const std::string& s, Rgba& out) {
 
 Rgba mix(Rgba a, Rgba b, float t) {
     auto m = [&](int x, int y) { return static_cast<int>(x + (y - x) * t + 0.5f); };
-    return rgba(m(ui::red(a), ui::red(b)), m(ui::green(a), ui::green(b)), m(ui::blue(a), ui::blue(b)), m(ui::alpha(a), ui::alpha(b)));
+    return rgba(m(bmstyle::red(a), bmstyle::red(b)), m(bmstyle::green(a), bmstyle::green(b)), m(bmstyle::blue(a), bmstyle::blue(b)), m(bmstyle::alpha(a), bmstyle::alpha(b)));
 }
 
 Palette darkPalette() { return {}; }
@@ -342,7 +344,7 @@ void apply(const Palette& given) {
     buttons.replace("DANGER", css(kDanger)).replace("TEXT", css(kText)).replace("HOVER", css(kBgHover));
     buttons.replace("INNER", QString::number(inner)).replace("BW", QString::number(bw)).replace("Rpx", QString::number(r) + "px");
     s += buttons;
-    // Segmented controls (ui::segmented): one outlined strip; the chosen part in the accent.
+    // Segmented controls (bmstyle::segmented): one outlined strip; the chosen part in the accent.
     // (Their strip draws the outline, the fill and the chosen part: SegmentStrip in Widgets.cpp.)
     QString seg = "QPushButton[segment] { background: transparent; border: none; border-radius: 0; padding: 5px 12px; color: DIM; }\n"
                   "QPushButton[segment]:hover, QPushButton[segment]:checked { color: TEXT; background: transparent; }\n"
@@ -353,7 +355,7 @@ void apply(const Palette& given) {
     seg.replace("DIM", css(kTextDim)).replace("TEXT", css(kText)).replace("SOFT", css(accent(55))).replace("ABORDER", css(accent(170)));
     seg.replace("FAINT", css(kTextFaint)).replace("BW", QString::number(std::max(1, bw))).replace("Rpx", QString::number(r) + "px");
     s += seg;
-    // The collapsible sections of Properties and Effects (ui::CollapsibleSection).
+    // The collapsible sections of Properties and Effects (bmstyle::CollapsibleSection).
     s += QString("QToolButton[sectionHeader=\"true\"] { text-align: left; font-weight: 600; padding: 5px 6px; background: %1;"
                  " border-radius: %3px; }\n"
                  "QToolButton[sectionHeader=\"true\"]:hover { background: %2; }\n"
@@ -370,7 +372,7 @@ void apply(const Palette& given) {
              .arg(r)
              .arg(css(accent(45)));
     // Fields: sunken, outlined, text from the left; the outline lights up on hover and focus. A
-    // drop-down is a field with a chevron (ui::Style draws it).
+    // drop-down is a field with a chevron (bmstyle::Style draws it).
     QString fields = "QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox, QKeySequenceEdit {"
                      " background: FIELD; border: BWpx solid FBORDER; border-radius: Rpx; padding: 3px 8px;"
                      " selection-background-color: SELECTION; }\n"
@@ -405,7 +407,7 @@ void apply(const Palette& given) {
              .arg(css(kField), css(kAccent))
              .arg(std::max(2, r))
              .arg(css(kText));
-    // Check boxes and radio buttons are drawn by ui::Style (a check mark, not an accent-filled box).
+    // Check boxes and radio buttons are drawn by bmstyle::Style (a check mark, not an accent-filled box).
     s += QString("QSlider::groove:horizontal { height: 4px; background: %1; border-radius: 2px; }\n"
                  "QSlider::sub-page:horizontal { background: %2; border-radius: 2px; }\n"
                  "QSlider::handle:horizontal { width: 14px; height: 14px; margin: -5px 0; border-radius: 7px; background: %2; }\n")
@@ -438,6 +440,7 @@ void apply(const Palette& given) {
              .arg(css(kText), css(kBgRaised), css(kTextDim));
     s += QString("QSplitter::handle { background: %1; }\n").arg(css(kBgDeep));
     app->setStyleSheet(s);
+    emit Appearance::get().changed();
 }
 
-} // namespace bemotion::theme
+} // namespace bmstyle::theme

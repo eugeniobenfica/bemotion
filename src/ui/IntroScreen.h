@@ -14,7 +14,8 @@ namespace bemotion {
 
 // The opening animation played when the app starts, before the home screen.
 // It is an ordinary bemotion project (assets/welcome/Welcome.bemotion, also
-// the Welcome project users can open and edit), drawn over the whole window.
+// the Welcome project users can open and edit), drawn over the whole window,
+// with its sound (Intro.wav, made by tools/intro-sound.py) played as usual.
 // A click or any key skips to its ending; finished() fires once it has faded out.
 class IntroScreen : public QWidget {
     Q_OBJECT

@@ -1,7 +1,9 @@
 #include "render/SceneRenderer.h"
 
+#include "core/Deform.h"
 #include "core/Expressions.h"
 #include "core/Geometry.h"
+#include "render/Gradient.h"
 #include "render/PluginCanvas.h"
 #include "render/Text.h"
 
@@ -13,7 +15,10 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkPathEffect.h"
 #include "include/core/SkPathBuilder.h"
+#include "include/core/SkPathMeasure.h"
 #include "include/core/SkRRect.h"
+#include "include/core/SkSurface.h"
+#include "include/core/SkVertices.h"
 #include "include/effects/SkColorMatrix.h"
 #include "include/effects/SkDashPathEffect.h"
 #include "include/effects/SkGradientShader.h"
@@ -123,20 +128,7 @@ SkPaint fillPaint(const ShapeProps& shape, const SkPath& path, double t, float o
     const SkColor4f c1 = color4(shape.fillColor.valueAt(t), opacity);
     SkPaint fill(c1);
     fill.setAntiAlias(true);
-    if (shape.fill == ShapeFill::Solid) return fill;
-    const SkColor4f colors[2] = {c1, color4(shape.fillColor2.valueAt(t), opacity)};
-    const SkRect r = path.getBounds();
-    const float w = std::max(1.0f, r.width()), h = std::max(1.0f, r.height());
-    if (shape.fill == ShapeFill::Linear) { // end to end along the angle, like a background's
-        const float a = degToRad(shape.fillAngle.valueAt(t));
-        const float dx = std::cos(a), dy = std::sin(a);
-        const float half = (std::fabs(w * dx) + std::fabs(h * dy)) * 0.5f;
-        const SkPoint pts[2] = {{r.centerX() - dx * half, r.centerY() - dy * half}, {r.centerX() + dx * half, r.centerY() + dy * half}};
-        fill.setShader(SkGradientShader::MakeLinear(pts, colors, nullptr, nullptr, 2, SkTileMode::kClamp));
-    } else {
-        fill.setShader(SkGradientShader::MakeRadial({r.centerX(), r.centerY()}, std::max(w, h) * 0.5f, colors, nullptr, nullptr, 2,
-                                                    SkTileMode::kClamp));
-    }
+    fill.setShader(gradientShader(shape.fill, c1, color4(shape.fillColor2.valueAt(t), opacity), shape.fillAngle.valueAt(t), path.getBounds()));
     return fill;
 }
 
@@ -206,6 +198,8 @@ PluginDrawer& pluginDrawer() {
 
 void drawPlugin(SkCanvas* canvas, const Layer& layer, double t, float opacity) {
     PluginCanvas pc(canvas, opacity);
+    if (layer.plugin.fill != ShapeFill::Solid)
+        pc.setGradient(layer.plugin.fill, layer.plugin.fillColor2.valueAt(t), layer.plugin.fillAngle.valueAt(t));
     if (pluginDrawer()) {
         pluginDrawer()(layer, t, pc);
     } else { // no plugin host (tests, tools): a placeholder frame
@@ -240,12 +234,34 @@ void drawMedia(SkCanvas* canvas, const Composition* comp, const Layer& layer, do
     SkPaint p;
     p.setAlphaf(std::clamp(opacity, 0.0f, 1.0f));
     // The same part of the image (it may not have the layer's size: a scaled-down preview frame).
-    const Vec2 size = layer.media.size;
+    const MediaProps& m = layer.media;
+    const Vec2 size = m.size;
     const float sx = size.x > 0 ? image->width() / size.x : 1.0f, sy = size.y > 0 ? image->height() / size.y : 1.0f;
     const SkRect src = SkRect::MakeLTRB((mn.x + size.x * 0.5f) * sx, (mn.y + size.y * 0.5f) * sy, (mx.x + size.x * 0.5f) * sx,
                                         (mx.y + size.y * 0.5f) * sy);
+    // Its frame: rounded corners cut the picture, a border goes inside the edge.
+    const float radius = std::clamp(m.cornerRadius.valueAt(t), 0.0f, std::min(dst.width(), dst.height()) * 0.5f);
+    const SkRRect frame = SkRRect::MakeRectXY(dst, radius, radius);
+    canvas->save();
+    if (radius > 0.0f) canvas->clipRRect(frame, true);
+    if (m.flipH || m.flipV) { // mirrored inside its own frame: bounds and handles stay
+        canvas->translate(dst.centerX(), dst.centerY());
+        canvas->scale(m.flipH ? -1.0f : 1.0f, m.flipV ? -1.0f : 1.0f);
+        canvas->translate(-dst.centerX(), -dst.centerY());
+    }
     canvas->drawImageRect(image, src, dst, SkSamplingOptions(SkFilterMode::kLinear, SkMipmapMode::kLinear), &p,
                           SkCanvas::kStrict_SrcRectConstraint);
+    canvas->restore();
+    const float border = std::min(m.borderWidth.valueAt(t), std::min(dst.width(), dst.height()) * 0.5f);
+    if (border > 0.0f) {
+        SkPaint line(color4(m.borderColor.valueAt(t), opacity));
+        line.setAntiAlias(true);
+        line.setStyle(SkPaint::kStroke_Style);
+        line.setStrokeWidth(border);
+        SkRRect inner = frame;
+        inner.inset(border * 0.5f, border * 0.5f);
+        canvas->drawRRect(inner, line);
+    }
 }
 
 // A background: the whole composition frame (local space = composition space).
@@ -712,6 +728,178 @@ void drawContent(SkCanvas* canvas, const Layer& layer, double t, float opacity, 
     }
 }
 
+// Paint strokes (Brush / Eraser) over the layer's picture, up to `paint_reveal` percent of their
+// total length in order (Write On). An eraser stroke clears what is under it in the layer.
+SkPath strokePath(const PaintStroke& s) {
+    SkPathBuilder b;
+    if (s.points.empty()) return b.detach();
+    b.moveTo(s.points[0].x, s.points[0].y);
+    if (s.points.size() == 1) b.lineTo(s.points[0].x + 0.01f, s.points[0].y); // a dot
+    // Smoothed: quadratic curves through the midpoints, the points as their controls.
+    for (size_t i = 1; i + 1 < s.points.size(); ++i) {
+        const Vec2 mid = (s.points[i] + s.points[i + 1]) * 0.5f;
+        b.quadTo(s.points[i].x, s.points[i].y, mid.x, mid.y);
+    }
+    if (s.points.size() >= 2) b.lineTo(s.points.back().x, s.points.back().y);
+    return b.detach();
+}
+
+void drawStrokes(SkCanvas* canvas, const Layer& layer, double t, float opacity) {
+    std::vector<SkPath> paths;
+    paths.reserve(layer.paint.size());
+    float total = 0.0f;
+    for (const PaintStroke& s : layer.paint) {
+        paths.push_back(strokePath(s));
+        total += SkPathMeasure(paths.back(), false).getLength();
+    }
+    float left = total * std::clamp(layer.paintReveal.valueAt(t) * 0.01f, 0.0f, 1.0f);
+    for (size_t i = 0; i < layer.paint.size() && left > 0.0f; ++i) {
+        const PaintStroke& s = layer.paint[i];
+        SkPathMeasure measure(paths[i], false);
+        const float length = measure.getLength();
+        SkPath shown = paths[i];
+        if (left < length) { // the stroke being written
+            SkPathBuilder part;
+            measure.getSegment(0.0f, left, &part, true);
+            shown = part.detach();
+        }
+        left -= length;
+        SkPaint paint(color4(s.color, opacity));
+        paint.setAntiAlias(true);
+        paint.setStyle(SkPaint::kStroke_Style);
+        paint.setStrokeWidth(s.width);
+        paint.setStrokeCap(SkPaint::kRound_Cap);
+        paint.setStrokeJoin(SkPaint::kRound_Join);
+        if (s.erase) paint.setBlendMode(SkBlendMode::kClear);
+        if (s.softness > 0.01f) paint.setMaskFilter(SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, s.softness * 0.5f));
+        canvas->drawPath(shown, paint);
+    }
+}
+
+// The layer's picture with its paint on top (a layer of its own when an eraser must cut it).
+void drawPainted(SkCanvas* canvas, const Layer& layer, double t, float opacity, const Composition* comp, const Projective& toOutput,
+                 float zoom, const Frame* frame) {
+    if (layer.paint.empty()) {
+        drawContent(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
+        return;
+    }
+    const bool erases = std::any_of(layer.paint.begin(), layer.paint.end(), [](const PaintStroke& s) { return s.erase; });
+    if (erases) {
+        Vec2 lo, hi;
+        SkRect bounds;
+        const bool bounded = localBounds(layer, t, lo, hi, comp);
+        if (bounded) bounds = SkRect::MakeLTRB(lo.x, lo.y, hi.x, hi.y);
+        canvas->saveLayer(bounded ? &bounds : nullptr, nullptr);
+    }
+    canvas->save(); // a compound's children set the canvas' matrix of their own: the strokes are in its space
+    drawContent(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
+    canvas->restore();
+    drawStrokes(canvas, layer, t, opacity);
+    if (erases) canvas->restore();
+}
+
+// The Puppet mesh covers what the picture shows (core/Deform): which cells of its grid hold
+// something, read once from the picture drawn small (again when its box or content changes).
+void updatePuppetShape(SkCanvas* canvas, const Layer& layer, double t, const Composition* comp, float zoom, const Frame* frame) {
+    Vec2 lo, hi;
+    if (layer.pins.empty() || !pictureBounds(layer, t, lo, hi, comp)) return;
+    for (const PaintStroke& s : layer.paint) // strokes reach past the picture (as drawSource sees it)
+        for (const Vec2& p : s.points) {
+            lo = {std::min(lo.x, p.x - s.width), std::min(lo.y, p.y - s.width)};
+            hi = {std::max(hi.x, p.x + s.width), std::max(hi.y, p.y + s.width)};
+        }
+    char key[160];
+    std::snprintf(key, sizeof key, "%.1f,%.1f,%.1f,%.1f|%zu|%llu|", lo.x, lo.y, hi.x, hi.y, layer.paint.size(),
+                  static_cast<unsigned long long>(layer.media.mediaId));
+    std::string shapeKey = key + (layer.type == LayerType::Text ? layer.text.text : std::string());
+    if (puppetShapeKey(layer.id) == shapeKey) return;
+    PuppetShape shape;
+    shape.key = std::move(shapeKey);
+    shape.lo = lo, shape.hi = hi;
+    puppetGrid(lo, hi, shape.cols, shape.rows);
+    constexpr int kSub = 4; // samples per cell side
+    const SkImageInfo info = SkImageInfo::MakeN32Premul(shape.cols * kSub, shape.rows * kSub);
+    sk_sp<SkSurface> small = canvas->makeSurface(info); // where the canvas draws: a video's frame may be on the graphics card
+    if (!small) small = SkSurfaces::Raster(info);
+    std::vector<uint32_t> pixels(static_cast<size_t>(info.width() * info.height()), 0);
+    if (small) {
+        SkCanvas* c = small->getCanvas();
+        c->clear(SK_ColorTRANSPARENT);
+        const Affine toImage = Affine::scale(Vec2{info.width() / std::max(1e-3f, hi.x - lo.x), info.height() / std::max(1e-3f, hi.y - lo.y)}) *
+                               Affine::translate(lo * -1.0f);
+        c->setMatrix(toSk(Projective(toImage)));
+        drawPainted(c, layer, t, 1.0f, comp, Projective(toImage), zoom, frame);
+        small->readPixels(SkPixmap(info, pixels.data(), info.minRowBytes()), 0, 0);
+    }
+    shape.inside.assign(static_cast<size_t>(shape.cols * shape.rows), 0);
+    for (int y = 0; y < info.height(); ++y)
+        for (int x = 0; x < info.width(); ++x)
+            if ((pixels[static_cast<size_t>(y * info.width() + x)] >> 24) > 16) // alpha: the top byte in RGBA and BGRA alike
+                shape.inside[static_cast<size_t>((y / kSub) * shape.cols + x / kSub)] = 1;
+    setPuppetShape(layer.id, std::move(shape));
+}
+
+// The picture bent by Puppet pins and the Mesh Warp (core/Deform.h): drawn into an image of its
+// bounds at about the size it shows, then through a grid of triangles whose corners moved.
+void drawSource(SkCanvas* canvas, const Layer& layer, double t, float opacity, const Composition* comp, const Projective& toOutput,
+                float zoom, const Frame* frame) {
+    updatePuppetShape(canvas, layer, t, comp, zoom, frame);
+    Vec2 lo, hi;
+    if (!deforms(layer, t) || !pictureBounds(layer, t, lo, hi, comp)) {
+        drawPainted(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
+        return;
+    }
+    if (!layer.paint.empty()) // strokes reach past the picture
+        for (const PaintStroke& s : layer.paint)
+            for (const Vec2& p : s.points) {
+                lo = {std::min(lo.x, p.x - s.width), std::min(lo.y, p.y - s.width)};
+                hi = {std::max(hi.x, p.x + s.width), std::max(hi.y, p.y + s.width)};
+            }
+    const float w = std::max(1.0f, hi.x - lo.x), h = std::max(1.0f, hi.y - lo.y);
+    // Pixels per layer unit where it shows (the canvas' scale), at most 4096 on a side.
+    const SkMatrix m = canvas->getTotalMatrix();
+    const float scale = std::clamp(std::sqrt(std::fabs(m.getScaleX() * m.getScaleY() - m.getSkewX() * m.getSkewY())), 0.05f, 4.0f);
+    const float s = std::min(scale, 4096.0f / std::max(w, h));
+    const int iw = std::max(1, static_cast<int>(std::ceil(w * s))), ih = std::max(1, static_cast<int>(std::ceil(h * s)));
+    const SkImageInfo info = SkImageInfo::MakeN32Premul(iw, ih);
+    sk_sp<SkSurface> surface = canvas->makeSurface(info); // the canvas' own kind: the graphics card when it draws there
+    if (!surface) surface = SkSurfaces::Raster(info);
+    if (!surface) return;
+    SkCanvas* c = surface->getCanvas();
+    c->clear(SK_ColorTRANSPARENT);
+    // Layer space -> the image (a compound's children are placed with it).
+    const Affine toImage = Affine::scale(s) * Affine::translate(lo * -1.0f);
+    c->setMatrix(toSk(Projective(toImage)));
+    drawPainted(c, layer, t, opacity, comp, Projective(toImage), zoom, frame);
+    const sk_sp<SkImage> picture = surface->makeImageSnapshot();
+    // A 32 x 32 grid of cells: fine enough for smooth bends.
+    constexpr int kCells = 32;
+    std::vector<SkPoint> positions, coords;
+    positions.reserve((kCells + 1) * (kCells + 1));
+    coords.reserve(positions.capacity());
+    for (int y = 0; y <= kCells; ++y)
+        for (int x = 0; x <= kCells; ++x) {
+            const Vec2 rest{lo.x + w * x / kCells, lo.y + h * y / kCells};
+            const Vec2 moved = deformPoint(layer, t, rest, lo, hi);
+            positions.push_back({moved.x, moved.y});
+            coords.push_back({(rest.x - lo.x) * s, (rest.y - lo.y) * s});
+        }
+    std::vector<uint16_t> indices;
+    indices.reserve(kCells * kCells * 6);
+    for (int y = 0; y < kCells; ++y)
+        for (int x = 0; x < kCells; ++x) {
+            const auto a = static_cast<uint16_t>(y * (kCells + 1) + x), b = static_cast<uint16_t>(a + 1);
+            const auto c2 = static_cast<uint16_t>(a + kCells + 1), d = static_cast<uint16_t>(c2 + 1);
+            indices.insert(indices.end(), {a, b, d, a, d, c2});
+        }
+    const sk_sp<SkVertices> mesh = SkVertices::MakeCopy(SkVertices::kTriangles_VertexMode, static_cast<int>(positions.size()), positions.data(),
+                                                        coords.data(), nullptr, static_cast<int>(indices.size()), indices.data());
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    paint.setShader(picture->makeShader(SkSamplingOptions(SkFilterMode::kLinear)));
+    canvas->drawVertices(mesh, SkBlendMode::kModulate, paint);
+}
+
 // How much of a mask's coverage the next one leaves (its mode), drawn over the masks above it.
 SkBlendMode maskBlend(MaskMode mode) {
     switch (mode) {
@@ -724,7 +912,7 @@ SkBlendMode maskBlend(MaskMode mode) {
 
 // One mask's coverage, white, in layer space: its outline grown or shrunk, softened, maybe inverted.
 void drawMaskCoverage(SkCanvas* canvas, const Mask& m, double t) {
-    const SkPath path = bezierSkPath(m.path);
+    const SkPath path = bezierSkPath(m.pathAt(t));
     SkPaint white(SkColors::kWhite);
     white.setAntiAlias(true);
     if (const float feather = m.feather.valueAt(t); feather > 0.01f) white.setMaskFilter(SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, feather * 0.5f));
@@ -749,9 +937,9 @@ void drawMaskCoverage(SkCanvas* canvas, const Mask& m, double t) {
 // The content cut by the layer's masks (in layer space, the canvas carrying its transform).
 void drawMasked(SkCanvas* canvas, const Layer& layer, double t, float opacity, const Composition* comp, const Projective& toOutput,
                 float zoom, const Frame* frame) {
-    const bool masked = std::any_of(layer.masks.begin(), layer.masks.end(), [](const Mask& m) { return m.enabled && !m.path.empty(); });
+    const bool masked = std::any_of(layer.masks.begin(), layer.masks.end(), [](const Mask& m) { return m.enabled && (!m.path.empty() || !m.pathKeys.empty()); });
     if (!masked) {
-        drawContent(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
+        drawSource(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
         return;
     }
     Vec2 lo, hi;
@@ -763,13 +951,13 @@ void drawMasked(SkCanvas* canvas, const Layer& layer, double t, float opacity, c
         hint = &bounds;
     }
     canvas->saveLayer(hint, nullptr);
-    drawContent(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
+    drawSource(canvas, layer, t, opacity, comp, toOutput, zoom, frame);
     SkPaint keep;
     keep.setBlendMode(SkBlendMode::kDstIn);
     canvas->saveLayer(hint, &keep);
     bool first = true;
     for (const Mask& m : layer.masks) {
-        if (!m.enabled || m.path.empty()) continue;
+        if (!m.enabled || (m.path.empty() && m.pathKeys.empty())) continue;
         // A first mask that takes away starts from everything (as in After Effects).
         if (first && (m.mode == MaskMode::Subtract || m.mode == MaskMode::Intersect)) canvas->drawPaint(SkPaint(SkColors::kWhite));
         SkPaint compose;
@@ -1073,7 +1261,7 @@ void drawComposition(SkCanvas* canvas, const Composition& comp, double time, con
     canvas->restore();
 }
 
-bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp) {
+bool pictureBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp) {
     if (layer.type == LayerType::Compound) { // everything inside, in the compound's space
         outMin = {1e9f, 1e9f};
         outMax = {-1e9f, -1e9f};
@@ -1141,6 +1329,39 @@ bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, co
             at = at * step;
             for (const Vec2& c : {lo, Vec2{hi.x, lo.y}, hi, Vec2{lo.x, hi.y}}) {
                 const Vec2 q = at.apply(c);
+                outMin = {std::min(outMin.x, q.x), std::min(outMin.y, q.y)};
+                outMax = {std::max(outMax.x, q.x), std::max(outMax.y, q.y)};
+            }
+        }
+    }
+    return true;
+}
+
+bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp) {
+    if (!pictureBounds(layer, time, outMin, outMax, comp)) return false;
+    if (layer.type == LayerType::Compound || layer.type == LayerType::Camera) return true;
+    const Vec2 lo = outMin, hi = outMax;
+    // The box grows with what is painted (an eraser only takes away). A shape with nothing of its
+    // own to show (the Brush's "Paint" layer) is only as big as its paint.
+    const bool painted = std::any_of(layer.paint.begin(), layer.paint.end(), [](const PaintStroke& s) { return !s.erase && !s.points.empty(); });
+    if (painted && layer.type == LayerType::Shape && !layer.shape.fillEnabled && !layer.shape.strokeEnabled)
+        outMin = {1e9f, 1e9f}, outMax = {-1e9f, -1e9f};
+    for (const PaintStroke& s : layer.paint) {
+        if (s.erase) continue;
+        for (const Vec2& p : s.points) {
+            const float r = s.width * 0.5f + s.softness;
+            outMin = {std::min(outMin.x, p.x - r), std::min(outMin.y, p.y - r)};
+            outMax = {std::max(outMax.x, p.x + r), std::max(outMax.y, p.y + r)};
+        }
+    }
+    if (deforms(layer, time)) { // where the bent picture's edge goes
+        const Vec2 a = outMin, b = outMax;
+        constexpr int kSteps = 16;
+        for (int i = 0; i <= kSteps; ++i) {
+            const float u = static_cast<float>(i) / kSteps;
+            for (const Vec2& e : {Vec2{a.x + (b.x - a.x) * u, a.y}, Vec2{a.x + (b.x - a.x) * u, b.y}, Vec2{a.x, a.y + (b.y - a.y) * u},
+                                  Vec2{b.x, a.y + (b.y - a.y) * u}}) {
+                const Vec2 q = deformPoint(layer, time, e, lo, hi);
                 outMin = {std::min(outMin.x, q.x), std::min(outMin.y, q.y)};
                 outMax = {std::max(outMax.x, q.x), std::max(outMax.y, q.y)};
             }

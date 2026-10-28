@@ -63,8 +63,22 @@ struct CommandOutcome {
     int play = -1;        // doc.play(): 1 start, 0 stop playback, -1 nothing
 };
 
+// A setting a plugin declares in plugin.json ("settings"), shown behind its gear in Settings ›
+// Plugins and read with bemotion.setting(id); kept in the app's settings, not in projects.
+struct PluginSetting {
+    enum class Kind { Number, Toggle, Choice, Text } kind = Kind::Toggle;
+    std::string id, label, description;
+    double number = 0.0; // the default of each kind
+    bool toggle = false;
+    std::string text;    // Text; Choice: the chosen label
+    double min = 0.0, max = 0.0, step = 1.0; // min == max: unbounded
+    std::string format = "%.0f";
+    std::vector<std::string> choices;
+};
+
 struct Plugin {
     std::string id, name, version, author, description;
+    std::vector<PluginSetting> settings;
     std::filesystem::path dir;
     bool builtin = false;
     bool enabled = true;
@@ -80,7 +94,7 @@ struct Plugin {
 
 class PluginHost {
 public:
-    static constexpr int kApiVersion = 7; // bemotion.api_version (docs/PLUGINS.md)
+    static constexpr int kApiVersion = 9; // bemotion.api_version (docs/PLUGINS.md)
     static PluginHost& get();
 
     void load(); // (re)loads every plugin and installs the scene drawer

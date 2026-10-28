@@ -1,10 +1,16 @@
 {
   "id": "recorder",
   "name": "Recorder",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "bemotion",
   "description": "Record a voice-over from the microphone, right in the timeline: the timeline plays while you speak, and the recording lands at the playhead.",
   "main": "main.lua",
-  "api": 5,
-  "permissions": ["edit", "media", "microphone"]
+  "api": 8,
+  "permissions": ["edit", "media", "microphone"],
+  "settings": [
+    { "id": "play", "label": "Play while recording", "kind": "toggle", "default": true,
+      "description": "The timeline plays while you speak, so you can follow the picture. Off: it stays still" },
+    { "id": "name", "label": "Clip name", "kind": "text", "default": "Recording",
+      "description": "The name each new recording gets on the timeline" }
+  ]
 }

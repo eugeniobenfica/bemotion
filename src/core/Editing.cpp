@@ -48,6 +48,36 @@ int rippleDelete(Composition& comp, const std::vector<uint64_t>& ids) {
     return removed;
 }
 
+double removeQuietParts(Composition& comp, uint64_t id, const std::vector<std::pair<double, double>>& quiet, bool ripple) {
+    const Layer* l = comp.findLayer(id);
+    if (!l || l->type != LayerType::Media || !hasTimeline(comp, *l) || l->media.reversed || l->media.timeRemap) return 0.0;
+    const double speed = std::max(1e-3, l->media.speed), start = l->media.start, frame = comp.frameDuration();
+    // In composition time, inside the clip, at least a frame long; the latest first, so the
+    // clip still holding the earlier ones is always the first piece.
+    std::vector<std::pair<double, double>> cuts;
+    for (const auto& [from, to] : quiet) {
+        const double a = std::max(l->inPoint, comp.snapToFrame(start + from / speed));
+        const double b = std::min(l->outPoint, comp.snapToFrame(start + to / speed));
+        if (b - a >= frame - kEps) cuts.emplace_back(a, b);
+    }
+    std::sort(cuts.begin(), cuts.end(), [](const auto& x, const auto& y) { return x.first > y.first; });
+    double removed = 0.0;
+    uint64_t head = id;
+    for (const auto& [a, b] : cuts) {
+        const Layer* h = comp.findLayer(head);
+        if (!h) break;
+        if (b < h->outPoint - kEps) comp.splitLayer(head, b);
+        uint64_t piece = head;
+        if (a > h->inPoint + kEps) piece = comp.splitLayer(head, a);
+        if (!piece) continue;
+        if (ripple) rippleDelete(comp, {piece});
+        else comp.removeLayerTree(piece);
+        removed += b - a;
+        if (piece == head) break; // the clip's start was quiet: nothing earlier is left
+    }
+    return removed;
+}
+
 bool closeGap(Composition& comp, uint64_t track, double t) {
     double prevOut = 0.0, nextIn = std::numeric_limits<double>::infinity();
     for (const Layer& l : comp.layers) {

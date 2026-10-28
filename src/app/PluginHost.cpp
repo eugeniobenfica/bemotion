@@ -4,6 +4,7 @@
 #include "app/Platform.h"
 #include "app/Settings.h"
 #include "core/Easing.h"
+#include "core/MeshFile.h"
 #include "media/Recorder.h"
 #include "render/PluginCanvas.h"
 #include "ui/AppSignals.h"
@@ -20,6 +21,7 @@
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <new>
 #include <sstream>
 
@@ -801,6 +803,57 @@ int bmMesh(lua_State* L) {
     return 1;
 }
 
+// bemotion.load_mesh(file, { up = "Auto" | "Y Up" | "Z Up", max_triangles = n }) -> mesh, or
+// nil and why: a model file read natively (core/MeshFile: OBJ, STL, glTF / GLB; a .gltf's .bin
+// beside it), far quicker than in Lua, simplified to at most `max_triangles` (0: all of them).
+int bmLoadMesh(lua_State* L) {
+    luaL_checktype(L, 1, LUA_TTABLE);
+    lua_getfield(L, 1, "data");
+    size_t n = 0;
+    const char* bytes = lua_tolstring(L, -1, &n);
+    lua_getfield(L, 1, "ext");
+    std::string ext = lua_tostring(L, -1) ? lua_tostring(L, -1) : "";
+    lua_getfield(L, 1, "path");
+    const std::string path = lua_tostring(L, -1) ? lua_tostring(L, -1) : "";
+    lua_pop(L, 3);
+    if (!bytes) return lua_pushnil(L), lua_pushstring(L, "the file could not be read"), 2;
+    for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::string up = "Auto";
+    lua_Integer maxTriangles = 0;
+    if (lua_istable(L, 2)) {
+        lua_getfield(L, 2, "up");
+        if (lua_isstring(L, -1)) up = lua_tostring(L, -1);
+        lua_getfield(L, 2, "max_triangles");
+        maxTriangles = lua_isnumber(L, -1) ? lua_tointeger(L, -1) : 0;
+        lua_pop(L, 2);
+    }
+    // A .gltf's buffers in its own folder (the user picked the file: its parts come along).
+    Plugin* plugin = pluginOf(L);
+    auto beside = [&](const std::string& name, std::string& out) {
+        if (!plugin || !plugin->may("files") || path.empty() || name.find("..") != std::string::npos) return false;
+        const fs::path file = platform::fromUtf8(path).parent_path() / platform::fromUtf8(name);
+        std::ifstream in(file, std::ios::binary);
+        if (!in) return false;
+        out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        return true;
+    };
+    MeshData data;
+    std::string error;
+    if (!loadMeshFile(ext, std::string(bytes, n), beside, data, error)) return lua_pushnil(L), lua_pushstring(L, error.c_str()), 2;
+    if (up == "Z Up" || (up == "Auto" && ext == "stl")) zUpToYUp(data);
+    if (maxTriangles > 0) simplifyMesh(data, static_cast<size_t>(maxTriangles));
+    auto* m = static_cast<render::Mesh*>(lua_newuserdatauv(L, sizeof(render::Mesh), 0));
+    new (m) render::Mesh();
+    luaL_setmetatable(L, kMeshType);
+    m->positions = std::move(data.positions);
+    m->normals = std::move(data.normals);
+    m->indices = std::move(data.indices);
+    m->colors.reserve(data.colors.size() / 4);
+    for (size_t i = 0; i + 3 < data.colors.size(); i += 4) m->colors.push_back({data.colors[i], data.colors[i + 1], data.colors[i + 2], data.colors[i + 3]});
+    m->finish();
+    return 1;
+}
+
 int meshGc(lua_State* L) {
     static_cast<render::Mesh*>(luaL_checkudata(L, 1, kMeshType))->~Mesh();
     return 0;
@@ -913,6 +966,31 @@ int bmParseCsv(lua_State* L) {
 }
 
 // bemotion.number(text) -> number or nil: "1.234,5", "R$ 12", "45%" (core/Data.h).
+// bemotion.setting(id): the user's value of one of the plugin's settings (plugin.json
+// "settings"), or its default; nil for an id it did not declare.
+int bmSetting(lua_State* L) {
+    const std::string id = luaL_checkstring(L, 1);
+    const Plugin* plugin = pluginOf(L);
+    if (!plugin) return lua_pushnil(L), 1;
+    const auto it = std::find_if(plugin->settings.begin(), plugin->settings.end(), [&](const PluginSetting& s) { return s.id == id; });
+    if (it == plugin->settings.end()) return lua_pushnil(L), 1;
+    json value = nullptr;
+    if (const auto p = settings().pluginSettings.find(plugin->id); p != settings().pluginSettings.end())
+        if (const auto v = p->second.find(id); v != p->second.end()) value = json::parse(v->second, nullptr, false);
+    switch (it->kind) {
+    case PluginSetting::Kind::Number: lua_pushnumber(L, value.is_number() ? value.get<double>() : it->number); break;
+    case PluginSetting::Kind::Toggle: lua_pushboolean(L, value.is_boolean() ? value.get<bool>() : it->toggle); break;
+    case PluginSetting::Kind::Choice: {
+        const std::string chosen = value.is_string() ? value.get<std::string>() : it->text;
+        const bool known = std::find(it->choices.begin(), it->choices.end(), chosen) != it->choices.end();
+        lua_pushstring(L, (known ? chosen : it->text).c_str());
+        break;
+    }
+    case PluginSetting::Kind::Text: lua_pushstring(L, (value.is_string() ? value.get<std::string>() : it->text).c_str()); break;
+    }
+    return 1;
+}
+
 int bmNumber(lua_State* L) {
     float v;
     if (lua_type(L, 1) == LUA_TNUMBER) lua_pushvalue(L, 1);
@@ -1069,7 +1147,8 @@ lua_State* newSandbox(const std::string& pluginId) {
                             {"parse_csv", bmParseCsv},              {"number", bmNumber},
                             {"cached", bmCached},                   {"json", bmJson},
                             {"base64", bmBase64},                   {"mesh", bmMesh},
-                            {"include", bmInclude},
+                            {"include", bmInclude},              {"setting", bmSetting},
+                            {"load_mesh", bmLoadMesh},
                             {nullptr, nullptr}};
     luaL_newmetatable(L, kMeshType);
     lua_pushcfunction(L, meshGc);
@@ -1078,7 +1157,7 @@ lua_State* newSandbox(const std::string& pluginId) {
     lua_setfield(L, -2, "__index");
     lua_pop(L, 1);
     luaL_newlib(L, api);
-    lua_pushinteger(L, PluginHost::kApiVersion); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone; 6: include; 7: row_labels
+    lua_pushinteger(L, PluginHost::kApiVersion); // 2: commands and operations; 3: tables, CSV import; 4: files, meshes; 5: buttons, microphone; 6: include; 7: row_labels; 8: settings; 9: load_mesh
     lua_setfield(L, -2, "api_version");
     const luaL_Reg mic[] = {{"start", micStart}, {"stop", micStop}, {"recording", micRecording}, {"level", micLevel},
                             {"cancel", micCancel}, {nullptr, nullptr}};
@@ -1270,6 +1349,26 @@ void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
         mainFile = m.value("main", mainFile);
         for (const auto& perm : m.value("permissions", json::array()))
             if (perm.is_string()) p.permissions.push_back(perm.get<std::string>());
+        for (const auto& sj : m.value("settings", json::array())) {
+            if (!sj.is_object() || !sj.contains("id")) continue;
+            PluginSetting s;
+            s.id = sj.value("id", std::string());
+            s.label = sj.value("label", s.id);
+            s.description = sj.value("description", std::string());
+            const std::string kind = sj.value("kind", std::string("toggle"));
+            s.kind = kind == "number" ? PluginSetting::Kind::Number : kind == "choice" ? PluginSetting::Kind::Choice
+                     : kind == "text"  ? PluginSetting::Kind::Text : PluginSetting::Kind::Toggle;
+            const json def = sj.value("default", json());
+            s.number = def.is_number() ? def.get<double>() : 0.0;
+            s.toggle = def.is_boolean() && def.get<bool>();
+            s.choices = sj.value("choices", std::vector<std::string>{});
+            s.text = def.is_string() ? def.get<std::string>() : (s.choices.empty() ? std::string() : s.choices.front());
+            s.min = sj.value("min", 0.0);
+            s.max = sj.value("max", 0.0);
+            s.step = sj.value("step", 1.0);
+            s.format = sj.value("format", std::string(s.step < 1.0 ? "%.2f" : "%.0f"));
+            if (!s.id.empty()) p.settings.push_back(std::move(s));
+        }
     } catch (const std::exception& e) {
         p.id = platform::toUtf8(dir.filename());
         p.name = p.id;

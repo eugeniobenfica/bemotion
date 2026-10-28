@@ -34,13 +34,14 @@ layer and then animate it.
 | every layer | `anchor`, `position`, `scale`, `rotation`, `opacity`; 3D layers `position_z`, `rotation_x` (the top tips away), `rotation_y` (the right side turns away) |
 | shapes | `size` (not paths), `roundness` (rectangle), `sides` (polygon, star), `inner_radius` (star), `fill_color`, `stroke_color`, `stroke_width`, `trim_start`, `trim_end`, `stroke_dash` and `stroke_gap` (px; both above 0: a dashed line), `stroke_dash_offset`; with a gradient `fill_color2` and, linear, `fill_angle`; with a repeater `repeat_copies`, `repeat_offset` (`[x, y]` from one copy to the next), `repeat_rotation`, `repeat_scale`, `repeat_end_opacity` |
 | masks (any layer with a picture) | `mask<index>.feather` (px), `mask<index>.opacity`, `mask<index>.expansion` (px, negative shrinks) |
-| text, subtitle, counter | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness`; counter also has `counter_from` and `counter_to` (it counts between them) and `counter_value` (keyframes on it replace the count) |
+| text, subtitle, counter | `font_size`, `text_color`, `tracking`, `line_height`, `wrap_width` (px, 0 = no wrapping), `reveal`, `outline_color`, `outline_width`, `box_color`, `box_padding`, `box_roundness`; with a gradient `text_color2` and, linear, `text_fill_angle`; counter also has `counter_from` and `counter_to` (it counts between them) and `counter_value` (keyframes on it replace the count) |
 | camera | `position`, `position_z`, `rotation_x` (looks down), `rotation_y` (looks left), `rotation`, `camera_zoom` |
-| media with a picture (video, image) | `crop_left`, `crop_top`, `crop_right`, `crop_bottom` (percent of the picture cut away from that side) |
+| media with a picture (video, image) | `crop_left`, `crop_top`, `crop_right`, `crop_bottom` (percent of the picture cut away from that side), `corner_radius` (px, rounds the picture's corners), `border_width` (px, a line around it), `border_color` |
 | media with sound | `volume` |
 | video and audio with Time Remap on | `time_remap` (the source second shown at each moment) |
-| plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`) |
+| plugin objects | `size`, `p.<parameter id>` (e.g. `p.progress`); with a gradient `object_fill_color2` and, linear, `object_fill_angle` |
 | effects | `fx<index>.<param>` (e.g. `fx0.size`; `effect.add` lists the params) |
+| painted, pinned or warped layers | `paint_reveal` (Write On, %), `pin<index>` (`[x, y]`, a Puppet pin's place), `warp<index>` (`[x, y]` offset of a Mesh Warp point, 0–15) |
 
 `query.layer` lists a layer's properties with their values and keyframes.
 
@@ -96,9 +97,11 @@ read, tiny gaps closed); for
 subtitles `captions` (`[{"start": s, "end": s, "text": "..."}]`, composition
 seconds; replaces them, sorted, overlaps cut) or `srt` (SubRip text); for shapes `shape` (kind), `fill`,
 `stroke` (booleans), `gradient` (`solid`, `linear`, `radial`: from
-`fill_color` to `fill_color2`), `repeater` (boolean), `path` (as in
+`fill_color` to `fill_color2`; also on text, from `text_color` to `text_color2`, and on
+plugin objects, from each filled part's color to `object_fill_color2`), `repeater` (boolean), `path` (as in
 `layer.add`; the shape becomes a path; `"shape": "path"` alone turns its outline
-into one); for backgrounds `fill`, `media`, `fit`. Any layer: `muted` and
+into one); for backgrounds `fill`, `media`, `fit`; for media with a picture
+`flip_h`, `flip_v` (booleans: mirrored left to right, top to bottom). Any layer: `muted` and
 `solo` (booleans: while some layer beside it is solo, only those are seen and
 heard), `blend` (`normal`, `multiply`, `screen`, `overlay`, `darken`,
 `lighten`, `color_dodge`, `color_burn`, `hard_light`, `soft_light`,
@@ -139,7 +142,12 @@ masks before it), `inverted`, `feather`. Its animatable values are properties:
 `mask0.feather`, `mask0.opacity`, `mask0.expansion`.
 
 **`mask.set`** — `layer`, `index`, any of `name`, `mode`, `inverted`,
-`enabled`, `path`. **`mask.remove`** — `layer`, `index`.
+`enabled`, `path`. A `path` with a `time` (or on a mask already animated) is a
+Mask Path keyframe there: in between, the outline moves point by point (eased)
+when the two have as many points, else it holds. `"animated": false` keeps the
+outline at `time` and drops the keyframes. `query.layer` lists each mask's
+`path_keys`. **`mask.duplicate`** → `{"index": i}` — `layer`, `index`: a copy
+right after it. **`mask.remove`** — `layer`, `index`.
 
 A **track matte** (`layer.set`): `matte` (`alpha`, `alpha_inverted`, `luma`,
 `luma_inverted`, `none`) and `matte_layer` (default: the layer right above,
@@ -246,9 +254,16 @@ picture but on the sound, in playback and export:
 `gain` (`value`: dB), `fade_in` / `fade_out` (`value`: seconds), `eq`
 (`low` 100 Hz shelf, `mid` 1 kHz, `high` 8 kHz shelf: dB, −24 to 24),
 `noise_reduction` (`reduction` dB 0–40, `sensitivity` %: how far above the
-steady noise still counts as noise), `ducking` (`amount`: how many dB quieter
+steady noise still counts as noise; with `sample` — `[from, to]` seconds of the
+clip's source with only the noise, on `audio_effect.add` / `set`, `null` to
+drop it — the noise is learned from that stretch instead of guessed), `ducking` (`amount`: how many dB quieter
 while any other clip with sound — without ducking itself — is above
-`threshold` dB, easing over `fade` seconds; put it on the music).
+`threshold` dB, easing over `fade` seconds; put it on the music), `reverb`
+(`mix`, `size`, `damping`: %), `echo` (`delay` seconds, `feedback` 0–90 %,
+`mix` %), `compressor` (`threshold` dB, `ratio` 1–20, `makeup` dB),
+`filter` (Low / High Cut: `low_cut` 20–2000 Hz, `high_cut` 1000–20000 Hz; at
+20 and 20000 they are off), `auto_level` (`target` dB −40 to −6, `even_out`
+%: how much quiet and loud passages are brought toward the target).
 
 **`audio_effect.add`** → `{"index": i, "values": {...}}` — `layer`, `effect`,
 `values` (`{"low": 3}`). **`audio_effect.set`** — `layer`, `index`,
@@ -300,10 +315,42 @@ lists an object's `params`.
 "duration"}` — `path`. Then `layer.add` with `"type": "media", "media": id`.
 (Plugins need the `media` permission.)
 
+**`audio.level`** → `{"layers", "target"}` — automatic levels: every clip with
+sound in `layer` (one) or `layers` (a list, or none: all) gets an Auto Level
+effect (`target` dB, default -18; `even_out` 0–100, default 50), the one it has
+updated, so they all sound as loud.
+**`audio.remove_silence`** → `{"removed_seconds", "threshold"}` — `layer` (a
+video or audio clip with sound): cuts out its quiet stretches, below
+`threshold` dB (default -40) or, with `sample` (`[from, to]`, composition
+seconds of only silence or noise), a little above that sample's loudest
+moment, lasting at least `min` seconds (default 0.5), keeping `padding`
+seconds of them on each side (default 0.1). `ripple` (default true) closes the
+gaps: the later pieces and clips on its track move back. Not for clips playing
+reversed or with Time Remap.
+
+**Paint** (the Brush and Eraser tools): **`paint.stroke`** → `{"index": i}` —
+`layer`, `points` (`[[x, y], ...]` in the layer's own space), `color`, `width`
+(px, default 12), `softness` (px of soft edge, default 0), `erase` (true: cuts through the layer's picture and the
+strokes before it). **`paint.clear`** — `layer`. The property `paint_reveal`
+(0–100 %) draws the strokes in order up to that much of their length (Write On).
+
+**Puppet and Warp**: **`puppet.pin.add`** → `{"index", "property"}` — `layer`,
+`point` (`[x, y]` where the pin sits on the picture, in the layer's own
+space; `starch`: true for a Starch pin, which holds nothing in place but
+stiffens the picture around it). Its property `pin<index>` is where it is moved
+to (keyframe it to animate): as in After Effects, a mesh covers what the
+picture shows and bends to follow its pins as rigidly as it can; separate pieces
+of the picture move on their own (a piece without pins stays put).
+**`puppet.pin.remove`** — `layer`, `index`. `layer.set` with `"warp": true`
+adds a Mesh Warp: a 4 × 4 grid over the layer's bounds whose points move by
+the properties `warp0` … `warp15` (offsets in px, row by row from the top left).
+
 **Media folders** keep the Media panel tidy; they are only names (nothing moves
 on disk). **`folder.add`** → `{"folder": name}` — `name`.
 **`folder.rename`** — `folder`, `name`. **`folder.remove`** — `folder` (its
-media go back to the top). **`media.move`** — `media` (an id), `folder` (a
+media go back to the top). **`folder.move`** → `{"folder", "index"}` —
+`folder`, `index` (its new place, 0 = first; past the end: last).
+**`media.move`** — `media` (an id), `folder` (a
 folder's name; `""` or none: the top). `query.composition` lists `folders` and
 each media item's `folder`.
 

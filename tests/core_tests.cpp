@@ -5,6 +5,7 @@
 #include "core/AudioDsp.h"
 #include "core/Clipboard.h"
 #include "core/Data.h"
+#include "core/Deform.h"
 #include "core/Describe.h"
 #include "core/Editing.h"
 #include "core/Expressions.h"
@@ -14,12 +15,14 @@
 #include "core/Geometry.h"
 #include "core/History.h"
 #include "core/Language.h"
+#include "core/MeshFile.h"
 #include "core/Lottie.h"
 #include "core/Presets.h"
 #include "core/Project.h"
 #include "core/Serialization.h"
 #include "core/Snapping.h"
 #include "core/Svg.h"
+#include "core/Tracking.h"
 #include "core/Transitions.h"
 
 #include <nlohmann/json.hpp>
@@ -27,6 +30,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -1514,9 +1518,41 @@ void testMediaFolders() {
     CHECK(!validate(back).empty());
     repair(back);
     CHECK(back.comp.mediaFolders.size() == 2);
+    // Folders keep the order they are put in.
+    CHECK(run(p, R"j({"op": "folder.move", "folder": "Logos", "index": 0})j").ok);
+    CHECK(p.comp.mediaFolders == std::vector<std::string>({"Logos", "Video"}));
+    CHECK(run(p, R"j({"op": "folder.move", "folder": "Logos", "index": 9})j").ok); // past the end: last
+    CHECK(p.comp.mediaFolders == std::vector<std::string>({"Video", "Logos"}));
+    CHECK(!run(p, R"j({"op": "folder.move", "folder": "Logos", "index": 0.5})j").ok);
     // Removing a folder keeps its media, at the top.
     CHECK(run(p, R"j({"op": "folder.remove", "folder": "Video"})j").ok);
     CHECK(p.comp.mediaFolders.size() == 1 && p.comp.findMedia(ida)->folder.empty());
+}
+
+// Gradient fills on text and plugin objects, and a picture's frame (corners, border, flips):
+// set by operations, saved and read back.
+void testGradientsAndFrames() {
+    Project p;
+    MediaItem img;
+    img.name = "photo.png", img.kind = MediaKind::Image, img.width = 640, img.height = 480;
+    const uint64_t mid = p.comp.addMedia(img);
+    p.comp.addLayer(makeTextLayer("Hello", {100, 100}, 5.0));
+    p.comp.addLayer(makeMediaLayer(*p.comp.findMedia(mid), {300, 300}, 0.0, 5.0));
+    const uint64_t textId = p.comp.layers[1].id, mediaId = p.comp.layers[0].id;
+    const std::string ops = R"j([{"op": "layer.set", "layer": )j" + std::to_string(textId) + R"j(, "gradient": "linear"},
+        {"op": "property.set", "layer": )j" + std::to_string(textId) + R"j(, "prop": "text_color2", "value": [0, 0, 1, 1]},
+        {"op": "layer.set", "layer": )j" + std::to_string(mediaId) + R"j(, "flip_h": true},
+        {"op": "property.set", "layer": )j" + std::to_string(mediaId) + R"j(, "prop": "corner_radius", "value": 24},
+        {"op": "property.set", "layer": )j" + std::to_string(mediaId) + R"j(, "prop": "border_width", "value": 3}])j";
+    OpsResult r = run(p, ops.c_str());
+    CHECK(r.ok);
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    const Layer* t = back.comp.findLayer(textId);
+    const Layer* m = back.comp.findLayer(mediaId);
+    CHECK(t && t->text.fill == ShapeFill::Linear && t->text.color2.base.b == 1.0f);
+    CHECK(m && m->media.flipH && !m->media.flipV && m->media.cornerRadius.base == 24.0f && m->media.borderWidth.base == 3.0f);
+    CHECK(!run(p, (R"j({"op": "layer.set", "layer": )j" + std::to_string(textId) + R"j(, "flip_h": true})j").c_str()).ok); // text has no picture
 }
 
 // The docs list every word of the expression language and every operation.
@@ -1901,6 +1937,215 @@ void testColorEffects() {
     CHECK(!run(p, R"([{"op": "effect.set", "layer": "Card", "index": 0, "curves": {"red": [[0, 2]]}}])").ok);
 }
 
+// Paint, Puppet pins and the Mesh Warp: operations, the math, the file.
+void testPaintPuppetWarp() {
+    // One pin moves everything; two turn it rigidly; a pin's own point lands on its target.
+    CHECK(near(puppetPoint({{{0, 0}, {10, 5}}}, {3, 4}).x, 13.0f));
+    const std::vector<PinMove> two = {{{-100, 0}, {0, -100}}, {{100, 0}, {0, 100}}}; // a quarter turn
+    const Vec2 turned = puppetPoint(two, {50, 0});
+    CHECK(near(turned.x, 0.0f) && near(turned.y, 50.0f));
+    CHECK(near(puppetPoint(two, {100, 0}).y, 100.0f));
+    Vec2 offsets[kWarpPoints] = {};
+    offsets[5] = {0, -40};
+    CHECK(near(warpPoint(offsets, {0, 0}, {300, 300}, {100, 100}).y, 60.0f)); // on the moved grid point
+    CHECK(near(warpPoint(offsets, {0, 0}, {300, 300}, {0, 0}).y, 0.0f));      // a corner stays
+
+    Project p;
+    p.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {0, 0}, 5.0));
+    const std::string id = std::to_string(p.comp.layers[0].id);
+    OpsResult r = run(p, (R"j([{"op": "paint.stroke", "layer": )j" + id + R"j(, "points": [[0, 0], [50, 50]], "width": 8},
+        {"op": "paint.stroke", "layer": )j" + id + R"j(, "points": [[10, 10]], "erase": true},
+        {"op": "puppet.pin.add", "layer": )j" + id + R"j(, "point": [20, 30]},
+        {"op": "property.set", "layer": )j" + id + R"j(, "prop": "pin0", "value": [25, 30]},
+        {"op": "layer.set", "layer": )j" + id + R"j(, "warp": true},
+        {"op": "property.set", "layer": )j" + id + R"j(, "prop": "warp3", "value": [4, 0]},
+        {"op": "property.set", "layer": )j" + id + R"j(, "prop": "paint_reveal", "value": 50}])j").c_str());
+    CHECK(r.ok);
+    const Layer& l = p.comp.layers[0];
+    CHECK(l.paint.size() == 2 && l.paint[1].erase && l.pins.size() == 1 && l.warp && deforms(l, 0.0));
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back));
+    const Layer& b = back.comp.layers[0];
+    CHECK(b.paint == l.paint && b.pins.size() == 1 && near(b.pins[0].rest.x, 20.0f) && near(b.pins[0].position.base.x, 25.0f));
+    CHECK(b.warp && near(b.warpPoints[3].base.x, 4.0f) && near(b.paintReveal.base, 50.0f));
+    CHECK(run(p, (R"j([{"op": "puppet.pin.remove", "layer": )j" + id + R"j(, "index": 0}, {"op": "paint.clear", "layer": )j" + id + R"j(}])j").c_str()).ok);
+    CHECK(p.comp.layers[0].pins.empty() && p.comp.layers[0].paint.empty());
+    CHECK(!run(p, (R"j({"op": "paint.stroke", "layer": )j" + id + R"j(, "points": [], "width": 8})j").c_str()).ok);
+
+    // The Puppet mesh: a pin's point follows it exactly; two pins turned together turn what is
+    // between them; a piece of the picture apart from the pinned one stays put.
+    CHECK(run(p, (R"j([{"op": "layer.set", "layer": )j" + id + R"j(, "warp": false},
+        {"op": "puppet.pin.add", "layer": )j" + id + R"j(, "point": [-40, 0]},
+        {"op": "puppet.pin.add", "layer": )j" + id + R"j(, "point": [40, 0]},
+        {"op": "puppet.pin.add", "layer": )j" + id + R"j(, "point": [0, 0], "starch": true},
+        {"op": "property.set", "layer": )j" + id + R"j(, "prop": "pin0", "value": [0, -40]},
+        {"op": "property.set", "layer": )j" + id + R"j(, "prop": "pin1", "value": [0, 40]}])j").c_str()).ok);
+    Layer& bent = p.comp.layers[0];
+    CHECK(bent.pins.size() == 3 && bent.pins[2].starch && deforms(bent, 0.0));
+    const Vec2 lo{-50, -50}, hi{50, 50};
+    const Vec2 onPin = deformPoint(bent, 0.0, {-40, 0}, lo, hi), between = deformPoint(bent, 0.0, {20, 0}, lo, hi);
+    CHECK(std::fabs(onPin.x) < 6.0f && std::fabs(onPin.y + 40.0f) < 6.0f);
+    CHECK(std::fabs(between.x) < 6.0f && std::fabs(between.y - 20.0f) < 6.0f); // a quarter turn
+    PuppetShape apart; // two blocks with a gap: the left one pinned, the right one free
+    apart.key = "test";
+    apart.lo = lo, apart.hi = hi;
+    puppetGrid(lo, hi, apart.cols, apart.rows);
+    apart.inside.assign(static_cast<size_t>(apart.cols * apart.rows), 0);
+    for (int y = 0; y < apart.rows; ++y)
+        for (int x = 0; x < apart.cols; ++x)
+            if (x < apart.cols / 2 - 2 || x > apart.cols / 2 + 2) apart.inside[static_cast<size_t>(y * apart.cols + x)] = 1;
+    setPuppetShape(bent.id, apart);
+    bent.pins = {bent.pins[0]};
+    bent.pins[0].rest = {-40, 0};
+    bent.pins[0].position = AnimVec2{Vec2{-40, 30}};
+    const Vec2 left = deformPoint(bent, 0.0, {-30, -10}, lo, hi), right = deformPoint(bent, 0.0, {40, 10}, lo, hi);
+    CHECK(near(left.y, 20.0f) && near(right.x, 40.0f) && near(right.y, 10.0f));
+    CHECK(puppetOnMesh(bent, {-40, 0}, lo, hi) && !puppetOnMesh(bent, {0, 0}, lo, hi));
+    Project starchy;
+    CHECK(deserializeProject(serializeProject(p), starchy) && starchy.comp.layers[0].pins.size() == 1);
+    CHECK(run(p, (R"j([{"op": "puppet.pin.add", "layer": )j" + id + R"j(, "point": [1, 1], "starch": true}])j").c_str()).ok);
+    CHECK(deserializeProject(serializeProject(p), starchy) && starchy.comp.layers[0].pins.back().starch);
+}
+
+// Model files: OBJ (with normals and a quad), STL (binary, welded), glTF (embedded), simplified.
+void testMeshFiles() {
+    MeshData m;
+    std::string error;
+    const std::string obj = "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nvn 0 0 1\nf 1//1 2//1 3//1 4//1\n";
+    CHECK(loadMeshFile("obj", obj, {}, m, error) && m.triangleCount() == 2 && m.vertexCount() == 4 && m.normals.size() == 12);
+    std::string stl(84, ' ');
+    const uint32_t one = 1;
+    std::memcpy(&stl[80], &one, 4);
+    const float tri[12] = {0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0};
+    stl.append(reinterpret_cast<const char*>(tri), 48);
+    stl.append(2, ' ');
+    CHECK(loadMeshFile("stl", stl, {}, m, error) && m.triangleCount() == 1 && m.vertexCount() == 3);
+    zUpToYUp(m);
+    CHECK(m.positions[3] == 1.0f && m.positions[7] == 0.0f && m.positions[8] == -1.0f); // (1, 0, 0) stays; (0, 1, 0) goes to (0, 0, -1)
+    // A glTF triangle in a data URI: 3 positions (36 bytes of floats).
+    const float pos[9] = {0, 0, 0, 1, 0, 0, 0, 1, 0};
+    static const char* b64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const auto* bytes = reinterpret_cast<const unsigned char*>(pos);
+    std::string enc;
+    for (size_t i = 0; i < 36; i += 3) {
+        const uint32_t v = bytes[i] << 16 | bytes[i + 1] << 8 | bytes[i + 2];
+        for (int k = 3; k >= 0; --k) enc += b64[(v >> (6 * k)) & 63];
+    }
+    const std::string gltf = R"({"asset":{"version":"2.0"},"buffers":[{"byteLength":36,"uri":"data:application/octet-stream;base64,)" + enc +
+                             R"("}],"bufferViews":[{"buffer":0,"byteLength":36}],"accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}],
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}],"nodes":[{"mesh":0,"translation":[5,0,0]}],"scenes":[{"nodes":[0]}]})";
+    CHECK(loadMeshFile("gltf", gltf, {}, m, error) && m.triangleCount() == 1 && m.positions[3] == 6.0f);
+    CHECK(!loadMeshFile("gltf", R"({"buffers":[{"uri":"model.bin"}]})", [](const std::string&, std::string&) { return false; }, m, error));
+    CHECK(!loadMeshFile("obj", "garbage", {}, m, error) && !error.empty());
+    // A fine grid of triangles, simplified to a few.
+    MeshData grid;
+    const int side = 60;
+    for (int y = 0; y <= side; ++y)
+        for (int x = 0; x <= side; ++x) grid.positions.insert(grid.positions.end(), {static_cast<float>(x), static_cast<float>(y), 0.0f});
+    for (int y = 0; y < side; ++y)
+        for (int x = 0; x < side; ++x) {
+            const uint32_t a = static_cast<uint32_t>(y * (side + 1) + x), b = a + 1, c = a + side + 1, d = c + 1;
+            grid.indices.insert(grid.indices.end(), {a, b, d, a, d, c});
+        }
+    simplifyMesh(grid, 500);
+    CHECK(grid.triangleCount() > 50 && grid.triangleCount() <= 500);
+}
+
+// The tracker finds a moved patch again, to a fraction of a pixel.
+void testTracking() {
+    auto frame = [](float cx, float cy) {
+        GrayImage g;
+        g.width = g.height = 96;
+        g.pixels.resize(96 * 96);
+        for (int y = 0; y < 96; ++y)
+            for (int x = 0; x < 96; ++x) {
+                const float dx = x - cx, dy = y - cy;
+                g.pixels[static_cast<size_t>(y * 96 + x)] = static_cast<uint8_t>(40 + 200 * std::exp(-(dx * dx + dy * dy) / 40.0f) +
+                                                                                 10 * ((x / 7 + y / 5) % 2));
+            }
+        return g;
+    };
+    const GrayImage a = frame(40, 40), b = frame(46, 37);
+    const TrackResult r = trackPatch(a, b, {40, 40}, {40, 40}, 10, 16);
+    CHECK(r.confidence > 0.8f && std::fabs(r.point.x - 46) < 1.0f && std::fabs(r.point.y - 37) < 1.0f);
+    const uint8_t rgba[8] = {255, 255, 255, 255, 0, 0, 0, 255};
+    const GrayImage g = grayFromRgba(rgba, 2, 1);
+    CHECK(g.pixels.size() == 2 && g.pixels[0] > 250 && g.pixels[1] == 0);
+}
+
+// Mask Path keyframes: the outline moves between keys point by point, saved, moved with the clip.
+void testMaskPathKeys() {
+    Project p;
+    p.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {0, 0}, 5.0));
+    const uint64_t id = p.comp.layers[0].id;
+    const std::string ops = R"j([{"op": "mask.add", "layer": )j" + std::to_string(id) + R"j(, "box": [0, 0, 100, 100]},
+        {"op": "mask.set", "layer": )j" + std::to_string(id) + R"j(, "index": 0, "time": 0, "path": [[0, 0], [100, 0], [100, 100], [0, 100]]},
+        {"op": "mask.set", "layer": )j" + std::to_string(id) + R"j(, "index": 0, "time": 2, "path": [[100, 0], [200, 0], [200, 100], [100, 100]]},
+        {"op": "mask.duplicate", "layer": )j" + std::to_string(id) + R"j(, "index": 0}])j";
+    OpsResult r = run(p, ops.c_str());
+    CHECK(r.ok);
+    if (!r.ok) return;
+    const Mask& m = p.comp.layers[0].masks[0];
+    CHECK(m.pathKeys.size() == 2 && p.comp.layers[0].masks.size() == 2 && p.comp.layers[0].masks[1].pathKeys.size() == 2);
+    CHECK(near(m.pathAt(1.0).vertices[0].point.x, 50.0f) && near(m.pathAt(3.0).vertices[0].point.x, 100.0f));
+    Project back;
+    CHECK(deserializeProject(serializeProject(p), back) && back.comp.layers[0].masks[0].pathKeys == m.pathKeys);
+    p.comp.layers[0].shiftTime(1.0);
+    CHECK(near(static_cast<float>(p.comp.layers[0].masks[0].pathKeys[1].time), 3.0f));
+    CHECK(run(p, (R"j({"op": "mask.set", "layer": )j" + std::to_string(id) + R"j(, "index": 0, "animated": false, "time": 2})j").c_str()).ok);
+    CHECK(p.comp.layers[0].masks[0].pathKeys.empty() && near(p.comp.layers[0].masks[0].path.vertices[0].point.x, 50.0f));
+}
+
+// Auto Level brings clips to one loudness; silence is found and cut out of a clip.
+void testAutoLevelAndSilence() {
+    auto tone = [](float amp, double seconds) {
+        std::vector<float> s(static_cast<size_t>(seconds * 48000) * 2);
+        for (size_t i = 0; i < s.size() / 2; ++i) s[i * 2] = s[i * 2 + 1] = amp * static_cast<float>(std::sin(2 * 3.14159265 * 220 * i / 48000.0));
+        return s;
+    };
+    auto levelDb = [](const std::vector<float>& s) {
+        double sum = 0;
+        for (float v : s) sum += v * v;
+        return 20 * std::log10(std::sqrt(sum / static_cast<double>(s.size())));
+    };
+    std::vector<float> quiet = tone(0.02f, 2.0), loud = tone(0.5f, 2.0);
+    dsp::autoLevel(quiet, 48000, -18.0f, 0.0f);
+    dsp::autoLevel(loud, 48000, -18.0f, 0.0f);
+    CHECK(std::fabs(levelDb(quiet) - -18.0) < 0.5 && std::fabs(levelDb(loud) - -18.0) < 0.5);
+    for (AudioEffectType t : {AudioEffectType::Reverb, AudioEffectType::Echo, AudioEffectType::Compressor, AudioEffectType::Filter}) {
+        std::vector<float> s = tone(0.3f, 0.5);
+        dsp::process(s, 48000, {makeAudioEffect(t)});
+        CHECK(std::all_of(s.begin(), s.end(), [](float v) { return std::isfinite(v) && std::fabs(v) < 4.0f; }));
+        CHECK(!dsp::processKey({makeAudioEffect(t)}).empty() || t == AudioEffectType::Filter);
+    }
+
+    // 1 s of sound, 1 s of silence, 1 s of sound: the silence is found (padded) ...
+    std::vector<float> loudness(300, 0.2f);
+    for (int i = 100; i < 200; ++i) loudness[i] = 0.0005f;
+    const auto stretches = dsp::quietStretches(loudness, 0.01, -40.0f, 0.5, 0.1);
+    CHECK(stretches.size() == 1 && near(static_cast<float>(stretches[0].first), 1.1f) && near(static_cast<float>(stretches[0].second), 1.9f));
+    CHECK(dsp::quietStretches(loudness, 0.01, -40.0f, 1.5, 0.1).empty()); // shorter than the minimum
+    CHECK(dsp::thresholdFromSample(loudness, 0.01, 1.2, 1.8) < -40.0f);
+    // ... and cut out of a 3 s clip, the rest moving back.
+    Project p;
+    MediaItem voice;
+    voice.name = "voice.wav", voice.kind = MediaKind::Audio, voice.duration = 3.0, voice.hasAudio = true;
+    const uint64_t mid = p.comp.addMedia(voice);
+    const uint64_t clip = p.comp.addLayer(makeMediaLayer(*p.comp.findMedia(mid), {0, 0}, 0.0, 3.0)).id;
+    const double removed = removeQuietParts(p.comp, clip, stretches);
+    CHECK(near(static_cast<float>(removed), 0.8f));
+    double end = 0.0;
+    int pieces = 0;
+    for (const Layer& l : p.comp.layers) end = std::max(end, l.outPoint), pieces += l.type == LayerType::Media;
+    CHECK(pieces == 2 && near(static_cast<float>(end), 2.2f));
+    CHECK(validate(p).empty());
+    // The operation needs the sound (an environment); audio.level sets one target on all clips.
+    CHECK(!run(p, R"({"op": "audio.remove_silence", "layer": 1})").ok);
+    CHECK(run(p, R"({"op": "audio.level", "target": -20})").ok);
+    for (const Layer& l : p.comp.layers)
+        CHECK(l.audioEffects.size() == 1 && l.audioEffects[0].type == AudioEffectType::AutoLevel && l.audioEffects[0].value == -20.0f);
+}
+
 void testAudioEffects() {
     // Defaults and ranges.
     CHECK(audioEffectFromId("noise_reduction") == AudioEffectType::NoiseReduction && audioEffectFromId("nope") == AudioEffectType::Count);
@@ -1982,7 +2227,33 @@ void testAudioEffects() {
     r = run(p, R"([{"op": "audio_effect.set", "layer": "Song", "index": 0, "values": {"lows": 3}}])");
     CHECK(!r.ok && r.error.find("low") != std::string::npos);
     CHECK(!run(p, R"([{"op": "audio_effect.set", "layer": "Song", "index": 0, "values": {"low": 99}}])").ok);
-    CHECK(!run(p, R"([{"op": "audio_effect.add", "layer": "Song", "effect": "reverb"}])").ok);
+    CHECK(!run(p, R"([{"op": "audio_effect.add", "layer": "Song", "effect": "flanger"}])").ok);
+    // Noise Reduction's sample of only the noise: kept in the file, dropped with null; only it takes one.
+    r = run(p, R"([{"op": "audio_effect.add", "layer": "Song", "effect": "noise_reduction", "sample": [1.5, 2.25]}])");
+    CHECK(r.ok);
+    auto songOf = [](Project& in) -> Layer& {
+        return *std::find_if(in.comp.layers.begin(), in.comp.layers.end(), [](const Layer& l) { return l.name == "Song"; });
+    };
+    if (r.ok) {
+        const AudioEffect& nr = songOf(p).audioEffects.back();
+        CHECK(nr.hasSample() && nr.sampleFrom == 1.5 && nr.sampleTo == 2.25 && dsp::processKey({nr}).find("1.500") != std::string::npos);
+        Project withSample;
+        CHECK(deserializeProject(serializeProject(p), withSample) && songOf(withSample).audioEffects.back().sampleTo == 2.25);
+        CHECK(run(p, R"([{"op": "audio_effect.set", "layer": "Song", "index": 2, "sample": null}])").ok && !songOf(p).audioEffects.back().hasSample());
+        CHECK(!run(p, R"([{"op": "audio_effect.set", "layer": "Song", "index": 2, "sample": [3, 1]}])").ok);
+        CHECK(!run(p, R"([{"op": "audio_effect.set", "layer": "Song", "index": 0, "sample": [1, 2]}])").ok);
+        CHECK(run(p, R"([{"op": "audio_effect.remove", "layer": "Song", "index": 2}])").ok);
+    }
+    // Learned from a sample, a steady hum is turned down where only the hum is.
+    {
+        std::vector<float> hum(48000 * 3 * 2);
+        for (size_t i = 0; i < hum.size() / 2; ++i) hum[i * 2] = hum[i * 2 + 1] = 0.05f * static_cast<float>(std::sin(2 * 3.14159265 * 120.0 * i / 48000.0));
+        std::vector<float> cleaned = hum;
+        dsp::reduceNoise(cleaned, 48000.0, 24.0f, 50.0f, 0.5, 1.5);
+        double before = 0, after = 0;
+        for (size_t i = 48000 * 2; i < 48000 * 4; ++i) before += hum[i] * hum[i], after += cleaned[i] * cleaned[i];
+        CHECK(after < before * 0.25);
+    }
     CHECK(run(p, R"([{"op": "audio_effect.remove", "layer": "Song", "index": 1}])").ok);
     Project q;
     std::string err;
@@ -2072,12 +2343,18 @@ int main() {
         {"expressions across projects", testExpressionsAcrossProjects},
         {"expressions through operations", testExpressionsThroughOperations},
         {"media folders", testMediaFolders},
+        {"gradients and picture frames", testGradientsAndFrames},
         {"references complete", testReferencesComplete},
         {"plugin catalog", testPluginCatalog},
         {"paths, masks, blending and mattes", testPathsAndMasks},
         {"clip speed, ripple, roll, slip, markers", testClipTiming},
         {"lut, curves and chroma key", testColorEffects},
         {"audio effects: eq, noise reduction, ducking", testAudioEffects},
+        {"auto level and silence removal", testAutoLevelAndSilence},
+        {"mask path keyframes", testMaskPathKeys},
+        {"paint, puppet and warp", testPaintPuppetWarp},
+        {"point tracking", testTracking},
+        {"3D model files", testMeshFiles},
         {"language files", testLanguageFiles},
     };
     for (const auto& [name, fn] : tests) {

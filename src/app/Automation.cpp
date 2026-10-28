@@ -3,6 +3,7 @@
 #include "app/McpServer.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "core/AudioDsp.h"
 #include "core/Data.h"
 #include "core/Describe.h"
 #include "core/Serialization.h"
@@ -406,6 +407,19 @@ OpEnvironment automationEnvironment() {
     };
     env.layerBounds = [](const Composition& comp, const Layer& layer, double t, Vec2& mn, Vec2& mx) {
         return render::localBounds(layer, t, mn, mx, &comp);
+    };
+    env.mediaLoudness = [](const MediaItem& item, std::vector<float>& loudness, double& blockSeconds, std::string& error) {
+        blockSeconds = static_cast<double>(media::kLoudnessBlock) / media::kAudioRate;
+        // The editor's decoded sound when it has it (same item, same file); else read it now.
+        if (const media::Loudness known = media::MediaManager::get().loudness(item.id);
+            known && media::MediaManager::get().audioPathOf(item.id) == item.path) {
+            loudness = *known;
+            return true;
+        }
+        std::vector<float> stereo;
+        if (!media::decodeAudio(platform::fromUtf8(item.path), stereo, &error)) return false;
+        loudness = dsp::loudness(stereo, media::kLoudnessBlock);
+        return true;
     };
     return env;
 }

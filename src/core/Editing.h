@@ -9,6 +9,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace bemotion {
@@ -61,6 +62,12 @@ bool linkAudio(Composition& comp, uint64_t video, uint64_t audio, bool* inSync =
 // A sound-only clip of `video`'s media to link it with: a selected one in `preferred` first,
 // else the one overlapping it most in time (0: none).
 uint64_t audioToLink(const Composition& comp, uint64_t video, const std::vector<uint64_t>& preferred = {});
+// Cuts quiet stretches out of a video or audio clip (silence or near silence between words):
+// `quiet` are [from, to) source seconds (dsp::quietStretches over its sound). The clip is split
+// around each one it shows and those pieces go; with `ripple` the pieces after them (and the
+// clips after it on its track) move back to close the gaps. Clips playing reversed or with
+// Time Remap are left alone. Returns the seconds removed (0: none).
+double removeQuietParts(Composition& comp, uint64_t id, const std::vector<std::pair<double, double>>& quiet, bool ripple = true);
 // True for clips these apply to: video and audio (not stills).
 bool hasTimeline(const Composition& comp, const Layer& layer);
 

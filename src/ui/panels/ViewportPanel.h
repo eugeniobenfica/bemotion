@@ -6,9 +6,11 @@
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkSurface.h"
 
+#include <QElapsedTimer>
 #include <QImage>
 #include <QWidget>
 
+#include <deque>
 #include <map>
 
 #include <cstdint>
@@ -16,6 +18,7 @@
 #include <optional>
 #include <vector>
 
+class QAbstractButton;
 class QComboBox;
 class QLabel;
 class QMimeData;
@@ -24,11 +27,21 @@ class QPlainTextEdit;
 class QPushButton;
 class QToolButton;
 
+namespace bmstyle {
+class IconButton;
+class DragValue;
+} // namespace bmstyle
+
 namespace bemotion {
+
+namespace ui {
+class ColorButton;
+using bmstyle::DragValue;
+} // namespace ui
 
 class EditorContext;
 namespace ui {
-class IconButton;
+using bmstyle::IconButton;
 }
 
 // Center panel: renders the composition (Skia) and provides direct manipulation.
@@ -93,7 +106,35 @@ protected:
 
 private:
     enum class Drag { None, Move, Scale, Rotate, Pan, Marquee, PathKey, PathHandle, Guide, Axis, Orbit, OrbitPan, CameraTool, Crop,
-                      PathPoint, PenHandle };
+                      PathPoint, PenHandle, Paint, Pin, WarpPoint, TrackBox };
+
+    // --- Brush, Eraser, Puppet, Warp, Track (ViewportTools.cpp) ---------------------------
+    Layer* toolLayer() const; // the single selected layer with a picture, unlocked
+    void buildToolHud();
+    void positionToolHud(int x, int y);
+    bool toolPress(Vec2 mouse, Qt::KeyboardModifiers mods);
+    void toolDrag(Vec2 mouse);
+    void toolRelease(); // the tracking box let go: tracking starts
+    Vec2 trackBoxStart_, trackBoxEnd_;
+    void drawToolOverlay(QPainter& p);
+    static Vec2 warpRest(int index, Vec2 lo, Vec2 hi); // a Mesh Warp point's place at rest
+    int warpPointAt(const Layer& l, Vec2 mouse) const;
+    ui::ColorButton* brushColor_ = nullptr;
+    ui::DragValue* brushSize_ = nullptr;
+    int toolIndex_ = -1; // the pin or warp point being dragged
+    // Ctrl+drag on a pin records its motion as it happens (After Effects' motion sketch): the
+    // playhead runs on from where it was, a key at every move.
+    bool recordingPin_ = false;
+    double recordFrom_ = 0.0;
+    QElapsedTimer recordClock_;
+    // Playback slower than the composition's frame rate (shown in a corner): the times frames
+    // were shown over the last second.
+    void notePlaybackFrame(int frame);
+    QElapsedTimer playClock_;
+    std::deque<qint64> shownFrames_;
+    int lastShownFrame_ = -1;
+    double shownFps_ = 0.0;
+    qint64 slowUntil_ = -1;
 
     void layout(); // zoom, origin and camera for the current size and time
     void press(QMouseEvent* e, bool doubleClick);
@@ -131,7 +172,11 @@ private:
         int vertex = -1;
         int part = 0; // 0 the point, 1 its in handle, 2 its out handle
     };
+    // The outline to change: a mask with Mask Path keyframes changes its key at the playhead
+    // (made there when there is none, as in After Effects).
     BezierPath* pathOf(const PathRef& r) const;
+    // The outline shown at the playhead (an animated mask's in-between), to draw and pick.
+    std::optional<BezierPath> shownPath(const PathRef& r) const;
     bool pathMatrix(uint64_t layerId, Projective& m) const; // layer space -> screen
     Vec2 pathLocal(uint64_t layerId, Vec2 screen) const;
     std::vector<PathRef> editablePaths() const;            // the single selected layer's
@@ -259,7 +304,7 @@ private:
     ui::IconButton* zoomOutButton_ = nullptr;
     ui::IconButton* zoomInButton_ = nullptr;
     QToolButton* zoomLevel_ = nullptr;
-    QPushButton* fitButton_ = nullptr;
+    QAbstractButton* fitButton_ = nullptr;
     QToolButton* qualityButton_ = nullptr;
     ui::IconButton* fullscreenButton_ = nullptr;
     ui::IconButton* snapshotButton_ = nullptr;

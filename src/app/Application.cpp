@@ -28,6 +28,8 @@
 #include "ui/Widgets.h"
 #include "ui/WindowChrome.h"
 
+#include "bmstyle/BmStyle.h"
+
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
@@ -179,6 +181,11 @@ int Application::run(int argc, char** argv) {
     platform::log("Qt " + std::string(qVersion()) + " on " + QSysInfo::prettyProductName().toStdString() + ", screen scale " +
                   std::to_string(app.devicePixelRatio()));
     QApplication::setStyle(new ui::Style); // Fusion with our check boxes; the palette and style sheet do the rest
+    // bmstyle (the look, libs/bmstyle): its controls' text through our translations, and its
+    // toned labels recolored when anything about the appearance changes (fonts, sizes too).
+    bmstyle::setTranslator([](const QString& text) { return trLabel(text); });
+    bmstyle::setLogoPainter(ui::drawLogoMark);
+    QObject::connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, &bmstyle::Appearance::get(), &bmstyle::Appearance::changed);
     ui::installWindowChrome();              // dialogs and windows framed by bemotion, not the system
     initShared();
     // The interface font: Inter ships with bemotion (other families come from the system).
@@ -269,7 +276,10 @@ void Application::buildWindow() {
         else if (files.size() == 1 && files[0].extension() == kProjectExtension) openProject(files[0]);
     };
     window_->resize(1440, 900);
-    ui::useGpu(settings().gpuRendering); // the viewport and exports draw on the graphics card, when there is one
+    ui::setGpuCacheMegabytes(settings().gpuCacheMegabytes);
+    // The viewport and exports draw on the graphics card, when there is one (Settings › Performance).
+    ui::useEngine(!settings().gpuRendering ? ui::Engine::Processor : settings().renderEngine == "vulkan" ? ui::Engine::Vulkan : ui::Engine::OpenGL);
+    media::setThreadCount(settings().processorThreads);
     tintTitleBar(window_);
     connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, window_, [this] { tintTitleBar(window_); });
     window_->showMaximized();

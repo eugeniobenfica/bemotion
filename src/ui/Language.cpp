@@ -26,9 +26,13 @@ public:
             strings_.insert(QByteArray::fromStdString(english), QString::fromStdString(translation));
     }
     QString translate(const char* context, const char* source, const char*, int n) const override {
-        // Ours only (bemotion's classes, plain tr(), QObject::tr of classes without Q_OBJECT):
-        // Qt's own texts (key names, its dialogs) stay as Qt has them.
-        const bool ours = !context || std::strncmp(context, "bemotion", 8) == 0 || std::strcmp(context, "QObject") == 0;
+        // Ours only (bemotion's classes, plain tr(), and tr() in classes without Q_OBJECT, which
+        // is their Qt base class's: "QWidget" for a painted list, "QAbstractButton"...). Qt's own
+        // texts (key names, its dialogs) stay as Qt has them.
+        static const char* const kBases[] = {"QObject", "QWidget", "QAbstractButton", "QPushButton", "QScrollArea", "QFrame",
+                                             "QLabel", "QDialog", "QMainWindow", "QPlainTextEdit", "QLayout"};
+        const bool ours = !context || std::strncmp(context, "bemotion", 8) == 0 ||
+                          std::any_of(std::begin(kBases), std::end(kBases), [context](const char* b) { return std::strcmp(context, b) == 0; });
         if (!source || !ours) return {};
         const auto it = strings_.constFind(QByteArray(source));
         if (it == strings_.constEnd()) return {};

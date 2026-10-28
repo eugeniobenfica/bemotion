@@ -30,7 +30,7 @@ Trash; bundled plugins stay installed and can be disabled.
 
 `api` is the version the plugin was written for: 1 objects, 2 commands and
 operations, 3 tables and CSV import, 4 files and 3D meshes, 5 command buttons
-and the microphone.
+and the microphone, 6 include, 7 row labels, 8 settings, 9 `load_mesh`.
 `bemotion.api_version` tells the running version.
 
 Scripts run in a sandbox (base, table, string, math and utf8 only — no files,
@@ -87,6 +87,34 @@ Helpers: `bemotion.ease(name, t)` (`"ease_out"`, `"back_out"`, `"bounce"`…),
 by people — `"1.234,5"`, `"R$ 12"`, `"45%"` — or `nil`) and
 `bemotion.parse_csv(text)` (rows of cells; comma, semicolon or tab). `print`
 goes to the Plugin Manager log. Colors can be `"#RRGGBB[AA]"` strings or tables.
+
+`bemotion.load_mesh(file, { up = "Auto" | "Y Up" | "Z Up", max_triangles = n })`
+(API 9) reads a model file natively — OBJ, STL, glTF / GLB, a `.gltf`'s `.bin`
+files from beside it — into a mesh for `g.mesh`, simplified to at most
+`max_triangles` (0: all), many times faster than parsing it in Lua; `nil` and
+why when it cannot. The 3D Models plugin is built on it (its *Detail*).
+
+## Settings (API 8)
+
+A plugin can declare settings of its own in `plugin.json`; Settings › Plugins
+shows a *Settings…* button on its card that opens them (applied at once, kept
+in the app's settings — not in projects — with a Reset to the defaults):
+
+```json
+"settings": [
+  { "id": "grid_width", "label": "Grid line width", "kind": "number", "default": 1.5,
+    "min": 0.5, "max": 6, "step": 0.05, "format": "%.1f px", "description": "..." },
+  { "id": "play", "label": "Play while recording", "kind": "toggle", "default": true },
+  { "id": "corners", "label": "Corners", "kind": "choice", "choices": ["Rounded", "Square"], "default": "Rounded" },
+  { "id": "name", "label": "Clip name", "kind": "text", "default": "Recording" }
+]
+```
+
+`bemotion.setting(id)` returns the user's value (or the default): a number, a
+boolean, the chosen label or the text; `nil` for an id not declared. Changing
+one redraws the plugin's objects. The bundled Charts (grid, corners), Recorder
+(play while recording, clip name) and 3D Models (turn while revealing) plugins
+use them.
 
 ## Files and 3D meshes (API 4)
 

@@ -1,6 +1,6 @@
-#include "ui/Style.h"
+#include "bmstyle/Style.h"
 
-#include "ui/Theme.h"
+#include "bmstyle/Theme.h"
 
 #include <QAbstractSlider>
 #include <QAbstractSpinBox>
@@ -13,7 +13,7 @@
 
 #include <algorithm>
 
-namespace bemotion::ui {
+namespace bmstyle {
 
 namespace {
 
@@ -111,4 +111,4 @@ void Style::drawPrimitive(PrimitiveElement element, const QStyleOption* option, 
     p->restore();
 }
 
-} // namespace bemotion::ui
+} // namespace bmstyle

@@ -9,6 +9,7 @@
 #include "core/Data.h"
 #include "core/Editing.h"
 #include "core/Geometry.h"
+#include "core/Ops.h"
 #include "core/Presets.h"
 #include "media/MediaManager.h"
 #include "render/Fonts.h"
@@ -39,6 +40,7 @@
 #include <QVBoxLayout>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -509,6 +511,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
         col->addWidget(section);
     }
     if (layer.type == LayerType::Media) buildMediaSource(col, layer);
+    if (layer.type == LayerType::Media && layer.media.hasAudio) buildSoundFixes(col, layer);
     if (layer.type == LayerType::Text && layer.text.subtitle) buildCaptions(col, layer);
 
     // Plugin groups made only of toggles / choices / text / files (no property rows): shown where the
@@ -606,6 +609,37 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                         on->setChecked(l->threeD);
                     }
                 });
+            }
+            // Gradient fills: plugin objects (charts) across each filled part; text (with its own
+            // rows, below) across its lines.
+            auto addFillRow = [&](CollapsibleSection* section) {
+                const bool isText = layer.type == LayerType::Text;
+                const ShapeFill now = isText ? layer.text.fill : layer.plugin.fill;
+                section->addPlainRow(isText ? tr("Fill") : tr("Gradient"), choiceCombo(kShapeFillLabels, static_cast<int>(now), [this, isText](int i) {
+                    for (Layer* l : ctx_.selectedLayers()) {
+                        if (isText && l->type == LayerType::Text) l->text.fill = static_cast<ShapeFill>(i);
+                        if (!isText && l->type == LayerType::Plugin) l->plugin.fill = static_cast<ShapeFill>(i);
+                    }
+                    ctx_.touch(); // its color and angle rows come and go (the panel rebuilds)
+                }));
+            };
+            if (group == "Object" && layer.type == LayerType::Plugin) addFillRow(section);
+            if (group == "Frame" && layer.type == LayerType::Media) { // mirrored pictures
+                for (const bool horizontal : {true, false}) {
+                    auto* on = new ui::Switch;
+                    connect(on, &QAbstractButton::toggled, this, [this, horizontal](bool v) {
+                        for (Layer* l : ctx_.selectedLayers())
+                            if (l->type == LayerType::Media && l->media.hasVideo) (horizontal ? l->media.flipH : l->media.flipV) = v;
+                        ctx_.touch();
+                    });
+                    section->addPlainRow(horizontal ? tr("Flip Horizontal") : tr("Flip Vertical"), on);
+                    refreshers_.push_back([this, id, on, horizontal] {
+                        if (const Layer* l = ctx_.comp().findLayer(id)) {
+                            const QSignalBlocker b(on);
+                            on->setChecked(horizontal ? l->media.flipH : l->media.flipV);
+                        }
+                    });
+                }
             }
             if (layer.type == LayerType::Plugin) {
                 for (PluginParam& p : layer.plugin.params) {
@@ -818,6 +852,7 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
                     ctx_.touch();
                 });
                 section->addPlainRow(tr("Auto Fit"), fitLines);
+                addFillRow(section);
                 refreshers_.push_back([this, id, fitLines] {
                     if (const Layer* l = ctx_.comp().findLayer(id)) {
                         const QSignalBlocker b(fitLines);
@@ -967,6 +1002,85 @@ void PropertiesPanel::buildMediaSource(QVBoxLayout* col, Layer& layer) {
     s->body()->addLayout(row);
     col->addWidget(s);
     if (hasTimeline(ctx_.comp(), layer)) buildMediaTime(col, layer);
+}
+
+// The automatic sound fixes, on the selected clips with sound: Auto Level and Remove Silence
+// (whose sample of the silence is picked on the timeline). Their options are kept in
+// Settings::tools between sessions.
+void PropertiesPanel::buildSoundFixes(QVBoxLayout* col, Layer&) {
+    ToolSettings& t = settings().tools;
+    auto number = [](float& value, float lo, float hi, float speed, const char* format) {
+        auto* v = new ui::DragValue;
+        v->setRange(lo, hi);
+        v->setSpeed(speed);
+        v->setFormat(format);
+        v->setValue(value);
+        connect(v, &ui::DragValue::valueChanged, v, [&value](float x) { value = x; });
+        connect(v, &ui::DragValue::editFinished, v, [] { saveSettings(); });
+        return v;
+    };
+    auto* level = new CollapsibleSection(tr("Auto Level"));
+    level->addPlainRow(tr("Target"), number(t.levelTarget, -40, -6, 0.1f, "%.1f dB"));
+    level->addPlainRow(tr("Even Out"), number(t.levelEvenOut, 0, 100, 0.25f, "%.0f%%"));
+    auto* levelRun = new QPushButton(tr("Level Selected Clips"));
+    connect(levelRun, &QPushButton::clicked, this, [this] { ui::autoLevelSelected(ctx_); });
+    level->body()->addWidget(levelRun);
+    col->addWidget(level);
+
+    auto* silence = new CollapsibleSection(tr("Remove Silence"));
+    silence->addPlainRow(tr("Quieter than"), number(t.silenceThreshold, -80, -6, 0.25f, "%.0f dB"));
+    silence->addPlainRow(tr("For at least"), number(t.silenceMin, 0.1f, 10, 0.01f, "%.2f s"));
+    silence->addPlainRow(tr("Keep around words"), number(t.silencePadding, 0, 2, 0.005f, "%.2f s"));
+    auto* ripple = new ui::Switch;
+    ripple->setChecked(t.silenceRipple);
+    connect(ripple, &QAbstractButton::toggled, this, [](bool on) {
+        settings().tools.silenceRipple = on;
+        saveSettings();
+    });
+    silence->addPlainRow(tr("Close the gaps"), ripple);
+    // The sample: a stretch of the timeline with only silence or background noise, dragged over
+    // on the timeline; what is that quiet counts as silence (instead of the level above).
+    auto* sampleRow = new QWidget;
+    auto* sr = new QHBoxLayout(sampleRow);
+    sr->setContentsMargins(0, 0, 0, 0);
+    sr->setSpacing(4);
+    auto* pick = new QPushButton(ui::makeIcon(ui::Icon::Pointer, theme::kTextDim, 16), tr("Pick a Sample"));
+    pick->setCheckable(true);
+    pick->setToolTip(tr("Then drag on the timeline over a pause: only silence or background noise"));
+    auto* clearSample = new ui::IconButton(ui::Icon::Close, tr("No sample: use the level above"), 24);
+    sr->addWidget(pick, 1);
+    sr->addWidget(clearSample);
+    silence->addPlainRow(tr("Sample"), sampleRow);
+    auto* sampleInfo = faint({});
+    sampleInfo->setWordWrap(true);
+    silence->body()->addWidget(sampleInfo);
+    connect(pick, &QPushButton::clicked, this, [this](bool on) {
+        if (!on) {
+            ctx_.samplePick = nullptr;
+            return;
+        }
+        ctx_.samplePick = [](double from, double to) {
+            settings().tools.silenceSampleFrom = from;
+            settings().tools.silenceSampleTo = to;
+        };
+        emit panelRequested(QStringLiteral("Timeline"));
+    });
+    connect(clearSample, &QAbstractButton::clicked, this, [] { settings().tools.silenceSampleFrom = settings().tools.silenceSampleTo = -1.0; });
+    refreshers_.push_back([this, sampleInfo, clearSample, pick] {
+        const ToolSettings& o = settings().tools;
+        const bool on = o.silenceSampleFrom >= 0.0 && o.silenceSampleTo > o.silenceSampleFrom;
+        char span[64];
+        std::snprintf(span, sizeof span, "%.2f s – %.2f s", o.silenceSampleFrom, o.silenceSampleTo);
+        const QString text = on ? tr("Sample of the silence: %1 (the level above is not used)").arg(QString::fromUtf8(span))
+                                : tr("No sample: stretches quieter than the level above count as silence.");
+        if (sampleInfo->text() != text) sampleInfo->setText(text);
+        clearSample->setEnabled(on);
+        if (pick->isChecked() != ctx_.pickingSample()) pick->setChecked(ctx_.pickingSample());
+    });
+    auto* silenceRun = new QPushButton(tr("Remove from Selected Clips"));
+    connect(silenceRun, &QPushButton::clicked, this, [this] { ui::removeSilence(ctx_, this); });
+    silence->body()->addWidget(silenceRun);
+    col->addWidget(silence);
 }
 
 // A shape's kind (a path keeps the outline it had), its path's points, the repeater.
@@ -1190,6 +1304,55 @@ void PropertiesPanel::buildMaskRows(CollapsibleSection* section, Layer& layer, i
         }
     });
     section->addPlainRow(tr("Enabled"), enabled);
+    // Mask Path keyframes (After Effects' stopwatch on Mask Path): a key of the outline at the
+    // playhead; with keys, editing the points at another moment makes one there.
+    auto* pathKeys = new QWidget;
+    auto* keyRow = new QHBoxLayout(pathKeys);
+    keyRow->setContentsMargins(0, 0, 0, 0);
+    keyRow->setSpacing(4);
+    auto* prevKey = new ui::IconButton(ui::Icon::KeyPrev, tr("Previous path keyframe"), 22);
+    auto* key = new ui::KeyframeButton;
+    key->setToolTip(tr("A keyframe of the outline at the playhead: the mask moves from one to the next"));
+    auto* nextKey = new ui::IconButton(ui::Icon::KeyNext, tr("Next path keyframe"), 22);
+    auto* keyInfo = new QLabel;
+    ui::setTone(keyInfo, ui::Tone::TextDim);
+    keyRow->addWidget(prevKey);
+    keyRow->addWidget(key);
+    keyRow->addWidget(nextKey);
+    keyRow->addWidget(keyInfo, 1);
+    section->addPlainRow(tr("Path"), pathKeys);
+    connect(key, &QAbstractButton::clicked, this, [this, mask] {
+        Mask* m = mask();
+        if (!m) return;
+        if (const int k = m->pathKeyAt(ctx_.time); k >= 0) {
+            m->path = m->pathAt(ctx_.time);
+            m->pathKeys.erase(m->pathKeys.begin() + k);
+        } else {
+            m->setPathKey(ctx_.time, m->pathAt(ctx_.time));
+        }
+        ctx_.touch();
+    });
+    auto jump = [this, mask](int direction) {
+        const Mask* m = mask();
+        if (!m) return;
+        double best = direction > 0 ? DBL_MAX : -DBL_MAX;
+        for (const Mask::PathKey& k : m->pathKeys) {
+            if (direction > 0 && k.time > ctx_.time + kTimeEpsilon) best = std::min(best, k.time);
+            if (direction < 0 && k.time < ctx_.time - kTimeEpsilon) best = std::max(best, k.time);
+        }
+        if (best != DBL_MAX && best != -DBL_MAX) ctx_.setTime(best);
+    };
+    connect(prevKey, &QAbstractButton::clicked, this, [jump] { jump(-1); });
+    connect(nextKey, &QAbstractButton::clicked, this, [jump] { jump(1); });
+    refreshers_.push_back([this, mask, key, prevKey, nextKey, keyInfo] {
+        const Mask* m = mask();
+        if (!m) return;
+        key->setState(m->pathKeyAt(ctx_.time) >= 0, !m->pathKeys.empty());
+        prevKey->setEnabled(!m->pathKeys.empty() && m->pathKeys.front().time < ctx_.time - kTimeEpsilon);
+        nextKey->setEnabled(!m->pathKeys.empty() && m->pathKeys.back().time > ctx_.time + kTimeEpsilon);
+        const QString info = m->pathKeys.empty() ? tr("Not animated") : tr("%1 keyframes").arg(m->pathKeys.size());
+        if (keyInfo->text() != info) keyInfo->setText(info);
+    });
     // Its points (the Pen), its name, removing it: small buttons on the right.
     auto* row = new QHBoxLayout;
     row->addStretch();
@@ -1208,6 +1371,12 @@ void PropertiesPanel::buildMaskRows(CollapsibleSection* section, Layer& layer, i
         }
     });
     row->addWidget(rename);
+    auto* duplicate = new ui::IconButton(ui::Icon::Duplicate, tr("Duplicate this mask"), 26);
+    connect(duplicate, &QAbstractButton::clicked, this, [this, id, index] {
+        const OpsResult r = applyOps(ctx_.project, {{"op", "mask.duplicate"}, {"layer", id}, {"index", index}});
+        if (r.ok) ctx_.touch();
+    });
+    row->addWidget(duplicate);
     auto* remove = new ui::IconButton(ui::Icon::Trash, tr("Delete this mask"), 26);
     connect(remove, &QAbstractButton::clicked, this, [this, id, index] {
         Layer* l = ctx_.comp().findLayer(id);
@@ -1525,7 +1694,6 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
     }
     auto* buttons = new ui::FlowLayout; // wraps when the panel is narrow
     auto* add = new QPushButton(tr("+ Add Row"));
-    add->setVisible(names.empty()); // named rows are added by name, above
     connect(add, &QPushButton::clicked, this, [this, rowsOf] {
         if (auto* rows = rowsOf()) {
             DataRow r;
@@ -1564,6 +1732,7 @@ void PropertiesPanel::buildPluginData(QVBoxLayout* col, Layer& layer) {
     const uint64_t layerId = layer.id;
     connect(csv, &QPushButton::clicked, this, [this, layerId] { importCsv(layerId); });
     if (names.empty()) buttons->addWidget(add);
+    else delete add; // named rows are added by name, above (shown parentless, it would flash up as a window)
     buttons->addWidget(paste);
     buttons->addWidget(copy);
     buttons->addWidget(csv);

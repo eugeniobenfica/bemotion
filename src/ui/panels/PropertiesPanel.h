@@ -37,6 +37,7 @@ private:
     void buildMask(QVBoxLayout* col, Layer& layer, int index); // a mask picked on the timeline: its options alone
     void buildMediaSource(QVBoxLayout* col, Layer& layer);
     void buildMediaTime(QVBoxLayout* col, Layer& layer);
+    void buildSoundFixes(QVBoxLayout* col, Layer& layer); // clips with sound: Auto Level, Remove Silence
     void buildBlending(QVBoxLayout* col, Layer& layer);
     void buildMaskRows(CollapsibleSection* section, Layer& layer, int index);
     void buildShapeRows(CollapsibleSection* section, Layer& layer);

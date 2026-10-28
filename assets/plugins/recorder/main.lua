@@ -3,6 +3,8 @@
 -- Press it to start recording (the timeline plays, so you can speak over it);
 -- press it again to stop: the recording is saved next to the project
 -- (Recordings/Recording N.wav), imported, and placed where recording began.
+-- Its settings (Settings > Plugins > Recorder > Settings): play while recording,
+-- the clip's name.
 
 local started_at = 0
 
@@ -15,13 +17,15 @@ bemotion.register_command {
     if doc.pressed then
       bemotion.microphone.start()
       started_at = doc.time
-      doc.play(true)
+      if bemotion.setting("play") ~= false then doc.play(true) end
       return
     end
     doc.play(false)
     if not bemotion.microphone.recording() then return end
     local file = bemotion.microphone.stop()
     local media = doc.apply { op = "media.import", path = file }
-    doc.apply { op = "layer.add", type = "media", media = media.media, start = started_at, name = "Recording" }
+    local name = bemotion.setting("name")
+    if not name or name == "" then name = "Recording" end
+    doc.apply { op = "layer.add", type = "media", media = media.media, start = started_at, name = name }
   end,
 }

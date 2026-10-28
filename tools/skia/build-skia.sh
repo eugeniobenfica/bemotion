@@ -59,6 +59,8 @@ if [ ! -f "$SRC/.bemotion-ready" ]; then
         # The mingw toolchain patch compiles everything with -mavx2 -mavx512f: the library would
         # only run on CPUs with AVX-512. Plain x86-64 instead.
         sed -i.bak '/"-mavx2",/d; /"-mavx512f",/d; /"-mf16c",/d; /"-mfma",/d' gn/skia/BUILD.gn
+        # MSVC's "/w" (no warnings) for the Vulkan memory allocator: GCC's is "-w".
+        sed -i.bak 's#cflags = \[ "/w" \]#cflags = [ "-w" ]#' src/gpu/vk/vulkanmemoryallocator/BUILD.gn
         git clone --quiet https://chromium.googlesource.com/chromium/src/third_party/zlib.git "$WORK/zlib"
         git -C "$WORK/zlib" checkout --quiet "$ZLIB_COMMIT"
         mkdir -p third_party/externals/zlib
@@ -73,6 +75,15 @@ if [ ! -f "$SRC/.bemotion-ready" ]; then
     # ... and nothing dispatches to them.
     sed -i.bak '/SkCpu::Supports(SkCpu::HSW)/d; /SkCpu::Supports(SkCpu::SKX)/d' \
         src/core/SkOpts.cpp src/core/SkBlitRow_opts.cpp src/core/SkSwizzler_opts.cpp
+    # Vulkan (Windows, Linux): its headers and memory allocator, at the commits Skia's DEPS pins.
+    if [ "$OS" != mac ]; then
+        for dep in vulkan-headers vulkanmemoryallocator; do
+            url=$(grep -o "\"third_party/externals/$dep\"[^,]*" DEPS | grep -o 'https://[^"]*' | head -1)
+            [ -n "$url" ] || continue
+            git clone --quiet "${url%@*}" "third_party/externals/$dep"
+            git -C "third_party/externals/$dep" checkout --quiet "${url##*@}"
+        done
+    fi
     touch .bemotion-ready
 fi
 cd "$SRC"
@@ -96,7 +107,7 @@ ARGS="
   skia_use_dng_sdk=false
   skia_use_wuffs=false
   skia_use_xps=false
-  skia_use_vulkan=false
+  skia_use_vulkan=$( [ "$OS" = mac ] && echo false || echo true )
   skia_use_icu=true
   skia_use_harfbuzz=true
   skia_use_system_icu=true
@@ -130,6 +141,8 @@ rm -rf "$PREFIX/include" "$PREFIX/lib"
 mkdir -p "$PREFIX/include" "$PREFIX/lib"
 # Headers keep Skia's layout ("include/core/SkCanvas.h", "modules/...", and the src/ headers the modules include).
 find include modules src -name '*.h' | tar -cf - -T - | tar -xf - -C "$PREFIX/include"
+# Vulkan's own headers (<vulkan/vulkan_core.h>), which Skia's Vulkan headers include.
+if [ -d third_party/externals/vulkan-headers/include ]; then cp -r third_party/externals/vulkan-headers/include/. "$PREFIX/include/"; fi
 cp "$OUT"/*.a "$PREFIX/lib/"
 cp LICENSE "$PREFIX/LICENSE"
 echo "$COMMIT" > "$PREFIX/REVISION"

@@ -16,6 +16,9 @@
 #include <string>
 #include <vector>
 
+#include "include/core/SkPaint.h"
+#include "include/core/SkRect.h"
+
 class SkCanvas;
 
 namespace bemotion::render {
@@ -46,8 +49,21 @@ public:
     // A 3D mesh, projected and lit (render/Mesh3D.h); the layer opacity applies.
     void mesh(const Mesh& mesh, MeshView view);
 
+    // The layer's gradient fill (PluginProps::fill): what is filled from here on (rectangles,
+    // circles, polygons, arcs; not lines or text) goes from its color to `to` across itself.
+    void setGradient(ShapeFill fill, Color to, float angleDeg) {
+        gradient_ = fill;
+        gradientTo_ = to;
+        gradientAngle_ = angleDeg;
+    }
+
 private:
     Color faded(Color c) const { return {c.r, c.g, c.b, c.a * opacity_}; }
+    // A filled part's paint, with the gradient across `bounds` when there is one.
+    SkPaint filled(Color c, const SkRect& bounds) const;
+    ShapeFill gradient_ = ShapeFill::Solid;
+    Color gradientTo_;
+    float gradientAngle_ = 90.0f;
     SkCanvas* canvas_;
     float opacity_; // layer opacity, multiplied into every color
     bool clipped_ = false;

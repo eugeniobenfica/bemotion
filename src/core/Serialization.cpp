@@ -122,6 +122,11 @@ json encodeMasks(const std::vector<Mask>& masks) {
                   {"feather", encodeAnimated(m.feather)}, {"opacity", encodeAnimated(m.opacity)}, {"expansion", encodeAnimated(m.expansion)}};
         if (m.inverted) j["inverted"] = true;
         if (!m.enabled) j["enabled"] = false;
+        if (!m.pathKeys.empty()) {
+            json keys = json::array();
+            for (const Mask::PathKey& k : m.pathKeys) keys.push_back({{"time", k.time}, {"path", pathToJson(k.path)}});
+            j["path_keys"] = std::move(keys);
+        }
         out.push_back(std::move(j));
     }
     return out;
@@ -141,6 +146,12 @@ std::vector<Mask> decodeMasks(const json& list) {
         if (j.contains("feather")) decodeAnimated(j["feather"], m.feather);
         if (j.contains("opacity")) decodeAnimated(j["opacity"], m.opacity);
         if (j.contains("expansion")) decodeAnimated(j["expansion"], m.expansion);
+        for (const json& k : j.value("path_keys", json::array())) {
+            if (!k.is_object() || !k.contains("path")) continue;
+            BezierPath p;
+            pathFromJson(k["path"], p);
+            m.setPathKey(k.value("time", 0.0), p);
+        }
         masks.push_back(std::move(m));
     }
     return masks;
@@ -185,6 +196,7 @@ json encodePlugin(const PluginProps& p) {
         j["rows"] = std::move(rows);
     }
     if (p.hasTable) j["table"] = {{"header", p.table.header}, {"rows", p.table.rows}};
+    if (p.fill != ShapeFill::Solid) j["gradient"] = idOrFirst(kShapeFillIds, static_cast<int>(p.fill));
     return j;
 }
 
@@ -221,6 +233,7 @@ void decodePlugin(const json& j, PluginProps& p) {
         }
         p.params.push_back(std::move(pp));
     }
+    p.fill = enumFromId(kShapeFillIds, j.value("gradient", std::string()), ShapeFill::Solid); // before properties: its rows exist
     p.hasRows = j.contains("rows");
     p.rows.clear();
     for (const auto& rj : j.value("rows", json::array())) {
@@ -288,6 +301,8 @@ json encodeLayer(const Layer& constLayer) {
         if (m.speed != 1.0) j["media"]["speed"] = m.speed;
         if (m.reversed) j["media"]["reversed"] = true;
         if (m.timeRemap) j["media"]["time_remap"] = true; // its keyframes: the "time_remap" property
+        if (m.flipH) j["media"]["flip_h"] = true;
+        if (m.flipV) j["media"]["flip_v"] = true;
     } else if (layer.type == LayerType::Background) {
         j["background"] = {{"fill", backgroundFillId(layer.background.fill)}, {"media", layer.background.mediaId},
                            {"fit", backgroundFitId(layer.background.fit)}};
@@ -298,6 +313,7 @@ json encodeLayer(const Layer& constLayer) {
                      {"align", kAlignIds[static_cast<int>(layer.text.align)]},
                      {"outline", layer.text.outlineEnabled},
                      {"box", layer.text.boxEnabled}};
+        if (layer.text.fill != ShapeFill::Solid) j["text"]["gradient"] = idOrFirst(kShapeFillIds, static_cast<int>(layer.text.fill));
         if (layer.text.counter) {
             j["text"]["counter"] = true;
             if (layer.text.counterDecimals) j["text"]["decimals"] = layer.text.counterDecimals;
@@ -325,6 +341,30 @@ json encodeLayer(const Layer& constLayer) {
             j["text"]["captions"] = std::move(captions);
         }
     }
+    // Paint strokes, Puppet pins (where they rest; where they go is the "pin<i>" property) and
+    // the Mesh Warp (its points: "warp<i>").
+    if (!layer.paint.empty()) {
+        json strokes = json::array();
+        for (const PaintStroke& s : layer.paint) {
+            json points = json::array();
+            for (const Vec2& v : s.points) points.push_back({v.x, v.y});
+            json sj = {{"points", std::move(points)}, {"color", encode(s.color)}, {"width", s.width}};
+            if (s.erase) sj["erase"] = true;
+            if (s.softness > 0.0f) sj["softness"] = s.softness;
+            strokes.push_back(std::move(sj));
+        }
+        j["paint"] = std::move(strokes);
+    }
+    if (!layer.pins.empty()) {
+        json pins = json::array();
+        for (const PuppetPin& p : layer.pins) {
+            json pj = {{"rest", encode(p.rest)}};
+            if (p.starch) pj["starch"] = true;
+            pins.push_back(std::move(pj));
+        }
+        j["pins"] = std::move(pins);
+    }
+    if (layer.warp) j["warp"] = true;
     json props = json::object();
     for (const auto& p : layer.properties())
         if (p.effectIndex < 0 && p.maskIndex < 0) props[p.id] = encodeProperty(p); // effects' and masks' live with them
@@ -360,8 +400,11 @@ json encodeLayer(const Layer& constLayer) {
     }
     if (!layer.audioEffects.empty()) {
         json effects = json::array();
-        for (const AudioEffect& e : layer.audioEffects)
-            effects.push_back({{"type", audioEffectId(e.type)}, {"enabled", e.enabled}, {"value", e.value}, {"value2", e.value2}, {"value3", e.value3}});
+        for (const AudioEffect& e : layer.audioEffects) {
+            json ej = {{"type", audioEffectId(e.type)}, {"enabled", e.enabled}, {"value", e.value}, {"value2", e.value2}, {"value3", e.value3}};
+            if (e.hasSample()) ej["sample"] = {e.sampleFrom, e.sampleTo};
+            effects.push_back(std::move(ej));
+        }
         j["audio_effects"] = std::move(effects);
     }
     if (!layer.animations.empty()) {
@@ -421,6 +464,8 @@ Layer decodeLayer(const json& j) {
         layer.media.speed = m->value("speed", 1.0);
         layer.media.reversed = m->value("reversed", false);
         layer.media.timeRemap = m->value("time_remap", false);
+        layer.media.flipH = m->value("flip_h", false);
+        layer.media.flipV = m->value("flip_v", false);
     }
     if (const auto b = j.find("background"); b != j.end() && b->is_object()) { // before properties: the fill decides which exist
         const std::string fill = b->value("fill", std::string("linear")), fit = b->value("fit", std::string("cover"));
@@ -463,6 +508,7 @@ Layer decodeLayer(const json& j) {
         layer.text.align = enumFromId(kAlignIds, t.value("align", std::string()), TextAlign::Center);
         layer.text.outlineEnabled = t.value("outline", false);
         layer.text.boxEnabled = t.value("box", false);
+        layer.text.fill = enumFromId(kShapeFillIds, t.value("gradient", std::string()), ShapeFill::Solid); // before properties: its rows exist
         layer.text.subtitle = t.value("subtitle", false);
         layer.text.counter = t.value("counter", false);
         layer.text.counterDecimals = t.value("decimals", 0);
@@ -485,6 +531,26 @@ Layer decodeLayer(const json& j) {
                 if (c.is_object())
                     layer.text.captions.push_back({c.value("start", 0.0), c.value("end", 0.0), c.value("text", std::string())});
     }
+    // Before the properties: they make the rows "pin<i>", "warp<i>" and "paint_reveal" exist.
+    for (const json& sj : j.value("paint", json::array())) {
+        if (!sj.is_object()) continue;
+        PaintStroke s;
+        for (const json& v : sj.value("points", json::array()))
+            if (v.is_array() && v.size() == 2 && v[0].is_number() && v[1].is_number()) s.points.push_back({v[0].get<float>(), v[1].get<float>()});
+        if (sj.contains("color")) decode(sj["color"], s.color);
+        s.width = sj.value("width", s.width);
+        s.erase = sj.value("erase", false);
+        s.softness = std::max(0.0f, sj.value("softness", 0.0f));
+        if (!s.points.empty()) layer.paint.push_back(std::move(s));
+    }
+    for (const json& pj : j.value("pins", json::array())) {
+        PuppetPin pin;
+        if (pj.is_object() && pj.contains("rest")) decode(pj["rest"], pin.rest);
+        if (pj.is_object()) pin.starch = pj.value("starch", false);
+        pin.position = AnimVec2{pin.rest};
+        layer.pins.push_back(std::move(pin));
+    }
+    layer.warp = j.value("warp", false);
     if (j.contains("properties")) {
         const auto& props = j["properties"];
         for (auto& p : layer.properties())
@@ -522,6 +588,8 @@ Layer decodeLayer(const json& j) {
         e.value = ej.value("value", e.value);
         e.value2 = ej.value("value2", e.value2);
         e.value3 = ej.value("value3", e.value3);
+        if (const auto s = ej.find("sample"); s != ej.end() && s->is_array() && s->size() == 2 && (*s)[0].is_number() && (*s)[1].is_number())
+            e.sampleFrom = (*s)[0].get<double>(), e.sampleTo = (*s)[1].get<double>();
         layer.audioEffects.push_back(e);
     }
     if (const auto transitions = j.find("transitions"); transitions != j.end() && transitions->is_object()) {

@@ -54,6 +54,9 @@ void drawLayer(SkCanvas* canvas, const Layer& layer, double time, const Projecti
 
 // Axis-aligned bounds of the layer content in its local space (a compound's
 // cover its children, which needs `comp`).
+// What the layer's picture covers in its own space, before its paint and its bending (Puppet,
+// Warp): the box the Mesh Warp's grid spans.
+bool pictureBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp = nullptr);
 bool localBounds(const Layer& layer, double time, Vec2& outMin, Vec2& outMax, const Composition* comp = nullptr);
 
 bool hasActiveEffects(const Layer& layer);

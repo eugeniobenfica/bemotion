@@ -62,7 +62,8 @@ follow from that:
 
 ```
 src/app      application, command line, MCP server, plugins, settings, OS (Qt)
- └─ src/ui       Qt Widgets editor: window, panels, dialogs, theme, widgets
+ └─ src/ui       Qt Widgets editor: window, panels, dialogs
+     ├─ libs/bmstyle the look: theme, widget style, icons, shared controls (Qt only)
      ├─ src/export   export job and encoders (FFmpeg libraries, PNG)
      ├─ src/media    media decoding (FFmpeg, stb), audio playback (miniaudio)
      └─ src/render   draws compositions with Skia (screen and offscreen), text, fonts
@@ -76,7 +77,8 @@ Dependencies only point **down**. In particular:
 | `core` | the C++ standard library, nlohmann/json | Qt, Skia, FFmpeg, Lua, anything above |
 | `render` | `core`, Skia | Qt, `ui`, `app` |
 | `media`, `export` | `core`, `render`, FFmpeg, stb, miniaudio | `ui`, `app` (`Platform` path helpers are the one exception) |
-| `ui` | everything below, Qt | `app` internals other than `Platform`, `Settings`, `PluginHost`, the libraries |
+| `libs/bmstyle` | Qt Widgets, nlohmann/json | anything of bemotion (it is reusable by other apps) |
+| `ui` | everything below, Qt, `bmstyle` | `app` internals other than `Platform`, `Settings`, `PluginHost`, the libraries |
 | `app` | everything | — |
 
 `core` builds as its own library (`bemotion_core`) with its own tests; a core
@@ -208,7 +210,13 @@ background per (media, `dsp::processKey`) by `MediaManager`, shared by clips
 with the same settings and awaited by exports (`audioReady`); Ducking lowers a
 clip while another clip with sound is louder than its threshold, from the
 other clips' loudness every 10 ms (`dsp::loudness`, made when audio is
-decoded), eased over its fade.
+decoded), eased over its fade. Reverb (Freeverb), Echo, Compressor, Low / High
+Cut and Auto Level (the clip to a target loudness, its passages evened out by a
+slow gain rider, a limiter under -1 dBFS) work like EQ: once per clip, in the
+background. Silence removal (`dsp::quietStretches` on the loudness, a threshold
+set or learned from a sample of the silence) cuts a clip with
+`removeQuietParts` (`core/Editing`); `audio.level` and `audio.remove_silence`
+are their operations (the sound comes in through `OpEnvironment::mediaLoudness`).
 
 ### Rules, files, history
 
@@ -301,7 +309,24 @@ decoded), eased over its fade.
   `Composition::isMatte`). `Validate` keeps mattes beside their layer, never
   themselves nor in a loop; removing or grouping a layer drops mattes that no
   longer hold. Solo (`Layer::solo`, `Composition::soloedOut`) and mute act per
-  level (the timeline toggles a whole track).
+  level (the timeline toggles a whole track). A mask's outline can be animated
+  (`Mask::pathKeys`, `pathAt`: point by point between keys with as many points,
+  else held; editing the points at another moment keys them there).
+- **Paint, Puppet, Warp** (`Layer.h`, `core/Deform`): `Layer::paint` strokes
+  (Brush, Eraser — an eraser stroke clears the layer's picture and the strokes
+  before it; `paint_reveal` writes them on), Puppet pins (`Layer::pins`: rest
+  point and an animatable `pin<i>`; `starch` pins only stiffen) and a 4 × 4
+  Mesh Warp (`warp<i>` offsets, bicubic). The Puppet works as After Effects':
+  a mesh (a grid of about 24 cells across) covers only what the picture shows
+  — the renderer reads which cells hold something from the picture drawn small
+  (`PuppetShape`, once per box and content) — and is solved as rigidly as
+  possible (ARAP, started from moving least squares, cached per pin
+  positions); separate pieces are meshes of their own (a piece without pins
+  stays put). The renderer draws the picture into an image and through a
+  32 × 32 triangle mesh moved by `deformPoint`, before the masks.
+- **Tracking** (`core/Tracking`): `trackPatch` finds a patch of one frame in the
+  next (normalized cross-correlation, sub-pixel); `ui/Tracking` reads the
+  clip's frames from the playhead and keys a marker layer's Position.
 
 ## 4. Changing a project: the three paths
 
@@ -336,8 +361,10 @@ Rules:
   time, view): **no randomness without a seed, no clocks, no global state**
   that changes the picture.
 - **The graphics card when there is one** (`render/Gpu`): the editor makes
-  an offscreen OpenGL context (`ui/GpuContext`, Qt's) and Skia's Ganesh
-  context on it; the viewport and the exports of the editor draw there and
+  an offscreen OpenGL context (`ui/GpuContext`, Qt's) — or, with the Vulkan
+  engine, a Vulkan instance and device of its own (the loader opened at run
+  time; Skia built with `skia_use_vulkan`, Windows and Linux) — and Skia's
+  Ganesh context on it; the viewport and the exports of the editor draw there and
   read the pixels back (`OffscreenRenderer`, `ViewportPanel`). No OpenGL,
   another thread, the command line or `gpu_rendering` off: the CPU, as
   before (the same pictures, up to antialiasing). Mind CPU costs anyway:
@@ -356,7 +383,13 @@ Rules:
   A `Place` says where the layers beside one land (a frame's camera at the
   top, a compound's transform inside it), so the matte is drawn where it is.
   Shapes add gradients, dashes (composed with the trim) and the repeater's
-  copies.
+  copies; text and plugin objects take gradients too (`render/Gradient`, one
+  shader for all; a plugin object's filled parts each go from their color to
+  `object_fill_color2`). Media pictures can have rounded corners, a border and
+  be flipped (`MediaProps::cornerRadius`, `borderWidth`, `flipH` / `flipV`).
+- The viewport draws, reads back and keeps only the composition frame's part of
+  the view (layers are clipped to it), not the empty canvas around it; the 3D
+  view draws it all.
 - **Text** (`Text.cpp`): SkShaper (HarfBuzz + ICU) with font fallback, shaped
   lines cached. **Fonts** (`Fonts.cpp`): the platform font manager plus the
   bundled Inter (`assets/fonts`).
@@ -372,8 +405,10 @@ Rules:
 
 ## 6. Media and export
 
-- `media/MediaIO` probes files and decodes stills (stb), audio and video
-  (FFmpeg, `FfmpegMedia.cpp`). `MediaManager` caches `SkImage`s, keeps one
+- `media/MediaIO` probes files and decodes stills (stb; FFmpeg's image
+  decoders for WebP, TIFF, AVIF, HEIC, JPEG XL, EXR, ICO, DDS... and whatever
+  stb cannot read), audio and video (FFmpeg, `FfmpegMedia.cpp`); a GIF, WebP or
+  APNG with more than one picture is a video. `MediaManager` caches `SkImage`s, keeps one
   video reader per (composition, layer) and decodes audio in the background.
   `AudioEngine` plays the timeline (miniaudio) and mixes audio for exports.
   `Recorder` keeps mono capture samples and a 100 Hz peak envelope in
@@ -452,9 +487,15 @@ Rules:
   no deblocking first, coarse to fine, then the exact frames) and published
   as they grow (`Filmstrip::version`); the timeline keeps them as pixmaps at
   the height it draws. *Settings › Performance* holds the switches
-  (`scaled_video_preview`, `adaptive_playback`, `gpu_rendering`, `auto_proxies`,
-  `show_filmstrips`, hardware decoding, proxies, cache memory, preview
-  quality).
+  (`scaled_video_preview`, `adaptive_playback`, `gpu_rendering` — the "Drawing
+  engine": OpenGL or the processor —, `auto_proxies`, `show_filmstrips`,
+  hardware decoding, proxies, cache memory, preview quality, `processor_threads`
+  for decoding, encoding and transcribing — `media::setThreadCount` — and
+  `gpu_cache_megabytes`, Skia's resource cache on the graphics card). Skia is
+  built with Vulkan on Windows and Linux (`tools/skia/build-skia.sh`; CMake
+  turns the engine on when Skia's `defines.json` has `SK_VULKAN`), so the
+  engine is Vulkan, OpenGL (`render_engine`) or the processor. Playback that
+  cannot keep the frame rate shows a quiet note in the viewport's corner.
 
 - **SVG and Lottie** (`core/Svg`, `core/Lottie`): pure data, no Qt. `addSvg`
   reads SVG text with its own small XML and path reader into Path shape
@@ -549,7 +590,37 @@ Rules:
   experience). `essentials_only` makes `PluginHost::load` load no plugin.
 - **Media folders** (`Composition::mediaFolders`, `MediaItem::folder`) are
   names only, for the Media panel; changed through `folder.*` and
-  `media.move`; `Validate` keeps every item's folder in the list.
+  `media.move`; `Validate` keeps every item's folder in the list. Their order is
+  the list's: a heading dragged in the panel (or Move Up / Down) is `folder.move`.
+- **Categories look one way**: Effects, Animate, the Media panel's folders and
+  the Objects panel (`closed_object_categories`) use `ui::CategoryHeader`;
+  Properties', Effects' and Color's sections (`CollapsibleSection`) paint their
+  headings with the same `paintCategoryHeader`, with an icon by title
+  (`iconForSection`).
+- **Brush, Eraser, Puppet, Warp, Track** (`Tool::Brush`…, `panels/ViewportTools.cpp`):
+  the brush paints on the selected layer (or a new "Paint" layer, whose box is
+  only as big as its paint; an eraser never grows a box), its color and size
+  also in the viewport's corner (Ctrl+wheel), the pointer only the brush's ring;
+  Puppet places pins on the picture's mesh (shown while the tool is on) and
+  drags them (Alt+click removes one; keyed while dragging; Ctrl+drag records
+  the motion in real time; Starch pins from Tool Settings); Warp drags the
+  grid's points (any layer, compounds too); Track takes a box (or a click)
+  around a detail and runs `ui::trackPoint` (coarse to fine, a template kept
+  from the last good match, forward or back) onto a chosen layer or a marker.
+- **Tool Settings** (`panels/ToolSettingsPanel`, beside Color, in front when a
+  painting, bending or tracking tool is picked): always the tool in use — its
+  name, shortcut and description from `toolCatalog()` — and its options, kept
+  in `Settings::tools` (`tool_settings`). The sound fixes (Auto Level, Remove
+  Silence) are in a clip's Properties (`buildSoundFixes`).
+- **Picking a sample** (`EditorContext::samplePick`): Remove Silence's sample
+  of the silence and Noise Reduction's sample of the noise (Effects panel) are
+  a stretch dragged on the timeline (ruler or rows) after "Pick a Sample", the
+  playhead following it; Esc cancels. Noise Reduction keeps its sample in the
+  clip's source seconds (`AudioEffect::sampleFrom` / `sampleTo`, `"sample"` in
+  the file and in `audio_effect.add` / `set`).
+- **Box selection on the timeline**: dragged from empty space on clip rows it
+  picks clips; from a keyframe row it picks keyframes (any rows and layers it
+  touches; Shift / Ctrl adds).
 - **Pen and paths** (`ViewportPanel`): `Tool::Pen` draws a new path shape,
   or a mask on a selected layer that is not a shape; the selected layer's path
   and masks show their points and handles (dragged with any tool); a mask
@@ -572,7 +643,22 @@ Rules:
   (`setExpressionComposition`); a closed editor sets it to null, and a new
   one replaces it, so nothing reads a composition that is gone.
 - **Drag and drop** between panels uses the MIME types of `ui/Mime.h`.
-- **`Theme`** — palettes (`Palette`) applied as a `QPalette` + style sheet.
+- **The look is a library: `bmstyle`** (`libs/bmstyle`, see its README). The
+  theme, the widget style, the drawing vocabulary, the icon set and the
+  controls panels share (`IconButton`, `Tile`, `DragValue`, `Switch`,
+  `segmented`, `FlowLayout`, `ElidedLabel`, `ResponsiveGrid`, `LabeledRow`,
+  `CategoryHeader` / `CategoryBody`, `ChoiceRow`, `setTone`, `sectionLabel`,
+  `accentButton`) live there, depend only on Qt, and are what another C++ app
+  links to look like bemotion. `ui/Theme.h`, `ui/Draw.h`, `ui/Style.h` and
+  `ui/Widgets.h` bring them into `theme::` / `ui::`, so the editor's code
+  reads as before; what is bemotion's own (icons for layers, `AudioMeter`,
+  `KeyframeButton`, `ColorButton`, `CollapsibleSection`) stays in `ui`. The
+  app gives the library its translations (`bmstyle::setTranslator(trLabel)`),
+  its logo (`setLogoPainter`) and forwards `appearanceChanged` to
+  `bmstyle::Appearance`. Spacing comes from `bmstyle::metrics` (a 4 px step).
+  A new shared control goes into the library; a control that knows about
+  layers, keyframes or settings stays in `ui`.
+- **`Theme`** (`bmstyle/Theme.h`) — palettes (`Palette`) applied as a `QPalette` + style sheet.
   Colors come from the named tokens (`theme::kText`, `kTextDim`, `kAccent`,
   `kBgPanel`, `kDanger`, …), never literals; the default accent is gold
   `#E8B931` on near-black. Besides the base colors a palette has optional
@@ -591,11 +677,11 @@ Rules:
   `ui::setTone(label, Tone::…)` (recolored on `appearanceChanged`), never a
   style sheet with a baked color; screens that bake colors otherwise rebuild
   on `appearanceChanged` (the home screen does).
-- **`Style`** (`ui/Style.h`) — Fusion plus our check boxes and radio buttons
+- **`Style`** (`bmstyle/Style.h`) — Fusion plus our check boxes and radio buttons
   (outline and check mark; an accent-filled box reads as a color swatch).
-- **`Draw`** (`ui/Draw.h`) — the small drawing vocabulary over `QPainter` for
+- **`Draw`** (`bmstyle/Draw.h`) — the small drawing vocabulary over `QPainter` for
   custom-painted parts (`Rgba` packed 0xAABBGGRR, `Pt`). **Icons** are vector
-  code in `Widgets.cpp` (`Icon` enum, `drawIcon`, `makeIcon`) — no icon files.
+  code in `bmstyle/Icons.cpp` (`Icon` enum, `drawIcon`, `makeIcon`) — no icon files.
 - **`Keymap`** — every shortcut is an `Action` with a default chord (After
   Effects conventions), rebindable in Settings and saved by id.
 - **`Tools`** — the tools and actions users can put in the timeline toolbar
@@ -696,6 +782,13 @@ Rules:
   button (`toggle` ones give `doc.pressed`), ask for playback (`doc.play`),
   and record through `media/Recorder` (miniaudio capture to WAV) with the
   `microphone` permission. The Recorder plugin is built on this.
+- **Settings** (API 8): `plugin.json` `"settings"` (number, toggle, choice,
+  text) shown behind the *Settings…* button of the plugin's card, kept in
+  `Settings::pluginSettings` (`plugin_settings`), read with
+  `bemotion.setting(id)`. The bundled plugins use them.
+- **Models** (API 9): `bemotion.load_mesh` reads OBJ, STL and glTF natively
+  (`core/MeshFile`, with vertex-clustering simplification to a triangle budget):
+  the 3D Models plugin's *Detail*.
 - **Permissions** in `plugin.json`: `edit` (commands), `media`
   (`media.import`), `files` (read the files chosen in `file` parameters),
   `microphone` (record). New

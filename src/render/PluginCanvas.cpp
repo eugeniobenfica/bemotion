@@ -1,7 +1,10 @@
 #include "render/PluginCanvas.h"
 
+#include "render/Gradient.h"
+
 #include "include/core/SkCanvas.h"
 #include "include/core/SkPaint.h"
+#include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkRRect.h"
 
@@ -29,10 +32,19 @@ SkPaint strokePaint(Color c, float width) {
 
 } // namespace
 
+SkPaint PluginCanvas::filled(Color c, const SkRect& bounds) const {
+    SkPaint p = fillPaint(faded(c));
+    if (gradient_ != ShapeFill::Solid) {
+        const Color to = faded(gradientTo_);
+        p.setShader(gradientShader(gradient_, p.getColor4f(), {to.r, to.g, to.b, std::clamp(to.a, 0.0f, 1.0f)}, gradientAngle_, bounds));
+    }
+    return p;
+}
+
 void PluginCanvas::rect(Vec2 a, Vec2 b, Color color, float radius) {
     const SkRect r = SkRect::MakeLTRB(a.x, a.y, b.x, b.y).makeSorted();
     const float rr = std::clamp(radius, 0.0f, std::min(r.width(), r.height()) * 0.5f);
-    canvas_->drawRRect(SkRRect::MakeRectXY(r, rr, rr), fillPaint(faded(color)));
+    canvas_->drawRRect(SkRRect::MakeRectXY(r, rr, rr), filled(color, r));
 }
 
 void PluginCanvas::rectOutline(Vec2 a, Vec2 b, Color color, float width, float radius) {
@@ -42,7 +54,7 @@ void PluginCanvas::rectOutline(Vec2 a, Vec2 b, Color color, float width, float r
 }
 
 void PluginCanvas::circle(Vec2 c, float radius, Color color) {
-    canvas_->drawCircle(c.x, c.y, radius, fillPaint(faded(color)));
+    canvas_->drawCircle(c.x, c.y, radius, filled(color, SkRect::MakeLTRB(c.x - radius, c.y - radius, c.x + radius, c.y + radius)));
 }
 
 void PluginCanvas::line(Vec2 a, Vec2 b, float width, Color color) {
@@ -79,7 +91,8 @@ void PluginCanvas::polygon(const std::vector<Vec2>& points, Color color) {
     b.moveTo(points[0].x, points[0].y);
     for (size_t i = 1; i < points.size(); ++i) b.lineTo(points[i].x, points[i].y);
     b.close();
-    canvas_->drawPath(b.detach(), fillPaint(faded(color)));
+    const SkPath path = b.detach();
+    canvas_->drawPath(path, filled(color, path.getBounds()));
 }
 
 void PluginCanvas::arc(Vec2 c, float r0, float r1, float fromDeg, float toDeg, Color color) {
@@ -100,7 +113,8 @@ void PluginCanvas::arc(Vec2 c, float r0, float r1, float fromDeg, float toDeg, C
         else b.lineTo(c.x, c.y);
         b.close();
     }
-    canvas_->drawPath(b.detach(), fillPaint(faded(color)));
+    const SkPath path = b.detach();
+    canvas_->drawPath(path, filled(color, path.getBounds()));
 }
 
 float PluginCanvas::measure(const std::string& s, float size, bool bold) const { return measurePlainText(s, size, bold); }

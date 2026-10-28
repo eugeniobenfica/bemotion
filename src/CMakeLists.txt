@@ -11,17 +11,20 @@ add_library(bemotion_core STATIC
     core/AudioDsp.cpp
     core/Clipboard.cpp
     core/Data.cpp
+    core/Deform.cpp
     core/Describe.cpp
     core/Ops.cpp
     core/Validate.cpp
     core/Language.cpp
     core/Layer.cpp
     core/Lottie.cpp
+    core/MeshFile.cpp
     core/Presets.cpp
     core/Project.cpp
     core/Serialization.cpp
     core/Snapping.cpp
     core/Svg.cpp
+    core/Tracking.cpp
     core/Transitions.cpp
     core/PluginCatalog.cpp)
 target_include_directories(bemotion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -61,6 +64,7 @@ add_executable(bemotion WIN32
     media/Recorder.cpp
     media/Transcriber.cpp
     render/Fonts.cpp
+    render/Gradient.cpp
     render/Gpu.cpp
     render/LogoMark.cpp
     render/Mesh3D.cpp
@@ -69,9 +73,7 @@ add_executable(bemotion WIN32
     render/SceneRenderer.cpp
     render/Text.cpp
     ui/AppSignals.h
-    ui/Draw.cpp
     ui/SkiaQt.h
-    ui/Style.cpp
     ui/WindowChrome.cpp
     ui/EditorContext.cpp
     ui/EditorWindow.cpp
@@ -92,7 +94,6 @@ add_executable(bemotion WIN32
     ui/CurvesEditor.cpp
     ui/ExperienceScreen.cpp
     ui/SettingsWindow.cpp
-    ui/Theme.cpp
     ui/Tools.cpp
     ui/Widgets.cpp
     ui/panels/EffectsPanel.cpp
@@ -105,12 +106,16 @@ add_executable(bemotion WIN32
     ui/panels/ToolsPanel.cpp
     ui/panels/AnimationsPanel.cpp
     ui/panels/ColorPanel.cpp
+    ui/Tracking.cpp
     ui/Transcribe.cpp
-    ui/panels/ViewportPanel.cpp)
+    ui/panels/ViewportPanel.cpp
+    ui/panels/ViewportTools.cpp
+    ui/panels/ToolSettingsPanel.cpp)
 set_target_properties(bemotion PROPERTIES AUTOMOC ON)
 target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion PRIVATE
     bemotion_core
+    bmstyle
     Qt6::Widgets Qt6::Svg Qt6::Network Qt6::Test
     qtadvanceddocking-qt6
     skia

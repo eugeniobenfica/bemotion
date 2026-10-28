@@ -20,13 +20,18 @@ class QLineEdit;
 class QToolButton;
 class QVBoxLayout;
 
+namespace bmstyle {
+class IconButton;
+class DragValue;
+} // namespace bmstyle
+
 namespace bemotion {
 
 class EditorContext;
 namespace ui {
 class ColorButton;
-class DragValue;
-class IconButton;
+using bmstyle::DragValue;
+using bmstyle::IconButton;
 class KeyframeButton;
 class ExpressionEditor;
 }
@@ -83,6 +88,11 @@ private:
     int effectIndex_;
     PropertyKind kind_;
     ui::KeyframeButton* key_ = nullptr;
+    // The timeline's rows (host mode): the property's previous / next keyframe on either side of
+    // its diamond, as After Effects has them; shown while it is animated.
+    ui::IconButton* prevKey_ = nullptr;
+    ui::IconButton* nextKey_ = nullptr;
+    void stepToKey(int direction);
     ui::IconButton* fx_ = nullptr; // opens / closes the expression
     QLabel* label_ = nullptr;
     ui::DragValue* x_ = nullptr;

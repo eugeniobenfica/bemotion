@@ -6,6 +6,7 @@
 #include "core/Media.h"
 #include "core/Math.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -163,6 +164,20 @@ struct ShapeProps {
 struct Mask {
     std::string name = "Mask 1";
     BezierPath path;
+    // Mask Path keyframes (After Effects'): the outline at moments, sorted by time; in between it
+    // moves point by point (eased), when both have as many points; else it holds. Without keys
+    // the outline is `path` all along; with them `path` is the last one shown or edited.
+    struct PathKey {
+        double time = 0.0;
+        BezierPath path;
+        bool operator==(const PathKey&) const = default;
+    };
+    std::vector<PathKey> pathKeys;
+    BezierPath pathAt(double t) const;
+    // The key at `t` (within a frame's tolerance, kTimeEpsilon), or -1.
+    int pathKeyAt(double t) const;
+    // Sets (or adds) a key at `t` with `p`, keeping them sorted. Returns its index.
+    int setPathKey(double t, const BezierPath& p);
     MaskMode mode = MaskMode::Add;
     bool inverted = false;
     bool enabled = true;
@@ -197,6 +212,10 @@ struct TextProps {
     TextAlign align = TextAlign::Center;
     AnimFloat fontSize{120.0f};
     AnimColor color{Color::fromHex(0xFFFFFF)};
+    // The letters' fill: their color, or a gradient from it to `color2` across the lines.
+    ShapeFill fill = ShapeFill::Solid;
+    AnimColor color2{Color::fromHex(0xE8B931)};
+    AnimFloat fillAngle{90.0f}; // linear gradient direction: 0 left to right, 90 top to bottom
     AnimFloat tracking{0.0f};    // extra letter spacing, px
     AnimFloat lineHeight{120.0f}; // percent of font size
     AnimFloat reveal{100.0f};    // percent of characters shown (typewriter)
@@ -293,6 +312,11 @@ struct PluginProps {
     std::vector<DataRow> rows;
     bool hasTable = false;
     DataTable table;
+    // A gradient over what the object fills (bars, slices, areas; not its lines and text): from
+    // each filled part's own color to `fillColor2`, across that part. Solid: as the plugin draws.
+    ShapeFill fill = ShapeFill::Solid;
+    AnimColor fillColor2{Color::fromHex(0xFFFFFF, 0.25f)};
+    AnimFloat fillAngle{90.0f};
 
     PluginParam* find(const std::string& id);
 };
@@ -327,6 +351,12 @@ struct MediaProps {
     AnimFloat volume{100.0f}; // percent, layers with audio
     // Crop: how much of each side of the picture is cut away, percent of the source.
     AnimFloat cropLeft{0.0f}, cropTop{0.0f}, cropRight{0.0f}, cropBottom{0.0f};
+    // The picture's frame: rounded corners (px of radius, at most half the shorter side) and a
+    // border line of `borderWidth` px around what is shown; mirrored left to right / top to bottom.
+    AnimFloat cornerRadius{0.0f};
+    AnimFloat borderWidth{0.0f};
+    AnimColor borderColor{Color::fromHex(0xFFFFFF)};
+    bool flipH = false, flipV = false;
     bool hasVideo = false;
     bool hasAudio = false;
     // Speed: 1 plays the source as it is, 2 twice as fast. Reversed, it plays backwards and
@@ -398,6 +428,32 @@ struct AppliedAnimation {
 constexpr int kLabelColorCount = 8;
 Color labelColor(int index);
 
+// A brush (or eraser) stroke painted on a layer (the Brush and Eraser tools, After Effects'
+// Paint): a line through `points` in the layer's own space, round at its ends. An eraser stroke
+// cuts through what is under it on the layer: its picture and the strokes before it.
+struct PaintStroke {
+    std::vector<Vec2> points;
+    Color color = Color::fromHex(0xFFFFFF);
+    float width = 12.0f; // px
+    float softness = 0.0f; // px of soft edge
+    bool erase = false;
+    bool operator==(const PaintStroke&) const = default;
+};
+
+// A Puppet pin (After Effects' Puppet tool): where it sits on the layer's picture at rest, and
+// where it is moved to (animatable: "pin<i>"). The picture bends to follow its pins.
+struct PuppetPin {
+    Vec2 rest;
+    AnimVec2 position;
+    bool starch = false; // a Starch pin: holds nothing, stiffens the picture around it (its position is unused)
+    std::string id, label; // runtime: "pin0", "Pin 1" (properties)
+};
+
+// Mesh Warp: a kWarpSide x kWarpSide grid over the layer's bounds whose points are moved
+// ("warp<i>": offsets in px, row by row from the top left).
+inline constexpr int kWarpSide = 4;
+inline constexpr int kWarpPoints = kWarpSide * kWarpSide;
+
 struct Layer {
     uint64_t id = 0;
     // Timeline row. Several layers ("clips") may share a track as long as
@@ -435,6 +491,14 @@ struct Layer {
     BackgroundProps background;
     std::vector<Effect> effects; // applied in order
     std::vector<AudioEffect> audioEffects; // mixed in order for audio media
+    // Painted over its picture (Brush / Eraser), in order; drawn up to `paintReveal` percent of
+    // their length (Write On), the first stroke first.
+    std::vector<PaintStroke> paint;
+    AnimFloat paintReveal{100.0f};
+    // Its picture bent by Puppet pins and / or a Mesh Warp (core/Deform.h), before its masks.
+    std::vector<PuppetPin> pins;
+    bool warp = false;
+    std::array<AnimVec2, kWarpPoints> warpPoints;
     ClipTransition transitionIn, transitionOut;
     std::vector<AppliedAnimation> animations; // Quick Animations on it, in time order
 

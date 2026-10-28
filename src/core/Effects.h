@@ -120,10 +120,11 @@ bool parseCubeLut(const std::string& text, Lut3D& out, std::string* error = null
 //   Gain              value = dB
 //   Fade In / Out     value = seconds
 //   EQ                value / value2 / value3 = low (100 Hz shelf) / mid (1 kHz) / high (8 kHz shelf), dB
-//   Noise Reduction   value = reduction (dB), value2 = sensitivity (%)
+//   Noise Reduction   value = reduction (dB), value2 = sensitivity (%); sampleFrom / sampleTo: a
+//                     stretch of the source with only the noise (its seconds), else it is guessed
 //   Ducking           value = how much quieter (dB) while other audio plays, value2 = what counts
 //                     as sound (dB), value3 = fade (seconds)
-enum class AudioEffectType { Gain, FadeIn, FadeOut, Eq, NoiseReduction, Ducking, Count };
+enum class AudioEffectType { Gain, FadeIn, FadeOut, Eq, NoiseReduction, Ducking, Reverb, Echo, Compressor, Filter, AutoLevel, Count };
 const char* audioEffectId(AudioEffectType type);
 const char* audioEffectLabel(AudioEffectType type);
 const char* audioEffectDescription(AudioEffectType type);
@@ -133,6 +134,8 @@ struct AudioEffect {
     AudioEffectType type = AudioEffectType::Gain;
     bool enabled = true;
     float value = 0.0f, value2 = 0.0f, value3 = 0.0f; // see AudioEffectType
+    double sampleFrom = -1.0, sampleTo = -1.0;        // Noise Reduction's sample (source seconds; -1: none)
+    bool hasSample() const { return sampleFrom >= 0.0 && sampleTo > sampleFrom; }
 };
 
 // The values an audio effect type shows, in order (`index` 0..2: value, value2, value3).

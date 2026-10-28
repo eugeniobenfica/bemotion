@@ -206,10 +206,11 @@ private:
                 report(where, "unknown shape kind");
                 l.shape.kind = ShapeKind::Rectangle;
             }
-            if (static_cast<int>(l.shape.fill) < 0 || l.shape.fill >= ShapeFill::Count) {
-                report(where, "unknown fill");
-                l.shape.fill = ShapeFill::Solid;
-            }
+            for (ShapeFill* fill : {&l.shape.fill, &l.text.fill, &l.plugin.fill})
+                if (static_cast<int>(*fill) < 0 || *fill >= ShapeFill::Count) {
+                    report(where, "unknown fill");
+                    *fill = ShapeFill::Solid;
+                }
             if (cleanPath(l.shape.path)) report(where, "path points with invalid numbers (removed)");
             if (static_cast<int>(l.blend) < 0 || l.blend >= BlendMode::Count) {
                 report(where, "unknown blending mode");
@@ -220,12 +221,35 @@ private:
                 l.matte = MatteMode::None;
             }
             if (l.matte == MatteMode::None) l.matteLayer = 0;
+            // Paint and pins: finite points (a broken file's NaN would draw garbage), sane widths.
+            for (PaintStroke& s : l.paint) {
+                if (std::erase_if(s.points, [](const Vec2& v) { return !std::isfinite(v.x) || !std::isfinite(v.y); }) > 0)
+                    report(where, "paint points with invalid numbers (removed)");
+                if (!std::isfinite(s.width) || s.width < 0.5f || s.width > 2000.0f) {
+                    report(where, "a paint stroke with an invalid width");
+                    s.width = std::isfinite(s.width) ? std::clamp(s.width, 0.5f, 2000.0f) : 12.0f;
+                }
+            }
+            if (std::erase_if(l.paint, [](const PaintStroke& s) { return s.points.empty(); }) > 0) report(where, "empty paint strokes (removed)");
+            for (PuppetPin& p : l.pins)
+                if (!std::isfinite(p.rest.x) || !std::isfinite(p.rest.y)) {
+                    report(where, "a puppet pin at an invalid place");
+                    p.rest = {};
+                }
             for (Mask& m : l.masks) {
                 if (static_cast<int>(m.mode) < 0 || m.mode >= MaskMode::Count) {
                     report(where, "a mask with an unknown mode");
                     m.mode = MaskMode::Add;
                 }
                 if (cleanPath(m.path)) report(where, "mask points with invalid numbers (removed)");
+                for (Mask::PathKey& k : m.pathKeys)
+                    if (cleanPath(k.path)) report(where, "mask path keyframe points with invalid numbers (removed)");
+                if (std::erase_if(m.pathKeys, [](const Mask::PathKey& k) { return !std::isfinite(k.time); }) > 0)
+                    report(where, "mask path keyframes at invalid times (removed)");
+                if (!std::is_sorted(m.pathKeys.begin(), m.pathKeys.end(), [](const auto& a, const auto& b) { return a.time < b.time; })) {
+                    report(where, "mask path keyframes out of order (sorted)");
+                    std::sort(m.pathKeys.begin(), m.pathKeys.end(), [](const auto& a, const auto& b) { return a.time < b.time; });
+                }
                 if (m.name.empty()) m.name = "Mask";
             }
             if (l.type == LayerType::Camera && !l.masks.empty()) {

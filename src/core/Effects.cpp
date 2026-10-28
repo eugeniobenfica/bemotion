@@ -374,6 +374,11 @@ constexpr AudioEffectInfo kAudioEffects[] = {
     {"eq", N_("EQ"), N_("Lowers or raises the lows, mids and highs.")},
     {"noise_reduction", N_("Noise Reduction"), N_("Lowers steady background noise: hum, hiss, fans.")},
     {"ducking", N_("Ducking"), N_("Lowers this clip (music) while other audio (voice) plays.")},
+    {"reverb", N_("Reverb"), N_("Puts the sound in a room: from a small studio to a hall.")},
+    {"echo", N_("Echo"), N_("Repeats the sound, each repeat quieter.")},
+    {"compressor", N_("Compressor"), N_("Evens out loud and quiet moments, for a steadier voice.")},
+    {"filter", N_("Low / High Cut"), N_("Cuts rumble and wind below a frequency, hiss above another.")},
+    {"auto_level", N_("Auto Level"), N_("Brings the clip to a set loudness and evens out its quiet and loud passages.")},
 };
 static_assert(std::size(kAudioEffects) == static_cast<size_t>(AudioEffectType::Count));
 } // namespace
@@ -409,6 +414,14 @@ const std::vector<AudioEffectParam>& audioEffectParams(AudioEffectType type) {
         {{0, "reduction", N_("Reduction"), 0, 40, 0.1f, "%.1f dB"}, {1, "sensitivity", N_("Sensitivity"), 0, 100, 0.25f, "%.0f%%"}},
         {{0, "amount", N_("Lower By"), 0, 40, 0.1f, "%.1f dB"}, {1, "threshold", N_("Sound Above"), -70, 0, 0.25f, "%.0f dB"},
          {2, "fade", N_("Fade"), 0.05f, 3, 0.01f, "%.2f s"}},
+        {{0, "mix", N_("Mix"), 0, 100, 0.25f, "%.0f%%"}, {1, "size", N_("Room Size"), 0, 100, 0.25f, "%.0f%%"},
+         {2, "damping", N_("Damping"), 0, 100, 0.25f, "%.0f%%"}},
+        {{0, "delay", N_("Delay"), 0.01f, 2, 0.005f, "%.2f s"}, {1, "feedback", N_("Feedback"), 0, 90, 0.25f, "%.0f%%"},
+         {2, "mix", N_("Mix"), 0, 100, 0.25f, "%.0f%%"}},
+        {{0, "threshold", N_("Threshold"), -60, 0, 0.25f, "%.1f dB"}, {1, "ratio", N_("Ratio"), 1, 20, 0.05f, "%.1f:1"},
+         {2, "makeup", N_("Makeup Gain"), 0, 24, 0.1f, "%.1f dB"}},
+        {{0, "low_cut", N_("Low Cut"), 20, 2000, 1.0f, "%.0f Hz"}, {1, "high_cut", N_("High Cut"), 1000, 20000, 10.0f, "%.0f Hz"}},
+        {{0, "target", N_("Target"), -40, -6, 0.1f, "%.1f dB"}, {1, "even_out", N_("Even Out"), 0, 100, 0.25f, "%.0f%%"}},
     };
     static_assert(std::size(table) == static_cast<size_t>(AudioEffectType::Count));
     static const std::vector<AudioEffectParam> none;
@@ -443,6 +456,29 @@ AudioEffect makeAudioEffect(AudioEffectType type) {
         effect.value = 15.0f;
         effect.value2 = -40.0f;
         effect.value3 = 0.4f;
+        break;
+    case AudioEffectType::Reverb:
+        effect.value = 25.0f;
+        effect.value2 = 50.0f;
+        effect.value3 = 40.0f;
+        break;
+    case AudioEffectType::Echo:
+        effect.value = 0.3f;
+        effect.value2 = 35.0f;
+        effect.value3 = 30.0f;
+        break;
+    case AudioEffectType::Compressor:
+        effect.value = -20.0f;
+        effect.value2 = 3.0f;
+        effect.value3 = 4.0f;
+        break;
+    case AudioEffectType::Filter:
+        effect.value = 80.0f;
+        effect.value2 = 20000.0f;
+        break;
+    case AudioEffectType::AutoLevel: // about -16 LUFS: speech for the web
+        effect.value = -18.0f;
+        effect.value2 = 50.0f;
         break;
     case AudioEffectType::Count: break;
     }

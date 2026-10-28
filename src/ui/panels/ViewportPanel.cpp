@@ -233,10 +233,7 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     for (float z : {0.25f, 0.5f, 1.0f, 2.0f, 4.0f})
         menu->addAction(QString("%1%").arg(static_cast<int>(z * 100)), this, [this, z] { setZoom(z); });
     zoomLevel_->setMenu(menu);
-    fitButton_ = new QPushButton(tr("Fit"), this);
-    fitButton_->setFixedHeight(26);
-    fitButton_->setMinimumWidth(46); // as wide as its word needs (translations)
-    fitButton_->setToolTip(tr("Fit composition to view (Ctrl+0)\nWheel: zoom  ·  Middle/right drag or Space+drag: pan"));
+    fitButton_ = hud(ui::Icon::FitView, tr("Fit composition to view (Ctrl+0)\nWheel: zoom  ·  Middle/right drag or Space+drag: pan"));
     connect(fitButton_, &QPushButton::clicked, this, [this] {
         if (orbit_) resetOrbit();
         requestFit();
@@ -248,7 +245,7 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     qualityButton_->setToolTip(tr("Preview resolution (export quality is unchanged)"));
     auto* qualityMenu = new QMenu(qualityButton_);
     auto* qualityGroup = new QActionGroup(qualityMenu);
-    for (const auto& [label, divisor] : {std::pair{TR_NOOP("Full"), 1}, {TR_NOOP("Half"), 2}, {"Quarter", 4}}) {
+    for (const auto& [label, divisor] : {std::pair{TR_NOOP("Full"), 1}, {TR_NOOP("Half"), 2}, {TR_NOOP("Quarter"), 4}}) {
         auto* action = qualityMenu->addAction(tr(label));
         action->setCheckable(true);
         action->setChecked(divisor == previewDivisor_);
@@ -273,6 +270,7 @@ ViewportPanel::ViewportPanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     connect(fullscreenButton_, &QPushButton::clicked, this, &ViewportPanel::viewportFullscreenRequested);
     snapshotButton_ = new ui::IconButton(ui::Icon::Snapshot, tr("Export Frame: this frame as a picture, at full size (Shift+E)"), 26, this);
     connect(snapshotButton_, &QPushButton::clicked, this, &ViewportPanel::snapshotRequested);
+    buildToolHud();
     connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
         frameValid_ = false;
         update();
@@ -371,7 +369,7 @@ bool ViewportPanel::setSpaceHeld(bool held) {
 void ViewportPanel::sync() {
     if (!isVisible()) return;
     // The pen stops drawing when its tool, its layer or the selection goes.
-    if (penDrawing_ && (ctx_.tool != Tool::Pen || !pathOf(penTarget_) || ctx_.selection.size() != 1 || ctx_.primaryId() != penTarget_.layer))
+    if (penDrawing_ && (ctx_.tool != Tool::Pen || !shownPath(penTarget_) || ctx_.selection.size() != 1 || ctx_.primaryId() != penTarget_.layer))
         finishPen();
     // Playing, the picture changes with the frame (not at every tick between two frames).
     const double time = ctx_.playing ? ctx_.comp().snapToFrame(ctx_.time) : ctx_.time;
@@ -391,8 +389,7 @@ void ViewportPanel::resizeEvent(QResizeEvent*) { positionHud(); }
 void ViewportPanel::positionHud() {
     const Composition& c = ctx_.comp();
     const int y = height() - 26 - 10;
-    fitButton_->adjustSize(); // its word decides its width (translations)
-    int x = width() - 12 - (26 * 3 + 70 + fitButton_->width() + 4 * 3 + 12);
+    int x = width() - 12 - (26 * 4 + 70 + 4 * 3 + 12);
     const bool hasCamera = std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.type == LayerType::Camera; });
     const bool has3D = hasCamera || std::any_of(c.layers.begin(), c.layers.end(), [](const Layer& l) { return l.threeD; });
     cameraButton_->setVisible(hasCamera);
@@ -429,6 +426,7 @@ void ViewportPanel::positionHud() {
         b->move(tx, controlsY);
         tx += b->width() + 4;
     }
+    positionToolHud(tx, controlsY); // the brush's color and size
 }
 
 // --- painting ---------------------------------------------------------------------------------
@@ -474,6 +472,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
         cacheGeneration_ = generation;
     }
     const int frameNumber = c.frameAt(t);
+    notePlaybackFrame(frameNumber);
     const bool onFrame = std::fabs(sceneTime - c.snapToFrame(sceneTime)) < 1e-6 && !cropping;
     const uint64_t arrivals = media::MediaManager::get().arrivals();
     // (Playing, the decoder works ahead all the time: only a frame that showed a stand-in waits
@@ -489,15 +488,30 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
         frameStale_ = false;
         frameArrivals_ = arrivals;
     } else if (!frameValid_ || key != frameKey_ || mediaChanged) {
-        if (frame_.size() != px) frame_ = QImage(px, QImage::Format_ARGB32_Premultiplied);
-        frame_.fill(Qt::transparent);
-        const SkImageInfo info = qtImageInfo(px.width(), px.height());
+        // Only the composition frame is drawn, read back and kept (layers are clipped to it):
+        // around it is the empty canvas, often half of the viewport. The 3D view draws it all.
+        QRect region(QPoint(0, 0), px);
+        if (!orbit_) {
+            const Vec2 a = sceneView().toScreen({0, 0}), b = sceneView().toScreen(compSize_);
+            const QRect frameRect(QPoint(static_cast<int>(std::floor(std::min(a.x, b.x) * rasterScale)) - 1,
+                                         static_cast<int>(std::floor(std::min(a.y, b.y) * rasterScale)) - 1),
+                                  QPoint(static_cast<int>(std::ceil(std::max(a.x, b.x) * rasterScale)) + 1,
+                                         static_cast<int>(std::ceil(std::max(a.y, b.y) * rasterScale)) + 1));
+            region = region.intersected(frameRect);
+        }
+        if (region.isEmpty()) region = QRect(0, 0, 1, 1); // the frame is out of sight: a pixel, transparent
+        if (frame_.size() != region.size()) frame_ = QImage(region.size(), QImage::Format_ARGB32_Premultiplied);
+        frame_.setOffset(region.topLeft());       // where it goes, in raster pixels...
+        frame_.setDevicePixelRatio(rasterScale);  // ... of this many per point
+        const SkImageInfo info = qtImageInfo(region.width(), region.height());
         // On the graphics card when there is one (render/Gpu.h; its pixels read back into
         // frame_), else straight into frame_.
         if (!render::gpu()) gpuSurface_.reset();
-        else if (!gpuSurface_ || gpuSurface_->width() != px.width() || gpuSurface_->height() != px.height()) gpuSurface_ = render::makeGpuSurface(info);
+        else if (!gpuSurface_ || gpuSurface_->width() != region.width() || gpuSurface_->height() != region.height())
+            gpuSurface_ = render::makeGpuSurface(info);
         const bool onGpu = gpuSurface_ && render::gpu()->makeCurrent();
         if (onGpu) gpuSurface_->getCanvas()->clear(SK_ColorTRANSPARENT);
+        else frame_.fill(Qt::transparent); // (read back, every pixel is written anyway)
         sk_sp<SkSurface> surface = onGpu ? gpuSurface_ : SkSurfaces::WrapPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()));
         frameValid_ = static_cast<bool>(surface);
         if (surface) {
@@ -513,7 +527,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
             media::MediaManager::get().takeStale(); // from here on: did this frame use a stand-in?
             QElapsedTimer timer;
             timer.start();
-            render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, render::View{origin_ * z, zoom_ * z, world_}, true,
+            render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, render::View{origin_ * z - Vec2{static_cast<float>(region.x()), static_cast<float>(region.y())}, zoom_ * z, world_}, true,
                                     throughCamera_, orbit_ ? &orbitLens_ : nullptr);
             if (onGpu) surface->readPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()), 0, 0);
             const double ms = timer.nsecsElapsed() / 1e6;
@@ -557,9 +571,13 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     const Vec2 compMax = sceneView().toScreen(compSize_);
     if (!orbit_) d.rectFilled(Pt(origin_.x + 4, origin_.y + 6), Pt(compMax.x + 4, compMax.y + 6), theme::shade(90), 2.0f);
     // Upscale only the scene; handles, rulers, guides and HUD retain native resolution.
-    p.setRenderHint(QPainter::SmoothPixmapTransform, frame_.width() < width() * devicePixelRatioF());
-    p.drawImage(rect(), frame_);
-    p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    if (!frame_.isNull()) { // the frame's part of the view, at the scale it was drawn
+        const qreal s = frame_.devicePixelRatio();
+        const QRectF target(frame_.offset().x() / s, frame_.offset().y() / s, frame_.width() / s, frame_.height() / s);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, s < devicePixelRatioF());
+        p.drawImage(target, frame_, QRectF(frame_.rect()));
+        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    }
     if (orbit_) draw3D(p);
     else d.rect(pt(origin_), pt(compMax), theme::kBorder);
     drawGuides(p);
@@ -770,8 +788,36 @@ void ViewportPanel::moveCamera(Vec2 mouse) {
     cam->transform.depth.set(t, body.z + focus);
 }
 
-void ViewportPanel::drawHudBackground(QPainter&) {
-    // Nothing: the composition size is in Properties (with nothing selected), not on the canvas.
+void ViewportPanel::drawHudBackground(QPainter& p) {
+    // (The composition size is in Properties, with nothing selected, not on the canvas.)
+    // Playback that cannot keep the composition's frame rate: a quiet note in the corner, as long
+    // as it lasts and a moment after (frames shown per second, over the last second).
+    const qint64 now = playClock_.isValid() ? playClock_.elapsed() : 0;
+    if (!playClock_.isValid() || now > slowUntil_) return;
+    Draw d(p);
+    const QString text = tr("Playing at %1 of %2 fps").arg(static_cast<int>(std::lround(shownFps_))).arg(static_cast<int>(std::lround(ctx_.comp().fps)));
+    const float x = (ctx_.showRulers ? kRuler : 0.0f) + 10.0f, y = (ctx_.showRulers ? kRuler : 0.0f) + 8.0f;
+    const float w = d.textWidth(text) + 30.0f, h = d.textHeight() + 8.0f;
+    d.rectFilled(Pt(x, y), Pt(x + w, y + h), theme::withAlpha(theme::kBgDeep, 200), h * 0.5f);
+    ui::drawIcon(d, ui::Icon::Speed, Pt(x + 12, y + h * 0.5f), 12.0f, theme::kWarning);
+    d.text(Pt(x + 22, y + 4), theme::kTextDim, text);
+}
+
+void ViewportPanel::notePlaybackFrame(int frame) {
+    if (!playClock_.isValid()) playClock_.start();
+    const qint64 now = playClock_.elapsed();
+    if (!ctx_.playing) {
+        shownFrames_.clear();
+        lastShownFrame_ = -1;
+        return;
+    }
+    if (frame == lastShownFrame_) return;
+    lastShownFrame_ = frame;
+    shownFrames_.push_back(now);
+    while (!shownFrames_.empty() && now - shownFrames_.front() > 1000) shownFrames_.pop_front();
+    if (shownFrames_.size() < 2 || now - shownFrames_.front() < 700) return; // a second's worth first
+    shownFps_ = (shownFrames_.size() - 1) * 1000.0 / static_cast<double>(now - shownFrames_.front());
+    if (shownFps_ < ctx_.comp().fps * 0.85) slowUntil_ = now + 2500; // shown a moment after it recovers
 }
 
 void ViewportPanel::drawMotionPath(QPainter& p) {
@@ -844,6 +890,7 @@ void ViewportPanel::drawOverlay(QPainter& p) {
 
     // Selection outlines.
     drawPaths(p);
+    drawToolOverlay(p); // pins, the warp grid, the brush
     const auto selected = ctx_.selectedLayers();
     Vec2 groupMin{1e9f, 1e9f}, groupMax{-1e9f, -1e9f};
     int visibleSelected = 0;
@@ -1071,7 +1118,20 @@ BezierPath* ViewportPanel::pathOf(const PathRef& r) const {
     Layer* l = const_cast<EditorContext&>(ctx_).comp().findLayer(r.layer);
     if (!l) return nullptr;
     if (r.mask < 0) return l->type == LayerType::Shape && l->shape.kind == ShapeKind::Path ? &l->shape.path : nullptr;
-    return r.mask < static_cast<int>(l->masks.size()) ? &l->masks[r.mask].path : nullptr;
+    if (r.mask >= static_cast<int>(l->masks.size())) return nullptr;
+    Mask& m = l->masks[r.mask];
+    if (m.pathKeys.empty()) return &m.path;
+    int k = m.pathKeyAt(ctx_.time);
+    if (k < 0) k = m.setPathKey(ctx_.time, m.pathAt(ctx_.time));
+    return &m.pathKeys[static_cast<size_t>(k)].path;
+}
+
+std::optional<BezierPath> ViewportPanel::shownPath(const PathRef& r) const {
+    const Layer* l = const_cast<EditorContext&>(ctx_).comp().findLayer(r.layer);
+    if (!l) return std::nullopt;
+    if (r.mask < 0) return l->type == LayerType::Shape && l->shape.kind == ShapeKind::Path ? std::optional(l->shape.path) : std::nullopt;
+    if (r.mask >= static_cast<int>(l->masks.size())) return std::nullopt;
+    return l->masks[r.mask].pathAt(ctx_.time);
 }
 
 bool ViewportPanel::pathMatrix(uint64_t layerId, Projective& m) const {
@@ -1096,7 +1156,8 @@ std::vector<ViewportPanel::PathRef> ViewportPanel::editablePaths() const {
 
 bool ViewportPanel::pathPointAt(Vec2 s, PathPoint& out) const {
     for (const PathRef& r : editablePaths()) {
-        const BezierPath* path = pathOf(r);
+        const std::optional<BezierPath> shown = shownPath(r);
+        const BezierPath* path = shown ? &*shown : nullptr;
         Projective m;
         if (!path || !pathMatrix(r.layer, m)) continue;
         for (int i = 0; i < static_cast<int>(path->vertices.size()); ++i) { // handles over points: they sit on top
@@ -1224,18 +1285,24 @@ bool ViewportPanel::pathPress(QMouseEvent* e, Vec2 mouse, bool doubleClick) {
     }
     // On an outline: a new point there, keeping the curve.
     for (const PathRef& r : editablePaths()) {
-        BezierPath* path = pathOf(r);
+        const std::optional<BezierPath> shown = shownPath(r);
         Projective m;
-        if (!path || !pathMatrix(r.layer, m)) continue;
+        if (!shown || !pathMatrix(r.layer, m)) continue;
         const Vec2 local = m.inverse().apply(mouse);
         const float scale = std::max(1e-4f, m.localScale(local));
         size_t segment = 0;
         float u = 0.0f;
-        BezierPath outline = *path;
+        BezierPath outline = *shown;
         if (r.mask >= 0) outline.closed = true; // masks are always closed
         if (nearestSegment(outline, local, 6.0f / scale, segment, u)) {
+            BezierPath* path = pathOf(r);
+            if (!path) continue;
             path->closed = outline.closed;
             insertVertex(*path, segment, u);
+            // An animated mask gets the point in every keyframe, so they still move into each other.
+            if (Layer* l = ctx_.comp().findLayer(r.layer); l && r.mask >= 0)
+                for (Mask::PathKey& k : l->masks[r.mask].pathKeys)
+                    if (&k.path != path && segment < segmentCount(k.path)) insertVertex(k.path, segment, u);
             drag_ = Drag::PathPoint;
             pathDrag_ = {r, static_cast<int>(segment) + 1, 0};
             pathGrab_ = {};
@@ -1272,7 +1339,8 @@ void ViewportPanel::dragPath(Vec2 mouse, Qt::KeyboardModifiers mods) {
 void ViewportPanel::drawPaths(QPainter& p) {
     Draw d(p);
     for (const PathRef& r : editablePaths()) {
-        const BezierPath* path = pathOf(r);
+        const std::optional<BezierPath> shown = shownPath(r);
+        const BezierPath* path = shown ? &*shown : nullptr;
         Projective m;
         if (!path || path->vertices.empty() || !pathMatrix(r.layer, m)) continue;
         BezierPath outline = *path;
@@ -1413,8 +1481,9 @@ void ViewportPanel::updateCursor(Vec2 mouse, Qt::KeyboardModifiers mods) {
             shape = ctx_.comp().guides[g].vertical ? Qt::SizeHorCursor : Qt::SizeVerCursor;
         else if (PathPoint hit; pathPointAt(mouse, hit))
             shape = Qt::PointingHandCursor;
-        else if (ctx_.tool == Tool::Pen && !orbit_)
-            shape = Qt::BitmapCursor; // the pen's own (below)
+        else if ((ctx_.tool == Tool::Pen || ctx_.tool == Tool::Brush || ctx_.tool == Tool::Eraser || ctx_.tool == Tool::Puppet ||
+                  ctx_.tool == Tool::Warp || ctx_.tool == Tool::Track) && !orbit_)
+            shape = Qt::BitmapCursor; // the tool's own (below)
         else {
             const double t = ctx_.time;
             Layer* single = ctx_.selection.size() == 1 ? ctx_.selected() : nullptr;
@@ -1521,6 +1590,11 @@ void ViewportPanel::press(QMouseEvent* e, bool doubleClick) {
         return;
     }
 
+    // Brush, Eraser, Puppet, Warp, Track (ViewportTools.cpp).
+    if (!spaceHeld_ && !additive && toolPress(mouse, e->modifiers())) {
+        update();
+        return;
+    }
     // Paths: the pen draws; the points of a path shape or of masks drag.
     if (!spaceHeld_ && !additive && pathPress(e, mouse, doubleClick)) {
         update();
@@ -1672,6 +1746,10 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
     snapLinesY_.clear();
 
     switch (drag_) {
+    case Drag::Paint:
+    case Drag::Pin:
+    case Drag::WarpPoint:
+    case Drag::TrackBox: toolDrag(mouse); break;
     case Drag::Pan:
         pan_ += mouse - lastMouse_;
         autoFit_ = false;
@@ -1851,6 +1929,7 @@ void ViewportPanel::dragTo(Vec2 mouse, Qt::KeyboardModifiers mods) {
 
 void ViewportPanel::mouseReleaseEvent(QMouseEvent* e) {
     const Vec2 mouse = vec(e->position());
+    toolRelease();
     if (drag_ == Drag::Guide) {
         // Dropping a guide on a ruler (or outside) deletes it.
         auto& guides = ctx_.comp().guides;
@@ -1889,6 +1968,13 @@ void ViewportPanel::mouseReleaseEvent(QMouseEvent* e) {
 
 void ViewportPanel::wheelEvent(QWheelEvent* e) {
     const float steps = e->angleDelta().y() / 120.0f;
+    if ((ctx_.tool == Tool::Brush || ctx_.tool == Tool::Eraser) && (e->modifiers() & Qt::ControlModifier) && steps != 0.0f) {
+        float& size = ctx_.tool == Tool::Eraser ? settings().tools.eraserSize : settings().tools.brushSize; // the brush's size
+        size = std::clamp(size * std::pow(1.15f, steps), 1.0f, 500.0f);
+        positionHud();
+        update();
+        return;
+    }
     if (orbit_ && steps != 0.0f) { // the 3D view: its eye goes closer / farther
         const float dist = orbitView_.distance > 0.0f ? orbitView_.distance : ctx_.comp().focalLength() * 3.2f;
         orbitView_.distance = std::clamp(dist * std::pow(1.15f, -steps), ctx_.comp().focalLength() * 0.05f, ctx_.comp().focalLength() * 40.0f);

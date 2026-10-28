@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 
@@ -142,6 +143,28 @@ std::vector<PropertyRef> Layer::properties() {
     p.push_back({"rotation", N_("Transform"), threeD ? N_("Z Rotation") : N_("Rotation"), PropertyKind::Float, &tr.rotation, 0.5f, 0, 0, "%.1f°"});
     p.push_back({"opacity", N_("Transform"), N_("Opacity"), PropertyKind::Float, &tr.opacity, 0.5f, 0, 100, "%.0f%%"});
     addMasks();
+    // Paint (Write On), Puppet pins and the Mesh Warp: on any layer with a picture.
+    if (!paint.empty()) p.push_back({"paint_reveal", N_("Paint"), N_("Write On"), PropertyKind::Float, &paintReveal, 0.5f, 0, 100, "%.0f%%"});
+    for (size_t i = 0; i < pins.size(); ++i) {
+        pins[i].id = "pin" + std::to_string(i);
+        pins[i].label = "Pin " + std::to_string(i + 1);
+        p.push_back({pins[i].id.c_str(), N_("Puppet"), pins[i].label.c_str(), PropertyKind::Vec2, &pins[i].position});
+    }
+    if (warp) {
+        static const std::array<std::string, kWarpPoints> ids = [] {
+            std::array<std::string, kWarpPoints> a;
+            for (int i = 0; i < kWarpPoints; ++i) a[static_cast<size_t>(i)] = "warp" + std::to_string(i);
+            return a;
+        }();
+        static const std::array<std::string, kWarpPoints> labels = [] {
+            std::array<std::string, kWarpPoints> a;
+            for (int i = 0; i < kWarpPoints; ++i) a[static_cast<size_t>(i)] = "Point " + std::to_string(i + 1);
+            return a;
+        }();
+        for (int i = 0; i < kWarpPoints; ++i)
+            p.push_back({ids[static_cast<size_t>(i)].c_str(), N_("Warp"), labels[static_cast<size_t>(i)].c_str(), PropertyKind::Vec2,
+                         &warpPoints[static_cast<size_t>(i)]});
+    }
 
     if (type == LayerType::Shape) {
         auto& s = shape;
@@ -182,10 +205,17 @@ std::vector<PropertyRef> Layer::properties() {
         p.push_back({"crop_top", N_("Crop"), N_("Top"), PropertyKind::Float, &media.cropTop, 0.2f, 0, 100, "%.1f%%"});
         p.push_back({"crop_right", N_("Crop"), N_("Right"), PropertyKind::Float, &media.cropRight, 0.2f, 0, 100, "%.1f%%"});
         p.push_back({"crop_bottom", N_("Crop"), N_("Bottom"), PropertyKind::Float, &media.cropBottom, 0.2f, 0, 100, "%.1f%%"});
+        p.push_back({"corner_radius", N_("Frame"), N_("Corner Radius"), PropertyKind::Float, &media.cornerRadius, 0.5f, 0, 100000, "%.1f px"});
+        p.push_back({"border_width", N_("Frame"), N_("Border Width"), PropertyKind::Float, &media.borderWidth, 0.25f, 0, 1000, "%.1f px"});
+        p.push_back({"border_color", N_("Frame"), N_("Border Color"), PropertyKind::Color, &media.borderColor});
         if (media.hasAudio)
             p.push_back({"volume", N_("Audio"), N_("Volume"), PropertyKind::Float, &media.volume, 0.5f, 0, 400, "%.0f%%"});
     } else if (type == LayerType::Plugin) {
         p.push_back({"size", N_("Object"), N_("Size"), PropertyKind::Vec2, &plugin.size, 1.0f, 0, 100000});
+        if (plugin.fill != ShapeFill::Solid)
+            p.push_back({"object_fill_color2", N_("Object"), N_("Gradient Color"), PropertyKind::Color, &plugin.fillColor2});
+        if (plugin.fill == ShapeFill::Linear)
+            p.push_back({"object_fill_angle", N_("Object"), N_("Gradient Angle"), PropertyKind::Float, &plugin.fillAngle, 0.5f, 0, 0, "%.0f°"});
         for (PluginParam& pp : plugin.params) {
             pp.propertyId = "p." + pp.id;
             const char* id = pp.propertyId.c_str();
@@ -206,7 +236,10 @@ std::vector<PropertyRef> Layer::properties() {
             p.push_back(value);
         }
         p.push_back({"font_size", N_("Text"), N_("Font Size"), PropertyKind::Float, &t.fontSize, 0.5f, 1, 2000, "%.0f px"});
-        p.push_back({"text_color", N_("Text"), N_("Color"), PropertyKind::Color, &t.color});
+        p.push_back({"text_color", N_("Text"), t.fill == ShapeFill::Solid ? N_("Color") : N_("Color 1"), PropertyKind::Color, &t.color});
+        if (t.fill != ShapeFill::Solid) p.push_back({"text_color2", N_("Text"), N_("Color 2"), PropertyKind::Color, &t.color2});
+        if (t.fill == ShapeFill::Linear)
+            p.push_back({"text_fill_angle", N_("Text"), N_("Gradient Angle"), PropertyKind::Float, &t.fillAngle, 0.5f, 0, 0, "%.0f°"});
         p.push_back({"tracking", N_("Text"), N_("Tracking"), PropertyKind::Float, &t.tracking, 0.25f, -200, 1000});
         p.push_back({"line_height", N_("Text"), N_("Line Height"), PropertyKind::Float, &t.lineHeight, 0.5f, 10, 500, "%.0f%%"});
         p.push_back({"wrap_width", N_("Text"), N_("Wrap Width"), PropertyKind::Float, &t.wrapWidth, 2.0f, 0, 100000, "%.0f px"});
@@ -255,6 +288,40 @@ Affine Layer::matrixAt(double t) const {
     return Affine::translate(pos) * Affine::rotateDeg(rot) * Affine::scale(scl) * Affine::translate(anc * -1.0f);
 }
 
+BezierPath Mask::pathAt(double t) const {
+    if (pathKeys.empty()) return path;
+    if (t <= pathKeys.front().time) return pathKeys.front().path;
+    if (t >= pathKeys.back().time) return pathKeys.back().path;
+    size_t i = 1;
+    while (i < pathKeys.size() && pathKeys[i].time < t) ++i;
+    const PathKey &a = pathKeys[i - 1], &b = pathKeys[i];
+    if (a.path.vertices.size() != b.path.vertices.size() || a.path.closed != b.path.closed) return a.path; // nothing to match: hold
+    const double span = b.time - a.time;
+    float u = span > 0 ? static_cast<float>((t - a.time) / span) : 1.0f;
+    u = u * u * (3.0f - 2.0f * u); // eased in and out, as After Effects' default mask motion looks
+    BezierPath out = a.path;
+    for (size_t k = 0; k < out.vertices.size(); ++k) {
+        const PathVertex &va = a.path.vertices[k], &vb = b.path.vertices[k];
+        out.vertices[k] = {va.point + (vb.point - va.point) * u, va.in + (vb.in - va.in) * u, va.out + (vb.out - va.out) * u};
+    }
+    return out;
+}
+
+int Mask::pathKeyAt(double t) const {
+    for (size_t i = 0; i < pathKeys.size(); ++i)
+        if (std::fabs(pathKeys[i].time - t) < kTimeEpsilon) return static_cast<int>(i);
+    return -1;
+}
+
+int Mask::setPathKey(double t, const BezierPath& p) {
+    if (const int i = pathKeyAt(t); i >= 0) {
+        pathKeys[static_cast<size_t>(i)].path = p;
+        return i;
+    }
+    const auto at = std::find_if(pathKeys.begin(), pathKeys.end(), [t](const PathKey& k) { return k.time > t; });
+    return static_cast<int>(pathKeys.insert(at, PathKey{t, p}) - pathKeys.begin());
+}
+
 void Layer::shiftTime(double delta) {
     inPoint += delta;
     outPoint += delta;
@@ -266,6 +333,8 @@ void Layer::shiftTime(double delta) {
     }
     for (auto& p : properties())
         for (int i = 0; i < p.anim->keyCount(); ++i) p.anim->setKeyTime(i, p.anim->keyTime(i) + delta);
+    for (Mask& m : masks)
+        for (Mask::PathKey& k : m.pathKeys) k.time += delta;
 }
 
 Layer makeShapeLayer(ShapeKind kind, Vec2 position, double duration) {
@@ -497,6 +566,12 @@ bool MediaProps::cropped(double t) const {
 }
 
 std::vector<float> defaultPropertyValue(const Layer& layer, const char* propertyId, Vec2 compCenter) {
+    if (std::strcmp(propertyId, "paint_reveal") == 0) return {100.0f};
+    if (std::strncmp(propertyId, "warp", 4) == 0) return {0.0f, 0.0f}; // a warp point not moved
+    if (std::strncmp(propertyId, "pin", 3) == 0) { // a pin at rest
+        const size_t i = static_cast<size_t>(std::atoi(propertyId + 3));
+        if (i < layer.pins.size()) return {layer.pins[i].rest.x, layer.pins[i].rest.y};
+    }
     if (std::strncmp(propertyId, "mask", 4) == 0) { // "mask0.opacity": 100%, feather and expansion 0
         const char* dot = std::strchr(propertyId, '.');
         return {dot && std::strcmp(dot + 1, "opacity") == 0 ? 100.0f : 0.0f};

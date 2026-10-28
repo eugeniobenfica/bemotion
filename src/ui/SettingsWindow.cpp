@@ -21,6 +21,7 @@
 #include "ui/Widgets.h"
 
 #include <QCheckBox>
+#include <QDialog>
 #include <QComboBox>
 #include <QCompleter>
 #include <QEvent>
@@ -43,6 +44,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -51,6 +54,7 @@
 #include <memory>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace bemotion::ui {
@@ -713,7 +717,11 @@ QWidget* performancePage() {
         st.hardwareDecoding = d.hardwareDecoding, st.useProxies = d.useProxies, st.cacheMegabytes = d.cacheMegabytes;
         st.scaledVideoPreview = d.scaledVideoPreview, st.autoProxies = d.autoProxies, st.showFilmstrips = d.showFilmstrips;
         st.adaptivePlayback = d.adaptivePlayback, st.gpuRendering = d.gpuRendering;
-        useGpu(st.gpuRendering);
+        st.processorThreads = d.processorThreads, st.gpuCacheMegabytes = d.gpuCacheMegabytes;
+        st.renderEngine = d.renderEngine;
+        useEngine(Engine::OpenGL);
+        setGpuCacheMegabytes(st.gpuCacheMegabytes);
+        media::setThreadCount(st.processorThreads);
         st.previewQuality = d.previewQuality;
         media::setHardwareDecoding(st.hardwareDecoding);
         media::MediaManager::get().reopenVideos();
@@ -731,6 +739,27 @@ QWidget* performancePage() {
                                   saveSettings();
                                   emit AppSignals::get().appearanceChanged();
                               }));
+    // What draws the pictures: the graphics card through OpenGL (Skia's Ganesh), or the processor.
+    preview->addRow(tr("Drawing engine"),
+                    tr("Vulkan and OpenGL draw on the graphics card: effects, blurs and big videos many times faster (Vulkan "
+                       "is often quicker on newer cards and drivers). The processor works everywhere, slower. Exports from "
+                       "the editor use the same engine") +
+                        (*gpuName() ? tr(" (in use: %1)").arg(QString::fromUtf8(gpuName())) : QString()),
+                    segmented({TR_NOOP("Vulkan"), TR_NOOP("OpenGL"), TR_NOOP("Processor")},
+                              !s.gpuRendering ? 2 : s.renderEngine == "vulkan" ? 0 : 1,
+                              [](int i) {
+                                  settings().gpuRendering = i != 2;
+                                  if (i != 2) settings().renderEngine = i == 0 ? "vulkan" : "opengl";
+                                  const Engine got = useEngine(i == 0 ? Engine::Vulkan : i == 1 ? Engine::OpenGL : Engine::Processor);
+                                  if (i == 0 && got != Engine::Vulkan) {
+                                      settings().renderEngine = "opengl";
+                                      QMessageBox::information(g_window, tr("Drawing engine"), tr("Vulkan does not work on this computer: drawing with OpenGL."));
+                                  }
+                                  saveSettings();
+                                  emit AppSignals::get().appearanceChanged(); // the viewport draws again
+                                  if (g_window) QTimer::singleShot(0, g_window, [] { if (g_window) g_window->rebuild(); }); // the engine in use
+                              },
+                              {vulkanAvailable(), true, true}));
     preview->addRow(tr("Lower the resolution while playing"),
                     tr("When a frame takes longer to draw than it lasts (heavy effects, big videos), playback draws at half or a "
                        "quarter of the size to stay smooth. Paused, the picture is back at the preview quality"),
@@ -758,19 +787,41 @@ QWidget* performancePage() {
     // The rest is fine-tuning: Advanced Options.
     if (!s.advanced) {
         col->addSpacing(6);
-        col->addWidget(hintLabel(tr("The graphics card, hardware decoding, proxy files and memory for cached frames are in Advanced Options (bottom left).")));
+        col->addWidget(hintLabel(tr("Processor threads, graphics memory, hardware decoding, proxy files and memory for cached frames are in Advanced Options (bottom left).")));
         return page;
     }
-    preview->addRow(tr("Draw with the graphics card"),
-                    tr("The viewport and exports draw on the graphics card (OpenGL): effects, blurs and big videos many times "
-                       "faster. Off, or without OpenGL: on the processor") +
-                        (*gpuName() ? tr(" (in use: %1)").arg(QString::fromUtf8(gpuName())) : QString()),
-                    switchControl(s.gpuRendering, [](bool on) {
-                        settings().gpuRendering = on;
-                        useGpu(on);
-                        saveSettings();
-                        emit AppSignals::get().appearanceChanged(); // the viewport draws again
-                    }));
+    {
+        // Threads for decoding, encoding and speech: fewer leaves the computer free for other work.
+        auto* threads = new QComboBox;
+        threads->addItem(tr("Automatic"), 0);
+        const int cores = std::max(1, static_cast<int>(std::thread::hardware_concurrency()));
+        for (int n : {1, 2, 4, 6, 8, 12, 16, 24, 32})
+            if (n <= cores) threads->addItem(QString::number(n), n);
+        threads->setCurrentIndex(std::max(0, threads->findData(s.processorThreads)));
+        QObject::connect(threads, &QComboBox::activated, threads, [threads](int) {
+            settings().processorThreads = threads->currentData().toInt();
+            media::setThreadCount(settings().processorThreads);
+            media::MediaManager::get().reopenVideos();
+            saveSettings();
+        });
+        SettingsCard* processing = addSection(col, tr("Processing"));
+        processing->addRow(tr("Processor threads"),
+                           tr("How many threads decoding, exporting and transcribing may each use (this computer has %1). "
+                              "Fewer leaves it free for other work").arg(cores),
+                           threads);
+        auto* memory = new QComboBox;
+        for (int mb : {128, 256, 512, 1024, 2048, 4096}) memory->addItem(mb < 1024 ? QString("%1 MB").arg(mb) : QString("%1 GB").arg(mb / 1024), mb);
+        memory->setCurrentIndex(std::max(0, memory->findData(s.gpuCacheMegabytes)));
+        QObject::connect(memory, &QComboBox::activated, memory, [memory](int) {
+            settings().gpuCacheMegabytes = memory->currentData().toInt();
+            setGpuCacheMegabytes(settings().gpuCacheMegabytes);
+            saveSettings();
+        });
+        processing->addRow(tr("Graphics memory for the preview"),
+                           tr("How much of the graphics card's memory keeps pictures, letters and effects between frames: "
+                              "more makes scrubbing smoother on cards with memory to spare"),
+                           memory);
+    }
     preview->addRow(tr("Decode video at the size shown"),
                     tr("A video shown small in the viewport is read small: much less work for 4K and HD footage. Exports "
                        "read it at the size it comes out, never smaller"),
@@ -1053,6 +1104,85 @@ QString permissionLabel(const std::string& permission) {
 
 // One plugin, as a row of its card: picture, name and what it does, what it adds and may do,
 // and its switch; its folder, removal and log under it.
+// A plugin's own settings (plugin.json "settings"): a window of rows, applied at once.
+void showPluginSettings(const std::string& pluginId) {
+    const Plugin* plugin = PluginHost::get().findPlugin(pluginId);
+    if (!plugin || plugin->settings.empty()) return;
+    QDialog dialog(g_window);
+    dialog.setWindowTitle(tr("%1 Settings").arg(QString::fromStdString(plugin->name)));
+    dialog.setMinimumWidth(460);
+    auto* col = new QVBoxLayout(&dialog);
+    col->setContentsMargins(16, 16, 16, 16);
+    auto* card = new SettingsCard;
+    col->addWidget(card);
+    auto store = [pluginId](const std::string& id, const nlohmann::json& value) {
+        settings().pluginSettings[pluginId][id] = value.dump();
+        saveSettings();
+        emit AppSignals::get().pluginsChanged(); // what plugins draw changes: the views draw again
+    };
+    auto current = [pluginId](const std::string& id) -> nlohmann::json {
+        const auto& all = settings().pluginSettings;
+        if (const auto p = all.find(pluginId); p != all.end())
+            if (const auto v = p->second.find(id); v != p->second.end()) return nlohmann::json::parse(v->second, nullptr, false);
+        return nullptr;
+    };
+    for (const PluginSetting& s : plugin->settings) {
+        const nlohmann::json value = current(s.id);
+        const std::string id = s.id;
+        QWidget* control = nullptr;
+        switch (s.kind) {
+        case PluginSetting::Kind::Toggle:
+            control = switchControl(value.is_boolean() ? value.get<bool>() : s.toggle, [store, id](bool on) { store(id, on); });
+            break;
+        case PluginSetting::Kind::Number: {
+            auto* v = new DragValue;
+            if (s.max > s.min) v->setRange(static_cast<float>(s.min), static_cast<float>(s.max));
+            v->setSpeed(static_cast<float>(std::max(0.001, s.step)));
+            v->setFormat(s.format.c_str());
+            v->setValue(static_cast<float>(value.is_number() ? value.get<double>() : s.number));
+            v->setFixedWidth(120);
+            QObject::connect(v, &DragValue::valueChanged, v, [store, id](float x) { store(id, x); });
+            control = v;
+            break;
+        }
+        case PluginSetting::Kind::Choice: {
+            auto* combo = new QComboBox;
+            for (const std::string& c : s.choices) combo->addItem(trs(c), QString::fromStdString(c));
+            combo->setCurrentIndex(std::max(0, combo->findData(QString::fromStdString(value.is_string() ? value.get<std::string>() : s.text))));
+            QObject::connect(combo, &QComboBox::activated, combo, [store, id, combo](int) { store(id, combo->currentData().toString().toStdString()); });
+            control = combo;
+            break;
+        }
+        case PluginSetting::Kind::Text: {
+            auto* edit = new QLineEdit(QString::fromStdString(value.is_string() ? value.get<std::string>() : s.text));
+            edit->setMinimumWidth(180);
+            QObject::connect(edit, &QLineEdit::editingFinished, edit, [store, id, edit] { store(id, edit->text().toStdString()); });
+            control = edit;
+            break;
+        }
+        }
+        card->addRow(trs(s.label), trs(s.description), control);
+    }
+    auto* buttons = new QHBoxLayout;
+    auto* reset = new QPushButton(tr("Reset"));
+    reset->setProperty("flat", true);
+    reset->setToolTip(tr("Back to the plugin's defaults"));
+    QObject::connect(reset, &QPushButton::clicked, &dialog, [&dialog, pluginId] {
+        settings().pluginSettings.erase(pluginId);
+        saveSettings();
+        emit AppSignals::get().pluginsChanged();
+        dialog.accept();
+        QTimer::singleShot(0, [pluginId] { showPluginSettings(pluginId); }); // shown again, at the defaults
+    });
+    buttons->addWidget(reset);
+    buttons->addStretch();
+    auto* done = accentButton(tr("Done"));
+    QObject::connect(done, &QPushButton::clicked, &dialog, &QDialog::accept);
+    buttons->addWidget(done);
+    col->addLayout(buttons);
+    dialog.exec();
+}
+
 QWidget* pluginRow(const Plugin& p) {
     PluginHost& host = PluginHost::get();
     auto* row = new QWidget;
@@ -1164,6 +1294,15 @@ QWidget* pluginRow(const Plugin& p) {
         emit AppSignals::get().pluginsChanged();
         if (g_window) QTimer::singleShot(200, g_window, [] { if (g_window) g_window->rebuild(); });
     });
+    // Its own settings: a gear beside the switch, where the card's controls are.
+    if (!p.settings.empty()) {
+        const std::string pluginId = p.id;
+        auto* gear = new IconButton(Icon::Gear, tr("This plugin's own settings"), 28);
+        gear->setEnabled(p.enabled && ok);
+        gear->setAccessibleName(tr("%1 Settings").arg(QString::fromStdString(p.name)));
+        QObject::connect(gear, &QAbstractButton::clicked, gear, [pluginId] { showPluginSettings(pluginId); });
+        h->addWidget(gear, 0, Qt::AlignTop);
+    }
     h->addWidget(enabled, 0, Qt::AlignTop);
     return row;
 }

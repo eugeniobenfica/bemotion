@@ -717,6 +717,13 @@ Loudness MediaManager::loudness(uint64_t mediaId) const {
     return it == m.audios.end() ? nullptr : it->second.loudness;
 }
 
+std::string MediaManager::audioPathOf(uint64_t mediaId) const {
+    Impl& m = impl();
+    std::lock_guard lock(m.mutex);
+    const auto it = m.audios.find(mediaId);
+    return it == m.audios.end() ? std::string() : it->second.path;
+}
+
 bool MediaManager::audioPending(uint64_t mediaId) const {
     Impl& m = impl();
     std::lock_guard lock(m.mutex);

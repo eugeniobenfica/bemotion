@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <set>
 #include <string>
@@ -29,7 +30,9 @@ struct KeySelection {
 // crops videos and images; Pen draws Bézier shapes (or, with a layer selected that is not a
 // shape, a mask on it); Ripple / Roll / Slip change how the timeline's clip drags edit
 // (Premiere's ripple edit, rolling edit and slip tools).
-enum class Tool { Select, Razor, Crop, Pen, Ripple, Roll, Slip };
+// Brush / Eraser paint on the selected layer (or a new one); Puppet places and drags pins; Warp
+// drags the points of a Mesh Warp; Track follows a point of a video (ui/Tracking).
+enum class Tool { Select, Razor, Crop, Pen, Ripple, Roll, Slip, Brush, Eraser, Puppet, Warp, Track };
 
 class EditorContext {
 public:
@@ -94,6 +97,16 @@ public:
 
     void setTime(double t);
     void stepFrames(int frames);
+    // The playhead to the selected layer's previous (-1) / next (+1) keyframe (any layer's when
+    // none is selected). False when there is none that way.
+    bool jumpToKeyframe(int direction);
+    // The Track Point tool's result goes onto this layer (Tool Settings; 0: a new marker layer).
+    uint64_t trackTarget = 0;
+    // "Pick a sample" (a sound fix's sample of the noise or of the silence): the next drag on the
+    // timeline, on its ruler or its rows, marks a stretch of time with the playhead following
+    // it, and `samplePick` gets it (composition seconds). Esc cancels.
+    std::function<void(double from, double to)> samplePick;
+    bool pickingSample() const { return static_cast<bool>(samplePick); }
     void tick(double dt); // advances playback
 
     // Marks the document as modified; recorded as an undo step when idle.

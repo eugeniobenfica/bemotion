@@ -388,6 +388,59 @@ void EffectsPanel::buildAudioEffects(QVBoxLayout* col, const Layer& layer) {
         }
         if (effect.type == AudioEffectType::Ducking)
             section->body()->addWidget(faint(tr("Quieter while any other clip with sound plays: put it on the music.")));
+        if (effect.type == AudioEffectType::NoiseReduction) {
+            // The noise learned from a stretch of only noise, dragged over on the timeline (else guessed).
+            auto* row = new QWidget;
+            auto* h = new QHBoxLayout(row);
+            h->setContentsMargins(0, 0, 0, 0);
+            h->setSpacing(4);
+            auto* pick = new QPushButton(ui::makeIcon(ui::Icon::Pointer, theme::kTextDim, 16), tr("Pick a Sample"));
+            pick->setCheckable(true);
+            pick->setToolTip(tr("Then drag on the timeline over a moment with only the noise (no voice, no music)"));
+            auto* clear = new ui::IconButton(ui::Icon::Close, tr("No sample: the noise is guessed from the quietest moments"), 24);
+            h->addWidget(pick, 1);
+            h->addWidget(clear);
+            section->addPlainRow(tr("Noise sample"), row);
+            auto* info = faint({});
+            info->setWordWrap(true);
+            section->body()->addWidget(info);
+            connect(pick, &QPushButton::clicked, this, [this, id, i](bool on) {
+                if (!on) {
+                    ctx_.samplePick = nullptr;
+                    return;
+                }
+                ctx_.samplePick = [this, id, i](double from, double to) {
+                    Layer* l = ctx_.comp().findLayer(id);
+                    if (!l || i >= static_cast<int>(l->audioEffects.size())) return;
+                    // The stretch of this clip, in its source's seconds (it moves with the clip).
+                    const double a = std::max(from, l->inPoint), b = std::min(to, l->outPoint);
+                    if (b <= a) return;
+                    const double sa = l->media.sourceTime(a), sb = l->media.sourceTime(b);
+                    l->audioEffects[static_cast<size_t>(i)].sampleFrom = std::max(0.0, std::min(sa, sb));
+                    l->audioEffects[static_cast<size_t>(i)].sampleTo = std::max(sa, sb);
+                    ctx_.touch();
+                };
+                emit panelRequested(QStringLiteral("Timeline"));
+            });
+            connect(clear, &QAbstractButton::clicked, this, [this, id, i] {
+                if (Layer* l = ctx_.comp().findLayer(id); l && i < static_cast<int>(l->audioEffects.size())) {
+                    l->audioEffects[static_cast<size_t>(i)].sampleFrom = l->audioEffects[static_cast<size_t>(i)].sampleTo = -1.0;
+                    ctx_.touch();
+                }
+            });
+            refreshers_.push_back([this, id, i, pick, clear, info] {
+                const Layer* l = ctx_.comp().findLayer(id);
+                if (!l || i >= static_cast<int>(l->audioEffects.size())) return;
+                const AudioEffect& e = l->audioEffects[static_cast<size_t>(i)];
+                char span[64];
+                std::snprintf(span, sizeof span, "%.2f s – %.2f s", e.sampleFrom, e.sampleTo);
+                const QString text = e.hasSample() ? tr("Noise learned from %1 of the source").arg(QString::fromUtf8(span))
+                                                   : tr("No sample: the noise is guessed from the quietest moments.");
+                if (info->text() != text) info->setText(text);
+                clear->setEnabled(e.hasSample());
+                if (pick->isChecked() != ctx_.pickingSample()) pick->setChecked(ctx_.pickingSample());
+            });
+        }
         col->addWidget(section);
     }
     col->addWidget(faint(layer.audioEffects.empty() ? tr("No audio effects yet. Pick one below.") : tr("Audio effects are applied during playback and export.")));

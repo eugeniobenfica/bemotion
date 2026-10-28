@@ -16,15 +16,18 @@ capability). This file is the short, practical version.
 | Document model, rules, operations | `src/core` (`Project`, `Layer`, `Validate`, `Ops`, `Serialization`, `Clipboard`, `Data`, `Arrange`, `Transitions`, `Presets`, `Expressions`) — no Qt, no Skia |
 | Drawing | `src/render` (`SceneRenderer`, `Text`, `PluginCanvas`, `Mesh3D`) |
 | Media, audio, recording, export | `src/media`, `src/export` |
-| Interface | `src/ui` (`EditorWindow`, `EditorContext`, `Theme`, `Style`, `Widgets`, `panels/*`) |
+| Interface | `src/ui` (`EditorWindow`, `EditorContext`, `Widgets`, `panels/*`) |
+| The look (reusable) | `libs/bmstyle` (theme, style, `Draw`, icons, shared controls; Qt only, no bemotion code) |
 | App, platform, plugins, automation | `src/app` (`Application`, `Platform`, `Settings`, `PluginHost`, `Automation`, `McpServer`, `Recovery`, `DevScript`) |
 | Bundled plugins | `assets/plugins` (charts, models3d, recorder) |
 | Contracts in prose | `docs/OPERATIONS.md`, `docs/PLUGINS.md`, `docs/AUTOMATION.md`, `docs/EXPRESSIONS.md` |
 
 ## Rules
 
-- Layers: `core` ← `render` ← `media` / `export` ← `ui` ← `app`. Dependencies
-  only point down.
+- Layers: `core` ← `render` ← `media` / `export` ← `ui` ← `app`, and
+  `libs/bmstyle` ← `ui`. Dependencies only point down; `bmstyle` never
+  includes bemotion code (other apps use it). A control panels share goes
+  there; one that knows about layers, keyframes or settings stays in `ui`.
 - Outside changes to a project go through **operations** (`src/core/Ops.cpp`,
   reference `docs/OPERATIONS.md`); every rule lives in `src/core/Validate.cpp`
   (a check *and* a repair). New script / AI abilities are new operations,

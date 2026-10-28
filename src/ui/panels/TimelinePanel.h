@@ -25,6 +25,11 @@ class QLineEdit;
 class QPushButton;
 class QHBoxLayout;
 
+namespace bmstyle {
+class IconButton;
+class Draw;
+} // namespace bmstyle
+
 namespace bemotion {
 
 class PropertyRow;
@@ -33,8 +38,8 @@ class TimelineRows;
 class TimelineScrollbar;
 class ToolPill;
 namespace ui {
-class Draw;
-class IconButton;
+using bmstyle::Draw;
+using bmstyle::IconButton;
 }
 
 // Bottom panel: toolbar (the user's tools, snapping, transport), time ruler,
@@ -230,6 +235,16 @@ private:
     DropTarget dropTargetAt(float y, Drag mode) const;
     void beginMarquee(QPointF pos);
     void updateMarquee(QPointF pos);
+    // The same box started on a keyframe row: it picks keyframes instead of clips.
+    void beginKeyMarquee(QPointF pos);
+    // Picking a sample (EditorContext::samplePick): the stretch dragged over, the playhead along.
+    void beginSamplePick(float x);
+    void updateSamplePick(float x);
+    void endSamplePick();
+    void paintSamplePick(ui::Draw& d, float top, float bottom);
+    bool sampling_ = false;
+    double sampleFrom_ = 0.0, sampleTo_ = 0.0;
+    void updateKeyMarquee(QPointF pos);
     void beginKeyDrag(QPointF pos);
     void updateKeyDrag(QPointF pos);
     void endKeyDrag();
@@ -349,11 +364,16 @@ private:
     bool marquee_ = false;
     QPointF marqueeStart_, marqueeEnd_;
     std::vector<uint64_t> marqueeBase_;
+    bool keyMarquee_ = false;
+    std::vector<KeySelection> marqueeKeyBase_;
     float hoverX_ = -1.0f; // razor preview
     bool dropActive_ = false;
     double dropTime_ = 0.0;
     int dropGap_ = 0;
     double dropLength_ = 0.0;
+    uint64_t dropTrack_ = 0; // dropped in the middle of a track with room there: onto it (else a new one at the gap)
+    // The track under `y` (its middle, not its edges) when [t, t + length) is free on it, else 0.
+    uint64_t freeTrackAt(float y, double t, double length) const;
 };
 
 } // namespace bemotion

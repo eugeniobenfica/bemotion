@@ -11,6 +11,7 @@
 #include "export/Export.h"
 
 #include "app/Platform.h"
+#include "media/MediaIO.h"
 
 extern "C" {
 #include <libavutil/log.h>
@@ -225,6 +226,7 @@ private:
             ctx->gop_size = std::max(1, static_cast<int>(p.fps * 2));
             if (oc_->oformat->flags & AVFMT_GLOBALHEADER) ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
             configure(ctx, codec, name);
+            ctx->thread_count = media::threadCount(); // Settings › Performance (0: FFmpeg's choice)
             const int r = avcodec_open2(ctx, codec, nullptr);
             if (r < 0) { // e.g. a hardware encoder without the hardware: try the next one
                 tried += std::string(tried.empty() ? "" : ", ") + name;

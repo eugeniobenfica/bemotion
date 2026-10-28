@@ -235,6 +235,10 @@ protected:
     void mousePressEvent(QMouseEvent* e) override {
         if (e->position().x() < panel_->trackX0()) return;
         const float mx = static_cast<float>(e->position().x()), my = static_cast<float>(e->position().y());
+        if (panel_->ctx_.pickingSample() && e->button() == Qt::LeftButton) {
+            panel_->beginSamplePick(mx);
+            return;
+        }
         const int marker = panel_->markerAt(mx, my);
         if (e->button() == Qt::RightButton) {
             panel_->showMarkerMenu(e->globalPosition().toPoint(), marker, panel_->xToTime(mx));
@@ -265,6 +269,10 @@ protected:
     }
     void mouseMoveEvent(QMouseEvent* e) override {
         const float mx = static_cast<float>(e->position().x()), my = static_cast<float>(e->position().y());
+        if (panel_->sampling_) {
+            panel_->updateSamplePick(mx);
+            return;
+        }
         if (panel_->drag_ == TimelinePanel::Drag::Marker) {
             panel_->dragMarkerTo(mx);
             return;
@@ -286,6 +294,7 @@ protected:
     }
     void mouseReleaseEvent(QMouseEvent*) override {
         edgeTimer_.stop();
+        if (panel_->sampling_) panel_->endSamplePick();
         if (panel_->drag_ == TimelinePanel::Drag::Marker) panel_->dragMarker_ = -1;
         panel_->drag_ = TimelinePanel::Drag::None;
         panel_->snapLineTime_ = -1.0;
@@ -435,6 +444,10 @@ public:
         setMouseTracking(true);
         setAcceptDrops(true);
         setFocusPolicy(Qt::ClickFocus);
+        // Dragging near the left or right edge scrolls the view, smoothly and faster the further
+        // out (as the ruler does for the playhead): clips, trims and things dragged in alike.
+        edgeTimer_.setInterval(16);
+        connect(&edgeTimer_, &QTimer::timeout, this, [this] { edgeTick(); });
     }
 
 protected:
@@ -444,8 +457,17 @@ protected:
     }
     void resizeEvent(QResizeEvent*) override { panel_->relayout(); }
     void mousePressEvent(QMouseEvent* e) override { panel_->rowsPress(e); }
-    void mouseMoveEvent(QMouseEvent* e) override { panel_->rowsMove(e); }
-    void mouseReleaseEvent(QMouseEvent* e) override { panel_->rowsRelease(e); }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        panel_->rowsMove(e);
+        lastPos_ = e->position();
+        lastButtons_ = e->buttons();
+        lastMods_ = e->modifiers();
+        followEdge(panel_->drag_ != TimelinePanel::Drag::None && (e->buttons() & Qt::LeftButton));
+    }
+    void mouseReleaseEvent(QMouseEvent* e) override {
+        edgeTimer_.stop();
+        panel_->rowsRelease(e);
+    }
     void mouseDoubleClickEvent(QMouseEvent* e) override { panel_->rowsDoubleClick(e); }
     void wheelEvent(QWheelEvent* e) override { panel_->wheel(e); }
     void leaveEvent(QEvent*) override {
@@ -478,6 +500,9 @@ protected:
             update();
             return;
         }
+        lastPos_ = e->position();
+        externalDrag_ = true;
+        followEdge(true);
         double t = 0;
         int gap = 0;
         if (!panel_->dropTimeAndGap(e->position(), t, gap)) return;
@@ -486,10 +511,14 @@ protected:
         panel_->dropActive_ = true;
         panel_->dropTime_ = t;
         panel_->dropLength_ = item && item->kind != MediaKind::Image ? item->duration : kDefaultLayerLength;
+        panel_->dropTrack_ = panel_->freeTrackAt(static_cast<float>(e->position().y()), t, panel_->dropLength_);
         e->acceptProposedAction();
         update();
     }
     void dragLeaveEvent(QDragLeaveEvent*) override {
+        edgeTimer_.stop();
+        externalDrag_ = false;
+        panel_->dropTrack_ = 0;
         panel_->dropActive_ = false;
         panel_->motionDrop_ = {};
         panel_->snapLineTime_ = -1.0;
@@ -499,6 +528,8 @@ protected:
         EditorContext& ctx = panel_->ctx_;
         double t = 0;
         int gap = 0;
+        edgeTimer_.stop();
+        externalDrag_ = false;
         panel_->dropActive_ = false;
         panel_->snapLineTime_ = -1.0;
         if (const auto motion = motionOf(e->mimeData())) {
@@ -515,15 +546,64 @@ protected:
         if (ui::readMime(e->mimeData(), ui::kMediaMime, mediaId)) l = ctx.addMedia(mediaId, std::nullopt, t);
         else if (ui::readMime(e->mimeData(), ui::kObjectMime, kind)) l = ctx.addObject(kind, ctx.comp().center(), t);
         if (l) {
-            ctx.comp().moveTracks({l->track}, gap);
+            // Onto the track it was dropped on when there is room there, else a new track at the gap.
+            const uint64_t id = l->id;
+            const uint64_t onto = panel_->freeTrackAt(static_cast<float>(e->position().y()), t, l->outPoint - l->inPoint);
+            if (!onto || !ctx.comp().moveClipsToTrack({id}, onto)) {
+                if (const Layer* added = ctx.comp().findLayer(id)) ctx.comp().moveTracks({added->track}, gap);
+            }
             ctx.touch();
         }
+        panel_->dropTrack_ = 0;
         e->acceptProposedAction();
         panel_->relayout();
     }
 
 private:
+    float edgeSpeed() const {
+        constexpr float kEdge = 28.0f;
+        const float x = static_cast<float>(lastPos_.x());
+        const float left = panel_->trackX0() + kEdge, right = panel_->trackX0() + panel_->trackW() - kEdge;
+        const float over = x < left ? x - left : x > right ? x - right : 0.0f;
+        if (over == 0.0f || x < panel_->trackX0() - 4.0f) return 0.0f; // over the names: no scrolling
+        return std::copysign(std::clamp(std::fabs(over) * 0.35f, 2.0f, 40.0f), over);
+    }
+    void followEdge(bool dragging) {
+        if (dragging && edgeSpeed() != 0.0f) {
+            if (!edgeTimer_.isActive()) edgeTimer_.start();
+        } else {
+            edgeTimer_.stop();
+        }
+    }
+    void edgeTick() {
+        const float speed = edgeSpeed();
+        const bool dragging = externalDrag_ || (panel_->drag_ != TimelinePanel::Drag::None && (lastButtons_ & Qt::LeftButton));
+        if (!dragging || speed == 0.0f || panel_->pxPerSec_ <= 0.0) {
+            edgeTimer_.stop();
+            return;
+        }
+        panel_->scroll_ = std::max(0.0, panel_->scroll_ + speed / panel_->pxPerSec_);
+        panel_->clampView();
+        if (!externalDrag_) { // the dragged clip stays under the mouse as the view moves
+            QMouseEvent move(QEvent::MouseMove, lastPos_, mapToGlobal(lastPos_), Qt::NoButton, lastButtons_, lastMods_);
+            panel_->rowsMove(&move);
+        } else if (panel_->dropActive_) {
+            double t = 0;
+            int gap = 0;
+            if (panel_->dropTimeAndGap(lastPos_, t, gap)) {
+                panel_->dropTime_ = t;
+                panel_->dropTrack_ = panel_->freeTrackAt(static_cast<float>(lastPos_.y()), t, panel_->dropLength_);
+            }
+        }
+        panel_->relayout();
+    }
+
     TimelinePanel* panel_;
+    QTimer edgeTimer_;
+    QPointF lastPos_;
+    Qt::MouseButtons lastButtons_;
+    Qt::KeyboardModifiers lastMods_;
+    bool externalDrag_ = false;
 };
 
 // The user's tools (Settings::toolbar, filled from the Tools popover) on a pill of their own.
@@ -798,8 +878,8 @@ TimelinePanel::TimelinePanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     rows_ = new TimelineRows(this);
     col->addWidget(rows_, 1);
     hscroll_ = new TimelineScrollbar(this);
+    col->addWidget(hscroll_); // parented first: shown on its own, it would flash up as a window
     hscroll_->setVisible(settings().showTimelineScrollbar);
-    col->addWidget(hscroll_);
     connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] {
         pill_->updateGeometry();
         pill_->update();
@@ -844,10 +924,12 @@ void TimelinePanel::buildToolbar(QHBoxLayout* bar) {
         ctx_.playing = false;
         ctx_.setTime(0.0);
     });
+    button(ui::Icon::KeyPrev, tr("Previous keyframe (Shift+J): of the selected layer, or of any"), [this] { ctx_.jumpToKeyframe(-1); });
     button(ui::Icon::StepBack, tr("Previous frame (Left)"), [this] { ctx_.stepFrames(-1); });
     play_ = button(ui::Icon::Play, tr("Play / Pause (Space)"), [this] { ctx_.playing = !ctx_.playing; });
     play_->setActive(true);
     button(ui::Icon::StepForward, tr("Next frame (Right)"), [this] { ctx_.stepFrames(1); });
+    button(ui::Icon::KeyNext, tr("Next keyframe (Shift+K): of the selected layer, or of any"), [this] { ctx_.jumpToKeyframe(1); });
     button(ui::Icon::ToEnd, tr("Go to end (End)"), [this] {
         ctx_.playing = false;
         ctx_.setTime(ctx_.comp().duration);
@@ -1458,6 +1540,7 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
             d.circleFilled({6, y}, 4.0f, theme::kAccent);
         }
     }
+    paintSamplePick(d, 0.0f, static_cast<float>(size.height()));
     // Box selection.
     if (marquee_) {
         const QRectF r = QRectF(marqueeStart_, marqueeEnd_).normalized();
@@ -1481,8 +1564,15 @@ void TimelinePanel::paintRows(QPainter& p, QSize size) {
             }
         if (items_.empty()) gy = 4;
         const float tx = timeToX(dropTime_);
-        d.line({0, gy}, {width, gy}, theme::kAccent, 2.0f);
-        d.rectFilled({tx, gy - 9}, {std::max(tx + 60, timeToX(dropTime_ + dropLength_)), gy + 9}, theme::accent(60), 4.0f);
+        const auto onto = std::find_if(items_.begin(), items_.end(), [this](const Item& r) { return r.kind == Item::Track && r.track == dropTrack_; });
+        if (dropTrack_ && onto != items_.end()) { // into that track's free room: the clip as it will sit
+            d.rectFilled({tx, onto->top + 3}, {std::max(tx + 60, timeToX(dropTime_ + dropLength_)), onto->top + onto->h - 3}, theme::accent(70), 5.0f);
+            d.rect({tx, onto->top + 3}, {std::max(tx + 60, timeToX(dropTime_ + dropLength_)), onto->top + onto->h - 3}, theme::kAccent, 5.0f, 1.5f);
+            gy = onto->top + 9;
+        } else {
+            d.line({0, gy}, {width, gy}, theme::kAccent, 2.0f);
+            d.rectFilled({tx, gy - 9}, {std::max(tx + 60, timeToX(dropTime_ + dropLength_)), gy + 9}, theme::accent(60), 4.0f);
+        }
         d.line({tx, 0}, {tx, bottom}, theme::kAccent, 1.0f);
         d.text({tx + 6, gy - 8}, theme::kText, ui::formatTimecode(dropTime_, ctx_.comp().fps));
     }
@@ -2088,6 +2178,7 @@ void TimelinePanel::showTrackMenu(QPoint global) {
     menu.addAction(tr("Ripple Delete\tShift+Del"), [this] { ctx_.rippleDeleteSelected(); })->setToolTip(tr("Delete and close the gap: the clips after it move back"));
     ui::fillTimeMenu(menu.addMenu(ui::menuIcon(ui::Icon::Speed, theme::kTextDim), tr("Time")), ctx_, this);
     ui::addSeparateAudio(menu, ctx_);
+    ui::addAudioFixes(menu, ctx_, this);
     if (ui::canTranscribe(ctx_, focus)) {
         QAction* t = menu.addAction(ui::menuIcon(ui::Icon::Subtitles, theme::kTextDim), tr("Transcribe to Subtitles..."),
                                     [this, focus] { ui::transcribeClip(ctx_, focus, 0, this); });
@@ -2378,6 +2469,10 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
         return;
     }
     const bool left = e->button() == Qt::LeftButton, right = e->button() == Qt::RightButton;
+    if (ctx_.pickingSample() && left && x >= trackX0()) {
+        beginSamplePick(x);
+        return;
+    }
     const Item* item = itemAt(y);
     if (!item) { // empty space below the rows: click to deselect, drag to box-select
         if (left) beginMarquee(pos);
@@ -2549,9 +2644,12 @@ void TimelinePanel::rowsPress(QMouseEvent* e) {
             return;
         }
         if (left) beginKeyDrag(pos);
-    } else if (left && !shiftHeld()) {
-        ctx_.clearKeySelection();
-        ctx_.select(layer->id);
+    } else if (left) { // empty space on a keyframe row: drag a box around keyframes (Shift / Ctrl adds)
+        if (!shiftHeld() && !ctrlHeld()) {
+            ctx_.clearKeySelection();
+            ctx_.select(layer->id);
+        }
+        beginKeyMarquee(pos);
     }
     relayout();
 }
@@ -2595,6 +2693,10 @@ void TimelinePanel::rowsMove(QMouseEvent* e) {
     }
     if (drag_ == Drag::Keys) {
         updateKeyDrag(pos);
+        return;
+    }
+    if (sampling_) {
+        updateSamplePick(static_cast<float>(pos.x()));
         return;
     }
     if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName ||
@@ -2643,6 +2745,7 @@ void TimelinePanel::rowsRelease(QMouseEvent* e) {
         graphRelease(e);
         return;
     }
+    if (sampling_) endSamplePick();
     if (drag_ == Drag::Keys) endKeyDrag();
     else if (drag_ == Drag::LayerMove || drag_ == Drag::LayerIn || drag_ == Drag::LayerOut || drag_ == Drag::LayerName ||
              drag_ == Drag::TransitionIn || drag_ == Drag::TransitionOut || drag_ == Drag::TransitionMove || drag_ == Drag::AnimationMove ||
@@ -2652,7 +2755,7 @@ void TimelinePanel::rowsRelease(QMouseEvent* e) {
         drag_ = Drag::None;
         dragBase_ = Composition{}; // (the copy is only needed while dragging)
     }
-    if (marquee_) marquee_ = false;
+    if (marquee_) marquee_ = keyMarquee_ = false;
     snapLineTime_ = -1.0;
     relayout();
 }
@@ -2871,6 +2974,18 @@ void TimelinePanel::endLayerDrag(QPointF pos) {
     rows_->setCursor(Qt::ArrowCursor);
 }
 
+uint64_t TimelinePanel::freeTrackAt(float y, double t, double length) const {
+    constexpr float kEdge = 7.0f; // a row's edges make a new track, as when moving clips
+    for (const Item& r : items_) {
+        if (r.kind != Item::Track || y < r.top + kEdge || y > r.top + r.h - kEdge) continue;
+        const double end = t + std::max(length, ctx_.comp().frameDuration());
+        for (const Layer& l : ctx_.comp().layers)
+            if (l.track == r.track && !l.parent && l.inPoint < end - kTimeEpsilon && l.outPoint > t + kTimeEpsilon) return 0;
+        return r.track;
+    }
+    return 0;
+}
+
 int TimelinePanel::dropGapAt(float y) const {
     int gap = 0, visible = 0;
     for (const Item& r : items_)
@@ -2916,13 +3031,97 @@ TimelinePanel::DropTarget TimelinePanel::dropTargetAt(float y, Drag mode) const 
 void TimelinePanel::beginMarquee(QPointF pos) {
     const bool additive = ctrlHeld() || shiftHeld();
     marquee_ = true;
+    keyMarquee_ = false;
     marqueeStart_ = marqueeEnd_ = pos;
     marqueeBase_ = additive ? ctx_.selection : std::vector<uint64_t>{};
     if (!additive) ctx_.select(0);
     ctx_.clearKeySelection();
 }
 
+void TimelinePanel::beginSamplePick(float x) {
+    sampling_ = true;
+    sampleFrom_ = sampleTo_ = std::clamp(xToTime(x), 0.0, ctx_.comp().duration);
+    ctx_.playing = false;
+    ctx_.setTime(sampleFrom_);
+    relayout();
+}
+
+void TimelinePanel::updateSamplePick(float x) {
+    sampleTo_ = std::clamp(xToTime(x), 0.0, ctx_.comp().duration);
+    ctx_.setTime(sampleTo_); // the needle rides along: what is under it can be seen and found
+    relayout();
+}
+
+void TimelinePanel::endSamplePick() {
+    sampling_ = false;
+    const double from = std::min(sampleFrom_, sampleTo_), to = std::max(sampleFrom_, sampleTo_);
+    // A click (no stretch) leaves the pick on: the next drag counts.
+    if (to - from >= 1.0 / std::max(1.0, ctx_.comp().fps) && ctx_.samplePick) {
+        const auto pick = std::move(ctx_.samplePick);
+        ctx_.samplePick = nullptr;
+        pick(from, to);
+    }
+    relayout();
+}
+
+// While a sample is being picked: the stretch dragged so far, and a word on what to do.
+void TimelinePanel::paintSamplePick(ui::Draw& d, float top, float bottom) {
+    if (!ctx_.pickingSample()) return;
+    const float x0 = trackX0(), x1 = x0 + trackW();
+    if (sampling_) {
+        const float a = std::clamp(timeToX(std::min(sampleFrom_, sampleTo_)), x0, x1), b = std::clamp(timeToX(std::max(sampleFrom_, sampleTo_)), x0, x1);
+        d.rectFilled({a, top}, {b, bottom}, theme::accent(40));
+        d.line({a, top}, {a, bottom}, theme::kAccent, 1.5f);
+        d.line({b, top}, {b, bottom}, theme::kAccent, 1.5f);
+    }
+    const QString hint = tr("Drag over a stretch with only the noise or silence to sample it  ·  Esc: cancel");
+    const float w = static_cast<float>(QFontMetricsF(font()).horizontalAdvance(hint)) + 24.0f;
+    const float cx = std::max(x0 + 6.0f, (x0 + x1 - w) * 0.5f);
+    d.rectFilled({cx, top + 6}, {cx + w, top + 30}, theme::kAccent, 12.0f);
+    d.text({cx + 12, top + 10}, theme::kOnAccent, hint);
+}
+
+void TimelinePanel::beginKeyMarquee(QPointF pos) {
+    marquee_ = true;
+    keyMarquee_ = true;
+    marqueeStart_ = marqueeEnd_ = pos;
+    marqueeKeyBase_ = ctx_.selectedKeys;
+}
+
+void TimelinePanel::updateKeyMarquee(QPointF pos) {
+    marqueeEnd_ = pos;
+    const QRectF r = QRectF(marqueeStart_, marqueeEnd_).normalized();
+    if (r.width() < 3 && r.height() < 3) return; // still a click
+    computeItems();
+    // The keyframes of every property row the box touches, inside its time span; their layers
+    // join the selection (the one the box started on stays the primary layer).
+    ctx_.selectedKeys = marqueeKeyBase_;
+    const uint64_t primary = ctx_.primaryId();
+    for (const Item& row : items_) {
+        if (row.kind != Item::Prop || row.top + row.h < r.top() || row.top > r.bottom()) continue;
+        const auto ref = findProperty(ctx_, row.layer, row.prop, row.effectIndex);
+        if (!ref) continue;
+        for (int k = 0; k < ref->anim->keyCount(); ++k) {
+            const float kx = timeToX(ref->anim->keyTime(k));
+            if (kx < r.left() - keyRadius() || kx > r.right() + keyRadius()) continue;
+            const KeySelection ks{row.layer, row.prop, ref->anim->keyUid(k)};
+            if (ctx_.isKeySelected(ks)) continue;
+            ctx_.selectedKeys.push_back(ks);
+            if (!ctx_.isSelected(row.layer)) ctx_.selection.insert(ctx_.selection.begin(), row.layer);
+        }
+    }
+    if (primary && ctx_.isSelected(primary)) { // keep the primary layer last
+        std::erase(ctx_.selection, primary);
+        ctx_.selection.push_back(primary);
+    }
+    relayout();
+}
+
 void TimelinePanel::updateMarquee(QPointF pos) {
+    if (keyMarquee_) {
+        updateKeyMarquee(pos);
+        return;
+    }
     marqueeEnd_ = pos;
     const QRectF r = QRectF(marqueeStart_, marqueeEnd_).normalized();
     if (r.width() < 3 && r.height() < 3) return; // still a click

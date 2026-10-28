@@ -36,6 +36,9 @@ struct OpEnvironment {
     std::function<bool(const std::string& objectType, Layer& out, std::string& error)> makePluginLayer;
     // A layer's bounds in its own space (texts need the renderer), for masks made to fit it.
     std::function<bool(const Composition& comp, const Layer& layer, double t, Vec2& mn, Vec2& mx)> layerBounds;
+    // A media item's sound as loudness (RMS 0..1, one value every `blockSeconds` of the source),
+    // for edits that find its quiet moments.
+    std::function<bool(const MediaItem& item, std::vector<float>& loudness, double& blockSeconds, std::string& error)> mediaLoudness;
 };
 
 struct OpsResult {

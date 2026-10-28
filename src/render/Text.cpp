@@ -1,6 +1,7 @@
 #include "render/Text.h"
 
 #include "render/Fonts.h"
+#include "render/Gradient.h"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkFont.h"
@@ -539,9 +540,15 @@ void drawText(SkCanvas* canvas, const TextProps& text, double t, float opacity, 
         }
     }
     const SkColor4f c = color4(text.color.valueAt(t), opacity);
-    if (c.fA <= 0.0f) return;
+    const SkColor4f c2 = text.fill == ShapeFill::Solid ? c : color4(text.color2.valueAt(t), opacity);
+    if (c.fA <= 0.0f && c2.fA <= 0.0f) return;
     SkPaint paint(c);
     paint.setAntiAlias(true);
+    if (text.fill != ShapeFill::Solid) { // across the lines, as a shape's across its outline
+        Vec2 mn, mx;
+        linesBox(text, p, l.size, mn, mx);
+        paint.setShader(gradientShader(text.fill, c, c2, text.fillAngle.valueAt(t), SkRect::MakeLTRB(mn.x, mn.y, mx.x, mx.y)));
+    }
     drawShaped(canvas, s, p, paint, visible, anim ? &*anim : nullptr);
 }
 

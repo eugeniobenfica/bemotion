@@ -1,6 +1,8 @@
 #include "ui/IntroScreen.h"
 
 #include "core/Serialization.h"
+#include "media/AudioEngine.h"
+#include "media/MediaManager.h"
 #include "render/SceneRenderer.h"
 #include "ui/SkiaQt.h"
 
@@ -50,9 +52,16 @@ void IntroScreen::step() {
     const double dt = std::min(clock_.restart() / 1000.0, 1.0 / 20.0);
     if (time_ < project_.comp.duration) time_ += dt;
     else reveal_ += dt;
+    // Its sound (an ordinary audio layer of the project): the picture follows the sound's clock,
+    // as the editor's playback does.
+    const bool playing = time_ < project_.comp.duration;
+    media::MediaManager::get().update(project_.comp);
+    if (double audio = 0.0; playing && media::AudioEngine::get().clock(audio) && std::fabs(audio - time_) < 0.25) time_ = audio;
+    media::AudioEngine::get().update(project_.comp, time_, playing);
     if (reveal_ >= kRevealSeconds) {
         active_ = false;
         timer_->stop();
+        media::AudioEngine::get().update(Composition{}, 0.0, false);
         hide();
         emit finished();
         return;

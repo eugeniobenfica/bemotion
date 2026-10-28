@@ -53,6 +53,7 @@ public:
     // settings; update() prepares it in the background). The plain audio until it is ready.
     AudioData audioFor(uint64_t mediaId, const std::vector<AudioEffect>& effects) const;
     Loudness loudness(uint64_t mediaId) const; // of the plain audio (null while decoding)
+    std::string audioPathOf(uint64_t mediaId) const; // the file that audio was decoded from ("" if none)
     bool audioPending(uint64_t mediaId) const;
     bool audioReady(const Composition& comp) const; // no audio of the composition still decoding or processing
     bool fileMissing(const MediaItem& item) const;

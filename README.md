@@ -113,7 +113,9 @@ does.
   click the outline to add a point, Ctrl+click to remove one. Any shape turns
   into one (*Convert to Bézier Path*). Shapes take **gradients** (linear,
   radial), **dashed** strokes and a **Repeater** (copies stepping in position,
-  rotation and scale, fading out)
+  rotation and scale, fading out); text and plugin objects take gradients too
+- **Brush and Eraser**: paint on any layer (or a new one), soft or hard;
+  *Write On* draws the strokes over time
 - **Masks**: a rectangle or ellipse over a layer, or drawn with the Pen on a
   selected layer; feather, opacity, expansion (all animatable), Add /
   Subtract / Intersect / Difference, inverted. Each mask is a row of its own
@@ -141,8 +143,8 @@ does.
 - **Media**: import images, video and audio (Ctrl+I or drop files on the
   window) into the *Media* panel; media layers animate like everything else;
   the **Crop** tool (Shift+C) drags a video's or image's edges (four
-  animatable sides in *Properties › Crop*)
-  and get an animatable *Volume*
+  animatable sides in *Properties › Crop*), rounded corners, a border and
+  flips; clips with sound get an animatable *Volume*
 - **Background**: a color, a gradient or a picture / video that always fills
   the frame (cover, contain, zoom, darken), under everything
 - **Compounds** (Ctrl+G): group layers into one object with its own timeline
@@ -187,6 +189,12 @@ does.
   edge for the duration, drag it to the clip's other end to move it — plain
   keyframes you can still edit. A transition picked on the timeline is the
   selection on its own (Delete or the trash removes it, not its clip)
+- **Puppet pins and Mesh Warp**, as in After Effects: pin a picture and bend
+  it (it follows as rigidly as it can; Starch pins stiffen a part), or move
+  the points of a 4 × 4 grid — every pin and point keyframable
+- **Track Point**: follow a detail of a video frame after frame, forward or
+  back; the layer you pick (or a new marker layer) gets Position keyframes
+  and moves with it
 - Add keyframes right in the Graph Editor (right-click, double-click or *+*)
 - **Effects**: blur, color, distort, glow, drop shadow, motion blur…
   stackable, keyframable, with presets
@@ -200,8 +208,11 @@ does.
 - **Scopes** (View › Panels › Scopes): waveform, RGB parade, vectorscope and
   histogram of the frame at the playhead
 - **Audio effects** on any clip with sound: gain, fades, a three-band **EQ**,
-  **Noise Reduction** (hum, hiss, fans) and **Ducking** (the music gets
-  quieter by itself while a voice plays)
+  **Noise Reduction** (hum, hiss, fans; or learned from a stretch of only
+  noise), **Ducking** (the music gets quieter by itself while a voice plays),
+  Reverb, Echo, Compressor, Low / High Cut and **Auto Level** (every clip
+  as loud as the others); **Remove Silence** cuts a clip's pauses out and
+  closes the gaps
 
 </td>
 </tr>
@@ -298,7 +309,9 @@ does.
   (Settings › Interface › Language, switched at once, no restart); a
   language is one JSON file anyone can translate and drop into bemotion's
   `languages` folder
-- **Smooth with big footage**: videos decoded on threads of their own, read
+- **Tool Settings** panel: the tool in use, its shortcut, what it does and its
+  options (snapping, brush, eraser, puppet, warp, track), kept between sessions
+- **Smooth with big footage**: the picture drawn on the GPU, videos decoded on threads of their own, read
   ahead while playing and **at the size they are shown** (a 4K clip in a
   small viewport is read small; exports always at full size), **proxies**
   (Media panel › right-click › *Create Proxy*, or made on import), frames
@@ -404,7 +417,11 @@ does.
 
 ## Download (Windows)
 
-Grab `bemotion-<version>-setup.exe` from the latest successful
+Grab `bemotion-<version>-setup.exe` or the portable zip from the
+[**latest release**](https://github.com/eugeniobenfica/bemotion/releases)
+(the first ones are **betas**: everything works, rough edges included — please
+[report](https://github.com/eugeniobenfica/bemotion/issues) what you find), or
+from the latest successful
 [build](https://github.com/eugeniobenfica/bemotion/actions/workflows/build.yml)
 (*Artifacts › bemotion-windows*), or build it yourself (below).
 
@@ -560,8 +577,9 @@ src/export   video / image-sequence encoders and the export job
 src/media    imported media: image / audio / video decoding (FFmpeg), audio playback and mixing
 src/ui       Qt interface: theme, widgets, intro, home screen, editor window, dock panels, dialogs
 src/app      application window, OS integration, settings, preset/theme libraries, plugin host
+libs/bmstyle the look (theme, widget style, drawing, icons, shared controls), reusable by other Qt apps
 assets       fonts, bundled plugins, the Welcome project and the brand files
-tools        Skia build script and the Windows deploy script
+tools        Skia build, packaging (Windows, Linux, macOS), release, smoke test and language scripts
 tests        unit tests for the core
 ```
 

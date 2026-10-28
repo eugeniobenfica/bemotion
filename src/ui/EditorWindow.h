@@ -28,12 +28,17 @@ class CDockManager;
 class CDockWidget;
 }
 
+namespace bmstyle {
+class IconButton;
+} // namespace bmstyle
+
 namespace bemotion {
 
 class RecentProjects;
 class ObjectsPanel;
 class MediaPanel;
 class ScopesPanel;
+class ToolSettingsPanel;
 class ToolsPanel;
 class ColorPanel;
 class AnimationsPanel;
@@ -44,7 +49,7 @@ class EffectsPanel;
 class TimelinePanel;
 namespace ui {
 class PreviewWindow;
-class IconButton;
+using bmstyle::IconButton;
 class AudioMeter;
 enum class Action;
 }
@@ -136,6 +141,8 @@ private:
     ObjectsPanel* objects_ = nullptr;
     MediaPanel* media_ = nullptr;
     ScopesPanel* scopes_ = nullptr;
+    ToolSettingsPanel* toolSettings_ = nullptr;
+    Tool lastTool_ = Tool::Select;
     ToolsPanel* tools_ = nullptr;
     ToolsPopover* toolsPopover_ = nullptr;
     ViewportPanel* viewport_ = nullptr;

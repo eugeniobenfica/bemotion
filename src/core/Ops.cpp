@@ -1,6 +1,7 @@
 #include "core/Ops.h"
 
 #include "core/Arrange.h"
+#include "core/AudioDsp.h"
 #include "core/Data.h"
 #include "core/Editing.h"
 #include "core/Expressions.h"
@@ -222,6 +223,11 @@ public:
             {"mask.add", &Applier::maskAdd},
             {"mask.set", &Applier::maskSet},
             {"mask.remove", &Applier::maskRemove},
+            {"mask.duplicate", &Applier::maskDuplicate},
+            {"paint.stroke", &Applier::paintStroke},
+            {"paint.clear", &Applier::paintClear},
+            {"puppet.pin.add", &Applier::pinAdd},
+            {"puppet.pin.remove", &Applier::pinRemove},
             {"marker.add", &Applier::markerAdd},
             {"marker.set", &Applier::markerSet},
             {"marker.remove", &Applier::markerRemove},
@@ -240,6 +246,8 @@ public:
             {"audio_effect.add", &Applier::audioEffectAdd},
             {"audio_effect.remove", &Applier::audioEffectRemove},
             {"audio_effect.set", &Applier::audioEffectSet},
+            {"audio.level", &Applier::audioLevel},
+            {"audio.remove_silence", &Applier::audioRemoveSilence},
             {"transition.add", &Applier::transitionAdd},
             {"arrange.distribute", &Applier::arrangeDistribute},
             {"arrange.stagger", &Applier::arrangeStagger},
@@ -250,6 +258,7 @@ public:
             {"folder.add", &Applier::folderAdd},
             {"folder.rename", &Applier::folderRename},
             {"folder.remove", &Applier::folderRemove},
+            {"folder.move", &Applier::folderMove},
             {"query.composition", &Applier::queryComposition},
             {"query.layers", &Applier::queryLayers},
             {"query.layer", &Applier::queryLayer},
@@ -633,8 +642,21 @@ private:
             l.shape.path = pathOf(op["path"]);
             l.shape.kind = ShapeKind::Path;
         }
-        if (has(op, "gradient")) requireType(l.type == LayerType::Shape, "gradient", "shape"), l.shape.fill = static_cast<ShapeFill>(idOf(kShapeFillIds, op, "gradient"));
+        if (has(op, "gradient")) {
+            requireType(l.type == LayerType::Shape || l.type == LayerType::Text || l.type == LayerType::Plugin, "gradient", "shape, text or plugin");
+            const auto fill = static_cast<ShapeFill>(idOf(kShapeFillIds, op, "gradient"));
+            (l.type == LayerType::Text ? l.text.fill : l.type == LayerType::Plugin ? l.plugin.fill : l.shape.fill) = fill;
+        }
         if (has(op, "repeater")) requireType(l.type == LayerType::Shape, "repeater", "shape"), l.shape.repeater = boolean(op["repeater"], "repeater");
+        if (has(op, "warp")) {
+            requireType(l.type != LayerType::Camera, "warp", "layer with a picture");
+            l.warp = boolean(op["warp"], "warp");
+        }
+        for (const char* key : {"flip_h", "flip_v"})
+            if (has(op, key)) {
+                requireType(l.type == LayerType::Media && l.media.hasVideo, key, "video or image");
+                (key[5] == 'h' ? l.media.flipH : l.media.flipV) = boolean(op[key], key);
+            }
         if (l.type == LayerType::Background && (has(op, "fill") || has(op, "media") || has(op, "fit"))) setBackground(l, op);
         else if (has(op, "fill")) requireType(l.type == LayerType::Shape, "fill", "shape"), l.shape.fillEnabled = boolean(op["fill"], "fill");
         if (has(op, "stroke")) requireType(l.type == LayerType::Shape, "stroke", "shape"), l.shape.strokeEnabled = boolean(op["stroke"], "stroke");
@@ -855,7 +877,15 @@ private:
         if (has(op, "mode")) m.mode = static_cast<MaskMode>(idOf(kMaskModeIds, op, "mode"));
         if (has(op, "inverted")) m.inverted = boolean(op["inverted"], "inverted");
         if (has(op, "enabled")) m.enabled = boolean(op["enabled"], "enabled");
-        if (has(op, "path")) m.path = pathOf(op["path"]);
+        if (has(op, "path")) {
+            // With "time" (or on a mask already animated): a Mask Path keyframe there.
+            if (has(op, "time") || !m.pathKeys.empty()) m.setPathKey(time(op), pathOf(op["path"]));
+            else m.path = pathOf(op["path"]);
+        }
+        if (has(op, "animated") && !boolean(op["animated"], "animated")) { // back to one outline: the one at "time"
+            m.path = m.pathAt(time(op));
+            m.pathKeys.clear();
+        }
     }
 
     // A mask: "shape" rectangle / ellipse over the layer's bounds (or "box": [x0, y0, x1, y1] in
@@ -897,6 +927,67 @@ private:
         Layer& l = layer(op);
         setMask(mask(l, op), op);
         return json::object();
+    }
+
+    // Paint, Puppet and Warp: on layers with a picture.
+    Layer& pictureLayer(const json& op, const char* what) {
+        Layer& l = layer(op);
+        if (l.type == LayerType::Camera || (l.type == LayerType::Media && !l.media.hasVideo))
+            fail("\"" + l.name + "\" has no picture for " + what);
+        return l;
+    }
+    Vec2 pointOf(const json& v, const char* name) {
+        if (!v.is_array() || v.size() != 2) fail(std::string("\"") + name + "\" is [x, y] in the layer's own space");
+        return {static_cast<float>(number(v[0], name)), static_cast<float>(number(v[1], name))};
+    }
+    json paintStroke(const json& op) {
+        Layer& l = pictureLayer(op, "paint");
+        const json& pts = field(op, "points");
+        if (!pts.is_array() || pts.empty()) fail("\"points\" is a list of [x, y] in the layer's own space");
+        if (pts.size() > 100000) fail("\"points\" has too many points (100000 at most)");
+        PaintStroke s;
+        for (const json& p : pts) s.points.push_back(pointOf(p, "points"));
+        if (has(op, "color")) s.color = colorOf(op["color"], "color");
+        s.width = static_cast<float>(number(op, "width", s.width));
+        if (s.width < 0.5 || s.width > 2000) fail("\"width\" must be 0.5 to 2000 px");
+        if (has(op, "erase")) s.erase = boolean(op["erase"], "erase");
+        s.softness = static_cast<float>(number(op, "softness", 0.0));
+        if (s.softness < 0 || s.softness > 500) fail("\"softness\" must be 0 to 500 px");
+        l.paint.push_back(std::move(s));
+        return {{"index", l.paint.size() - 1}};
+    }
+    json paintClear(const json& op) {
+        Layer& l = layer(op);
+        l.paint.clear();
+        l.paintReveal = AnimFloat{100.0f};
+        return json::object();
+    }
+    json pinAdd(const json& op) {
+        Layer& l = pictureLayer(op, "puppet pins");
+        if (l.pins.size() >= 64) fail("a layer takes 64 puppet pins at most");
+        PuppetPin pin;
+        pin.rest = pointOf(field(op, "point"), "point");
+        pin.position = AnimVec2{pin.rest};
+        if (has(op, "starch")) pin.starch = boolean(op["starch"], "starch");
+        l.pins.push_back(std::move(pin));
+        return {{"index", l.pins.size() - 1}, {"property", "pin" + std::to_string(l.pins.size() - 1)}};
+    }
+    json pinRemove(const json& op) {
+        Layer& l = layer(op);
+        const double i = number(field(op, "index"), "index");
+        if (i < 0 || i >= static_cast<double>(l.pins.size()) || i != std::floor(i))
+            fail("layer \"" + l.name + "\" has " + std::to_string(l.pins.size()) + " pin(s): index must be 0.." + std::to_string(static_cast<int>(l.pins.size()) - 1));
+        l.pins.erase(l.pins.begin() + static_cast<std::ptrdiff_t>(i));
+        return json::object();
+    }
+
+    json maskDuplicate(const json& op) {
+        Layer& l = layer(op);
+        Mask copy = mask(l, op);
+        const auto at = &mask(l, op) - l.masks.data() + 1;
+        copy.name += " " + std::string("copy");
+        l.masks.insert(l.masks.begin() + at, std::move(copy));
+        return {{"index", at}};
     }
 
     json maskRemove(const json& op) {
@@ -1187,6 +1278,21 @@ private:
         }
     }
 
+    // Noise Reduction's sample of only the noise: [from, to] seconds of the clip's source, or null.
+    void audioSample(AudioEffect& e, const json& op) {
+        if (!op.contains("sample")) return;
+        if (e.type != AudioEffectType::NoiseReduction) fail("only noise_reduction takes a \"sample\"");
+        const json& s = op["sample"];
+        if (s.is_null()) {
+            e.sampleFrom = e.sampleTo = -1.0;
+            return;
+        }
+        if (!s.is_array() || s.size() != 2 || !s[0].is_number() || !s[1].is_number() || s[0].get<double>() < 0.0 || s[1].get<double>() <= s[0].get<double>())
+            fail("\"sample\" must be [from, to]: seconds of the clip's source with only the noise, from < to (null: none)");
+        e.sampleFrom = s[0].get<double>();
+        e.sampleTo = s[1].get<double>();
+    }
+
     json audioEffectAdd(const json& op) {
         Layer& l = audioLayer(op);
         const std::string id = text(field(op, "effect"), "effect");
@@ -1198,6 +1304,7 @@ private:
         }
         AudioEffect e = makeAudioEffect(type);
         audioValues(e, op);
+        audioSample(e, op);
         l.audioEffects.push_back(e);
         json values = json::object();
         for (const AudioEffectParam& p : audioEffectParams(type)) values[p.id] = audioEffectValue(e, p.index);
@@ -1216,7 +1323,59 @@ private:
         AudioEffect& e = audioEffect(l, op);
         if (has(op, "enabled")) e.enabled = boolean(op["enabled"], "enabled");
         audioValues(e, op);
+        audioSample(e, op);
         return json::object();
+    }
+
+    // Automatic levels for one or more clips: each gets an Auto Level effect at the same target
+    // (the one it has is set), so they all sound as loud.
+    json audioLevel(const json& op) {
+        std::vector<uint64_t> ids;
+        if (has(op, "layer")) ids.push_back(audioLayer(op).id);
+        else
+            for (uint64_t id : layerList(op))
+                if (const Layer* l = c_.findLayer(id); l && l->type == LayerType::Media && l->media.hasAudio) ids.push_back(id);
+        if (ids.empty()) fail("no clips with sound to level");
+        AudioEffect level = makeAudioEffect(AudioEffectType::AutoLevel);
+        audioValues(level, {{"values", {{"target", number(op, "target", level.value)}, {"even_out", number(op, "even_out", level.value2)}}}});
+        for (uint64_t id : ids) {
+            Layer& l = *c_.findLayer(id);
+            const auto it = std::find_if(l.audioEffects.begin(), l.audioEffects.end(), [](const AudioEffect& e) { return e.type == AudioEffectType::AutoLevel; });
+            if (it != l.audioEffects.end()) it->value = level.value, it->value2 = level.value2, it->enabled = true;
+            else l.audioEffects.push_back(level);
+        }
+        return {{"layers", ids}, {"target", level.value}};
+    }
+
+    // Removes the quiet stretches of a clip with sound: below `threshold` dB (or learned from a
+    // `sample` of the silence: [from, to] composition seconds) for at least `min` seconds.
+    json audioRemoveSilence(const json& op) {
+        Layer& l = audioLayer(op);
+        if (l.media.reversed || l.media.timeRemap) fail("layer \"" + l.name + "\" plays reversed or with Time Remap: turn that off first");
+        const MediaItem* item = c_.findMedia(l.media.mediaId);
+        if (!item) fail("layer \"" + l.name + "\" has no media");
+        if (!env_.mediaLoudness) fail("reading sound is not available here");
+        std::vector<float> loud;
+        double block = 0.0;
+        std::string error;
+        if (!env_.mediaLoudness(*item, loud, block, error)) fail("could not read the sound of \"" + item->name + "\": " + error);
+        const double minimum = number(op, "min", 0.5), padding = number(op, "padding", 0.1);
+        if (minimum < 0.05 || minimum > 60) fail("\"min\" must be 0.05 to 60 seconds");
+        if (padding < 0 || padding > 5) fail("\"padding\" must be 0 to 5 seconds");
+        double threshold = number(op, "threshold", -40.0);
+        if (has(op, "sample")) {
+            const json& s = op["sample"];
+            if (!s.is_array() || s.size() != 2 || !s[0].is_number() || !s[1].is_number())
+                fail("\"sample\" must be [from, to]: composition seconds of a moment that is only silence or noise");
+            const double speed = std::max(1e-3, l.media.speed);
+            const double from = (s[0].get<double>() - l.media.start) * speed, to = (s[1].get<double>() - l.media.start) * speed;
+            threshold = dsp::thresholdFromSample(loud, block, from, to);
+            if (threshold <= -99.0) fail("the sample is outside the clip's sound");
+        }
+        if (threshold < -100 || threshold > 0) fail("\"threshold\" must be -100 to 0 dB");
+        const auto quiet = dsp::quietStretches(loud, block, static_cast<float>(threshold), minimum, padding);
+        const double removed = removeQuietParts(c_, l.id, quiet, !has(op, "ripple") || boolean(op["ripple"], "ripple"));
+        return {{"removed_seconds", removed}, {"threshold", threshold}};
     }
 
     // A "layers" list (ids or names); "all" or missing: every layer.
@@ -1431,6 +1590,15 @@ private:
             if (m.folder == from) m.folder = to;
         return {{"folder", to}};
     }
+    json folderMove(const json& op) { // to another place in the list (the Media panel's order)
+        const std::string name = folderName(op, "folder", true);
+        const double i = number(field(op, "index"), "index");
+        if (i != std::floor(i)) fail("\"index\" must be a whole number (0: the first folder)");
+        std::erase(c_.mediaFolders, name);
+        const auto at = static_cast<size_t>(std::clamp(i, 0.0, static_cast<double>(c_.mediaFolders.size())));
+        c_.mediaFolders.insert(c_.mediaFolders.begin() + static_cast<std::ptrdiff_t>(at), name);
+        return {{"folder", name}, {"index", at}};
+    }
     json folderRemove(const json& op) { // its media go to the top
         const std::string name = folderName(op, "folder", true);
         std::erase(c_.mediaFolders, name);
@@ -1482,6 +1650,8 @@ private:
         if (!l.masks.empty()) j["masks"] = l.masks.size();
         if (l.type == LayerType::Media && (l.media.speed != 1.0 || l.media.reversed)) j["speed"] = round3(static_cast<float>(l.media.speed * 100.0));
         if (l.type == LayerType::Media && l.media.reversed) j["reversed"] = true;
+        if (l.type == LayerType::Media && l.media.flipH) j["flip_h"] = true;
+        if (l.type == LayerType::Media && l.media.flipV) j["flip_v"] = true;
         if (l.type == LayerType::Media && l.media.timeRemap) j["time_remap"] = true;
         if (l.text.subtitle && l.type == LayerType::Text) j["captions"] = l.text.captions.size();
         if (!l.effects.empty()) j["effects"] = l.effects.size();
@@ -1530,7 +1700,8 @@ private:
         json j = layerSummary(l);
         if (l.type == LayerType::Text)
             j["text"] = {{"text", l.text.text}, {"font", l.text.fontFamily}, {"style", l.text.fontStyle},
-                         {"align", kAlignNames[static_cast<int>(l.text.align)]}, {"outline", l.text.outlineEnabled}, {"box", l.text.boxEnabled}};
+                         {"align", kAlignNames[static_cast<int>(l.text.align)]}, {"outline", l.text.outlineEnabled}, {"box", l.text.boxEnabled},
+                         {"gradient", kShapeFillIds[static_cast<int>(l.text.fill)]}};
         if (l.type == LayerType::Text && l.text.subtitle) {
             json caps = json::array();
             for (const Caption& c : l.text.captions) caps.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
@@ -1547,6 +1718,11 @@ private:
                 const Mask& m = l.masks[i];
                 masks.push_back({{"index", i}, {"name", m.name}, {"mode", kMaskModeIds[static_cast<int>(m.mode)]}, {"inverted", m.inverted},
                                  {"enabled", m.enabled}, {"path", pathToJson(m.path)}});
+                if (!m.pathKeys.empty()) {
+                    json keys = json::array();
+                    for (const Mask::PathKey& k : m.pathKeys) keys.push_back({{"time", k.time}, {"path", pathToJson(k.path)}});
+                    masks.back()["path_keys"] = std::move(keys);
+                }
             }
             j["mask_list"] = masks;
         }

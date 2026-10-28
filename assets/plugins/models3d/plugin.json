@@ -1,10 +1,14 @@
 {
   "id": "models3d",
   "name": "3D Models",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "author": "bemotion",
   "description": "Imported 3D models (glTF / GLB, OBJ, STL) as objects of the 2D scene: turn, light and animate them like anything else.",
   "main": "main.lua",
-  "api": 4,
-  "permissions": ["files"]
+  "api": 9,
+  "permissions": ["files"],
+  "settings": [
+    { "id": "reveal_turn", "label": "Turn while revealing", "kind": "toggle", "default": true,
+      "description": "A model's Reveal grows it in while it finishes a quarter turn. Off: it only grows" }
+  ]
 }

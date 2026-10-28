@@ -8,6 +8,7 @@
 #include "ui/Language.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 
 namespace bemotion {
@@ -152,6 +153,25 @@ void EditorContext::setTime(double t) { time = comp().snapToFrame(std::clamp(t, 
 void EditorContext::stepFrames(int frames) {
     playing = false;
     setTime(comp().timeOfFrame(comp().frameAt(time) + frames));
+}
+
+bool EditorContext::jumpToKeyframe(int direction) {
+    double best = direction > 0 ? DBL_MAX : -DBL_MAX;
+    auto consider = [&](Layer& layer) {
+        for (const PropertyRef& p : layer.properties())
+            for (int i = 0; i < p.anim->keyCount(); ++i) {
+                const double t = p.anim->keyTime(i);
+                if (direction > 0 && t > time + kTimeEpsilon) best = std::min(best, t);
+                if (direction < 0 && t < time - kTimeEpsilon) best = std::max(best, t);
+            }
+    };
+    if (Layer* sel = selected()) consider(*sel);
+    else
+        for (Layer& l : comp().layers) consider(l);
+    if (best == DBL_MAX || best == -DBL_MAX) return false;
+    playing = false;
+    setTime(best);
+    return true;
 }
 
 void EditorContext::tick(double dt) {

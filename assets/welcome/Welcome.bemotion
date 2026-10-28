@@ -12,6 +12,32 @@
     "height": 1080,
     "layers": [
       {
+        "id": 36,
+        "in": 0.0,
+        "label": 2,
+        "locked": false,
+        "media": {
+          "audio": true,
+          "id": 1,
+          "size": [
+            0.0,
+            0.0
+          ],
+          "start": 0.0,
+          "video": false
+        },
+        "name": "Intro Sound",
+        "out": 5.0,
+        "properties": {
+          "volume": {
+            "value": 100.0
+          }
+        },
+        "track": 36,
+        "type": "media",
+        "visible": true
+      },
+      {
         "id": 20,
         "in": 0.0,
         "label": 4,
@@ -132,7 +158,7 @@
             "expression": "var u = map(time, 0.07, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 5.812 + e * 2.6\n[cos(a), sin(a)] * 520 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -158,6 +184,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -262,7 +297,7 @@
             "expression": "var u = map(time, 0.02, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 5.166 + e * 2.6\n[cos(a), sin(a)] * 700 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -288,6 +323,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -392,7 +436,7 @@
             "expression": "var u = map(time, 0.17, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 4.520 + e * 2.6\n[cos(a), sin(a)] * 610 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -418,6 +462,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -522,7 +575,7 @@
             "expression": "var u = map(time, 0.12, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 3.875 + e * 2.6\n[cos(a), sin(a)] * 520 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -548,6 +601,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -652,7 +714,7 @@
             "expression": "var u = map(time, 0.07, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 3.229 + e * 2.6\n[cos(a), sin(a)] * 700 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -678,6 +740,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -782,7 +853,7 @@
             "expression": "var u = map(time, 0.02, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 2.583 + e * 2.6\n[cos(a), sin(a)] * 610 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -808,6 +879,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -912,7 +992,7 @@
             "expression": "var u = map(time, 0.17, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 1.937 + e * 2.6\n[cos(a), sin(a)] * 520 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -938,6 +1018,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -1042,7 +1131,7 @@
             "expression": "var u = map(time, 0.12, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 1.292 + e * 2.6\n[cos(a), sin(a)] * 700 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -1068,6 +1157,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -1172,7 +1270,7 @@
             "expression": "var u = map(time, 0.07, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 0.646 + e * 2.6\n[cos(a), sin(a)] * 610 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -1198,6 +1296,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -1302,7 +1409,7 @@
             "expression": "var u = map(time, 0.02, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 0.000 + e * 2.6\n[cos(a), sin(a)] * 520 * (1 - e)            // around the compound's center",
             "value": [
               953.3939819335938,
-              532.4197387695313
+              532.4197387695312
             ]
           },
           "rotation": {
@@ -1328,6 +1435,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -1705,6 +1821,15 @@
               1.0
             ]
           },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
           "stroke_width": {
             "keys": [
               {
@@ -1804,7 +1929,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(5.817), sin(5.817)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -1830,6 +1955,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -1881,7 +2015,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(5.543), sin(5.543)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -1907,6 +2041,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -1958,7 +2101,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 330   // fast, then slowing down\n[cos(4.913), sin(4.913)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -1984,6 +2127,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2035,7 +2187,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(4.337), sin(4.337)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2061,6 +2213,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2112,7 +2273,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(4.102), sin(4.102)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2138,6 +2299,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2189,7 +2359,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 330   // fast, then slowing down\n[cos(3.725), sin(3.725)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2215,6 +2385,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2266,7 +2445,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(3.044), sin(3.044)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2292,6 +2471,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2343,7 +2531,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(2.583), sin(2.583)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2369,6 +2557,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2420,7 +2617,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 330   // fast, then slowing down\n[cos(2.369), sin(2.369)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2446,6 +2643,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2497,7 +2703,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(1.873), sin(1.873)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2523,6 +2729,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2574,7 +2789,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(1.201), sin(1.201)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2600,6 +2815,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2651,7 +2875,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 330   // fast, then slowing down\n[cos(0.857), sin(0.857)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2677,6 +2901,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2728,7 +2961,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(0.605), sin(0.605)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2754,6 +2987,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2805,7 +3047,7 @@
             "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(0.000), sin(0.000)] * d",
             "value": [
               959.6729736328125,
-              528.8630981445313
+              528.8630981445312
             ]
           },
           "rotation": {
@@ -2831,6 +3073,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -2906,6 +3157,15 @@
               0.8941176533699036,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "expression": "layer(\"Shockwave\").stroke_width(time - 0.14) * 0.6",
@@ -3234,6 +3494,15 @@
               1.0
             ]
           },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
           "stroke_width": {
             "value": 8.0
           },
@@ -3318,7 +3587,7 @@
           "size": {
             "value": [
               24.049999237060547,
-              161.85000610351563
+              161.85000610351562
             ]
           },
           "stroke_color": {
@@ -3328,6 +3597,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -3409,8 +3687,8 @@
           },
           "size": {
             "value": [
-              184.60000610351563,
-              184.60000610351563
+              184.60000610351562,
+              184.60000610351562
             ]
           },
           "stroke_color": {
@@ -3420,6 +3698,15 @@
               1.0,
               1.0
             ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
           },
           "stroke_width": {
             "value": 8.0
@@ -3513,6 +3800,15 @@
               1.0
             ]
           },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
           "stroke_width": {
             "value": 8.0
           },
@@ -3534,10 +3830,24 @@
       }
     ],
     "max_duration": 5.0,
-    "media": [],
-    "next_layer_id": 36,
-    "next_media_id": 1,
-    "next_track_id": 36,
+    "media": [
+      {
+        "audio": true,
+        "duration": 5.0,
+        "fps": 0.0,
+        "height": 0,
+        "id": 1,
+        "kind": "Audio",
+        "name": "Intro.wav",
+        "path": "Intro.wav",
+        "relative": "Intro.wav",
+        "video": false,
+        "width": 0
+      }
+    ],
+    "next_layer_id": 37,
+    "next_media_id": 2,
+    "next_track_id": 37,
     "width": 1920
   },
   "format": "bemotion",

@@ -14,6 +14,30 @@
 
 namespace bemotion {
 
+// The tools' own options (the Tool Settings panel), kept between sessions.
+struct ToolSettings {
+    float brushColor[4] = {1.0f, 1.0f, 1.0f, 1.0f}; // straight RGBA
+    float brushSize = 16.0f;     // px
+    float brushOpacity = 100.0f; // percent
+    float brushSoftness = 0.0f;  // px of blurred edge
+    float eraserSize = 32.0f;
+    float eraserSoftness = 0.0f;
+    bool pinAutoKey = true;      // dragging a pin keys it at the playhead (as After Effects does)
+    bool pinStarch = false;      // new Puppet pins are Starch pins (stiffen, hold nothing)
+    bool showMesh = true;        // the Puppet tool shows the picture's mesh
+    float trackFeature = 24.0f;  // px: the detail's box with a plain click
+    float trackSearch = 40.0f;   // px it may move between two frames
+    float trackMatch = 60.0f;    // percent: below it, the point is lost
+    bool trackBackward = false;  // from the playhead toward the clip's start
+    float silenceThreshold = -40.0f; // dB
+    float silenceMin = 0.5f;         // s
+    float silencePadding = 0.1f;     // s
+    bool silenceRipple = true;
+    double silenceSampleFrom = -1.0, silenceSampleTo = -1.0; // composition seconds of only silence (-1: none)
+    float levelTarget = -18.0f;  // dB
+    float levelEvenOut = 50.0f;  // percent
+};
+
 struct Settings {
     std::string theme = "Dark"; // ThemeLibrary entry
     bool customAccent = false;  // false: use the theme's own accent
@@ -63,6 +87,7 @@ struct Settings {
     bool scaledVideoPreview = true; // the editor decodes videos no bigger than it shows them (exports: full size)
     bool adaptivePlayback = true;   // playing, the viewport lowers its resolution when a frame takes too long (paused: full)
     bool gpuRendering = true;       // the editor and its exports draw on the graphics card when OpenGL works (render/Gpu.h)
+    std::string renderEngine = "opengl"; // with gpuRendering: "opengl" or "vulkan" (ui/GpuContext)
     bool autoProxies = false;       // imported videos bigger than 1280 x 720 get a proxy at once
     bool showFilmstrips = true;     // video clips show their frames on the timeline
     // Animate's folders: the user's own (in order, after the built-in ones), where items were
@@ -71,6 +96,13 @@ struct Settings {
     std::map<std::string, std::string> animationFolderOf;
     std::vector<std::string> closedAnimationFolders;
     std::vector<std::string> closedEffectCategories; // the Effects browser's, by their English name
+    std::vector<std::string> closedObjectCategories;
+    // Plugin settings (plugin.json "settings", Settings › Plugins › a plugin's gear): by plugin id,
+    // then setting id, each value as JSON text ("true", "3", "\"Pastel\"").
+    std::map<std::string, std::map<std::string, std::string>> pluginSettings;
+    ToolSettings tools;
+    int processorThreads = 0;    // decoding, encoding, transcribing: threads each may use (0: automatic)
+    int gpuCacheMegabytes = 512; // the graphics card's memory kept for pictures between frames // the Objects panel's, by their English name (plugins: their id)
     // The interface language: "auto" (the system's, when there is a file for it), "en", or a
     // language file's code ("pt-BR"); see ui/Language.h. Takes effect at the next start.
     std::string language = "auto";

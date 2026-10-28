@@ -28,6 +28,9 @@ public:
     explicit EffectsPanel(EditorContext& ctx, QWidget* parent = nullptr);
     void sync();
 
+signals:
+    void panelRequested(const QString& name); // a panel to bring forward ("Timeline": to pick a sample there)
+
 private:
     std::string stackKey();
     std::string browserKey();

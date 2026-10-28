@@ -1,4 +1,4 @@
-#include "ui/Draw.h"
+#include "bmstyle/Draw.h"
 
 #include <QFontMetricsF>
 #include <QPainterPath>
@@ -6,7 +6,7 @@
 
 #include <cmath>
 
-namespace bemotion::ui {
+namespace bmstyle {
 
 namespace {
 
@@ -132,4 +132,4 @@ void Draw::pushClip(Pt a, Pt b) {
     p_.setClipRect(rectOf(a, b), Qt::IntersectClip);
 }
 
-} // namespace bemotion::ui
+} // namespace bmstyle

@@ -1,9 +1,17 @@
 {
   "id": "charts",
   "name": "Charts",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "bemotion",
   "description": "Animated column, bar, line and donut charts, tables and maps (world, countries by state), with CSV import.",
   "main": "main.lua",
-  "api": 7
+  "api": 8,
+  "settings": [
+    { "id": "grid_width", "label": "Grid line width", "kind": "number", "default": 1.5, "min": 0.5, "max": 6, "step": 0.05,
+      "format": "%.1f px", "description": "How thick the grid lines of every column, bar and line chart are" },
+    { "id": "axis_values", "label": "Values on the grid", "kind": "toggle", "default": true,
+      "description": "The numbers beside the grid lines. Off: only the lines" },
+    { "id": "corners", "label": "Corners", "kind": "choice", "choices": ["Rounded", "Square"], "default": "Rounded",
+      "description": "The corners of the backgrounds of charts and tables" }
+  ]
 }

@@ -38,6 +38,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <utility>
 
 namespace bemotion {
 
@@ -204,7 +205,9 @@ protected:
             const float rowTop = y;
             y += height(row);
             if (row.kind == Row::Folder) {
+                if (folderDrag_ && row.folder == pressedFolder_) p.setOpacity(0.45); // the one being moved
                 paintFolder(p, row, rowTop, static_cast<int>(i) == hover_);
+                p.setOpacity(1.0);
                 continue;
             }
             const MediaItem* item = ctx_.comp().findMedia(row.id);
@@ -250,6 +253,12 @@ protected:
             d.text(ui::Pt(tx, ty + lh + 2.0f), !error.empty() ? theme::kDanger : theme::kTextFaint, p.fontMetrics().elidedText(info, Qt::ElideRight, room));
             if (layersUsing(ctx_.comp(), item->id) > 0) d.circleFilled(ui::Pt(width() - 9.0f, rowTop + 10.0f), 3.0f, theme::kAccent);
         }
+        // A folder being moved: a line where it would go.
+        if (folderDrag_) {
+            const float at = static_cast<float>(folderSlotY(dropIndex_));
+            d.rectFilled(ui::Pt(4, at - 1.5f), ui::Pt(width() - 4, at + 1.5f), theme::kAccent, 1.5f);
+            d.circleFilled(ui::Pt(6, at), 3.5f, theme::kAccent);
+        }
         // Media of a folder dragged off it: the room below says where it lands.
         if (dragOut_) {
             const float top = static_cast<float>(rowsHeight_) + 2.0f, bottom = std::max(top + kRow - 4.0f, static_cast<float>(QWidget::height()) - 2.0f);
@@ -290,7 +299,7 @@ protected:
                                                           (error.empty() ? tr("Drag onto the canvas or the timeline, or double-click to add at the playhead.").toStdString() : error)),
                                    this);
             } else if (row && row->kind == Row::Folder) {
-                QToolTip::showText(he->globalPos(), tr("A folder to keep media tidy (nothing moves on disk). Drag media onto it."), this);
+                QToolTip::showText(he->globalPos(), tr("A folder to keep media tidy (nothing moves on disk). Drag media onto it, or drag it to reorder."), this);
             } else {
                 QToolTip::hideText();
             }
@@ -304,10 +313,55 @@ protected:
         return r ? static_cast<int>(r - rows_.data()) : -1;
     }
 
+    // Folders are moved by dragging their heading (live, inside the list): the other folders'
+    // headings are the places it can go, the line between them where it lands.
+    struct FolderSpot {
+        std::string name;
+        int top, bottom; // its heading's top, the end of what is shown in it
+    };
+    std::vector<FolderSpot> folderSpots() const {
+        std::vector<FolderSpot> spots;
+        int t = 0;
+        for (const Row& r : rows_) {
+            if (r.kind == Row::Folder) spots.push_back({r.folder, t, t + height(r)});
+            else if (r.indent && !spots.empty()) spots.back().bottom = t + height(r);
+            t += height(r);
+        }
+        return spots;
+    }
+    // Where the dragged folder would go: its index among the others.
+    int folderDropIndex(int y) const {
+        int index = 0;
+        for (const FolderSpot& f : folderSpots()) {
+            if (f.name == pressedFolder_) continue;
+            if (y < (f.top + f.bottom) / 2) break;
+            ++index;
+        }
+        return index;
+    }
+    int folderSlotY(int index) const {
+        int i = 0, last = 0;
+        for (const FolderSpot& f : folderSpots()) {
+            if (f.name == pressedFolder_) continue;
+            if (i++ == index) return f.top;
+            last = f.bottom;
+        }
+        return last;
+    }
+
     void mouseMoveEvent(QMouseEvent* e) override {
         if (const int h = indexAt(static_cast<int>(e->position().y())); h != hover_) {
             hover_ = h;
             update();
+        }
+        if ((e->buttons() & Qt::LeftButton) && !pressedFolder_.empty() &&
+            (folderDrag_ || (e->position().toPoint() - pressPos_).manhattanLength() > QApplication::startDragDistance()) &&
+            ctx_.comp().mediaFolders.size() > 1) {
+            folderDrag_ = true;
+            setCursor(Qt::ClosedHandCursor);
+            if (const int at = folderDropIndex(static_cast<int>(e->position().y())); at != dropIndex_) dropIndex_ = at;
+            update();
+            return;
         }
         if ((e->buttons() & Qt::LeftButton) && pressed_ && (e->position().toPoint() - pressPos_).manhattanLength() > QApplication::startDragDistance()) {
             const MediaItem* item = ctx_.comp().findMedia(pressed_);
@@ -338,9 +392,10 @@ protected:
         const Row* row = rowAt(static_cast<int>(e->position().y()));
         if (row && row->kind == Row::Folder) {
             const std::string folder = row->folder;
-            if (e->button() == Qt::LeftButton && filter.empty()) { // open / close
-                if (!closed_.erase(folder)) closed_.insert(folder);
-                refresh();
+            if (e->button() == Qt::LeftButton && filter.empty()) { // open / close on release, unless it is dragged
+                pressedFolder_ = folder;
+                pressPos_ = e->position().toPoint();
+                dropIndex_ = -1;
             } else if (e->button() == Qt::RightButton) {
                 showFolderMenu(folder, e->globalPosition().toPoint());
             }
@@ -355,6 +410,21 @@ protected:
             if (item) showMenu(item->id, e->globalPosition().toPoint());
             else showEmptyMenu(e->globalPosition().toPoint());
         }
+    }
+
+    void mouseReleaseEvent(QMouseEvent* e) override {
+        if (e->button() != Qt::LeftButton || pressedFolder_.empty()) return;
+        const std::string folder = std::exchange(pressedFolder_, {});
+        if (std::exchange(folderDrag_, false)) {
+            unsetCursor();
+            const auto& folders = ctx_.comp().mediaFolders;
+            const auto now = std::find(folders.begin(), folders.end(), folder) - folders.begin();
+            if (dropIndex_ >= 0 && dropIndex_ != now) apply({{"op", "folder.move"}, {"folder", folder}, {"index", dropIndex_}});
+            update();
+            return;
+        }
+        if (!closed_.erase(folder)) closed_.insert(folder);
+        refresh();
     }
 
     void mouseDoubleClickEvent(QMouseEvent* e) override {
@@ -457,6 +527,13 @@ protected:
                     closed_.insert(typed.trimmed().toStdString());
         });
         menu.addAction(tr("New Folder..."), [this] { newFolder(); });
+        // Or drag its heading: the same move.
+        const auto& folders = ctx_.comp().mediaFolders;
+        const int index = static_cast<int>(std::find(folders.begin(), folders.end(), folder) - folders.begin());
+        menu.addAction(tr("Move Up"), [this, folder, index] { apply({{"op", "folder.move"}, {"folder", folder}, {"index", index - 1}}); })
+            ->setEnabled(index > 0);
+        menu.addAction(tr("Move Down"), [this, folder, index] { apply({{"op", "folder.move"}, {"folder", folder}, {"index", index + 1}}); })
+            ->setEnabled(index + 1 < static_cast<int>(folders.size()));
         menu.addSeparator();
         menu.addAction(tr("Delete Folder"), [this, folder] { apply({{"op", "folder.remove"}, {"folder", folder}}); })
             ->setToolTip(tr("The media inside stay, at the top"));
@@ -535,6 +612,9 @@ private:
     int hover_ = -1;
     uint64_t pressed_ = 0;
     QPoint pressPos_;
+    std::string pressedFolder_; // a folder heading pressed: opened / closed on release, or dragged
+    bool folderDrag_ = false;   // ... being dragged to another place
+    int dropIndex_ = -1;        // where it would land among the other folders
 };
 
 MediaPanel::MediaPanel(EditorContext& ctx, QWidget* parent) : QWidget(parent), ctx_(ctx) {

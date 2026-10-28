@@ -25,6 +25,14 @@ const std::vector<ToolInfo>& toolCatalog() {
         {"ripple", TR_NOOP("Ripple Edit"), Icon::RippleEdit, TR_NOOP("Drag a clip's edge: the clips after it follow, no gap opens"), Action::RippleTool, true},
         {"roll", TR_NOOP("Rolling Edit"), Icon::RollEdit, TR_NOOP("Drag the cut between two clips: one gets longer, the other shorter"), Action::RollTool, true},
         {"slip", TR_NOOP("Slip"), Icon::SlipEdit, TR_NOOP("Drag a clip: it stays put and shows other frames of its footage"), Action::SlipTool, true},
+        {"brush", TR_NOOP("Brush"), Icon::Brush,
+         TR_NOOP("Paint on the selected layer (or on a new one); its color and size are in the viewport's corner"), Action::BrushTool, true},
+        {"eraser", TR_NOOP("Eraser"), Icon::Eraser, TR_NOOP("Erase the selected layer's picture and paint where you drag"), Action::EraserTool, true},
+        {"puppet", TR_NOOP("Puppet Pin"), Icon::Puppet,
+         TR_NOOP("Click the selected layer to pin it, drag pins to bend it (Alt+click a pin: remove it)"), Action::PuppetTool, true},
+        {"warp", TR_NOOP("Warp"), Icon::Warp, TR_NOOP("Drag the points of a grid over the selected layer to bend it"), Action::WarpTool, true},
+        {"track", TR_NOOP("Track Point"), Icon::Track,
+         TR_NOOP("Click a detail of the selected video: it is followed frame by frame, and a layer moves with it"), Action::TrackTool, true},
         {"split", TR_NOOP("Split at Playhead"), Icon::SplitPlayhead, TR_NOOP("Split the selected layers at the playhead"), Action::Split},
         {"compound", TR_NOOP("Create Compound"), Icon::Compound, TR_NOOP("Combine the selected layers; double-click it to open its timeline"),
          Action::CreateCompound},
@@ -70,7 +78,9 @@ bool toolActive(const EditorContext& ctx, const ToolInfo& tool) {
     const std::string_view id = tool.id;
     return (id == "select" && ctx.tool == Tool::Select) || (id == "razor" && ctx.tool == Tool::Razor) ||
            (id == "crop" && ctx.tool == Tool::Crop) || (id == "pen" && ctx.tool == Tool::Pen) ||
-           (id == "ripple" && ctx.tool == Tool::Ripple) || (id == "roll" && ctx.tool == Tool::Roll) || (id == "slip" && ctx.tool == Tool::Slip);
+           (id == "ripple" && ctx.tool == Tool::Ripple) || (id == "roll" && ctx.tool == Tool::Roll) || (id == "slip" && ctx.tool == Tool::Slip) ||
+           (id == "brush" && ctx.tool == Tool::Brush) || (id == "eraser" && ctx.tool == Tool::Eraser) ||
+           (id == "puppet" && ctx.tool == Tool::Puppet) || (id == "warp" && ctx.tool == Tool::Warp) || (id == "track" && ctx.tool == Tool::Track);
 }
 
 void runTool(EditorContext& ctx, const ToolInfo& tool) {
@@ -82,6 +92,11 @@ void runTool(EditorContext& ctx, const ToolInfo& tool) {
     else if (id == "ripple") ctx.tool = Tool::Ripple;
     else if (id == "roll") ctx.tool = Tool::Roll;
     else if (id == "slip") ctx.tool = Tool::Slip;
+    else if (id == "brush") ctx.tool = ctx.tool == Tool::Brush ? Tool::Select : Tool::Brush;
+    else if (id == "eraser") ctx.tool = ctx.tool == Tool::Eraser ? Tool::Select : Tool::Eraser;
+    else if (id == "puppet") ctx.tool = ctx.tool == Tool::Puppet ? Tool::Select : Tool::Puppet;
+    else if (id == "warp") ctx.tool = ctx.tool == Tool::Warp ? Tool::Select : Tool::Warp;
+    else if (id == "track") ctx.tool = ctx.tool == Tool::Track ? Tool::Select : Tool::Track;
     else if (id == "split") ctx.splitSelectedAtPlayhead();
     else if (id == "compound") ctx.createCompound();
     else if (id == "release") ctx.releaseSelectedCompounds();
@@ -105,6 +120,11 @@ QCursor toolCursor(Tool tool) {
     case Tool::Ripple: icon = Icon::RippleEdit; break;
     case Tool::Roll: icon = Icon::RollEdit; break;
     case Tool::Slip: icon = Icon::SlipEdit; break;
+    case Tool::Brush:
+    case Tool::Eraser: return QCursor(Qt::BlankCursor); // the viewport draws the brush's ring, nothing else
+    case Tool::Puppet: icon = Icon::Puppet; break;
+    case Tool::Warp: icon = Icon::Warp; break;
+    case Tool::Track: icon = Icon::Track; break;
     }
     // Made once per tool and theme: its icon with a halo, readable on any picture.
     static std::map<std::pair<int, Rgba>, QCursor> made;

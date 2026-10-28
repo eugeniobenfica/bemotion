@@ -174,7 +174,9 @@ end
 local function frame(o, g)
   local w, h = o.width, o.height
   local x0, y0, x1, y1 = -w / 2, -h / 2, w / 2, h / 2
-  if o.background and o.background.a > 0 then g.rect(x0, y0, w, h, o.background, 18) end
+  if o.background and o.background.a > 0 then
+    g.rect(x0, y0, w, h, o.background, bemotion.setting("corners") == "Square" and 0 or 18)
+  end
   local pad = math.min(w, h) * 0.06
   x0, y0, x1, y1 = x0 + pad, y0 + pad, x1 - pad, y1 - pad
   if o.title ~= "" then
@@ -193,11 +195,13 @@ local function grid(o, g, bx0, by0, bx1, by1, max, vertical)
   for k = 0, n do
     if vertical then
       local x = bx0 + (bx1 - bx0) * k / n
-      g.line(x, by0, x, by1, 1.5, o.grid_color)
+      g.line(x, by0, x, by1, bemotion.setting("grid_width") or 1.5, o.grid_color)
     else
       local y = by1 - (by1 - by0) * k / n
-      g.line(bx0, y, bx1, y, 1.5, o.grid_color)
-      g.text(value_text(o, max * k / n), bx0 - fs * 0.4, y, fs * 0.75, bemotion.with_alpha(o.text_color, 0.55), "right")
+      g.line(bx0, y, bx1, y, bemotion.setting("grid_width") or 1.5, o.grid_color)
+      if bemotion.setting("axis_values") ~= false then
+        g.text(value_text(o, max * k / n), bx0 - fs * 0.4, y, fs * 0.75, bemotion.with_alpha(o.text_color, 0.55), "right")
+      end
     end
   end
 end
@@ -324,7 +328,7 @@ bemotion.register_object {
     if columns then
       local label_h = o.show_labels and fs * 1.8 or 0
       local value_h = (o.show_values and not o.value_inside) and fs * 1.6 or 0
-      local axis_w = o.show_grid and g.measure(value_text(o, max), fs * 0.75) + fs * 0.6 or 0
+      local axis_w = o.show_grid and bemotion.setting("axis_values") ~= false and g.measure(value_text(o, max), fs * 0.75) + fs * 0.6 or 0
       local bx0, by0, bx1, by1 = x0 + axis_w, y0 + value_h, x1, y1 - label_h
       grid(o, g, bx0, by0, bx1, by1, max, false)
       local slot = (bx1 - bx0) / n
@@ -453,7 +457,7 @@ bemotion.register_object {
     local max = data_max(o)
     local fs = o.font_size
     local label_h = o.show_labels and fs * 1.8 or 0
-    local axis_w = o.show_grid and g.measure(value_text(o, max), fs * 0.75) + fs * 0.6 or 0
+    local axis_w = o.show_grid and bemotion.setting("axis_values") ~= false and g.measure(value_text(o, max), fs * 0.75) + fs * 0.6 or 0
     local bx0, by0, bx1, by1 = x0 + axis_w, y0 + fs * 1.6, x1 - fs, y1 - label_h
     grid(o, g, bx0, by0, bx1, by1, max, false)
 

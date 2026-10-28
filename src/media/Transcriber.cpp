@@ -167,7 +167,7 @@ bool transcribe(const std::filesystem::path& file, double from, double to, const
         bool stopped = false;
     } cb{&progress};
     whisper_full_params p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
-    p.n_threads = static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1u, 8u));
+    p.n_threads = threadCount() > 0 ? threadCount() : static_cast<int>(std::clamp(std::thread::hardware_concurrency(), 1u, 8u));
     p.language = options.language.empty() ? "auto" : options.language.c_str();
     p.translate = false;
     p.print_progress = p.print_realtime = p.print_timestamps = p.print_special = false;

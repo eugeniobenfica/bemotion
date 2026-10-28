@@ -65,23 +65,45 @@ std::optional<PropertyRef> findProperty(EditorContext& ctx, uint64_t layerId, co
 
 // --- CollapsibleSection -------------------------------------------------------------------
 
+namespace {
+// A section's heading: a checkable button painted as the Effects and Animate panels paint their
+// categories (ui::paintCategoryHeader: chevron, icon, name, a rule), one look for every panel.
+class SectionHeader : public QToolButton {
+public:
+    explicit SectionHeader(ui::Icon icon) : icon_(icon) {
+        setFixedHeight(30);
+        setCursor(Qt::PointingHandCursor);
+    }
+    QSize sizeHint() const override { return {160, 30}; }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        QString name = text();
+        name.replace("&&", "&");
+        ui::paintCategoryHeader(p, rect(), icon_, name, -1, !isChecked(), underMouse(), false);
+    }
+    void enterEvent(QEnterEvent*) override { update(); }
+    void leaveEvent(QEvent*) override { update(); }
+
+private:
+    ui::Icon icon_;
+};
+} // namespace
+
 CollapsibleSection::CollapsibleSection(const QString& title, QWidget* parent, QWidget* headerExtra) : QWidget(parent) {
     auto* col = new QVBoxLayout(this);
     col->setContentsMargins(0, 2, 0, 2);
     col->setSpacing(0);
     auto* headRow = new QHBoxLayout;
     headRow->setContentsMargins(0, 0, 0, 0);
-    header_ = new QToolButton;
+    header_ = new SectionHeader(ui::iconForSection(title));
     header_->setText(trLabel(title).replace("&", "&&")); // an & is not a shortcut here ("Sorting & Highlight")
     header_->setCheckable(true);
     header_->setChecked(!collapsedSections().value(title, false));
-    header_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     header_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    header_->setProperty("sectionHeader", true); // styled by the theme (ui/Theme.cpp), so it follows theme changes
-    auto setArrow = [this] {
-        header_->setIcon(ui::makeIcon(header_->isChecked() ? ui::Icon::ChevronDown : ui::Icon::ChevronRight, theme::kTextDim, 14));
-    };
-    setArrow();
+    auto setArrow = [this] { header_->update(); }; // the chevron is painted with the heading
     headRow->addWidget(header_);
     if (headerExtra) headRow->addWidget(headerExtra);
     col->addLayout(headRow);
@@ -174,12 +196,34 @@ PropertyRow::PropertyRow(EditorContext& ctx, uint64_t layerId, const PropertyRef
     row->setSpacing(4);
     QWidget* values = buildEditors(prop);
     values->setFixedWidth(kind_ == PropertyKind::Vec2 ? 132 : kind_ == PropertyKind::Color ? 112 : 72);
+    auto arrow = [this](ui::Icon icon, const QString& tip, int direction) {
+        auto* b = new ui::IconButton(icon, tip, 14);
+        b->setFixedSize(14, 22);
+        QSizePolicy keep = b->sizePolicy();
+        keep.setRetainSizeWhenHidden(true); // the labels stay in line whether a row is animated or not
+        b->setSizePolicy(keep);
+        connect(b, &QAbstractButton::clicked, this, [this, direction] { stepToKey(direction); });
+        return b;
+    };
+    prevKey_ = arrow(ui::Icon::ChevronLeft, tr("Previous keyframe of this property"), -1);
+    nextKey_ = arrow(ui::Icon::ChevronRight, tr("Next keyframe of this property"), 1);
+    row->setSpacing(0);
+    row->addWidget(prevKey_);
     row->addWidget(key_);
+    row->addWidget(nextKey_);
+    row->addSpacing(2);
     row->addWidget(fx_);
+    row->addSpacing(2);
     row->addWidget(label_, 1);
+    row->addSpacing(4);
     row->addWidget(values);
+    row->addSpacing(4);
     row->addWidget(reset_);
     refresh();
+}
+
+void PropertyRow::stepToKey(int direction) {
+    if (auto p = prop()) jumpToKey(ctx_, *p->anim, direction);
 }
 
 PropertyRow::~PropertyRow() { delete container_; }
@@ -288,6 +332,13 @@ void PropertyRow::refresh() {
     const AnimatedBase& anim = *p->anim;
     const int keyHere = anim.findKey(t);
     key_->setState(keyHere >= 0, anim.isAnimated());
+    if (prevKey_) {
+        const bool keyed = anim.keyCount() > 0;
+        prevKey_->setVisible(keyed);
+        nextKey_->setVisible(keyed);
+        prevKey_->setEnabled(keyed && anim.keyTime(0) < t - kTimeEpsilon);
+        nextKey_->setEnabled(keyed && anim.keyTime(anim.keyCount() - 1) > t + kTimeEpsilon);
+    }
     const bool inClip = t >= layer->inPoint - kTimeEpsilon && t <= layer->outPoint + kTimeEpsilon;
     key_->setEnabled(inClip || keyHere >= 0);
     key_->setToolTip(!inClip && keyHere < 0 ? tr("The playhead is outside this clip\nAlt+click: expression")

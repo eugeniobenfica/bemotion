@@ -27,6 +27,12 @@ void fillMaskMenu(QMenu* menu, EditorContext& ctx);
 // "Separate Audio" for the selected videos with sound (their sound becomes clips of its own),
 // and "Link Audio" for selected videos without it (a sound-only clip of their media goes back in).
 void addSeparateAudio(QMenu& menu, EditorContext& ctx);
+// Automatic sound fixes for the selected clips with sound: Auto Level (one loudness for all of
+// them) and Remove Silence (cuts their quiet stretches out), with the options of the Tool
+// Settings panel (Settings::tools).
+void addAudioFixes(QMenu& menu, EditorContext& ctx, QWidget* parent);
+void autoLevelSelected(EditorContext& ctx);
+void removeSilence(EditorContext& ctx, QWidget* parent);
 // Rectangle / ellipse masks fitted to the selected layers.
 void addFittedMask(EditorContext& ctx, bool ellipse);
 // Speed (percent) and duration of the selected video / audio clips, reverse, ripple (modal).
