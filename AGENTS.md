@@ -28,6 +28,10 @@ capability). This file is the short, practical version.
   `libs/bmstyle` ← `ui`. Dependencies only point down; `bmstyle` never
   includes bemotion code (other apps use it). A control panels share goes
   there; one that knows about layers, keyframes or settings stays in `ui`.
+- `libs/bmstyle` is a git subtree of the bestyle repository, shared with
+  Artisan: commit changes there on their own (no other files), then
+  `tools/bestyle.sh push`; `tools/bestyle.sh pull` brings in the other apps'
+  changes.
 - Outside changes to a project go through **operations** (`src/core/Ops.cpp`,
   reference `docs/OPERATIONS.md`); every rule lives in `src/core/Validate.cpp`
   (a check *and* a repair). New script / AI abilities are new operations,
