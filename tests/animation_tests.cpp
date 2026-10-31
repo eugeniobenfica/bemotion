@@ -294,15 +294,22 @@ void testHistory() {
         steps.commit(q);
     }
     CHECK(steps.undoSteps() == 3);
-    const size_t snapshot = serializeProject(q).size();
+    // A step keeps only what changed: adding a layer costs about one layer's text.
+    Project probe;
+    History one;
+    one.reset(probe);
+    probe.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0));
+    one.commit(probe);
+    const size_t step = one.bytes();
+    CHECK(step > 0 && step < serializeProject(probe).size());
     Project r;
-    History small(200, snapshot * 3);
+    History small(200, step * 3);
     small.reset(r);
     for (int i = 0; i < 10; ++i) {
         r.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0));
         small.commit(r);
     }
-    CHECK(small.bytes() <= snapshot * 3);
+    CHECK(small.bytes() <= step * 3);
     CHECK(small.undoSteps() >= 1 && small.undoSteps() < 10);
     while (small.undo(r)) {}
     CHECK(!r.comp.layers.empty()); // the first steps are gone
@@ -355,6 +362,46 @@ void testHistoryLimits() {
     CHECK(!saved.isDirty());
     CHECK(saved.undo(r) && saved.isDirty());
     CHECK(saved.redo(r) && !saved.isDirty());
+}
+
+// Steps keep differences, not whole projects: a big project's long history stays small, and
+// every state comes back exactly, whatever was edited (start, middle or end of the file).
+void testHistoryDifferences() {
+    Project p;
+    for (int i = 0; i < 300; ++i)
+        p.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {float(i), float(i)}, 5.0));
+    History h;
+    h.reset(p);
+    std::vector<std::string> states{serializeProject(p)};
+    for (int i = 0; i < 60; ++i) {
+        Layer& l = p.comp.layers[static_cast<size_t>((i * 37) % 300)];
+        switch (i % 4) {
+        case 0: l.transform.opacity.base = float(i); break;
+        case 1: l.name = "Edited " + std::to_string(i); break;
+        case 2: p.comp.layers.erase(p.comp.layers.begin()); break;
+        case 3: p.comp.addLayer(makeTextLayer("New " + std::to_string(i), {1, 2}, 3.0)); break;
+        }
+        h.commit(p);
+        states.push_back(serializeProject(p));
+    }
+    CHECK(h.undoSteps() == 60);
+    CHECK(h.bytes() < states.back().size()); // 60 steps cost less than one copy of the project
+    bool exact = true;
+    for (size_t i = states.size() - 1; i-- > 0;)
+        exact &= h.undo(p) && serializeProject(p) == states[i];
+    CHECK(exact && !h.canUndo());
+    for (size_t i = 1; i < states.size(); ++i)
+        exact &= h.redo(p) && serializeProject(p) == states[i];
+    CHECK(exact && !h.canRedo());
+    // Half way back and a new edit: the redo steps go, the rest still undo exactly.
+    for (int i = 0; i < 30; ++i)
+        h.undo(p);
+    p.comp.layers.pop_back();
+    h.commit(p);
+    CHECK(!h.canRedo() && h.undoSteps() == 31);
+    for (int i = 30; i >= 0; --i)
+        exact &= h.undo(p) && serializeProject(p) == states[static_cast<size_t>(i)];
+    CHECK(exact);
 }
 
 void testPlaceMotion() {
@@ -547,6 +594,7 @@ Tests animationTests() {
         {"compounds", testCompounds},
         {"history", testHistory},
         {"history limits", testHistoryLimits},
+        {"history keeps differences", testHistoryDifferences},
         {"place motion", testPlaceMotion},
         {"quick animation marks", testQuickAnimationMarks},
         {"3d camera", testCamera3D},
