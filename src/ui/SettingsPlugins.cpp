@@ -6,22 +6,22 @@
 #include "app/Downloads.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
+#include "app/Settings.h"
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
 #include "media/Recorder.h"
 #include "media/Transcriber.h"
-#include "app/Settings.h"
 #include "render/Fonts.h"
 #include "ui/AppSignals.h"
-#include "ui/Keymap.h"
-#include "ui/Language.h"
 #include "ui/ColorPicker.h"
 #include "ui/GpuContext.h"
+#include "ui/Keymap.h"
+#include "ui/Language.h"
 #include "ui/Modules.h"
 #include "ui/PagedWindow.h"
-#include "ui/Updates.h"
 #include "ui/Theme.h"
 #include "ui/Transcribe.h"
+#include "ui/Updates.h"
 #include "ui/Widgets.h"
 
 #include <QCheckBox>
@@ -427,8 +427,9 @@ void addOfficialPlugins(QVBoxLayout* col) {
 // (Transcribe Speech). Listed with the plugins so every optional download is in one place.
 void addOtherDownloads(QVBoxLayout* col) {
     if (!media::speechToTextAvailable()) return;
-    SettingsCard* card = addSection(col, tr("Other downloads"), tr("Not part of the installer: downloaded only when you ask, then "
-                                                              "used offline."));
+    SettingsCard* card = addSection(col, tr("Other downloads"),
+                                    tr("Not part of the installer: downloaded only when you ask, then "
+                                       "used offline."));
     media::TranscribeOptions found;
     const bool have = media::findSpeechModels(platform::speechModelFolders(), found);
     QPushButton* button = nullptr;
@@ -438,10 +439,12 @@ void addOtherDownloads(QVBoxLayout* col) {
         button->setEnabled(false);
     } else {
         button = accentButton(tr("Get"));
-        QObject::connect(button, &QPushButton::clicked, button, [] { ui::offerSpeechModel(g_window, [] { rebuildSoon(); }); });
+        QObject::connect(button, &QPushButton::clicked, button,
+                         [] { ui::offerSpeechModel(g_window, [] { rebuildSoon(); }); });
     }
     card->addRow(tr("Speech recognition model"),
-                 tr("Transcribes speech into subtitles (whisper.cpp)  ·  %1").arg(sizeText(net::kSpeechModelBytes)), button);
+                 tr("Transcribes speech into subtitles (whisper.cpp)  ·  %1").arg(sizeText(net::kSpeechModelBytes)),
+                 button);
 }
 
 QWidget* pluginsPage() {

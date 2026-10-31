@@ -110,20 +110,25 @@ QStringList catalogBases() {
     return {repo + QString("v%1/assets/plugins/").arg(BEMOTION_VERSION), repo + "main/assets/plugins/"};
 }
 
-void fetchCatalogFrom(QStringList bases, QObject* context, std::function<void(bool, std::vector<CatalogPlugin>, QString)> done) {
+void fetchCatalogFrom(QStringList bases, QObject* context,
+                      std::function<void(bool, std::vector<CatalogPlugin>, QString)> done) {
     const QString base = bases.takeFirst();
-    fetch(QUrl(base + "index.json"), context, [base, bases, context, done](bool ok, const QByteArray& data, const QString& error) {
-        if (!ok) {
-            if (!bases.isEmpty()) return fetchCatalogFrom(bases, context, done);
-            return done(false, {}, error);
-        }
-        std::vector<CatalogPlugin> plugins;
-        std::string why;
-        if (!parsePluginCatalog(data.toStdString(), plugins, &why)) return done(false, {}, QString::fromStdString(why));
-        std::erase_if(plugins, [](const CatalogPlugin& p) { return p.api > PluginHost::kApiVersion; }); // needs a newer bemotion
-        resolvedCatalogBase() = base;
-        done(true, std::move(plugins), {});
-    });
+    fetch(QUrl(base + "index.json"), context,
+          [base, bases, context, done](bool ok, const QByteArray& data, const QString& error) {
+              if (!ok) {
+                  if (!bases.isEmpty()) return fetchCatalogFrom(bases, context, done);
+                  return done(false, {}, error);
+              }
+              std::vector<CatalogPlugin> plugins;
+              std::string why;
+              if (!parsePluginCatalog(data.toStdString(), plugins, &why))
+                  return done(false, {}, QString::fromStdString(why));
+              std::erase_if(plugins, [](const CatalogPlugin& p) {
+                  return p.api > PluginHost::kApiVersion;
+              }); // needs a newer bemotion
+              resolvedCatalogBase() = base;
+              done(true, std::move(plugins), {});
+          });
 }
 
 } // namespace

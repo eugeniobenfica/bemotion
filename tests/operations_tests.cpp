@@ -221,7 +221,8 @@ void testOpsLayers() {
     CHECK(list.is_array() && list.size() == 3);
     CHECK(list[0]["layer"] == p.comp.layers[0].id); // top first
     bool sawDot = false;
-    for (const nlohmann::json& l : list) sawDot |= l["name"] == "Dot" && l["type"] == "ellipse";
+    for (const nlohmann::json& l : list)
+        sawDot |= l["name"] == "Dot" && l["type"] == "ellipse";
     CHECK(sawDot);
     CHECK(run(p, R"({"op": "layer.remove", "layer": "Dot"})").ok);
     CHECK(p.comp.layers.size() == 2);
@@ -237,13 +238,15 @@ void testOpsKeys() {
         {"op": "key.add", "layer": "T", "prop": "opacity", "time": 0, "value": 0},
         {"op": "key.add", "layer": "T", "prop": "opacity", "time": 1, "value": 50},
         {"op": "key.add", "layer": "T", "prop": "opacity", "time": 2, "value": 100}
-    ])").ok);
+    ])")
+              .ok);
     auto opacity = [&]() -> const AnimFloat& { return p.comp.layers[0].transform.opacity; };
     CHECK(opacity().keyCount() == 3);
     CHECK(run(p, R"({"op": "key.easing", "layer": "T", "prop": "opacity", "time": 1, "easing": "hold"})").ok);
     CHECK(opacity().keys[1].easing == Easing::Hold && opacity().keys[0].easing != Easing::Hold);
     CHECK(run(p, R"({"op": "key.easing", "layer": "T", "prop": "opacity", "all": true, "easing": "linear"})").ok);
-    CHECK(std::all_of(opacity().keys.begin(), opacity().keys.end(), [](const auto& k) { return k.easing == Easing::Linear; }));
+    CHECK(std::all_of(opacity().keys.begin(), opacity().keys.end(),
+                      [](const auto& k) { return k.easing == Easing::Linear; }));
     CHECK(!run(p, R"({"op": "key.easing", "layer": "T", "prop": "opacity", "all": true, "easing": "wobbly"})").ok);
     CHECK(run(p, R"({"op": "key.remove", "layer": "T", "prop": "opacity", "time": 1})").ok);
     CHECK(opacity().keyCount() == 2 && near(static_cast<float>(opacity().keys[1].time), 2.0f));
@@ -262,7 +265,8 @@ void testOpsRemoveByIndex() {
         {"op": "mask.add", "layer": "R", "name": "Square"},
         {"op": "effect.add", "layer": "R", "effect": "glow"},
         {"op": "effect.add", "layer": "R", "effect": "drop_shadow"}
-    ])").ok);
+    ])")
+              .ok);
     auto r = [&]() -> const Layer& { return p.comp.layers[0]; };
     CHECK(r().masks.size() == 2 && r().effects.size() == 2);
     CHECK(run(p, R"({"op": "mask.remove", "layer": "R", "index": 0})").ok);
@@ -330,16 +334,23 @@ void testOpsDataSet() {
     plain.name = "Plain";
     p.comp.addLayer(plain);
     auto rows = [&]() -> const std::vector<DataRow>& {
-        return std::find_if(p.comp.layers.begin(), p.comp.layers.end(), [](const Layer& l) { return l.name == "Bars"; })->plugin.rows;
+        return std::find_if(p.comp.layers.begin(), p.comp.layers.end(), [](const Layer& l) { return l.name == "Bars"; })
+            ->plugin.rows;
     };
-    CHECK(run(p, R"({"op": "data.set", "layer": "Bars", "rows": [{"label": "Jan", "value": 42, "color": "#E8B931"}, ["Feb", 7]]})").ok);
+    CHECK(
+        run(p,
+            R"({"op": "data.set", "layer": "Bars", "rows": [{"label": "Jan", "value": 42, "color": "#E8B931"}, ["Feb", 7]]})")
+            .ok);
     CHECK(rows().size() == 2 && rows()[1].label == "Feb" && near(rows()[0].value, 42.0f));
     CHECK(run(p, R"({"op": "data.set", "layer": "Bars", "csv": "Month;Sales\nMar;1.234,5\nApr;10"})").ok);
     CHECK(rows().size() == 2 && rows()[0].label == "Mar" && near(rows()[0].value, 1234.5f));
-    CHECK(run(p, R"({"op": "data.set", "layer": "Grid", "table": {"header": ["Name", "Score"], "rows": [["Ana", 12], ["Bia", "9"]]}})").ok);
+    CHECK(
+        run(p,
+            R"({"op": "data.set", "layer": "Grid", "table": {"header": ["Name", "Score"], "rows": [["Ana", 12], ["Bia", "9"]]}})")
+            .ok);
     CHECK(!run(p, R"({"op": "data.set", "layer": "Grid", "rows": [["x", 1]]})").ok);  // a table takes no rows
     CHECK(!run(p, R"({"op": "data.set", "layer": "Plain", "rows": [["x", 1]]})").ok); // no data at all
-    CHECK(!run(p, R"({"op": "data.set", "layer": "Bars"})").ok);                       // nothing given
+    CHECK(!run(p, R"({"op": "data.set", "layer": "Bars"})").ok);                      // nothing given
 }
 
 // Importing goes through the host's probe: without one (a plain core) it fails cleanly.
