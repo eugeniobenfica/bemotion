@@ -537,7 +537,12 @@ Rules:
   `layout.ads`; a saved layout missing a newer panel is replaced by the
   default), and a **16 ms timer** (`tick()`) that drives playback, media,
   audio, undo commits, autosave (a moment after each change, once the
-  document's revision stops moving) and every panel's `sync()`. A slower
+  document's revision stops moving) and every panel's `sync()`. The tick
+  **rests** while nothing happens: no playback or recording, no pending
+  commit, `revision()` and `MediaManager::arrivals()` unchanged and no user
+  input (`EditorWindow::eventFilter` → `wake()`). Then it skips the panels'
+  syncs, except four times a second for what changes on its own (background
+  jobs, plugins); after each wake it runs fully for half a second. A slower
   timer keeps crash-recovery copies (`app/Recovery`).
   - Panel headers have only tabs and **minimize** / **maximize** buttons
     (`decorateArea`, added to every dock area; no close, undock, tabs-menu or
@@ -566,7 +571,9 @@ Rules:
   - Never `show()` / `setVisible(true)` a widget before it has a parent: for
     a moment it is a window of its own (it flashes on screen).
 - **Panels** (`ui/panels`) follow one pattern:
-  - `sync()` is called every tick. It computes a cheap **structure key** (what
+  - `sync()` is called every tick (fewer while the editor rests; a change
+    that comes from neither input nor `touch()` / `redraw()` shows within a
+    quarter second). It computes a cheap **structure key** (what
     the widgets depend on: selected layer, its properties, …). If the key
     changed, `rebuild()` recreates the widgets; otherwise it only refreshes
     values (`PropertyRow::refresh`, refresher lambdas).

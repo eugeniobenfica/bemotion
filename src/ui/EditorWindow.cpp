@@ -1319,6 +1319,22 @@ void EditorWindow::buildMenus() {
 }
 
 bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
+    // The user did something (in any of the app's windows): the panels follow at once.
+    switch (event->type()) {
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::MouseMove:
+    case QEvent::Wheel:
+    case QEvent::KeyPress:
+    case QEvent::KeyRelease:
+    case QEvent::DragMove:
+    case QEvent::Drop:
+    case QEvent::Resize:
+    case QEvent::Show:
+    case QEvent::WindowActivate: wake(); break;
+    default: break;
+    }
     // Esc leaves the viewport-only layout. It is caught before shortcuts are (Esc also deselects).
     if (viewportFullscreen_ && (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)) {
         auto* key = static_cast<QKeyEvent*>(event);
@@ -1360,6 +1376,13 @@ bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
 
 // --- update loop ------------------------------------------------------------------------------
 
+// After the last thing that happened, full ticks go on for half a second (meters fall, the
+// last frame is decoded and shown); resting, the panels still sync four times a second.
+constexpr int kAwakeTicks = 30;
+constexpr int kHeartbeatTicks = 15;
+
+void EditorWindow::wake() { awakeTicks_ = kAwakeTicks; }
+
 void EditorWindow::tick() {
     const double dt = std::min(0.25, clock_.restart() / 1000.0);
     setExpressionComposition(&ctx_.comp()); // what expressions read in panels, handles and the timeline
@@ -1381,6 +1404,22 @@ void EditorWindow::tick() {
     }
     media::MediaManager::get().update(ctx_.comp());
     media::AudioEngine::get().update(ctx_.comp(), ctx_.time, ctx_.playing && ctx_.playRate == 1.0);
+
+    // Resting: while nothing plays, records, changes, arrives from the decoders or is touched
+    // (eventFilter), the panels have nothing new to show, so their syncs are skipped. A few
+    // times a second they run anyway, for what changes on its own (background jobs, plugins).
+    const uint64_t arrivals = media::MediaManager::get().arrivals();
+    if (ctx_.playing || recorder.recording() || ctx_.hasPendingCommit() || ctx_.revision() != wokenRevision_ ||
+        arrivals != wokenArrivals_)
+        wake();
+    wokenRevision_ = ctx_.revision();
+    wokenArrivals_ = arrivals;
+    if (awakeTicks_ > 0) --awakeTicks_;
+    else if (++restingTicks_ < kHeartbeatTicks) {
+        autosave();
+        return;
+    }
+    restingTicks_ = 0;
 
     objects_->sync();
     media_->sync();
