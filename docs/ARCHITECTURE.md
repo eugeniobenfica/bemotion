@@ -922,8 +922,8 @@ Update the effect list in `docs/OPERATIONS.md`.
 **An operation** — a method in `Applier` (`core/Ops.cpp`) registered in the
 operation table; validate every field with the `field` / `number` / `text`
 helpers so errors are precise; return created ids. Tests in
-`tests/core_tests.cpp`, reference in `docs/OPERATIONS.md`. MCP and Lua get it
-automatically.
+`tests/operations_tests.cpp` (or the area's file), reference in
+`docs/OPERATIONS.md`. MCP and Lua get it automatically.
 
 **A validation rule** — check and repair in `core/Validate.cpp` (both), a test
 that breaks and repairs it; make sure existing projects still pass
@@ -972,8 +972,35 @@ changes behavior.
 
 ## 13. Testing and verification
 
-- **Core tests** (`tests/core_tests.cpp`, `ctest`): every change to `src/core`
-  comes with tests. Keep them small and deterministic; no heavy fuzzing
+- **Core tests** (`ctest`): every change to `src/core` comes with tests. Keep
+  them small and deterministic. One executable, one file per area:
+  `animation_tests.cpp` (keyframes, easing, presets, cameras), `timeline_tests`
+  (tracks, clips, transitions), `operations_tests` (operations, validation),
+  `expression_tests`, `layer_tests` (kinds of layers, effects, audio) and
+  `file_tests` (the format, imports, exports, catalogs, languages, docs); each
+  ends with its list of tests, which `core_tests.cpp` runs. `tests/Check.h`
+  has `CHECK`, `near` and `run` (operations from JSON text).
+- **Files from earlier versions** (`tests/files/*.bemotion`): each must open
+  with nothing repaired (or only what its `<name>.repairs.txt` lists, one
+  `where: what` a line), pass `validate` and save back unchanged. Add a file
+  here when the format grows; never edit one to make it pass.
+- **Golden images** (`tools/golden.py`, the `golden_images` ctest): renders a
+  contact sheet of every project in `examples/`, `tests/files/`,
+  `tests/corpus/project/` and the Welcome project with `bemotion render` (the
+  CPU renderer) and compares it with `tests/golden/<name>.png`, forgiving
+  antialiasing (4×4 blocks, a small threshold, 0.5% of blocks). A drawing
+  change that is meant: `python tools/golden.py build/bemotion --update`, look
+  at the PNGs, commit them with the change. Text comes from each system's font
+  engine; where one still draws a project differently, its own golden goes in
+  `tests/golden/<windows|linux|macos>/` (CI uploads the renders).
+- **Fuzzing** (`tests/fuzz.cpp`, `bemotion_fuzz [--seconds N] [--seed S]`):
+  mutated copies of `tests/corpus/<kind>/` (project, ops, svg, expression,
+  mesh) go to `deserializeProject`, `applyOps`, `addSvg`, expressions and
+  `loadMeshFile`; byte changes plus JSON-aware ones that keep the parser
+  happy. A crash, an exception or an input over 10 s writes
+  `fuzz-failure.<ext>` and prints `--seed S --at I` to replay it. ctest runs
+  5 s, the sanitizer CI job 2 minutes. A bug it finds: fix it, and add the
+  input (made small) to the corpus or a test. No libFuzzer or other
   infrastructure.
 - **Smoke test** (`tools/smoke-test.sh <build dir>`): exports the Welcome
   project to every format (checked with ffprobe), drives the automation
@@ -1008,7 +1035,12 @@ changes behavior.
   `-portable.zip`. `tools/package-linux.sh` (AppImage) and
   `tools/package-macos.sh` (`.app` / `.dmg`) do the same for the other systems.
 - CI (`.github/workflows/build.yml`) builds, tests, smoke-tests and packages on
-  Windows, Linux and macOS, and uploads the packages as artifacts.
+  Windows, Linux and macOS, and uploads the packages as artifacts. Two more
+  jobs: **sanitizers** (Linux, `-fsanitize=address,undefined`, no recovery:
+  ctest, the smoke test and 2 minutes of fuzzing; leaks are not checked) and
+  **format** (`git clang-format --diff` against the base: only the lines a
+  change touches must follow `.clang-format`, so older code is formatted as it
+  is edited; `libs/bestyle` and `third_party` are left out).
 - The version is `project(VERSION …)` plus `BEMOTION_VERSION_SUFFIX` (`beta.2`;
   empty for a release) in the top `CMakeLists.txt`. A release is tagged
   `v<version>` and carries the packages and a `SHA256SUMS.txt` of them under

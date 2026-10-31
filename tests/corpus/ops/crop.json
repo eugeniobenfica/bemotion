@@ -1,0 +1,20 @@
+[
+ {
+  "op": "property.set",
+  "layer": "Photo",
+  "prop": "crop_left",
+  "value": 25
+ },
+ {
+  "op": "property.set",
+  "layer": "Photo",
+  "prop": "crop_top",
+  "value": 50
+ },
+ {
+  "op": "property.set",
+  "layer": "Photo",
+  "prop": "crop_right",
+  "value": 90
+ }
+]

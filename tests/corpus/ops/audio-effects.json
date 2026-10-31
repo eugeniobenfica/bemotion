@@ -1,0 +1,98 @@
+[
+ {
+  "op": "audio_effect.add",
+  "layer": "Song",
+  "effect": "eq",
+  "values": {
+   "low": 4,
+   "high": -3
+  }
+ },
+ {
+  "op": "audio_effect.add",
+  "layer": "Song",
+  "effect": "ducking"
+ },
+ {
+  "op": "audio_effect.set",
+  "layer": "Song",
+  "index": 1,
+  "enabled": false,
+  "values": {
+   "amount": 20
+  }
+ },
+ {
+  "op": "query.layer",
+  "layer": "Song"
+ },
+ {
+  "op": "audio_effect.add",
+  "layer": "Card",
+  "effect": "eq"
+ },
+ {
+  "op": "audio_effect.set",
+  "layer": "Song",
+  "index": 0,
+  "values": {
+   "lows": 3
+  }
+ },
+ {
+  "op": "audio_effect.set",
+  "layer": "Song",
+  "index": 0,
+  "values": {
+   "low": 99
+  }
+ },
+ {
+  "op": "audio_effect.add",
+  "layer": "Song",
+  "effect": "flanger"
+ },
+ {
+  "op": "audio_effect.add",
+  "layer": "Song",
+  "effect": "noise_reduction",
+  "sample": [
+   1.5,
+   2.25
+  ]
+ },
+ {
+  "op": "audio_effect.set",
+  "layer": "Song",
+  "index": 2,
+  "sample": null
+ },
+ {
+  "op": "audio_effect.set",
+  "layer": "Song",
+  "index": 2,
+  "sample": [
+   3,
+   1
+  ]
+ },
+ {
+  "op": "audio_effect.set",
+  "layer": "Song",
+  "index": 0,
+  "sample": [
+   1,
+   2
+  ]
+ },
+ {
+  "op": "audio_effect.remove",
+  "layer": "Song",
+  "index": 2
+ },
+ {
+  "op": "audio_effect.remove",
+  "layer": "Song",
+  "index": 1
+ }
+]

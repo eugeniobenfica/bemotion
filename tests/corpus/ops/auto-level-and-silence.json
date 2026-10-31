@@ -1,0 +1,10 @@
+[
+ {
+  "op": "audio.remove_silence",
+  "layer": 1
+ },
+ {
+  "op": "audio.level",
+  "target": -20
+ }
+]

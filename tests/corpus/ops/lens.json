@@ -1,0 +1,32 @@
+[
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Flat",
+  "position": [
+   1060,
+   540
+  ]
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Deep",
+  "z": 1000,
+  "position": [
+   1060,
+   540
+  ]
+ },
+ {
+  "op": "layer.add",
+  "type": "camera",
+  "z": 200
+ },
+ {
+  "op": "property.set",
+  "layer": "Camera",
+  "prop": "rotation_y",
+  "value": 10
+ }
+]

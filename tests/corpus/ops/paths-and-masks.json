@@ -1,0 +1,105 @@
+[
+ {
+  "op": "layer.add",
+  "type": "path",
+  "name": "Wave",
+  "path": {
+   "closed": false,
+   "vertices": [
+    [
+     0,
+     0
+    ],
+    [
+     100,
+     0,
+     -30,
+     -40,
+     30,
+     40
+    ],
+    [
+     200,
+     0
+    ]
+   ]
+  }
+ },
+ {
+  "op": "layer.add",
+  "type": "ellipse",
+  "name": "Spot"
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Card",
+  "below": "Spot"
+ },
+ {
+  "op": "layer.set",
+  "layer": "Card",
+  "matte": "alpha",
+  "blend": "multiply",
+  "gradient": "linear",
+  "repeater": true
+ },
+ {
+  "op": "mask.add",
+  "layer": "Card",
+  "shape": "ellipse",
+  "mode": "subtract",
+  "feather": 12
+ },
+ {
+  "op": "layer.set",
+  "layer": "Spot",
+  "shape": "path"
+ },
+ {
+  "op": "property.set",
+  "layer": "Card",
+  "prop": "mask0.opacity",
+  "value": 50
+ },
+ {
+  "op": "property.set",
+  "layer": "Card",
+  "prop": "repeat_copies",
+  "value": 5
+ },
+ {
+  "op": "property.set",
+  "layer": "Card",
+  "prop": "fill_color2",
+  "value": "#336699"
+ },
+ {
+  "op": "property.set",
+  "layer": "Card",
+  "prop": "stroke_dash",
+  "value": 8
+ },
+ {
+  "op": "layer.set",
+  "layer": "Card",
+  "matte": "alpha",
+  "matte_layer": "Card"
+ },
+ {
+  "op": "layer.add",
+  "type": "ellipse",
+  "name": "M"
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "R",
+  "below": "M"
+ },
+ {
+  "op": "layer.set",
+  "layer": "R",
+  "matte": "luma"
+ }
+]

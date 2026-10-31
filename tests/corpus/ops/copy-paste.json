@@ -1,0 +1,22 @@
+[
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "A",
+  "start": 1
+ },
+ {
+  "op": "layer.add",
+  "type": "text",
+  "name": "B",
+  "start": 2
+ },
+ {
+  "op": "group",
+  "layers": [
+   "A",
+   "B"
+  ],
+  "name": "G"
+ }
+]

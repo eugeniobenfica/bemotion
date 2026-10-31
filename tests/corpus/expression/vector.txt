@@ -1,0 +1,1 @@
+[960 + sin(time * 2) * 300, value.y]

@@ -1,0 +1,67 @@
+[
+ {
+  "op": "layer.add",
+  "type": "text",
+  "name": "T",
+  "text": "Hello world",
+  "letter_in": "rise",
+  "letter_by": "word",
+  "letter_order": "center",
+  "letter_delay": 0.1,
+  "letter_duration": 0.4,
+  "letter_loop": "wave",
+  "fit_lines": 2
+ },
+ {
+  "op": "layer.set",
+  "layer": "T",
+  "letter_in": "explode"
+ },
+ {
+  "op": "layer.set",
+  "layer": "T",
+  "letter_delay": -1
+ },
+ {
+  "op": "layer.set",
+  "layer": "T",
+  "letter_out": "fade",
+  "letter_in": "none"
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "R"
+ },
+ {
+  "op": "layer.set",
+  "layer": "R",
+  "letter_in": "fade"
+ },
+ {
+  "op": "layer.add",
+  "type": "subtitle",
+  "captions": [
+   {
+    "start": 0,
+    "end": 0.2,
+    "text": "Hi"
+   },
+   {
+    "start": 0.5,
+    "end": 3,
+    "text": "A much longer caption that keeps on going well past what two lines of subtitles can hold, really"
+   }
+  ]
+ },
+ {
+  "op": "layer.set",
+  "layer": "Subtitles",
+  "fit_captions": true
+ },
+ {
+  "op": "layer.set",
+  "layer": "T",
+  "fit_captions": true
+ }
+]

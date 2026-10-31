@@ -1,0 +1,54 @@
+[
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "A",
+  "position": [
+   100,
+   500
+  ]
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "B",
+  "position": [
+   900,
+   500
+  ]
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "C",
+  "position": [
+   300,
+   500
+  ]
+ },
+ {
+  "op": "arrange.distribute",
+  "layers": [
+   "A",
+   "B",
+   "C"
+  ]
+ },
+ {
+  "op": "arrange.stagger",
+  "layers": "all",
+  "step": 0.5
+ },
+ {
+  "op": "transition.add",
+  "layer": "A",
+  "transition": "fade",
+  "edge": "both",
+  "duration": 0.5
+ },
+ {
+  "op": "transition.add",
+  "layer": "A",
+  "transition": "fdae"
+ }
+]

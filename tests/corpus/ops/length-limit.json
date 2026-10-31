@@ -1,0 +1,15 @@
+[
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "duration": 8
+ },
+ {
+  "op": "composition.set",
+  "max_duration": 5
+ },
+ {
+  "op": "composition.set",
+  "max_duration": -1
+ }
+]

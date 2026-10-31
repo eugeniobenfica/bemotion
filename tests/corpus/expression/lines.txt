@@ -1,0 +1,4 @@
+var speed = 90; // degrees a second
+let turns = time * speed
+half = turns / 2
+half + value

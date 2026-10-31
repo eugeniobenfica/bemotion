@@ -1,0 +1,72 @@
+[
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "One",
+  "duration": 2
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Two",
+  "duration": 2,
+  "start": 2
+ },
+ {
+  "op": "marker.add",
+  "time": 1,
+  "name": "Beat"
+ },
+ {
+  "op": "marker.add",
+  "time": 0.5,
+  "color": 3
+ },
+ {
+  "op": "layer.set",
+  "layer": "Two",
+  "track_of": "One"
+ },
+ {
+  "op": "layer.add",
+  "type": "ellipse",
+  "start": 1,
+  "track_of": "One"
+ },
+ {
+  "op": "layer.roll",
+  "layer": "One",
+  "time": 1.5
+ },
+ {
+  "op": "layer.trim",
+  "layer": "Two",
+  "edge": "out",
+  "time": 3,
+  "ripple": true
+ },
+ {
+  "op": "marker.set",
+  "time": 1,
+  "to": 2,
+  "name": "Drop"
+ },
+ {
+  "op": "query.composition"
+ },
+ {
+  "op": "layer.ripple_delete",
+  "layers": [
+   "One"
+  ]
+ },
+ {
+  "op": "marker.remove",
+  "index": 0
+ },
+ {
+  "op": "layer.speed",
+  "layer": "Two",
+  "speed": 50
+ }
+]

@@ -1,0 +1,42 @@
+[
+ {
+  "op": "layer.add",
+  "type": "ellipse",
+  "name": "Ball",
+  "position": [
+   100,
+   200
+  ]
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Box",
+  "start": 1,
+  "duration": 4
+ },
+ {
+  "op": "expression.set",
+  "layer": "Box",
+  "prop": "rotation",
+  "expression": "time * 90"
+ },
+ {
+  "op": "expression.set",
+  "layer": "Box",
+  "prop": "position",
+  "expression": "layer(\"Ball\").position + [0, -50]"
+ },
+ {
+  "op": "expression.set",
+  "layer": "Box",
+  "prop": "opacity",
+  "expression": "progress < 0.5 ? 20 : 100"
+ },
+ {
+  "op": "expression.set",
+  "layer": "Box",
+  "prop": "scale",
+  "expression": "time * (2"
+ }
+]

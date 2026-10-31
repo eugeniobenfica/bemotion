@@ -1,0 +1,76 @@
+[
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Card"
+ },
+ {
+  "op": "effect.add",
+  "layer": "Card",
+  "effect": "curves"
+ },
+ {
+  "op": "effect.set",
+  "layer": "Card",
+  "index": 0,
+  "curves": {
+   "rgb": [
+    [
+     0,
+     0
+    ],
+    [
+     0.5,
+     0.7
+    ],
+    [
+     1,
+     1
+    ]
+   ],
+   "blue": null
+  }
+ },
+ {
+  "op": "effect.add",
+  "layer": "Card",
+  "effect": "lut"
+ },
+ {
+  "op": "effect.set",
+  "layer": "Card",
+  "index": 1,
+  "file": "C:/looks/film.cube"
+ },
+ {
+  "op": "query.layer",
+  "layer": "Card"
+ },
+ {
+  "op": "effect.set",
+  "layer": "Card",
+  "index": 0,
+  "file": "x.cube"
+ },
+ {
+  "op": "effect.set",
+  "layer": "Card",
+  "index": 0,
+  "curves": {
+   "rgbb": []
+  }
+ },
+ {
+  "op": "effect.set",
+  "layer": "Card",
+  "index": 0,
+  "curves": {
+   "red": [
+    [
+     0,
+     2
+    ]
+   ]
+  }
+ }
+]

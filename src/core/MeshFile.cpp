@@ -240,6 +240,8 @@ Mat4 nodeMatrix(const json& node) {
 }
 
 struct Gltf {
+    static constexpr size_t kMaxValues = size_t{1} << 26; // per accessor: far past any model shown
+
     json doc;
     std::vector<std::string> buffers;
 
@@ -256,15 +258,24 @@ struct Gltf {
         const int type = a.value("componentType", 5126);
         const bool normalized = a.value("normalized", false);
         const int bytes = type == 5126 || type == 5125 ? 4 : type == 5122 || type == 5123 ? 2 : 1;
-        out.assign(count * static_cast<size_t>(size), 0.0f);
-        if (!a.contains("bufferView")) return true; // all zeros
-        const json& view = doc["bufferViews"][a["bufferView"].get<size_t>()];
+        if (count > kMaxValues) return error = "an accessor too large", false;
+        if (!a.contains("bufferView")) { // all zeros
+            out.assign(count * static_cast<size_t>(size), 0.0f);
+            return true;
+        }
+        const json views = doc.value("bufferViews", json::array());
+        const size_t viewIndex = a["bufferView"].get<size_t>();
+        if (viewIndex >= views.size()) return error = "a missing buffer view", false;
+        const json& view = views[viewIndex];
         const size_t buffer = view.value("buffer", 0u);
         if (buffer >= buffers.size()) return error = "a missing buffer", false;
         const std::string& data = buffers[buffer];
         const size_t start = view.value("byteOffset", 0u) + a.value("byteOffset", 0u);
         const size_t stride = view.value("byteStride", 0u) ? view.value("byteStride", 0u) : static_cast<size_t>(size * bytes);
+        // Every number below the limits above, so the sums cannot wrap around.
+        if (start > data.size() || stride > data.size()) return error = "an accessor past its buffer", false;
         if (count && start + (count - 1) * stride + static_cast<size_t>(size * bytes) > data.size()) return error = "an accessor past its buffer", false;
+        out.assign(count * static_cast<size_t>(size), 0.0f);
         for (size_t i = 0; i < count; ++i)
             for (int c = 0; c < size; ++c) {
                 const char* p = data.data() + start + i * stride + static_cast<size_t>(c * bytes);
@@ -319,14 +330,20 @@ bool loadGltf(const std::string& ext, const std::string& data, const std::functi
     const json& materials = g.doc.value("materials", json::array());
     auto addMesh = [&](size_t meshIndex, const Mat4& m) -> bool {
         if (meshIndex >= meshes.size()) return true;
+        if (out.positions.size() > Gltf::kMaxValues) return error = "a model too large", false;
         for (const json& prim : meshes[meshIndex].value("primitives", json::array())) {
             if (prim.value("mode", 4) != 4 || !prim.contains("attributes") || !prim["attributes"].contains("POSITION")) continue;
             const json& attrs = prim["attributes"];
             std::vector<float> pos, nor, col;
             int ps = 3, ns = 3, cs = 4;
             if (!g.read(attrs["POSITION"].get<int>(), pos, ps, error)) return false;
-            const bool hasNormals = attrs.contains("NORMAL") && g.read(attrs["NORMAL"].get<int>(), nor, ns, error);
-            const bool hasColors = attrs.contains("COLOR_0") && g.read(attrs["COLOR_0"].get<int>(), col, cs, error);
+            if (ps != 3) return error = "positions that are not 3D", false;
+            const size_t n = pos.size() / 3;
+            // Normals and colors only when there is one for every position.
+            const bool hasNormals = attrs.contains("NORMAL") && g.read(attrs["NORMAL"].get<int>(), nor, ns, error) &&
+                                    ns == 3 && nor.size() >= n * 3;
+            const bool hasColors = attrs.contains("COLOR_0") && g.read(attrs["COLOR_0"].get<int>(), col, cs, error) &&
+                                   cs >= 3 && col.size() >= n * static_cast<size_t>(cs);
             float base[4] = {1, 1, 1, 1};
             if (prim.contains("material") && prim["material"].get<size_t>() < materials.size()) {
                 const json& f = materials[prim["material"].get<size_t>()].value("pbrMetallicRoughness", json::object()).value("baseColorFactor", json::array());
@@ -334,7 +351,6 @@ bool loadGltf(const std::string& ext, const std::string& data, const std::functi
                     for (int i = 0; i < 4; ++i) base[i] = f[static_cast<size_t>(i)].get<float>();
             }
             const auto first = static_cast<uint32_t>(out.vertexCount());
-            const size_t n = pos.size() / 3;
             for (size_t i = 0; i < n; ++i) {
                 const float* p = &pos[i * 3];
                 for (int r = 0; r < 3; ++r) out.positions.push_back(m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r]);
@@ -355,7 +371,12 @@ bool loadGltf(const std::string& ext, const std::string& data, const std::functi
                 int is = 1;
                 if (!g.read(prim["indices"].get<int>(), idx, is, error)) return false;
                 for (size_t i = 0; i + 2 < idx.size(); i += 3)
-                    for (int k = 0; k < 3; ++k) out.indices.push_back(first + static_cast<uint32_t>(idx[i + static_cast<size_t>(k)]));
+                    for (int k = 0; k < 3; ++k) {
+                        const float v = idx[i + static_cast<size_t>(k)];
+                        if (!(v >= 0.0f && v < static_cast<float>(n)))
+                            return error = "a triangle with a missing vertex", false;
+                        out.indices.push_back(first + static_cast<uint32_t>(v));
+                    }
             } else {
                 for (uint32_t i = 0; i + 2 < n; i += 3) out.indices.insert(out.indices.end(), {first + i, first + i + 1, first + i + 2});
             }
@@ -363,13 +384,20 @@ bool loadGltf(const std::string& ext, const std::string& data, const std::functi
         return true;
     };
     const json& nodes = g.doc.value("nodes", json::array());
+    // Nodes form a tree; a node among its own ancestors, or one shared so often that the walk
+    // would never end, is a broken file.
+    std::vector<char> onPath(nodes.size(), 0);
+    size_t visits = 0;
     std::function<bool(size_t, const Mat4&, int)> visit = [&](size_t index, const Mat4& parent, int depth) -> bool {
-        if (index >= nodes.size() || depth > 64) return true;
+        if (index >= nodes.size() || depth > 64 || onPath[index]) return true;
+        if (++visits > 100000) return error = "too many nodes", false;
         const json& node = nodes[index];
         const Mat4 m = mul(parent, nodeMatrix(node));
         if (node.contains("mesh") && !addMesh(node["mesh"].get<size_t>(), m)) return false;
+        onPath[index] = 1;
         for (const json& c : node.value("children", json::array()))
             if (!visit(c.get<size_t>(), m, depth + 1)) return false;
+        onPath[index] = 0;
         return true;
     };
     const json& scenes = g.doc.value("scenes", json::array());
