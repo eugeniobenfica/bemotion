@@ -1120,7 +1120,8 @@ changes behavior.
   `tools/package-macos.sh` (`.app` / `.dmg`) do the same for the other systems.
 - CI (`.github/workflows/build.yml`) builds, tests, smoke-tests and packages on
   Windows, Linux and macOS, and uploads the packages as artifacts. Three more
-  jobs: **sanitizers** (Linux, `-fsanitize=address,undefined`, no recovery:
+  jobs: **sanitizers** (Linux, `-fsanitize=address,undefined` without the
+  `vptr` check, which needs RTTI that Skia is built without; no recovery:
   ctest, the smoke test and 2 minutes of fuzzing; leaks are not checked),
   **coverage** (Linux, `tools/coverage.sh`: a report of the lines the tests
   reach, uploaded as an artifact, not a gate) and **format** (`git clang-format --diff` against the base: only the lines a
