@@ -38,7 +38,7 @@ capability). This file is the short, practical version.
   documented and tested in the same commit. Logic the editor and scripts share
   goes into the core (as `Clipboard`, `Arrange`, `Transitions` did).
 - Contracts — the `.bemotion` format, operations JSON, plugin API (now version
-  7), property and effect ids, settings keys, command-line options — change
+  9), property and effect ids, settings keys, command-line options — change
   only compatibly: new optional fields with defaults, never renames.
 - What every user needs belongs in the app; plugins add kinds of objects and
   workflows. Plugins never touch files, devices or the network themselves:

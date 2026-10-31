@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -57,6 +58,51 @@ std::string withoutBom(std::string code) {
 
 void budgetHook(lua_State* L, lua_Debug*) {
     if (--g_budget <= 0) luaL_error(L, "script ran too long (instruction limit)");
+}
+
+// Each plugin's Lua heap is capped, so a plugin that hoards memory (string.rep of a gigabyte is
+// one instruction, which the instruction budget cannot stop) gets "not enough memory" instead of
+// taking the app down. Only plugin code runs under the cap (sandboxCall): the host's own pushes
+// before a call are outside any protected call, where a failed allocation would abort.
+constexpr int64_t kMemoryCap = int64_t(512) << 20;
+
+struct SandboxMemory {
+    lua_Alloc base = nullptr;
+    void* baseUd = nullptr;
+    int64_t used = 0;
+    bool limited = false;
+};
+
+void* cappedAlloc(void* ud, void* ptr, size_t osize, size_t nsize) {
+    auto* m = static_cast<SandboxMemory*>(ud);
+    const int64_t old = ptr ? static_cast<int64_t>(osize) : 0; // without ptr, osize is a type tag
+    const int64_t grow = static_cast<int64_t>(nsize) - old;
+    if (grow > 0 && m->limited && m->used + grow > kMemoryCap) return nullptr;
+    void* p = m->base(m->baseUd, ptr, osize, nsize);
+    if (p || nsize == 0) m->used += grow;
+    return p;
+}
+
+SandboxMemory* memoryOf(lua_State* L) {
+    void* ud = nullptr;
+    lua_getallocf(L, &ud);
+    return static_cast<SandboxMemory*>(ud);
+}
+
+// lua_pcall for plugin code: under the memory cap, and the cap as it was afterwards (calls nest).
+int sandboxCall(lua_State* L, int nargs, int nresults) {
+    SandboxMemory* m = memoryOf(L);
+    const bool was = m->limited;
+    m->limited = true;
+    const int status = lua_pcall(L, nargs, nresults, 0);
+    m->limited = was;
+    return status;
+}
+
+void closeSandbox(lua_State* L) {
+    SandboxMemory* m = memoryOf(L);
+    lua_close(L); // frees through cappedAlloc, so m goes after
+    delete m;
 }
 
 // --- values ------------------------------------------------------------------
@@ -603,7 +649,7 @@ int bmCached(lua_State* L) {
     const int saved = g_budget;
     g_budget = kCommandBudget;
     lua_pushvalue(L, 2);
-    const int status = lua_pcall(L, 0, 1, 0);
+    const int status = sandboxCall(L, 0, 1);
     g_budget = saved;
     if (status != LUA_OK) return lua_error(L);
     if (!lua_isnil(L, -1)) {
@@ -1127,6 +1173,10 @@ int bmRegisterObject(lua_State* L) {
 
 lua_State* newSandbox(const std::string& pluginId) {
     lua_State* L = luaL_newstate();
+    auto* memory = new SandboxMemory;
+    memory->base = lua_getallocf(L, &memory->baseUd);
+    memory->used = static_cast<int64_t>(lua_gc(L, LUA_GCCOUNT)) * 1024 + lua_gc(L, LUA_GCCOUNTB); // what the state holds
+    lua_setallocf(L, cappedAlloc, memory);
     // Only pure libraries: no io, os, package or debug.
     luaL_requiref(L, LUA_GNAME, luaopen_base, 1);
     luaL_requiref(L, LUA_TABLIBNAME, luaopen_table, 1);
@@ -1311,7 +1361,7 @@ fs::path PluginHost::userDir() {
 
 void PluginHost::shutdown() {
     for (Plugin& p : plugins_)
-        if (p.L) lua_close(p.L);
+        if (p.L) closeSandbox(p.L);
     plugins_.clear();
     types_.clear();
     commands_.clear();
@@ -1377,7 +1427,7 @@ void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
     if (p.id.empty()) p.error = "plugin.json: missing \"id\"";
     // A user plugin with a bundled plugin's id replaces it.
     if (Plugin* existing = findPlugin(p.id)) {
-        if (existing->L) lua_close(existing->L);
+        if (existing->L) closeSandbox(existing->L);
         std::erase_if(types_, [&](const PluginObjectType& t) { return t.pluginId == p.id; });
         std::erase_if(commands_, [&](const PluginCommand& c) { return c.pluginId == p.id; });
         std::erase_if(plugins_, [&](const Plugin& q) { return q.id == p.id; });
@@ -1400,14 +1450,14 @@ void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
     g_budget = kLoadBudget;
     lua_sethook(L, budgetHook, LUA_MASKCOUNT, kHookEvery);
     const std::string chunk = "@" + plugin.id + "/" + mainFile;
-    if (luaL_loadbufferx(L, code.data(), code.size(), chunk.c_str(), "t") != LUA_OK || lua_pcall(L, 0, 0, 0) != LUA_OK) {
+    if (luaL_loadbufferx(L, code.data(), code.size(), chunk.c_str(), "t") != LUA_OK || sandboxCall(L, 0, 0) != LUA_OK) {
         plugin.error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "error loading the script";
         lua_pop(L, 1);
     }
     g_registering = nullptr;
     g_registeringCommands = nullptr;
     if (!plugin.error.empty()) {
-        lua_close(L);
+        closeSandbox(L);
         plugin.L = nullptr;
         return;
     }
@@ -1442,7 +1492,7 @@ bool runWithDoc(lua_State* L, Project& project, double time, const std::vector<u
     pushDoc(L, time, selection, pressed);
     g_budget = kCommandBudget;
     lua_sethook(L, budgetHook, LUA_MASKCOUNT, kHookEvery);
-    const bool ok = lua_pcall(L, 1, 0, 0) == LUA_OK;
+    const bool ok = sandboxCall(L, 1, 0) == LUA_OK;
     g_run = nullptr;
     if (!ok) {
         error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "the command failed";
@@ -1503,7 +1553,7 @@ bool PluginHost::runScript(const std::string& source, const std::string& chunkNa
         ok = runWithDoc(L, project, time, selection, env, true, error);
     }
     log = host.plugins_.back().log;
-    lua_close(L);
+    closeSandbox(L);
     host.plugins_.pop_back();
     return ok;
 }
@@ -1658,7 +1708,7 @@ std::vector<std::string> PluginHost::rowLabels(const Layer& layer, std::vector<i
     lua_rawgeti(L, LUA_REGISTRYINDEX, type->labelsRef);
     pushParams(L, layer, layer.inPoint);
     g_budget = kCommandBudget;
-    if (lua_pcall(L, 1, 2, 0) == LUA_OK) {
+    if (sandboxCall(L, 1, 2) == LUA_OK) {
         if (lua_istable(L, -2)) {
             const lua_Integer n = luaL_len(L, -2);
             for (lua_Integer i = 1; i <= n; ++i) {
@@ -1715,7 +1765,7 @@ bool PluginHost::importCsv(Layer& layer, const std::string& csv, std::string& er
     pushCells(L, cells);
     pushParams(L, layer, layer.inPoint);
     g_budget = kCommandBudget;
-    bool ok = lua_pcall(L, 2, 1, 0) == LUA_OK;
+    bool ok = sandboxCall(L, 2, 1) == LUA_OK;
     if (!ok) {
         error = lua_tostring(L, -1) ? lua_tostring(L, -1) : "import_csv failed";
     } else if (!lua_istable(L, -1)) {
@@ -1781,7 +1831,7 @@ void PluginHost::draw(const Layer& layer, double t, render::PluginCanvas& c) {
     lua_getfield(L, LUA_REGISTRYINDEX, "bemotion.gfx");
     g_canvas = &c;
     g_budget = kDrawBudget;
-    if (lua_pcall(L, 2, 0, 0) != LUA_OK) {
+    if (sandboxCall(L, 2, 0) != LUA_OK) {
         plugin->drawError = lua_tostring(L, -1) ? lua_tostring(L, -1) : "error";
         drawPlaceholder(c, layer, t, plugin->drawError);
     } else {

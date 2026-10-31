@@ -760,8 +760,9 @@ Rules:
   [PLUGINS.md](PLUGINS.md).
 - **Sandbox**: only `base`, `table`, `string`, `math`, `utf8`; no files, OS,
   network, `load` or `require`. Instruction budgets: 4 M per draw, 20 M while
-  loading, 200 M per command; a plugin that exceeds them is stopped, not the
-  app.
+  loading, 200 M per command, and 512 MB of Lua memory per plugin
+  (`cappedAlloc`; only plugin code runs under the cap, through `sandboxCall`);
+  a plugin that exceeds them is stopped, not the app.
 - **Objects** (`register_object`) declare parameters (animatable numbers and
   colors, toggles, choices, text) and draw with `PluginCanvas` primitives. Layers
   keep their parameter definitions, so projects still open without the plugin.
@@ -782,6 +783,9 @@ Rules:
   button (`toggle` ones give `doc.pressed`), ask for playback (`doc.play`),
   and record through `media/Recorder` (miniaudio capture to WAV) with the
   `microphone` permission. The Recorder plugin is built on this.
+- **Includes and row labels** (API 6, 7): `bemotion.include` runs another Lua
+  file of the plugin's folder; `clip` / `unclip` on the canvas; `row_labels(o)`
+  tells which labels a chart row can take.
 - **Settings** (API 8): `plugin.json` `"settings"` (number, toggle, choice,
   text) shown behind the *Settings…* button of the plugin's card, kept in
   `Settings::pluginSettings` (`plugin_settings`), read with
