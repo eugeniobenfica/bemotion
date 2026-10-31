@@ -99,7 +99,25 @@ def scenario_edits_and_undo(exe, out):
     return None
 
 
-SCENARIOS = [("edits and undo", scenario_edits_and_undo)]
+def scenario_plugin_object(exe, out):
+    """A plugin object is drawn in the viewport (its Lua runs on the viewport's render thread,
+    behind the plugin host's lock), and again after a frame step."""
+    ops = [{"op": "layer.add", "type": "plugin", "object": "charts.bars", "name": "Chart"},
+           {"op": "data.set", "layer": "Chart", "rows": [["A", 9, "#E8B931"], ["B", 9, "#E8B931"], ["C", 9, "#E8B931"]]}]
+    # Near the end (the bars grow in at the start): End, a frame back, then another one.
+    steps = (["move 800 300 3"] + key("End") + key("Left") + ["wait 30", "capture @shown.bmp"] + key("Left")
+             + ["wait 20", "capture @stepped.bmp"])
+    folder = run(exe, out, "plugin-object", ops, steps)
+    shots = [folder / "shown.bmp", folder / "stepped.bmp"]
+    if not all(s.exists() for s in shots):
+        return "no capture"
+    shown, stepped = (count(s, ACCENT) for s in shots)
+    if shown < 15000 or stepped < 15000:
+        return f"the chart's gold bars are not shown ({shown}, then {stepped} gold pixels)"
+    return None
+
+
+SCENARIOS = [("edits and undo", scenario_edits_and_undo), ("plugin object", scenario_plugin_object)]
 
 
 def main():

@@ -1,5 +1,6 @@
 #include "ui/panels/ViewportPanel.h"
 
+#include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "app/Settings.h"
 #include "core/Geometry.h"
@@ -11,10 +12,10 @@
 #include "ui/Draw.h"
 #include "ui/EditorContext.h"
 #include "ui/Mime.h"
+#include "ui/SkiaQt.h"
 #include "ui/Theme.h"
 #include "ui/Tools.h"
 #include "ui/Widgets.h"
-#include "ui/SkiaQt.h"
 
 #include "include/core/SkCanvas.h"
 #include "include/core/SkSurface.h"
@@ -32,6 +33,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPlainTextEdit>
+#include <QPointer>
 #include <QPushButton>
 #include <QToolButton>
 #include <QWheelEvent>
@@ -305,6 +307,95 @@ void ViewportPanel::clearCache() {
     cacheBytes_ = 0;
 }
 
+ui::ViewportRenderer* ViewportPanel::renderer() {
+    const int engine = static_cast<int>(ui::currentEngine());
+    if (engine != rendererEngine_) { // first time, or the engine changed in Settings
+        rendererEngine_ = engine;
+        requests_.clear();
+        pending_.reset();
+        renderer_.reset();
+        if (!platform::env("BEMOTION_VIEWPORT_ON_UI_THREAD").empty()) return nullptr; // (to compare)
+        QPointer<ViewportPanel> self(this);
+        renderer_ = std::make_unique<ui::ViewportRenderer>([self] {
+            QMetaObject::invokeMethod(
+                qApp,
+                [self] {
+                    if (self) self->frameArrived();
+                },
+                Qt::QueuedConnection);
+        });
+        if (!renderer_->available()) renderer_.reset();
+        platform::log(renderer_ ? "viewport draws on a thread of its own" : "viewport draws on the interface's thread");
+    }
+    return renderer_.get();
+}
+
+void ViewportPanel::frameArrived() {
+    if (!renderer_) return;
+    std::optional<ui::ViewportRenderer::Result> done = renderer_->take();
+    if (!done) return;
+    // Shown even when a newer one was asked for meanwhile (scrubbing faster than frames draw):
+    // the newest finished frame beats the last one.
+    const auto it = requests_.find(done->job.serial);
+    if (it == requests_.end()) return; // older than what is shown
+    const Requested r = it->second;
+    requests_.erase(requests_.begin(), std::next(it));
+    if (pending_ && pending_->serial == r.serial) pending_.reset();
+    if (done->image.isNull()) {
+        frameValid_ = false;
+        return;
+    }
+    showFrame(r, std::move(done->image), done->ms, done->stale);
+    update();
+}
+
+void ViewportPanel::showFrame(const Requested& r, QImage image, double ms, bool stale) {
+    const Composition& c = ctx_.comp();
+    frame_ = std::move(image);
+    frameKey_ = r.key;
+    frameValid_ = true;
+    frameStale_ = stale;
+    frameArrivals_ = r.arrivals;
+    // Playing: a frame that takes longer than the composition's frame (most of it: the
+    // rest of the tick needs time too) lowers the resolution; one that would still fit at
+    // four times the pixels raises it back. (The next frame shows the change.)
+    if (ctx_.playing && settings().adaptivePlayback && r.divisor == std::max(previewDivisor_, playbackDivisor_)) {
+        renderMs_ = renderMs_ > 0.0 ? renderMs_ * 0.7 + ms * 0.3 : ms;
+        const double budget = 1000.0 * c.frameDuration() * 0.7;
+        if (renderMs_ > budget && playbackDivisor_ < 4) {
+            playbackDivisor_ *= 2;
+            renderMs_ /= 4.0; // a quarter of the pixels
+        } else if (renderMs_ * 4.0 * 1.5 < budget && playbackDivisor_ > 1) {
+            playbackDivisor_ /= 2;
+            renderMs_ *= 4.0;
+        }
+    }
+    // Kept (shared until the next render writes a new picture), the frames farthest from the
+    // playhead going first when the memory for it is full. Only a frame of the document and the
+    // view the kept ones show (one drawn on the render thread may come back after an edit).
+    FrameKey look = r.key;
+    look.time = -1.0;
+    look.pixels = size();
+    look.scale = devicePixelRatioF();
+    look.revision = 0;
+    if (!r.onFrame || stale || look != cacheLook_ || r.key.revision != cacheRevision_) return;
+    const size_t budget = static_cast<size_t>(std::max(0, settings().cacheMegabytes / 2)) << 20;
+    const size_t bytes = static_cast<size_t>(frame_.sizeInBytes());
+    if (bytes > budget) return;
+    printCache(c);
+    if (const auto old = cache_.find({r.frameNumber, r.divisor}); old != cache_.end())
+        cacheBytes_ -= static_cast<size_t>(old->second.sizeInBytes());
+    cache_[{r.frameNumber, r.divisor}] = frame_;
+    cacheBytes_ += bytes;
+    while (cacheBytes_ > budget && cache_.size() > 1) {
+        auto far = cache_.begin();
+        if (std::abs(std::prev(cache_.end())->first.first - r.frameNumber) > std::abs(far->first.first - r.frameNumber))
+            far = std::prev(cache_.end());
+        cacheBytes_ -= static_cast<size_t>(far->second.sizeInBytes());
+        cache_.erase(far);
+    }
+}
+
 // Sums up the document the kept frames show, when the first one is kept.
 void ViewportPanel::printCache(const Composition& c) {
     if (cachePrinted_ || !cacheByChanges_) return;
@@ -399,6 +490,8 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     if (onFrame && hit != cache_.end() && (!frameValid_ || key != frameKey_ || mediaChanged)) {
         frame_ = hit->second;
         frameKey_ = key;
+        requests_.clear(); // frames still on their way are older than this one: not shown
+        pending_.reset();
         frameValid_ = true;
         frameStale_ = false;
         frameArrivals_ = arrivals;
@@ -415,72 +508,73 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
             region = region.intersected(frameRect);
         }
         if (region.isEmpty()) region = QRect(0, 0, 1, 1); // the frame is out of sight: a pixel, transparent
-        if (frame_.size() != region.size()) frame_ = QImage(region.size(), QImage::Format_ARGB32_Premultiplied);
-        frame_.setOffset(region.topLeft());       // where it goes, in raster pixels...
-        frame_.setDevicePixelRatio(rasterScale);  // ... of this many per point
-        const SkImageInfo info = qtImageInfo(region.width(), region.height());
-        // On the graphics card when there is one (render/Gpu.h; its pixels read back into
-        // frame_), else straight into frame_.
-        if (!render::gpu()) gpuSurface_.reset();
-        else if (!gpuSurface_ || gpuSurface_->width() != region.width() || gpuSurface_->height() != region.height())
-            gpuSurface_ = render::makeGpuSurface(info);
-        const bool onGpu = gpuSurface_ && render::gpu()->makeCurrent();
-        if (onGpu) gpuSurface_->getCanvas()->clear(SK_ColorTRANSPARENT);
-        else frame_.fill(Qt::transparent); // (read back, every pixel is written anyway)
-        sk_sp<SkSurface> surface = onGpu ? gpuSurface_ : SkSurfaces::WrapPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()));
-        frameValid_ = static_cast<bool>(surface);
-        if (surface) {
-            const float z = static_cast<float>(rasterScale);
-            // Cropping: the layer's whole picture, the part cut away dimmed over it (drawCrop).
-            Composition uncropped;
-            if (cropping) {
-                uncropped = c;
-                if (Layer* l = uncropped.findLayer(cropping->id))
-                    l->media.cropLeft = l->media.cropTop = l->media.cropRight = l->media.cropBottom = AnimFloat{0.0f};
-            }
-            media::MediaManager::get().setPreviewScale(this, zoom_ * z); // videos decoded no bigger than shown here
-            media::MediaManager::get().takeStale(); // from here on: did this frame use a stand-in?
-            QElapsedTimer timer;
-            timer.start();
-            render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, render::View{origin_ * z - Vec2{static_cast<float>(region.x()), static_cast<float>(region.y())}, zoom_ * z, world_}, true,
-                                    throughCamera_, orbit_ ? &orbitLens_ : nullptr);
-            if (onGpu) surface->readPixels(info, frame_.bits(), static_cast<size_t>(frame_.bytesPerLine()), 0, 0);
-            const double ms = timer.nsecsElapsed() / 1e6;
-            frameKey_ = key;
-            const bool stale = media::MediaManager::get().takeStale(); // a video frame still on its way: not kept
-            frameStale_ = stale;
-            frameArrivals_ = arrivals;
-            // Playing: a frame that takes longer than the composition's frame (most of it: the
-            // rest of the tick needs time too) lowers the resolution; one that would still fit at
-            // four times the pixels raises it back. (The next frame shows the change.)
-            if (ctx_.playing && settings().adaptivePlayback && divisor == std::max(previewDivisor_, playbackDivisor_)) {
-                renderMs_ = renderMs_ > 0.0 ? renderMs_ * 0.7 + ms * 0.3 : ms;
-                const double budget = 1000.0 * c.frameDuration() * 0.7;
-                if (renderMs_ > budget && playbackDivisor_ < 4) {
-                    playbackDivisor_ *= 2;
-                    renderMs_ /= 4.0; // a quarter of the pixels
-                } else if (renderMs_ * 4.0 * 1.5 < budget && playbackDivisor_ > 1) {
-                    playbackDivisor_ /= 2;
-                    renderMs_ *= 4.0;
+        const float z = static_cast<float>(rasterScale);
+        const render::View view{origin_ * z - Vec2{static_cast<float>(region.x()), static_cast<float>(region.y())},
+                                zoom_ * z, world_};
+        media::MediaManager::get().setPreviewScale(this, zoom_ * z); // videos decoded no bigger than shown here
+        Requested r{key, frameNumber, divisor, onFrame, arrivals, ++requestSerial_};
+        if (ui::ViewportRenderer* worker = renderer()) {
+            // On the render thread: the last frame stays on screen meanwhile (frameArrived).
+            if (!pending_ || pending_->key != key || (mediaChanged && pending_->arrivals != arrivals)) {
+                if (!docCopy_ || docCopyOf_ != &c || docCopyRevision_ != key.revision) {
+                    docCopy_ = std::make_shared<const Composition>(c);
+                    docCopyOf_ = &c;
+                    docCopyRevision_ = key.revision;
+                    ++docCopyId_;
                 }
+                ui::ViewportRenderer::Job job;
+                job.comp = docCopy_;
+                job.revision = docCopyId_;
+                job.uncropped = cropping ? cropping->id : 0;
+                job.time = sceneTime;
+                job.region = region;
+                job.rasterScale = rasterScale;
+                job.view = view;
+                job.throughCamera = throughCamera_;
+                job.orbit = orbit_;
+                job.lens = orbitLens_;
+                job.serial = r.serial;
+                requests_[r.serial] = r;
+                pending_ = r;
+                worker->submit(std::move(job));
             }
-            // Kept (shared until the next render writes a new picture), the frames farthest from
-            // the playhead going first when the memory for it is full.
-            if (onFrame && !stale) {
-                const size_t budget = static_cast<size_t>(std::max(0, settings().cacheMegabytes / 2)) << 20;
-                const size_t bytes = static_cast<size_t>(frame_.sizeInBytes());
-                if (bytes <= budget) {
-                    printCache(c);
-                    if (const auto old = cache_.find({frameNumber, divisor}); old != cache_.end()) cacheBytes_ -= static_cast<size_t>(old->second.sizeInBytes());
-                    cache_[{frameNumber, divisor}] = frame_;
-                    cacheBytes_ += bytes;
-                    while (cacheBytes_ > budget && cache_.size() > 1) {
-                        auto far = cache_.begin();
-                        if (std::abs(std::prev(cache_.end())->first.first - frameNumber) > std::abs(far->first.first - frameNumber)) far = std::prev(cache_.end());
-                        cacheBytes_ -= static_cast<size_t>(far->second.sizeInBytes());
-                        cache_.erase(far);
-                    }
+        } else {
+            QImage image(region.size(), QImage::Format_ARGB32_Premultiplied);
+            image.setOffset(region.topLeft());      // where it goes, in raster pixels...
+            image.setDevicePixelRatio(rasterScale); // ... of this many per point
+            const SkImageInfo info = qtImageInfo(region.width(), region.height());
+            // On the graphics card when there is one (render/Gpu.h; its pixels read back into
+            // the image), else straight into the image.
+            if (!render::gpu())
+                gpuSurface_.reset();
+            else if (!gpuSurface_ || gpuSurface_->width() != region.width() || gpuSurface_->height() != region.height())
+                gpuSurface_ = render::makeGpuSurface(info);
+            const bool onGpu = gpuSurface_ && render::gpu()->makeCurrent();
+            if (onGpu)
+                gpuSurface_->getCanvas()->clear(SK_ColorTRANSPARENT);
+            else
+                image.fill(Qt::transparent); // (read back, every pixel is written anyway)
+            sk_sp<SkSurface> surface =
+                onGpu ? gpuSurface_
+                      : SkSurfaces::WrapPixels(info, image.bits(), static_cast<size_t>(image.bytesPerLine()));
+            frameValid_ = static_cast<bool>(surface);
+            if (surface) {
+                // Cropping: the layer's whole picture, the part cut away dimmed over it (drawCrop).
+                Composition uncropped;
+                if (cropping) {
+                    uncropped = c;
+                    if (Layer* l = uncropped.findLayer(cropping->id))
+                        l->media.cropLeft = l->media.cropTop = l->media.cropRight = l->media.cropBottom =
+                            AnimFloat{0.0f};
                 }
+                media::MediaManager::get().takeStale(); // from here on: did this frame use a stand-in?
+                QElapsedTimer timer;
+                timer.start();
+                render::drawComposition(surface->getCanvas(), cropping ? uncropped : c, sceneTime, view, true,
+                                        throughCamera_, orbit_ ? &orbitLens_ : nullptr);
+                if (onGpu) surface->readPixels(info, image.bits(), static_cast<size_t>(image.bytesPerLine()), 0, 0);
+                const double ms = timer.nsecsElapsed() / 1e6;
+                showFrame(r, std::move(image), ms, media::MediaManager::get().takeStale());
             }
         }
     }
@@ -489,7 +583,14 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     // Upscale only the scene; handles, rulers, guides and HUD retain native resolution.
     if (!frame_.isNull()) { // the frame's part of the view, at the scale it was drawn
         const qreal s = frame_.devicePixelRatio();
-        const QRectF target(frame_.offset().x() / s, frame_.offset().y() / s, frame_.width() / s, frame_.height() / s);
+        QRectF target(frame_.offset().x() / s, frame_.offset().y() / s, frame_.width() / s, frame_.height() / s);
+        // Drawn for another view (the new frame is on its way): where its picture is in this one.
+        if (!orbit_ && !frameKey_.orbit && frameKey_.zoom > 0.0f &&
+            (frameKey_.origin.x != origin_.x || frameKey_.origin.y != origin_.y || frameKey_.zoom != zoom_)) {
+            const qreal k = zoom_ / frameKey_.zoom;
+            target = QRectF(origin_.x + (target.x() - frameKey_.origin.x) * k,
+                            origin_.y + (target.y() - frameKey_.origin.y) * k, target.width() * k, target.height() * k);
+        }
         p.setRenderHint(QPainter::SmoothPixmapTransform, s < devicePixelRatioF());
         p.drawImage(target, frame_, QRectF(frame_.rect()));
         p.setRenderHint(QPainter::SmoothPixmapTransform, false);

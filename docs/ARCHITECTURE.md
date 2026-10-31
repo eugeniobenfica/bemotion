@@ -402,8 +402,9 @@ Rules:
   engine, a Vulkan instance and device of its own (the loader opened at run
   time; Skia built with `skia_use_vulkan`, Windows and Linux) — and Skia's
   Ganesh context on it; the viewport and the exports of the editor draw there and
-  read the pixels back (`OffscreenRenderer`, `ViewportPanel`). No OpenGL,
-  another thread, the command line or `gpu_rendering` off: the CPU, as
+  read the pixels back (`OffscreenRenderer`, `ViewportRenderer` with a context
+  of its own). No OpenGL, another thread without its own context, the command
+  line or `gpu_rendering` off: the CPU, as
   before (the same pictures, up to antialiasing). Mind CPU costs anyway:
   effect layers are bounded to what the layer covers (`saveLayer`
   bounds); avoid per-pixel loops in SkSL and Skia's morphology filters
@@ -516,6 +517,26 @@ Rules:
   cost (Skia is built without its AVX2 paths, `tools/skia/build-skia.sh`: a
   bilinear draw of a decoded frame is ~20 ms at 1100 px); the GPU
   (`render/Gpu`) takes 4K with Blur + Glow from ~145 to ~30 ms a frame.
+- **The interface never waits for a frame** (`ui/panels/ViewportRenderer`):
+  the viewport draws on a thread of its own, on a graphics card context of its
+  own (`ui::prepareThreadGpu`: OpenGL's offscreen surface made on the
+  interface's thread, its context on the render thread; Vulkan wholly there;
+  `render::setThreadGpu`), or on the CPU when the editor does. It asks for a
+  frame, keeps showing the last one (moved and scaled to the current view),
+  and shows each frame as it is done; only the newest request waits (a newer
+  one replaces it), and the newest finished frame is shown even while
+  scrubbing faster than frames draw. The thread reads its own copy of the
+  composition, copied once per document revision into the same object (the
+  media readers are kept by its address: `MediaManager::setPreviewCopy` makes
+  it count as the editor's). What it shares is locked: `MediaManager`'s video
+  state (`Impl::video`, recursive; the audio engine's `mutex` is separate and
+  taken after it, so audio never waits for a video), the plugins' Lua
+  (`PluginHost::lua_`: drawing, commands, scripts, loading) and the text
+  shaper (one per thread). Where the card cannot be shared between threads
+  (`QOpenGLContext::supportsThreadedOpenGL`), the viewport draws on the
+  interface's thread as before; `BEMOTION_VIEWPORT_ON_UI_THREAD=1` forces that
+  (to compare). A script stepping 45 frames of 60 blurred, glowing layers runs
+  in 6.7 s instead of 14 s: the interface was waiting for the frames.
 - **The editor never waits for a decoder**: every video of the editor's
   composition is read by its clip's `Seeker` thread, which also reads a few
   frames ahead of the playhead (`kAhead`), handed over without a copy

@@ -145,6 +145,7 @@ add_library(bemotion_ui STATIC
     ui/PluginInstall.cpp
     ui/Updates.cpp
     ui/panels/ViewportPanel.cpp
+    ui/panels/ViewportRenderer.cpp
     ui/panels/ViewportPaths.cpp
     ui/panels/ViewportInput.cpp
     ui/panels/ViewportTools.cpp

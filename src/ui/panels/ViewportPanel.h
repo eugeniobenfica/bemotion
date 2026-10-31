@@ -3,6 +3,7 @@
 #include "core/Changes.h"
 #include "core/Math.h"
 #include "render/SceneRenderer.h"
+#include "ui/panels/ViewportRenderer.h"
 
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkSurface.h"
@@ -358,6 +359,29 @@ private:
     bool cacheByChanges_ = true;
     void dropChangedFrames(const Composition& c, uint64_t revision);
     void printCache(const Composition& c);
+
+    // Frames drawn on a thread of their own (ViewportRenderer), when it can; else here, as the
+    // interface paints. What a frame asked for is kept to file it when it comes back.
+    struct Requested {
+        FrameKey key;
+        int frameNumber = 0;
+        int divisor = 1;
+        bool onFrame = false;
+        uint64_t arrivals = 0;
+        uint64_t serial = 0;
+    };
+    std::unique_ptr<ui::ViewportRenderer> renderer_;
+    int rendererEngine_ = -1;                // the engine the renderer was last made for (made again when it changes)
+    std::map<uint64_t, Requested> requests_; // by serial: drawing, and waiting (the newest)
+    std::optional<Requested> pending_;       // the newest asked for, until it comes back
+    uint64_t requestSerial_ = 0;
+    std::shared_ptr<const Composition> docCopy_; // what the renderer draws, copied once per document
+    const Composition* docCopyOf_ = nullptr;
+    uint64_t docCopyRevision_ = 0, docCopyId_ = 0;
+    ui::ViewportRenderer* renderer();
+    void frameArrived();
+    // A rendered frame (here or there) becomes the one shown, and is kept for the RAM preview.
+    void showFrame(const Requested& r, QImage image, double ms, bool stale);
     size_t cacheBytes_ = 0;
     void clearCache();
 };
