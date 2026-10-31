@@ -79,14 +79,29 @@ Dependencies only point **down**. In particular:
 | --- | --- | --- |
 | `core` | the C++ standard library, nlohmann/json | Qt, Skia, FFmpeg, Lua, anything above |
 | `render` | `core`, Skia | Qt, `ui`, `app` |
-| `media`, `export` | `core`, `render`, FFmpeg, stb, miniaudio | `ui`, `app` (`Platform` path helpers are the one exception) |
+| `media`, `export` | `core`, `render`, FFmpeg, stb, miniaudio | Qt, `ui`, `app` (UTF-8 paths: `core/Utf8.h`) |
 | `libs/bestyle` | Qt Widgets, nlohmann/json | anything of bemotion (it is reusable by other apps) |
-| `ui` | everything below, Qt, `bestyle` | `app` internals other than `Platform`, `Settings`, `PluginHost`, `Downloads`, the libraries |
+| `ui` | everything below, Qt, `bestyle`, the `app` services (below) | the program: `Application`, `Automation`, `McpServer`, `DevScript`, `AppIcon` |
 | `app` | everything | — |
 
-`core` builds as its own library (`bemotion_core`) with its own tests; a core
-change must never need Qt to compile. Things the core cannot do itself (probe
-a media file, build a plugin object) come in as callbacks (`OpEnvironment`).
+Each layer builds as a static library that links only the ones below it
+(`src/CMakeLists.txt`): `bemotion_core`, `bemotion_render`, `bemotion_media`
+(`media` and `export`), `bemotion_ui`; the `bemotion` executable adds the
+program on top. The build links each layer whole into a program of its own
+(`bemotion_layer_render`, `_media`, `_ui`, from `tests/`), so a call into a
+layer above is an undefined symbol and the build fails — the rule is checked,
+not just written down. A core change must never need Qt to compile. Things a
+layer cannot do itself (probe a media file, build a plugin object) come in as
+callbacks (`OpEnvironment`).
+
+The application services the editor stands on — `Platform`, `Settings`,
+`PluginHost`, `Downloads`, `Recovery`, `ProjectPackage`, `RecentProjects`,
+`EffectLibrary`, `PresetLibrary`, `Services` — live in `src/app` but build
+into `bemotion_ui`: they use the editor's theme, tools and signals, and the
+editor uses them, so they are one layer. What only the program needs (startup,
+the command line, MCP, dev scripts) stays in the executable; what the editor
+shares with it goes to `app/Services` (`automationEnvironment`,
+`renderFramesPng`, `exportProject`).
 
 ## 3. The document model (`src/core`)
 
@@ -458,7 +473,7 @@ Rules:
   would encode the rest of the audio and flush every frame the encoder
   holds, which looked like a hang) and the unfinished file is removed. The
   dialog previews the last frame (`ExportJob::lastFrame`). `FfmpegEncoder` (MP4 / H.264, MOV / ProRes, WebM /
-  VP9, GIF) and `PngSequenceEncoder`. `app/Automation::exportProject` is the
+  VP9, GIF) and `PngSequenceEncoder`. `app/Services::exportProject` is the
   one helper the command line, MCP and `--export` share.
 - FFmpeg versions differ between platforms (Ubuntu 24.04 ships 6.1, MSYS2
   8.x): guard newer APIs with `LIBAVCODEC_VERSION_INT` checks.
@@ -536,7 +551,12 @@ Rules:
   `layout.ads`; a saved layout missing a newer panel is replaced by the
   default), and a **16 ms timer** (`tick()`) that drives playback, media,
   audio, undo commits, autosave (a moment after each change, once the
-  document's revision stops moving) and every panel's `sync()`. A slower
+  document's revision stops moving) and every panel's `sync()`. The tick
+  **rests** while nothing happens: no playback or recording, no pending
+  commit, `revision()` and `MediaManager::arrivals()` unchanged and no user
+  input (`EditorWindow::eventFilter` → `wake()`). Then it skips the panels'
+  syncs, except four times a second for what changes on its own (background
+  jobs, plugins); after each wake it runs fully for half a second. A slower
   timer keeps crash-recovery copies (`app/Recovery`).
   - Panel headers have only tabs and **minimize** / **maximize** buttons
     (`decorateArea`, added to every dock area; no close, undock, tabs-menu or
@@ -565,7 +585,9 @@ Rules:
   - Never `show()` / `setVisible(true)` a widget before it has a parent: for
     a moment it is a window of its own (it flashes on screen).
 - **Panels** (`ui/panels`) follow one pattern:
-  - `sync()` is called every tick. It computes a cheap **structure key** (what
+  - `sync()` is called every tick (fewer while the editor rests; a change
+    that comes from neither input nor `touch()` / `redraw()` shows within a
+    quarter second). It computes a cheap **structure key** (what
     the widgets depend on: selected layer, its properties, …). If the key
     changed, `rebuild()` recreates the widgets; otherwise it only refreshes
     values (`PropertyRow::refresh`, refresher lambdas).
@@ -777,7 +799,8 @@ Rules:
   overridable with `BEMOTION_APPDATA`), Documents, file and folder dialogs, file
   manager, trash, and UTF-8 helpers: **`platform::arguments()` and
   `platform::env()` instead of `argv` / `getenv`** (the Windows C runtime
-  hands those over in the legacy code page), `fromUtf8` / `toUtf8` for paths.
+  hands those over in the legacy code page), `fromUtf8` / `toUtf8` for paths
+  (the same as `core/Utf8.h`, which the layers below Qt use).
   `platform::log()` writes `bemotion.log` (startup, projects, imports, saves,
   plugin and MCP calls, crashes).
 - **`Settings`** — user preferences in `settings.json` (theme, sizes,
@@ -789,8 +812,9 @@ Rules:
 - **`Recovery`** — while a project has unsaved changes the editor keeps a copy
   in `<app data>/recovery`; saving or closing normally removes it, and copies
   left by a crash are offered back at the next start.
-- **`Automation`** — the command line for scripts and AIs and the helpers it
-  shares with MCP (`automationEnvironment`, `renderFramesPng`, `exportProject`).
+- **`Automation`** — the command line for scripts and AIs.
+- **`Services`** — what the command line, MCP and the editor share
+  (`automationEnvironment`, `renderFramesPng`, `exportProject`).
 - **`McpServer`** — `bemotion mcp`, the Model Context Protocol server (§10).
 - **`PluginHost`** — Lua plugins (§9).
   The application's frame timer processes pending reloads even on the home

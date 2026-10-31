@@ -5,7 +5,7 @@
 #include "core/Expressions.h"
 #include "core/Lottie.h"
 
-#include "app/Automation.h"
+#include "app/Services.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "app/Recovery.h"
@@ -585,6 +585,22 @@ void EditorWindow::buildMenus() {
 }
 
 bool EditorWindow::eventFilter(QObject* watched, QEvent* event) {
+    // The user did something (in any of the app's windows): the panels follow at once.
+    switch (event->type()) {
+    case QEvent::MouseButtonPress:
+    case QEvent::MouseButtonRelease:
+    case QEvent::MouseButtonDblClick:
+    case QEvent::MouseMove:
+    case QEvent::Wheel:
+    case QEvent::KeyPress:
+    case QEvent::KeyRelease:
+    case QEvent::DragMove:
+    case QEvent::Drop:
+    case QEvent::Resize:
+    case QEvent::Show:
+    case QEvent::WindowActivate: wake(); break;
+    default: break;
+    }
     // Esc leaves the viewport-only layout. It is caught before shortcuts are (Esc also deselects).
     if (viewportFullscreen_ && (event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)) {
         auto* key = static_cast<QKeyEvent*>(event);

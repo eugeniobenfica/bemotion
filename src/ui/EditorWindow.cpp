@@ -3,7 +3,7 @@
 #include "core/Expressions.h"
 #include "core/Lottie.h"
 
-#include "app/Automation.h"
+#include "app/Services.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "app/Recovery.h"
@@ -691,6 +691,13 @@ void EditorWindow::toggleViewportFullscreen() {
 
 // --- update loop ------------------------------------------------------------------------------
 
+// After the last thing that happened, full ticks go on for half a second (meters fall, the
+// last frame is decoded and shown); resting, the panels still sync four times a second.
+constexpr int kAwakeTicks = 30;
+constexpr int kHeartbeatTicks = 15;
+
+void EditorWindow::wake() { awakeTicks_ = kAwakeTicks; }
+
 void EditorWindow::tick() {
     const double dt = std::min(0.25, clock_.restart() / 1000.0);
     setExpressionComposition(&ctx_.comp()); // what expressions read in panels, handles and the timeline
@@ -712,6 +719,22 @@ void EditorWindow::tick() {
     }
     media::MediaManager::get().update(ctx_.comp());
     media::AudioEngine::get().update(ctx_.comp(), ctx_.time, ctx_.playing && ctx_.playRate == 1.0);
+
+    // Resting: while nothing plays, records, changes, arrives from the decoders or is touched
+    // (eventFilter), the panels have nothing new to show, so their syncs are skipped. A few
+    // times a second they run anyway, for what changes on its own (background jobs, plugins).
+    const uint64_t arrivals = media::MediaManager::get().arrivals();
+    if (ctx_.playing || recorder.recording() || ctx_.hasPendingCommit() || ctx_.revision() != wokenRevision_ ||
+        arrivals != wokenArrivals_)
+        wake();
+    wokenRevision_ = ctx_.revision();
+    wokenArrivals_ = arrivals;
+    if (awakeTicks_ > 0) --awakeTicks_;
+    else if (++restingTicks_ < kHeartbeatTicks) {
+        autosave();
+        return;
+    }
+    restingTicks_ = 0;
 
     objects_->sync();
     media_->sync();

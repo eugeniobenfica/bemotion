@@ -96,6 +96,7 @@ private:
     void buildMenus();
     void buildDocks();
     void tick();
+    void wake(); // full ticks again for a moment (input, a change, a decoded frame)
     void save();
     void saveAs();
     void jumpToKeyframe(int direction);
@@ -183,6 +184,10 @@ private:
     QLabel* status_ = nullptr; // errors next to the menus
     QString lastTitle_;
     double recordingStart_ = -1.0;
+    // The tick rests while nothing happens (EditorWindow::tick): what woke it last, and how many
+    // full ticks are left before it rests again.
+    uint64_t wokenRevision_ = ~0ull, wokenArrivals_ = ~0ull;
+    int awakeTicks_ = 0, restingTicks_ = 0;
     uint64_t recordingScope_ = 0;
     bool spaceDown_ = false;
     bool handedOver_ = false;

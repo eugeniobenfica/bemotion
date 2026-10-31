@@ -25,7 +25,8 @@ capability). This file is the short, practical version.
 ## Rules
 
 - Layers: `core` ← `render` ← `media` / `export` ← `ui` ← `app`, and
-  `libs/bestyle` ← `ui`. Dependencies only point down; `bestyle` never
+  `libs/bestyle` ← `ui`. Dependencies only point down, and the build checks
+  it (one static library per layer, ARCHITECTURE §2); `bestyle` never
   includes bemotion code (other apps use it). A control panels share goes
   there; one that knows about layers, keyframes or settings stays in `ui`.
 - `libs/bestyle` is a git subtree of the bestyle repository, shared with

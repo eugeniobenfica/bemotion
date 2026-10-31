@@ -121,6 +121,7 @@ public:
     // mode under the mouse), put back afterwards.
     void redraw() { ++revision_; }
     void commitIfIdle(bool interacting);
+    bool hasPendingCommit() const { return pendingCommit_; } // touched, not yet an undo step
 
     void undo();
     void redo();

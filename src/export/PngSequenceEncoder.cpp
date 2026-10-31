@@ -2,7 +2,7 @@
 
 #include "export/Export.h"
 
-#include "app/Platform.h"
+#include "core/Utf8.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -19,7 +19,7 @@ public:
     bool open(const EncoderParams& params, std::string& error) override {
         params_ = params;
         folder_ = params.output.parent_path();
-        stem_ = platform::toUtf8(params.output.stem());
+        stem_ = utf8::fromPath(params.output.stem());
         std::error_code ec;
         if (!folder_.empty()) std::filesystem::create_directories(folder_, ec);
         if (ec) {
@@ -27,7 +27,7 @@ public:
             return false;
         }
         // Image sequences carry no sound: the audio goes next to the frames.
-        if (params.audio && !writeWav(folder_ / platform::fromUtf8(stem_ + ".wav"), *params.audio, kExportAudioRate, error))
+        if (params.audio && !writeWav(folder_ / utf8::toPath(stem_ + ".wav"), *params.audio, kExportAudioRate, error))
             return false;
         return true;
     }
@@ -35,11 +35,11 @@ public:
     bool write(const uint8_t* rgba, std::string& error) override {
         char suffix[16];
         std::snprintf(suffix, sizeof(suffix), "_%04d.png", index_++);
-        const auto file = folder_ / platform::fromUtf8(stem_ + suffix);
+        const auto file = folder_ / utf8::toPath(stem_ + suffix);
         // stb writes through a callback so paths with any characters work on Windows.
         std::ofstream out(file, std::ios::binary | std::ios::trunc);
         if (!out) {
-            error = "Could not write " + platform::toUtf8(file);
+            error = "Could not write " + utf8::fromPath(file);
             return false;
         }
         const int channels = params_.alpha ? 4 : 3;
@@ -59,7 +59,7 @@ public:
         const int ok = stbi_write_png_to_func(sink, &out, params_.width, params_.height, channels, data,
                                               params_.width * channels);
         if (!ok || !out) {
-            error = "Could not encode " + platform::toUtf8(file);
+            error = "Could not encode " + utf8::fromPath(file);
             return false;
         }
         return true;

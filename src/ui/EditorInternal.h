@@ -5,7 +5,7 @@
 
 #include "core/Expressions.h"
 #include "core/Lottie.h"
-#include "app/Automation.h"
+#include "app/Services.h"
 #include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "app/Recovery.h"
