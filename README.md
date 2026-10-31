@@ -481,7 +481,7 @@ nlohmann/json, stb, Lua, miniaudio) is fetched on the first configure.
 
 ```bash
 pacman -S --needed git patch mingw-w64-ucrt-x86_64-{toolchain,cmake,ninja,pkgconf,python,gn}   mingw-w64-ucrt-x86_64-{qt6-base,qt6-svg,qt6-tools,ffmpeg,whisper.cpp,harfbuzz,icu,libjpeg-turbo,libwebp,libpng,expat,zlib,freetype}
-tools/skia/build-skia.sh
+tools/skia/fetch-skia.sh || tools/skia/build-skia.sh   # Skia: the prebuilt one, or build it (~1 h)
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/bemotion.exe
@@ -492,7 +492,7 @@ tools/package-windows.sh build dist           # installer + portable zip (needs:
 
 ```bash
 sudo apt install ninja-build clang python3 pkg-config qt6-base-dev qt6-base-private-dev qt6-base-dev-tools qt6-qpa-plugins libqt6svg6-dev libgl-dev libxkbcommon-dev   libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev   libharfbuzz-dev libicu-dev libfreetype-dev libfontconfig-dev libpng-dev libjpeg-dev libwebp-dev libexpat1-dev zlib1g-dev
-tools/skia/build-skia.sh
+tools/skia/fetch-skia.sh || tools/skia/build-skia.sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
 ./build/bemotion
 ```
@@ -502,7 +502,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
 ```bash
 brew install ninja pkgconf qt ffmpeg harfbuzz icu4c freetype fontconfig libpng jpeg-turbo webp
 export PKG_CONFIG_PATH="$(brew --prefix icu4c)/lib/pkgconfig:$(brew --prefix jpeg-turbo)/lib/pkgconfig"
-tools/skia/build-skia.sh
+tools/skia/fetch-skia.sh || tools/skia/build-skia.sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix qt)"
 cmake --build build && ./build/bemotion
 ```

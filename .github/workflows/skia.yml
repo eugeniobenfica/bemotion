@@ -1,0 +1,94 @@
+name: Skia
+
+# Builds the pinned Skia (tools/skia/build-skia.sh) on each system and publishes it as the
+# release skia-<revision> (a pre-release, which bemotion's updater ignores: its tag is not a
+# version), so contributors can fetch it (tools/skia/fetch-skia.sh) instead of building it.
+# Runs when the pinned revision or its patches change on main, or by hand.
+
+on:
+  push:
+    branches: [main]
+    paths: ['tools/skia/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            name: mingw
+          - os: ubuntu-24.04
+            name: linux
+          - os: macos-latest
+            name: mac
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.name == 'mingw' && 'msys2 {0}' || 'bash' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - if: matrix.name == 'mingw'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git patch
+            mingw-w64-ucrt-x86_64-toolchain mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-gn mingw-w64-ucrt-x86_64-harfbuzz
+            mingw-w64-ucrt-x86_64-icu mingw-w64-ucrt-x86_64-libjpeg-turbo mingw-w64-ucrt-x86_64-libwebp
+            mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-expat mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-freetype
+
+      - if: matrix.name == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build clang python3 pkg-config libharfbuzz-dev libicu-dev libfreetype-dev \
+            libfontconfig-dev libpng-dev libjpeg-dev libwebp-dev libexpat1-dev zlib1g-dev
+
+      - if: matrix.name == 'mac'
+        run: |
+          brew install ninja pkgconf harfbuzz icu4c freetype fontconfig libpng jpeg-turbo webp
+          echo "PKG_CONFIG_PATH=$(brew --prefix icu4c)/lib/pkgconfig:$(brew --prefix jpeg-turbo)/lib/pkgconfig:$PKG_CONFIG_PATH" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: bash -x tools/skia/build-skia.sh
+
+      - name: Archive
+        run: |
+          rev="$(cut -c1-12 third_party/skia/REVISION)"
+          tar -C third_party -cJf "skia-${{ matrix.name }}-$rev.tar.xz" skia
+          echo "REV=$rev" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: skia-${{ matrix.name }}
+          path: skia-${{ matrix.name }}-*.tar.xz
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v7
+        with:
+          path: out
+          merge-multiple: true
+
+      - name: Release skia-<revision>
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rev="$(sed -n 's/^COMMIT=\([0-9a-f]*\).*/\1/p' tools/skia/build-skia.sh | cut -c1-12)"
+          cd out
+          sha256sum skia-*.tar.xz > SHA256SUMS.txt
+          gh release view "skia-$rev" >/dev/null 2>&1 ||
+            gh release create "skia-$rev" --prerelease --latest=false --title "Skia $rev (for building bemotion)" \
+              --notes "Skia at $rev built by tools/skia/build-skia.sh, for tools/skia/fetch-skia.sh. Not a bemotion release."
+          gh release upload "skia-$rev" skia-*.tar.xz SHA256SUMS.txt --clobber
