@@ -7,6 +7,7 @@
 #   the files with ffprobe (frame count, size, codec)
 # - opens the app without a screen (Qt "offscreen" platform), on the home screen
 #   and in the editor, and saves what the window shows
+# - drives the editor through scripted scenarios and checks what it showed (tools/ui-test.py)
 # The output dir (default smoke/) keeps the files for a look afterwards.
 set -euo pipefail
 
@@ -91,6 +92,13 @@ gui() { # name, capture frame, args...
 }
 gui home 400                         # the intro plays first
 gui editor 60 "$(native "$project")"
+
+echo "== interface scenarios (tools/ui-test.py)"
+if [ -n "$py" ]; then
+    "$py" "$root/tools/ui-test.py" "$(native "$exe")" "$(native "$out/ui")" || failed=1
+else
+    echo "  skipped (no python)"
+fi
 
 [ "$failed" = 0 ] && echo "smoke test passed" || echo "smoke test FAILED"
 exit "$failed"

@@ -1027,6 +1027,11 @@ changes behavior.
   `file_tests` (the format, imports, exports, catalogs, languages, docs); each
   ends with its list of tests, which `core_tests.cpp` runs. `tests/Check.h`
   has `CHECK`, `near` and `run` (operations from JSON text).
+- **Interface scenarios** (`tools/ui-test.py`, run by the smoke test on every
+  platform): the editor driven offscreen by a `BEMOTION_SCRIPT`, and its
+  captures (BMP) checked by counting a color in them, so they hold whatever the
+  fonts. Add a scenario when an editor behavior broke once (the first: an edit
+  never shows a kept frame from before it, and undo brings it back).
 - **Every operation is tested** (`tools/ops-tested.py`, the `operations_tested`
   ctest): each name in `Ops.cpp`'s table must appear, quoted, in `tests/*.cpp`
   or `tools/mcp-test.py`. A new operation fails it until its test is written.
