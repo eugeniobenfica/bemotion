@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -64,7 +65,10 @@ void budgetHook(lua_State* L, lua_Debug*) {
 // one instruction, which the instruction budget cannot stop) gets "not enough memory" instead of
 // taking the app down. Only plugin code runs under the cap (sandboxCall): the host's own pushes
 // before a call are outside any protected call, where a failed allocation would abort.
-constexpr int64_t kMemoryCap = int64_t(512) << 20;
+// Two caps: each plugin's, and all plugins' together (several plugins may each stay under theirs).
+constexpr int64_t kMemoryCap = int64_t(256) << 20;
+constexpr int64_t kTotalMemoryCap = int64_t(768) << 20;
+std::atomic<int64_t> g_pluginMemory{0}; // every plugin's Lua heap (exports draw on other threads)
 
 struct SandboxMemory {
     lua_Alloc base = nullptr;
@@ -77,9 +81,12 @@ void* cappedAlloc(void* ud, void* ptr, size_t osize, size_t nsize) {
     auto* m = static_cast<SandboxMemory*>(ud);
     const int64_t old = ptr ? static_cast<int64_t>(osize) : 0; // without ptr, osize is a type tag
     const int64_t grow = static_cast<int64_t>(nsize) - old;
-    if (grow > 0 && m->limited && m->used + grow > kMemoryCap) return nullptr;
+    if (grow > 0 && m->limited && (m->used + grow > kMemoryCap || g_pluginMemory.load() + grow > kTotalMemoryCap)) return nullptr;
     void* p = m->base(m->baseUd, ptr, osize, nsize);
-    if (p || nsize == 0) m->used += grow;
+    if (p || nsize == 0) {
+        m->used += grow;
+        g_pluginMemory += grow;
+    }
     return p;
 }
 

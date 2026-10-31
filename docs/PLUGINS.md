@@ -39,8 +39,10 @@ and the microphone, 6 include, 7 row labels, 8 settings, 9 `load_mesh`.
 `bemotion.api_version` tells the running version.
 
 Scripts run in a sandbox (base, table, string, math and utf8 only — no files,
-OS or network) with an instruction budget per draw call and at most 512 MB of
-memory per plugin (past it, an allocation fails with "not enough memory").
+OS or network) with an instruction budget per draw call and at most 256 MB of
+memory per plugin, 768 MB for all plugins together (past either, an
+allocation fails with "not enough memory"). A model loaded with `load_mesh`
+stays on the host's side and does not count against it.
 
 ## Registering an object
 

@@ -793,8 +793,8 @@ Rules:
   [PLUGINS.md](PLUGINS.md).
 - **Sandbox**: only `base`, `table`, `string`, `math`, `utf8`; no files, OS,
   network, `load` or `require`. Instruction budgets: 4 M per draw, 20 M while
-  loading, 200 M per command, and 512 MB of Lua memory per plugin
-  (`cappedAlloc`; only plugin code runs under the cap, through `sandboxCall`);
+  loading, 200 M per command, and 256 MB of Lua memory per plugin, 768 MB
+  for all of them together (`cappedAlloc`; only plugin code runs under the cap, through `sandboxCall`);
   a plugin that exceeds them is stopped, not the app.
 - **Objects** (`register_object`) declare parameters (animatable numbers and
   colors, toggles, choices, text) and draw with `PluginCanvas` primitives. Layers
