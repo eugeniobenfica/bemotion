@@ -34,8 +34,9 @@ QNetworkReply* fetch(const QUrl& url, QObject* context, Done done, Progress prog
 QString sha256Hex(const QByteArray& data);
 
 // Where the official plugin catalog is: index.json, and each plugin's files under <base>/<id>/,
-// in bemotion's repository at this version's tag (v<version>), never the main branch.
-// BEMOTION_PLUGIN_CATALOG replaces it (a mirror, or a local folder as file:///.../plugins/).
+// in bemotion's repository at this version's tag (v<version>), or on the main branch when that
+// tag is not on GitHub (development builds). After fetchPluginCatalog, the place it was read from.
+// BEMOTION_PLUGIN_CATALOG replaces both (a mirror, or a local folder as file:///.../plugins/).
 QString pluginCatalogBase();
 // The catalog, read (plugins of a newer API than this bemotion's are left out).
 void fetchPluginCatalog(QObject* context, std::function<void(bool ok, std::vector<CatalogPlugin> plugins, QString error)> done);

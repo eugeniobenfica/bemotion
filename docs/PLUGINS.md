@@ -12,9 +12,10 @@ or `"all"`, keeps some inside for offline installs). Users get them when they
 open a project that uses one (the editor offers the missing ones, and
 Properties has *Download Plugin* on such an object), or from *Settings ›
 Plugins › Show Official Plugins*. Both read `assets/plugins/index.json` from
-the repository on GitHub **at the tag of the app's version** (`v<version>`,
-never the main branch: a push does not reach installed apps), only when
-clicked, download the plugin's files, check each one's SHA-256 against the
+the repository on GitHub **at the tag of the app's version** (`v<version>`:
+a later push does not reach installed apps), or from the main branch when
+that tag is not on GitHub (development builds, a release not tagged yet),
+only when clicked, download the plugin's files, check each one's SHA-256 against the
 catalog, then install it like *Install Plugin…* (a downloaded one replaces a
 bundled one of the same id). A plugin fix reaches users with the next
 release.

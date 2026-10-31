@@ -11,6 +11,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QStringList>
 
 #include <memory>
 
@@ -84,24 +85,56 @@ QNetworkReply* fetch(const QUrl& url, QObject* context, Done done, Progress prog
 
 QString sha256Hex(const QByteArray& data) { return QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex()); }
 
-QString pluginCatalogBase() {
-    QString base = QString::fromStdString(platform::env("BEMOTION_PLUGIN_CATALOG"));
-    // The tag of this version, not the main branch: what a release installs is what was released
-    // with it (and checked by its SHA256 in that tag's index.json), never a later push.
-    if (base.isEmpty()) base = QString("https://raw.githubusercontent.com/eugeniobenfica/bemotion/v%1/assets/plugins/").arg(BEMOTION_VERSION);
+namespace {
+
+// Where the catalog was last read from: its plugins' files are fetched from the same place.
+QString& resolvedCatalogBase() {
+    static QString base;
+    return base;
+}
+
+QString withSlash(QString base) {
     if (!base.endsWith('/')) base += '/';
     return base;
 }
 
-void fetchPluginCatalog(QObject* context, std::function<void(bool, std::vector<CatalogPlugin>, QString)> done) {
-    fetch(QUrl(pluginCatalogBase() + "index.json"), context, [done](bool ok, const QByteArray& data, const QString& error) {
-        if (!ok) return done(false, {}, error);
+// The places the catalog is looked for, in order. The tag of this version first: what a release
+// installs is what was released with it (and checked by its SHA256 in that tag's index.json).
+// A version without its tag on GitHub (a development build, or a release whose tag was never
+// pushed) reads the main branch instead: its index.json still checks every file, and plugins
+// for a newer API are left out.
+QStringList catalogBases() {
+    const QString custom = QString::fromStdString(platform::env("BEMOTION_PLUGIN_CATALOG"));
+    if (!custom.isEmpty()) return {withSlash(custom)};
+    const QString repo = "https://raw.githubusercontent.com/eugeniobenfica/bemotion/";
+    return {repo + QString("v%1/assets/plugins/").arg(BEMOTION_VERSION), repo + "main/assets/plugins/"};
+}
+
+void fetchCatalogFrom(QStringList bases, QObject* context, std::function<void(bool, std::vector<CatalogPlugin>, QString)> done) {
+    const QString base = bases.takeFirst();
+    fetch(QUrl(base + "index.json"), context, [base, bases, context, done](bool ok, const QByteArray& data, const QString& error) {
+        if (!ok) {
+            if (!bases.isEmpty()) return fetchCatalogFrom(bases, context, done);
+            return done(false, {}, error);
+        }
         std::vector<CatalogPlugin> plugins;
         std::string why;
         if (!parsePluginCatalog(data.toStdString(), plugins, &why)) return done(false, {}, QString::fromStdString(why));
         std::erase_if(plugins, [](const CatalogPlugin& p) { return p.api > PluginHost::kApiVersion; }); // needs a newer bemotion
+        resolvedCatalogBase() = base;
         done(true, std::move(plugins), {});
     });
+}
+
+} // namespace
+
+QString pluginCatalogBase() {
+    const QString& base = resolvedCatalogBase();
+    return base.isEmpty() ? catalogBases().first() : base;
+}
+
+void fetchPluginCatalog(QObject* context, std::function<void(bool, std::vector<CatalogPlugin>, QString)> done) {
+    fetchCatalogFrom(catalogBases(), context, std::move(done));
 }
 
 void installCatalogPlugin(const CatalogPlugin& plugin, QObject* context, std::function<void(bool, QString)> done, Progress progress) {
