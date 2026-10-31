@@ -172,7 +172,8 @@ void testExpressionsAcrossProjects() {
     auto first = make(10.0f);
     setExpressionComposition(&first->comp);
     { const ExpressionScope s(first->comp); }
-    first.reset(); // closed
+    setExpressionComposition(nullptr); // closed, as the editor's window does when it goes
+    first.reset();
     auto second = make(20.0f);
     setExpressionComposition(&second->comp);
     { const ExpressionScope s(second->comp); } // ends back on the editor's composition: the second
