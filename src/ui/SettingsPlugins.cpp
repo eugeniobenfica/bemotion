@@ -9,6 +9,7 @@
 #include "media/MediaIO.h"
 #include "media/MediaManager.h"
 #include "media/Recorder.h"
+#include "media/Transcriber.h"
 #include "app/Settings.h"
 #include "render/Fonts.h"
 #include "ui/AppSignals.h"
@@ -20,6 +21,7 @@
 #include "ui/PagedWindow.h"
 #include "ui/Updates.h"
 #include "ui/Theme.h"
+#include "ui/Transcribe.h"
 #include "ui/Widgets.h"
 
 #include <QCheckBox>
@@ -421,6 +423,27 @@ void addOfficialPlugins(QVBoxLayout* col) {
     }
 }
 
+// What else bemotion can download beside plugins, kept out of the packages: the speech model
+// (Transcribe Speech). Listed with the plugins so every optional download is in one place.
+void addOtherDownloads(QVBoxLayout* col) {
+    if (!media::speechToTextAvailable()) return;
+    SettingsCard* card = addSection(col, tr("Other downloads"), tr("Not part of the installer: downloaded only when you ask, then "
+                                                              "used offline."));
+    media::TranscribeOptions found;
+    const bool have = media::findSpeechModels(platform::speechModelFolders(), found);
+    QPushButton* button = nullptr;
+    if (have) {
+        button = new QPushButton(tr("Installed"));
+        button->setProperty("flat", true);
+        button->setEnabled(false);
+    } else {
+        button = accentButton(tr("Get"));
+        QObject::connect(button, &QPushButton::clicked, button, [] { ui::offerSpeechModel(g_window, [] { rebuildSoon(); }); });
+    }
+    card->addRow(tr("Speech recognition model"),
+                 tr("Transcribes speech into subtitles (whisper.cpp)  ·  %1").arg(sizeText(net::kSpeechModelBytes)), button);
+}
+
 QWidget* pluginsPage() {
     PluginHost& host = PluginHost::get();
     QVBoxLayout* col;
@@ -502,6 +525,7 @@ QWidget* pluginsPage() {
     if (!anyInstalled)
         installed->addContent(pluginText(tr("None yet. Install Plugin adds one from its folder (its plugin.json file)."), Tone::TextFaint));
     addOfficialPlugins(col);
+    addOtherDownloads(col);
     return page;
 }
 

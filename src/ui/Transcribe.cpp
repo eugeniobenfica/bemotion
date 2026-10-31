@@ -63,7 +63,7 @@ struct Job {
 
 } // namespace
 
-// The speech model did not come with this installation (Linux and macOS builds may leave it out):
+// The speech model did not come with this installation (the packages leave it out):
 // offered for download, once; `then` runs when it is there.
 void offerSpeechModel(QWidget* parent, std::function<void()> then) {
     QMessageBox ask(parent);
