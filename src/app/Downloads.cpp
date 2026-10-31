@@ -86,7 +86,9 @@ QString sha256Hex(const QByteArray& data) { return QString::fromLatin1(QCryptogr
 
 QString pluginCatalogBase() {
     QString base = QString::fromStdString(platform::env("BEMOTION_PLUGIN_CATALOG"));
-    if (base.isEmpty()) base = "https://raw.githubusercontent.com/eugeniobenfica/bemotion/main/assets/plugins/";
+    // The tag of this version, not the main branch: what a release installs is what was released
+    // with it (and checked by its SHA256 in that tag's index.json), never a later push.
+    if (base.isEmpty()) base = QString("https://raw.githubusercontent.com/eugeniobenfica/bemotion/v%1/assets/plugins/").arg(BEMOTION_VERSION);
     if (!base.endsWith('/')) base += '/';
     return base;
 }

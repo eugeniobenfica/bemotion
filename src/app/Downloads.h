@@ -1,7 +1,7 @@
 #pragma once
 
 // The few things bemotion fetches from the internet, and only when the user asks for them:
-// the official plugins a release leaves out (from bemotion's repository on GitHub,
+// the official plugins (packages leave them out; from bemotion's repository on GitHub,
 // core/PluginCatalog.h), the speech-to-text model (from whisper.cpp's models on Hugging Face)
 // when it did not come with the app, and new versions (bemotion's releases on GitHub,
 // core/Updates.h) once the user turned updates on — the one thing that may be looked for
@@ -33,7 +33,8 @@ QNetworkReply* fetch(const QUrl& url, QObject* context, Done done, Progress prog
 
 QString sha256Hex(const QByteArray& data);
 
-// Where the official plugin catalog is: index.json, and each plugin's files under <base>/<id>/.
+// Where the official plugin catalog is: index.json, and each plugin's files under <base>/<id>/,
+// in bemotion's repository at this version's tag (v<version>), never the main branch.
 // BEMOTION_PLUGIN_CATALOG replaces it (a mirror, or a local folder as file:///.../plugins/).
 QString pluginCatalogBase();
 // The catalog, read (plugins of a newer API than this bemotion's are left out).
