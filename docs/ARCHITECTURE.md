@@ -889,8 +889,8 @@ Update the effect list in `docs/OPERATIONS.md`.
 **An operation** — a method in `Applier` (`core/Ops.cpp`) registered in the
 operation table; validate every field with the `field` / `number` / `text`
 helpers so errors are precise; return created ids. Tests in
-`tests/core_tests.cpp`, reference in `docs/OPERATIONS.md`. MCP and Lua get it
-automatically.
+`tests/operations_tests.cpp` (or the area's file), reference in
+`docs/OPERATIONS.md`. MCP and Lua get it automatically.
 
 **A validation rule** — check and repair in `core/Validate.cpp` (both), a test
 that breaks and repairs it; make sure existing projects still pass
@@ -939,9 +939,14 @@ changes behavior.
 
 ## 13. Testing and verification
 
-- **Core tests** (`tests/core_tests.cpp`, `ctest`): every change to `src/core`
-  comes with tests. Keep them small and deterministic; no heavy fuzzing
-  infrastructure.
+- **Core tests** (`ctest`): every change to `src/core` comes with tests. Keep
+  them small and deterministic. One executable, one file per area:
+  `animation_tests.cpp` (keyframes, easing, presets, cameras), `timeline_tests`
+  (tracks, clips, transitions), `operations_tests` (operations, validation),
+  `expression_tests`, `layer_tests` (kinds of layers, effects, audio) and
+  `file_tests` (the format, imports, exports, catalogs, languages, docs); each
+  ends with its list of tests, which `core_tests.cpp` runs. `tests/Check.h`
+  has `CHECK`, `near` and `run` (operations from JSON text).
 - **Smoke test** (`tools/smoke-test.sh <build dir>`): exports the Welcome
   project to every format (checked with ffprobe), drives the automation
   commands and the MCP server (`tools/mcp-test.py`), and opens the app

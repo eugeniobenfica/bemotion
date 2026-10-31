@@ -1,4 +1,5 @@
-add_executable(bemotion_core_tests core_tests.cpp)
+add_executable(bemotion_core_tests core_tests.cpp animation_tests.cpp timeline_tests.cpp operations_tests.cpp
+    expression_tests.cpp layer_tests.cpp file_tests.cpp)
 target_link_libraries(bemotion_core_tests PRIVATE bemotion_core)
 target_compile_definitions(bemotion_core_tests PRIVATE BEMOTION_SOURCE_DIR="${PROJECT_SOURCE_DIR}") # the docs it checks
 add_test(NAME core_tests COMMAND bemotion_core_tests)
