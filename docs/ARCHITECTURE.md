@@ -366,6 +366,9 @@ Rules:
 - Editor tools may keep mutating directly for interactive gestures (they need
   60 fps feedback); when an editor action is also useful to scripts, move its
   logic into the core and call it from both (the gradual direction).
+  `tools/editor-paths.py` measures it: the editor's edits (`touch()` sites)
+  and how many go through logic shared with operations (16% of 211 when it
+  was added). A change that moves an edit into the core should raise it.
 
 ## 5. Rendering (`src/render`)
 
