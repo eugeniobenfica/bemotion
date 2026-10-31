@@ -594,6 +594,45 @@ void testHistory() {
     CHECK(p.comp.layers.size() == 1);
 }
 
+void testHistoryLimits() {
+    // Steps: only the newest ones stay.
+    Project p;
+    History steps(3);
+    steps.reset(p);
+    for (int i = 0; i < 6; ++i) {
+        p.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0));
+        steps.commit(p);
+    }
+    CHECK(steps.undoSteps() == 3);
+    while (steps.undo(p)) {}
+    CHECK(p.comp.layers.size() == 3);
+
+    // Bytes: a tiny budget keeps the last step, and undo and redo keep the count right.
+    Project q;
+    History bytes(200, 1);
+    bytes.reset(q);
+    for (int i = 0; i < 4; ++i) {
+        q.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0));
+        bytes.commit(q);
+    }
+    CHECK(bytes.undoSteps() == 1);
+    const size_t kept = bytes.bytes();
+    CHECK(bytes.undo(q) && q.comp.layers.size() == 3);
+    CHECK(bytes.redo(q) && q.comp.layers.size() == 4);
+    CHECK(bytes.bytes() == kept);
+
+    // Saved state: back to it by undo is clean again.
+    Project r;
+    History saved;
+    saved.reset(r);
+    r.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0));
+    saved.commit(r);
+    saved.markSaved();
+    CHECK(!saved.isDirty());
+    CHECK(saved.undo(r) && saved.isDirty());
+    CHECK(saved.redo(r) && !saved.isDirty());
+}
+
 // --- operations, validation ------------------------------------------------------------------
 
 OpsResult run(Project& p, const char* ops) { return applyOps(p, nlohmann::json::parse(ops)); }
@@ -2353,6 +2392,7 @@ int main() {
         {"compounds", testCompounds},
         {"legacy format id", testLegacyFormatId},
         {"history", testHistory},
+        {"history limits", testHistoryLimits},
         {"media", testMedia},
         {"operations: build and query", testOpsBuildAndQuery},
         {"operations: atomic batches and errors", testOpsAtomic},

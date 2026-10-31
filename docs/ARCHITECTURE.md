@@ -238,8 +238,10 @@ are their operations (the sound comes in through `OpEnvironment::mediaLoudness`)
   sees an invalid project). Never break old files: add fields with defaults;
   bump the version only for incompatible changes, keeping a migration.
 - **`History`** — undo by snapshots: after each completed edit the serialized
-  project is pushed (limit 200). Editing code does not do undo bookkeeping; it
-  changes the project and lets the editor commit (§7).
+  project is pushed, bounded by steps (200) and by the bytes kept (256 MB; the
+  oldest go first, the last step always stays). Each state has a number, so
+  "unsaved?" compares numbers, not projects. Editing code does not do undo
+  bookkeeping; it changes the project and lets the editor commit (§7).
 - **`Describe`** — a compact text summary (for terminals and AIs).
 - **`Expressions`** — a formula per property (`AnimatedBase::expression`),
   in a small language of its own (`docs/EXPRESSIONS.md`): parsed once per text
