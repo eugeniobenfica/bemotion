@@ -95,6 +95,7 @@ add_executable(bemotion WIN32
     ui/CurvesEditor.cpp
     ui/ExperienceScreen.cpp
     ui/SettingsWindow.cpp
+    ui/SettingsPlugins.cpp
     ui/Tools.cpp
     ui/Widgets.cpp
     ui/panels/EffectsPanel.cpp
