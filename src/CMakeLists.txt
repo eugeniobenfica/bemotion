@@ -102,6 +102,8 @@ add_executable(bemotion WIN32
     ui/panels/ObjectsPanel.cpp
     ui/panels/ScopesPanel.cpp
     ui/panels/PropertiesPanel.cpp
+    ui/panels/PropertiesSections.cpp
+    ui/panels/PropertiesData.cpp
     ui/panels/TimelineGraph.cpp
     ui/panels/TimelinePanel.cpp
     ui/panels/TimelinePaint.cpp
@@ -115,6 +117,8 @@ add_executable(bemotion WIN32
     ui/PluginInstall.cpp
     ui/Updates.cpp
     ui/panels/ViewportPanel.cpp
+    ui/panels/ViewportPaths.cpp
+    ui/panels/ViewportInput.cpp
     ui/panels/ViewportTools.cpp
     ui/panels/ToolSettingsPanel.cpp)
 set_target_properties(bemotion PROPERTIES AUTOMOC ON)
