@@ -78,6 +78,7 @@ add_executable(bemotion WIN32
     ui/WindowChrome.cpp
     ui/EditorContext.cpp
     ui/EditorWindow.cpp
+    ui/EditorMenus.cpp
     ui/ExportDialog.cpp
     ui/GpuContext.cpp
     ui/HelpWindow.cpp
