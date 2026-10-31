@@ -7,14 +7,17 @@ namespace bemotion::render {
 
 namespace {
 Gpu* g_gpu = nullptr;
-}
+thread_local Gpu* t_gpu = nullptr;
+} // namespace
 
 void setGpu(Gpu* gpu) { g_gpu = gpu; }
-Gpu* gpu() { return g_gpu; }
+void setThreadGpu(Gpu* gpu) { t_gpu = gpu; }
+Gpu* gpu() { return t_gpu ? t_gpu : g_gpu; }
 
 sk_sp<SkSurface> makeGpuSurface(const SkImageInfo& info) {
-    if (!g_gpu || !g_gpu->makeCurrent() || !g_gpu->context()) return nullptr;
-    return SkSurfaces::RenderTarget(g_gpu->context(), skgpu::Budgeted::kYes, info);
+    Gpu* g = gpu();
+    if (!g || !g->makeCurrent() || !g->context()) return nullptr;
+    return SkSurfaces::RenderTarget(g->context(), skgpu::Budgeted::kYes, info);
 }
 
 } // namespace bemotion::render

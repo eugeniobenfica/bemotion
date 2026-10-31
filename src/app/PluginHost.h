@@ -12,6 +12,7 @@
 #include "core/Project.h"
 
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -149,6 +150,9 @@ public:
 private:
     void loadPlugin(const std::filesystem::path& dir, bool builtin);
     std::vector<Plugin> plugins_;
+    // Lua runs on one thread at a time: the viewport draws plugin objects on a thread of its own
+    // (ui/ViewportRenderer) while the interface runs commands and loads plugins.
+    mutable std::recursive_mutex lua_;
     std::vector<PluginObjectType> types_;
     std::vector<PluginCommand> commands_;
     bool reloadRequested_ = false;

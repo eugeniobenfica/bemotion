@@ -87,8 +87,9 @@ struct Shaper {
     }
 };
 
+// One per thread: a shaper keeps state while it shapes (the viewport draws on a thread of its own).
 Shaper& shaper() {
-    static Shaper s;
+    thread_local Shaper s;
     return s;
 }
 

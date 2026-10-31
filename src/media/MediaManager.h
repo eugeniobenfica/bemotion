@@ -62,6 +62,9 @@ public:
     // Proxies (see MediaIO.h): the editor's composition (`preview`) shows a video's proxy when
     // there is one and they are on; exports and other compositions always show the original.
     void setPreview(const Composition* preview);
+    // A copy of the preview, drawn elsewhere (the viewport's render thread): its videos are
+    // the preview's (proxies, decoded ahead at the size shown). Null: none.
+    void setPreviewCopy(const Composition* copy);
     void setUseProxies(bool on);
     bool useProxies() const;
     bool hasProxy(const MediaItem& item) const;

@@ -80,6 +80,7 @@ private:
 class VulkanGpu final : public EngineGpu {
 public:
     bool create() override {
+        setThread();
 #ifdef _WIN32
         loader_.setFileName("vulkan-1");
 #elif defined(__APPLE__)
@@ -162,6 +163,7 @@ public:
         return static_cast<bool>(skia_);
     }
     bool makeCurrent() override { return skia_ && QThread::currentThread() == thread_; } // nothing to bind
+    void setThread() { thread_ = QThread::currentThread(); } // the one that creates it uses it
     GrDirectContext* context() override { return skia_.get(); }
     void release() override {
         // Skia lets go of what it made on the card. The device and instance stay: surfaces kept by
@@ -181,6 +183,57 @@ private:
     VkDevice device_ = VK_NULL_HANDLE;
     skgpu::VulkanExtensions extensions_;
     sk_sp<GrDirectContext> skia_;
+};
+#endif
+
+// OpenGL for another thread: its offscreen surface is made on the interface's thread (Qt asks
+// for that), its context on the thread that draws, current there and nowhere else.
+class QtThreadGpu final : public ThreadGpu {
+  public:
+    QtThreadGpu() {
+        surface_ = std::make_unique<QOffscreenSurface>();
+        surface_->setFormat(QSurfaceFormat::defaultFormat());
+        surface_->create();
+    }
+    bool create() override {
+        if (!surface_->isValid()) return false;
+        context_ = std::make_unique<QOpenGLContext>();
+        context_->setFormat(surface_->format());
+        if (!context_->create() || !context_->makeCurrent(surface_.get())) return false;
+        GrContextOptions options;
+        options.fAvoidStencilBuffers = true;
+        skia_ = GrDirectContexts::MakeGL(GrGLMakeNativeInterface(), options);
+        return static_cast<bool>(skia_);
+    }
+    bool makeCurrent() override {
+        if (!skia_ || QThread::currentThread() != context_->thread()) return false;
+        if (QOpenGLContext::currentContext() == context_.get()) return true;
+        return context_->makeCurrent(surface_.get());
+    }
+    GrDirectContext* context() override { return skia_.get(); }
+    void release() override {
+        if (skia_ && context_->makeCurrent(surface_.get())) skia_->releaseResourcesAndAbandonContext();
+        skia_.reset();
+        if (context_) context_->doneCurrent();
+        context_.reset(); // on its own thread
+    }
+
+  private:
+    std::unique_ptr<QOffscreenSurface> surface_; // goes on the interface's thread (the destructor)
+    std::unique_ptr<QOpenGLContext> context_;
+    sk_sp<GrDirectContext> skia_;
+};
+
+#ifdef SK_VULKAN
+class VulkanThreadGpu final : public ThreadGpu {
+  public:
+    bool create() override { return vulkan_.create(); }
+    bool makeCurrent() override { return vulkan_.makeCurrent(); }
+    GrDirectContext* context() override { return vulkan_.context(); }
+    void release() override { vulkan_.release(); }
+
+  private:
+    VulkanGpu vulkan_;
 };
 #endif
 
@@ -234,6 +287,14 @@ Engine useEngine(Engine engine) {
     render::setGpu(current());
     applyCacheLimit();
     return engine;
+}
+
+std::unique_ptr<ThreadGpu> prepareThreadGpu() {
+    if (g_engine == Engine::OpenGL && QOpenGLContext::supportsThreadedOpenGL()) return std::make_unique<QtThreadGpu>();
+#ifdef SK_VULKAN
+    if (g_engine == Engine::Vulkan) return std::make_unique<VulkanThreadGpu>();
+#endif
+    return nullptr;
 }
 
 bool useGpu(bool on) { return useEngine(on ? Engine::OpenGL : Engine::Processor) != Engine::Processor; }

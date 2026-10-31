@@ -6,7 +6,8 @@
 // Performance): everything draws on the processor, as before. Same pictures either way, up to
 // the last bit of antialiasing.
 //
-// Only the thread that made it (the interface's) may use it; others draw on the processor.
+// Only the thread that made it (the interface's) may use it; others draw on the processor, or on
+// a graphics card context of their own (setThreadGpu: the viewport's render thread).
 
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkSurface.h"
@@ -24,7 +25,9 @@ public:
 };
 
 void setGpu(Gpu* gpu); // null: the processor
-Gpu* gpu();
+// This thread's own, in place of the interface's (null: back to it).
+void setThreadGpu(Gpu* gpu);
+Gpu* gpu(); // this thread's own, else the interface's
 
 // A surface of `info` to draw a frame on: on the graphics card when there is one usable from
 // this thread (made current), else null (the caller draws in memory).

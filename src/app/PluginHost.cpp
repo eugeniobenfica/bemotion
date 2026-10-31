@@ -54,6 +54,7 @@ fs::path PluginHost::userDir() {
 }
 
 void PluginHost::shutdown() {
+    std::lock_guard lua(lua_);
     for (Plugin& p : plugins_)
         if (p.L) closeSandbox(p.L);
     plugins_.clear();
@@ -63,6 +64,7 @@ void PluginHost::shutdown() {
 }
 
 void PluginHost::load() {
+    std::lock_guard lua(lua_);
     shutdown();
     std::error_code ec;
     // Essentials only: the core alone, no plugin at all (their layers draw nothing meanwhile).
@@ -79,6 +81,7 @@ void PluginHost::load() {
 }
 
 void PluginHost::loadPlugin(const fs::path& dir, bool builtin) {
+    std::lock_guard lua(lua_);
     Plugin p;
     p.dir = dir;
     p.builtin = builtin;
@@ -205,6 +208,7 @@ bool runWithDoc(lua_State* L, Project& project, double time, const std::vector<u
 
 bool PluginHost::runCommand(const std::string& commandId, Project& project, double time, const std::vector<uint64_t>& selection,
                             const OpEnvironment& env, std::string& error, bool pressed, CommandOutcome* outcome) {
+    std::lock_guard lua(lua_);
     const auto it = std::find_if(commands_.begin(), commands_.end(), [&](const PluginCommand& c) { return c.id == commandId; });
     Plugin* plugin = it != commands_.end() ? findPlugin(it->pluginId) : nullptr;
     if (!plugin || !plugin->L || !plugin->enabled) {
@@ -226,6 +230,7 @@ bool PluginHost::runCommand(const std::string& commandId, Project& project, doub
 bool PluginHost::runScript(const std::string& source, const std::string& chunkName, Project& project, double time,
                            const OpEnvironment& env, std::vector<std::string>& log, std::string& error,
                            const std::vector<uint64_t>& selection) {
+    std::lock_guard lua(get().lua_); // (its sandbox shares the budget with the plugins')
     const std::string code = withoutBom(source);
     // A throwaway sandbox with its own (fake) plugin entry, so print() has somewhere to go.
     const std::string id = "script";
@@ -273,6 +278,7 @@ Plugin* PluginHost::findPlugin(const std::string& id) {
 }
 
 void PluginHost::processPendingReload() {
+    std::lock_guard lua(lua_);
     // A running command's Lua state owns the take's start time and stop action.
     if (!reloadRequested_ || media::Recorder::get().recording()) return;
     reloadRequested_ = false;
@@ -281,6 +287,7 @@ void PluginHost::processPendingReload() {
 }
 
 void PluginHost::setEnabled(const std::string& pluginId, bool enabled) {
+    std::lock_guard lua(lua_);
     if (Plugin* p = findPlugin(pluginId)) {
         if (!enabled && p->may("microphone") && media::Recorder::get().recording()) return;
         p->enabled = enabled;
@@ -292,6 +299,7 @@ void PluginHost::setEnabled(const std::string& pluginId, bool enabled) {
 }
 
 bool PluginHost::install(const fs::path& manifest, std::string* error) {
+    std::lock_guard lua(lua_);
     try {
         const json m = json::parse(readFile(manifest));
         const std::string id = m.value("id", std::string());
@@ -306,6 +314,7 @@ bool PluginHost::install(const fs::path& manifest, std::string* error) {
 }
 
 bool PluginHost::uninstall(const std::string& pluginId, std::string* error) {
+    std::lock_guard lua(lua_);
     const Plugin* plugin = findPlugin(pluginId);
     if (!plugin || plugin->builtin) {
         if (error) *error = "only installed plugins can be removed";
@@ -391,6 +400,7 @@ void PluginHost::reconcile(Composition& comp) const {
 }
 
 std::vector<std::string> PluginHost::rowLabels(const Layer& layer, std::vector<int>* unknownRows) {
+    std::lock_guard lua(lua_);
     std::vector<std::string> names;
     if (unknownRows) unknownRows->clear();
     const PluginObjectType* type = findType(layer.plugin.objectType);
@@ -427,6 +437,7 @@ std::vector<std::string> PluginHost::rowLabels(const Layer& layer, std::vector<i
 }
 
 bool PluginHost::importCsv(Layer& layer, const std::string& csv, std::string& error) {
+    std::lock_guard lua(lua_);
     PluginProps& props = layer.plugin;
     if (!props.hasRows && !props.hasTable) {
         error = "this object has no data";
@@ -508,6 +519,7 @@ bool PluginHost::importCsv(Layer& layer, const std::string& csv, std::string& er
 }
 
 void PluginHost::draw(const Layer& layer, double t, render::PluginCanvas& c) {
+    std::lock_guard lua(lua_);
     const PluginObjectType* type = findType(layer.plugin.objectType);
     Plugin* plugin = type ? findPlugin(type->pluginId) : nullptr;
     if (!type || !plugin || !plugin->L) {

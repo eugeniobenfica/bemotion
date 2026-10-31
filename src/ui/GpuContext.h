@@ -5,6 +5,10 @@
 // when Skia was built with it), each with Skia's context on it. An engine that does not work here
 // falls back to the other, then to the processor.
 
+#include "render/Gpu.h"
+
+#include <memory>
+
 namespace bemotion::ui {
 
 // Makes it (once) and hands it to the renderer; false: no usable OpenGL here. `on` false: the
@@ -22,5 +26,16 @@ const char* gpuName();
 // How much of the graphics card's memory Skia keeps for pictures, glyphs and effects between
 // frames (Settings › Performance): more reuses more, fewer uploads while scrubbing.
 void setGpuCacheMegabytes(int megabytes);
+
+// A graphics card context for another thread (the viewport's render thread), on the engine in
+// use: made here, on the interface's thread; then create() and release() on the thread that draws
+// with it (render::setThreadGpu), and deleted back here. Null: the processor draws, or this
+// system cannot share the card between threads.
+class ThreadGpu : public render::Gpu {
+  public:
+    virtual bool create() = 0;
+    virtual void release() = 0;
+};
+std::unique_ptr<ThreadGpu> prepareThreadGpu();
 
 } // namespace bemotion::ui

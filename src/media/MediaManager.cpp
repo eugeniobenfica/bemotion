@@ -219,6 +219,12 @@ struct MediaManager::Impl {
     std::map<uint64_t, std::string> proxyErrors;
     uint64_t generation = 1;
     std::atomic<uint64_t> arrivals{0}; // frames a seeker finished (and filmstrips made)
+    // Everything but the audio: the viewport draws on a thread of its own (ui/ViewportRenderer)
+    // while the interface asks for thumbnails, filmstrips and proxies. Taken before `mutex` when
+    // both are (the audio engine takes only `mutex`, so it never waits for a video).
+    mutable std::recursive_mutex video;
+    const Composition* previewCopy = nullptr; // setPreviewCopy
+    bool isPreview(const Composition* comp) const { return preview && (comp == preview || comp == previewCopy); }
     struct FilmstripJob {
         std::future<void> job;
         std::shared_ptr<FilmstripProgress> progress = std::make_shared<FilmstripProgress>();
@@ -285,6 +291,7 @@ void MediaManager::install() {
 
 void MediaManager::release() {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     m.proxyQueue.clear();
     m.proxyCancel = true; // a proxy being made stops (its half-made file goes)
     if (m.proxyThread.valid()) m.proxyThread.wait();
@@ -302,6 +309,7 @@ void MediaManager::release() {
 
 void MediaManager::update(const Composition& comp) {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     std::lock_guard lock(m.mutex);
     for (const MediaItem& item : comp.media) {
         if (!item.hasAudio) continue;
@@ -377,6 +385,7 @@ void MediaManager::update(const Composition& comp) {
 
 sk_sp<SkImage> MediaManager::thumbnail(const MediaItem& item) {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     Impl::Picture& pic = m.pictures[item.id];
     if (pic.path == item.path) return pic.image;
     pic.path = item.path;
@@ -394,7 +403,10 @@ sk_sp<SkImage> MediaManager::thumbnail(const MediaItem& item) {
         }
     }
     if (!ok) {
-        if (!error.empty()) m.errors[item.id] = error;
+        if (!error.empty()) {
+            std::lock_guard lock(m.mutex); // (error() reads it)
+            m.errors[item.id] = error;
+        }
         return nullptr;
     }
     pic.image = toImage(w, h, rgba, item.kind == MediaKind::Image);
@@ -406,7 +418,8 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
     if (!item || !item->hasVideo) return nullptr;
     if (item->kind == MediaKind::Image) return thumbnail(*item); // the full image
     Impl& m = impl();
-    const bool preview = &comp == m.preview;
+    std::lock_guard video(m.video);
+    const bool preview = m.isPreview(&comp);
     const std::string file = showsProxy(comp, *item) ? platform8(proxyPath(*item)) : item->path;
     const double frame = item->fps > 0 ? 1.0 / item->fps : 1.0 / 30.0;
     // The editor decodes a video no bigger than it shows it (steps of an eighth, so zooming does
@@ -428,7 +441,10 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
         v.lastUse = m.tick;
         std::string error;
         v.reader = VideoReader::open(pathOf(file), &error);
-        if (!v.reader) m.errors[item->id] = error;
+        if (!v.reader) {
+            std::lock_guard lock(m.mutex); // (error() reads it)
+            m.errors[item->id] = error;
+        }
     }
     if (!v.reader) return nullptr;
     if (v.seeker && v.seeker->scale() != scale) v.seeker = nullptr, v.recent.clear(); // made again at the new size
@@ -494,17 +510,23 @@ sk_sp<SkImage> MediaManager::frameFor(const Composition& comp, const Layer& laye
 
 void MediaManager::setOutputScale(const Composition* comp, double pixelsPerUnit) {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     if (pixelsPerUnit > 0.0) m.outputScales[comp] = pixelsPerUnit;
     else m.outputScales.erase(comp);
 }
 
 void MediaManager::setPreviewScale(const void* view, double pixelsPerUnit) {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     if (pixelsPerUnit > 0.0) m.previewScales[view] = {pixelsPerUnit, m.tick};
     else m.previewScales.erase(view);
 }
 
-void MediaManager::setScaledPreview(bool on) { impl().scaledPreview = on; }
+void MediaManager::setScaledPreview(bool on) {
+    Impl& m = impl();
+    std::lock_guard video(m.video);
+    m.scaledPreview = on;
+}
 
 namespace {
 
@@ -569,6 +591,7 @@ void makeFilmstrip(const std::filesystem::path& file, double duration, const std
 std::shared_ptr<const Filmstrip> MediaManager::filmstrip(const MediaItem& item) {
     if (item.kind != MediaKind::Video || !item.hasVideo || item.duration <= 0) return nullptr;
     Impl& m = impl();
+    std::lock_guard video(m.video);
     const bool proxy = hasProxy(item);
     const std::string file = proxy ? platform8(proxyPath(item)) : item.path;
     Impl::FilmstripJob& f = m.filmstrips[file];
@@ -585,22 +608,42 @@ std::shared_ptr<const Filmstrip> MediaManager::filmstrip(const MediaItem& item) 
     return f.progress->latest;
 }
 
-void MediaManager::setPreview(const Composition* preview) { impl().preview = preview; }
+void MediaManager::setPreview(const Composition* preview) {
+    Impl& m = impl();
+    std::lock_guard video(m.video);
+    m.preview = preview;
+}
+
+void MediaManager::setPreviewCopy(const Composition* copy) {
+    Impl& m = impl();
+    std::lock_guard video(m.video);
+    m.previewCopy = copy;
+}
 
 uint64_t MediaManager::arrivals() const { return impl().arrivals.load(); }
 
-bool MediaManager::takeStale() { return std::exchange(impl().staleServed, false); }
+bool MediaManager::takeStale() {
+    Impl& m = impl();
+    std::lock_guard video(m.video);
+    return std::exchange(m.staleServed, false);
+}
 
 void MediaManager::setUseProxies(bool on) {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     if (m.useProxies != on) ++m.generation;
     m.useProxies = on;
 }
 
-bool MediaManager::useProxies() const { return impl().useProxies; }
+bool MediaManager::useProxies() const {
+    const Impl& m = impl();
+    std::lock_guard video(m.video);
+    return m.useProxies;
+}
 
 bool MediaManager::hasProxy(const MediaItem& item) const {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     if (item.kind != MediaKind::Video) return false;
     if (m.proxyRunning && m.proxyRunning->item.path == item.path) return false; // half made
     const auto it = m.proxyExists.find(item.path);
@@ -614,11 +657,13 @@ bool MediaManager::hasProxy(const MediaItem& item) const {
 
 bool MediaManager::showsProxy(const Composition& comp, const MediaItem& item) const {
     const Impl& m = impl();
-    return m.useProxies && &comp == m.preview && hasProxy(item);
+    std::lock_guard video(m.video);
+    return m.useProxies && m.isPreview(&comp) && hasProxy(item);
 }
 
 void MediaManager::makeProxies(const std::vector<MediaItem>& items) {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     for (const MediaItem& item : items) {
         if (item.kind != MediaKind::Video || hasProxy(item) || proxyProgress(item.id) >= 0) continue;
         auto job = std::make_shared<Impl::ProxyJob>();
@@ -631,6 +676,7 @@ void MediaManager::makeProxies(const std::vector<MediaItem>& items) {
 
 float MediaManager::proxyProgress(uint64_t mediaId) const {
     const Impl& m = impl();
+    std::lock_guard video(m.video);
     if (m.proxyRunning && m.proxyRunning->item.id == mediaId) return m.proxyRunning->progress.load();
     for (const auto& job : m.proxyQueue)
         if (job->item.id == mediaId) return 0.0f;
@@ -639,12 +685,14 @@ float MediaManager::proxyProgress(uint64_t mediaId) const {
 
 std::string MediaManager::proxyError(uint64_t mediaId) const {
     const Impl& m = impl();
+    std::lock_guard video(m.video);
     const auto it = m.proxyErrors.find(mediaId);
     return it == m.proxyErrors.end() ? std::string() : it->second;
 }
 
 void MediaManager::deleteProxy(const MediaItem& item) {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     std::erase_if(m.proxyQueue, [&](const auto& job) { return job->item.path == item.path; });
     if (m.proxyRunning && m.proxyRunning->item.path == item.path) m.proxyCancel = true;
     std::error_code ec;
@@ -666,6 +714,7 @@ uint64_t MediaManager::proxyBytes() const {
 
 void MediaManager::deleteAllProxies() {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     m.proxyQueue.clear();
     if (m.proxyRunning) m.proxyCancel = true;
     m.videos.clear(); // readers of proxies let their files go
@@ -680,14 +729,20 @@ void MediaManager::deleteAllProxies() {
 
 void MediaManager::setFrameCacheMegabytes(int megabytes) {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     m.frameBudget = static_cast<size_t>(std::max(0, megabytes)) << 20;
     m.trimFrames();
 }
 
-uint64_t MediaManager::generation() const { return impl().generation; }
+uint64_t MediaManager::generation() const {
+    const Impl& m = impl();
+    std::lock_guard video(m.video);
+    return m.generation;
+}
 
 void MediaManager::reopenVideos() {
     Impl& m = impl();
+    std::lock_guard video(m.video);
     m.videos.clear();
     ++m.generation;
 }
