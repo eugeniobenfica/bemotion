@@ -87,6 +87,7 @@ struct Settings {
     std::string updateChannel;        // "stable", "beta"; empty: as this build (a beta follows betas)
     int64_t lastUpdateCheck = 0;      // when it last looked (seconds since 1970)
     std::string skippedVersion;       // "Skip this version": not offered again (a newer one is)
+    bool crashReports = false;        // keep a local report when bemotion crashes (app/Platform.h)
     // Playback (Settings › Editor › Playback).
     bool hardwareDecoding = false; // videos read by the graphics card (media/MediaIO.h); off: a fast processor often beats it
     bool useProxies = true;       // the editor shows videos' proxies when they have one

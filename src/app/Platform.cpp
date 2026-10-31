@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <iterator>
 #include <mutex>
 
 #ifdef _WIN32
@@ -25,6 +26,15 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <dbghelp.h>
+#else
+#include <csignal>
+#include <fcntl.h>
+#include <unistd.h>
+#if __has_include(<execinfo.h>)
+#include <execinfo.h>
+#define BEMOTION_HAS_BACKTRACE 1
+#endif
 #endif
 
 namespace bemotion::platform {
@@ -198,13 +208,55 @@ void writeLog(const std::string& line, bool truncate) {
     out << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz").toStdString() << "  " << line << '\n';
 }
 
+// Crash reports (setCrashReports): what the crash handlers need, made ready beforehand, since a
+// crashing process should not allocate or take locks.
+bool g_crashReports = false;
+std::string g_previousLog;           // the session before's log, read by startLog
+std::vector<fs::path> g_newReports;  // kept from it at this start
+std::string g_logPath;               // for the signal handler (UTF-8; POSIX paths are bytes)
+
+std::string crashStamp(const QDateTime& when) { return when.toString("yyyy-MM-dd-hhmmss").toStdString(); }
+
 #ifdef _WIN32
+using MiniDumpWriteDumpFn = decltype(&MiniDumpWriteDump);
+MiniDumpWriteDumpFn g_writeDump = nullptr;
+std::wstring g_dumpPath; // crash-<start time>.dmp
+
 LONG WINAPI onCrash(EXCEPTION_POINTERS* info) {
     char buf[96];
     std::snprintf(buf, sizeof buf, "CRASH: exception 0x%08lX at %p", info->ExceptionRecord->ExceptionCode,
                   info->ExceptionRecord->ExceptionAddress);
     writeLog(buf, false);
+    if (g_crashReports && g_writeDump && !g_dumpPath.empty()) {
+        const HANDLE file = CreateFileW(g_dumpPath.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            MINIDUMP_EXCEPTION_INFORMATION ex{GetCurrentThreadId(), info, FALSE};
+            // The threads' stacks and the modules: enough for a stack trace, without the heap
+            // (which could hold the user's pictures or text).
+            g_writeDump(GetCurrentProcess(), GetCurrentProcessId(), file, MiniDumpNormal, &ex, nullptr, nullptr);
+            CloseHandle(file);
+        }
+    }
     return EXCEPTION_CONTINUE_SEARCH; // Windows Error Reporting still gets it
+}
+#else
+// Signals: a line and the stack into the log, with calls safe in a signal handler only, then
+// the default action (the process ends as it would have).
+void onSignal(int sig) {
+    const int fd = g_logPath.empty() ? -1 : ::open(g_logPath.c_str(), O_WRONLY | O_APPEND);
+    if (fd >= 0) {
+        char line[] = "CRASH: signal 00\n"; // (no printf in a signal handler)
+        line[14] = static_cast<char>('0' + sig / 10 % 10);
+        line[15] = static_cast<char>('0' + sig % 10);
+        if (::write(fd, line, sizeof line - 1) < 0) {}
+#ifdef BEMOTION_HAS_BACKTRACE
+        void* frames[64];
+        backtrace_symbols_fd(frames, backtrace(frames, 64), fd);
+#endif
+        ::close(fd);
+    }
+    std::signal(sig, SIG_DFL);
+    std::raise(sig);
 }
 #endif
 
@@ -213,9 +265,16 @@ LONG WINAPI onCrash(EXCEPTION_POINTERS* info) {
 fs::path logFile() { return appDataDir() / "bemotion.log"; }
 
 void startLog() {
+    {
+        std::ifstream previous(logFile(), std::ios::binary);
+        g_previousLog.assign(std::istreambuf_iterator<char>(previous), std::istreambuf_iterator<char>());
+    }
     writeLog("bemotion " BEMOTION_VERSION " started", true);
+    g_logPath = toUtf8(logFile());
 #ifdef _WIN32
     SetUnhandledExceptionFilter(onCrash);
+#else
+    for (int sig : {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT}) std::signal(sig, onSignal);
 #endif
     std::set_terminate([] {
         std::string what = "unknown";
@@ -231,5 +290,37 @@ void startLog() {
 }
 
 void log(const std::string& line) { writeLog(line, false); }
+
+fs::path crashFolder() { return appDataDir() / "crashes"; }
+
+void setCrashReports(bool on) {
+    g_crashReports = on;
+    if (!on) return;
+    std::error_code ec;
+    fs::create_directories(crashFolder(), ec);
+    // The session before ended in a crash: its log is the report (startLog read it).
+    if (g_previousLog.find("CRASH:") != std::string::npos) {
+        const fs::path report = crashFolder() / fromUtf8("crash-" + crashStamp(QDateTime::currentDateTime().addSecs(-1)) + ".log");
+        std::ofstream(report, std::ios::binary) << g_previousLog;
+        g_newReports.push_back(report);
+        // A minidump that crash left (Windows) goes with it.
+        for (const auto& entry : fs::directory_iterator(crashFolder(), ec))
+            if (entry.path().extension() == ".dmp" && toUtf8(entry.path().stem()).ends_with("-pending")) {
+                fs::path dump = report;
+                dump.replace_extension(".dmp");
+                fs::rename(entry.path(), dump, ec);
+                if (!ec) g_newReports.push_back(dump);
+            }
+        g_previousLog.clear();
+    }
+#ifdef _WIN32
+    if (!g_writeDump)
+        if (HMODULE dbghelp = LoadLibraryW(L"dbghelp.dll"))
+            g_writeDump = reinterpret_cast<MiniDumpWriteDumpFn>(reinterpret_cast<void*>(GetProcAddress(dbghelp, "MiniDumpWriteDump")));
+    g_dumpPath = (crashFolder() / ("crash-" + crashStamp(QDateTime::currentDateTime()) + "-pending.dmp")).wstring();
+#endif
+}
+
+std::vector<fs::path> newCrashReports() { return g_newReports; }
 
 } // namespace bemotion::platform

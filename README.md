@@ -445,6 +445,9 @@ Runs on 64-bit Windows 10 (1809 or later) and Windows 11, on any x86-64 CPU —
 optimized code paths for newer processors are picked at runtime. The files are
 not signed yet, so SmartScreen may warn on first launch (*More info › Run anyway*).
 If something goes wrong, `%APPDATA%\bemotion\bemotion.log` says what happened.
+Turn on *Settings › Interface › Crash reports* and a crash leaves a report in
+`%APPDATA%\bemotion\crashes` (kept on your computer, never sent) to attach to
+a bug report.
 
 ### Running from the sources
 

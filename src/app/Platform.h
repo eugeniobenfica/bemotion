@@ -50,4 +50,14 @@ void startLog();
 void log(const std::string& line);
 fs::path logFile();
 
+// Crash reports, off unless the user turns them on (the "crash_reports" setting): a session
+// that crashed leaves <app data>/crashes/crash-<time>.log (its log, with the stack where the
+// system gives one) and, on Windows, crash-<time>.dmp. Nothing is ever sent anywhere: the user
+// may attach them to a bug report. setCrashReports(true) at start also keeps the report of the
+// session before (startLog read its log before starting a new one).
+void setCrashReports(bool on);
+fs::path crashFolder();
+// The reports kept at this start, from the session before (empty when it ended normally).
+std::vector<fs::path> newCrashReports();
+
 } // namespace bemotion::platform

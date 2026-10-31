@@ -451,6 +451,22 @@ QWidget* interfacePage() {
     updates->addRow(tr("This version"), tr("bemotion %1").arg(BEMOTION_VERSION), buttonRow({checkNow, updateNow}));
     updates->addContent(updateStatus);
 
+    // Crash reports: local only (app/Platform.h), off until turned on here.
+    SettingsCard* crashes = addSection(col, tr("Crash reports"));
+    auto* openCrashes = new QPushButton(tr("Open Folder"));
+    QObject::connect(openCrashes, &QPushButton::clicked, openCrashes, [] {
+        std::error_code ec;
+        std::filesystem::create_directories(platform::crashFolder(), ec);
+        platform::revealInFileManager(platform::crashFolder());
+    });
+    crashes->addRow(tr("Keep crash reports"),
+                    tr("When bemotion crashes, a report stays on this computer, never sent: attach it to a bug report if you like"),
+                    buttonRow({openCrashes, switchControl(s.crashReports, [](bool on) {
+                                   settings().crashReports = on;
+                                   saveSettings();
+                                   platform::setCrashReports(on);
+                               })}));
+
     SettingsCard* reset = addSection(col, tr("Start over"));
     auto* resetInterface = new QPushButton(tr("Reset Interface..."));
     QObject::connect(resetInterface, &QPushButton::clicked, resetInterface, [] {

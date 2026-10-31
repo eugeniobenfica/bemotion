@@ -802,7 +802,13 @@ Rules:
   hands those over in the legacy code page), `fromUtf8` / `toUtf8` for paths
   (the same as `core/Utf8.h`, which the layers below Qt use).
   `platform::log()` writes `bemotion.log` (startup, projects, imports, saves,
-  plugin and MCP calls, crashes).
+  plugin and MCP calls, crashes: an exception on Windows, a signal and the
+  stack elsewhere). **Crash reports** (`crash_reports`, off until *Settings ›
+  Interface › Crash reports* turns them on): `startLog` reads the session
+  before's log before starting a new one, and `setCrashReports` keeps it as
+  `<app data>/crashes/crash-<time>.log` when it ended in a crash, with a
+  Windows minidump (stacks and modules only, not the heap); the editor then
+  says so once. Nothing is sent: bemotion collects no data.
 - **`Settings`** — user preferences in `settings.json` (theme, sizes,
   shortcuts, toolbar, disabled plugins, autosave, the default length limit, the
   projects folder the user picked on the home screen…)

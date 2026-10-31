@@ -193,6 +193,7 @@ int Application::run(int argc, char** argv) {
     for (const char* style : {"Regular", "Medium", "SemiBold", "Bold"})
         QFontDatabase::addApplicationFont(QString::fromStdString(platform::toUtf8(Fonts::interFile(style))));
     applySettings();
+    platform::setCrashReports(settings().crashReports); // (keeps the report of a session that crashed)
     media::AudioEngine::get().start();
     platform::log("fonts, plugins and media ready");
     buildWindow();
@@ -518,6 +519,18 @@ void Application::showFirstRun() {
 }
 
 void Application::offerRecovery() {
+    // The session before crashed and the user keeps crash reports: say where this one is.
+    if (const std::vector<std::filesystem::path> reports = platform::newCrashReports(); !reports.empty()) {
+        QMessageBox box(window_);
+        box.setWindowTitle(tr("Crash Report"));
+        box.setText(tr("bemotion closed unexpectedly last time."));
+        box.setInformativeText(tr("A report was kept on this computer (nothing was sent). Attaching it to a bug report on "
+                                  "GitHub helps fix it."));
+        QPushButton* show = box.addButton(tr("Show Report"), QMessageBox::AcceptRole);
+        box.addButton(tr("OK"), QMessageBox::RejectRole);
+        box.exec();
+        if (box.clickedButton() == show) platform::revealInFileManager(reports.front());
+    }
     const std::vector<recovery::Entry> entries = recovery::pending();
     if (entries.empty()) return;
     const recovery::Entry& e = entries.front();

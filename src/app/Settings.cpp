@@ -122,6 +122,7 @@ void loadSettings() {
         s.showTimelineScrollbar = j.value("show_timeline_scrollbar", s.showTimelineScrollbar);
         s.essentialsOnly = j.value("essentials_only", s.essentialsOnly);
         s.checkUpdates = j.value("check_updates", s.checkUpdates);
+        s.crashReports = j.value("crash_reports", s.crashReports);
         s.updateChannel = j.value("update_channel", s.updateChannel);
         if (s.updateChannel != "stable" && s.updateChannel != "beta") s.updateChannel.clear();
         s.lastUpdateCheck = j.value("last_update_check", s.lastUpdateCheck);
@@ -191,7 +192,7 @@ void saveSettings() {
               {"show_expression_buttons", s.showExpressionButtons}, {"show_graph_button", s.showGraphButton},
               {"show_snapshot_button", s.showSnapshotButton}, {"show_timeline_scrollbar", s.showTimelineScrollbar},
               {"experience", s.experience}, {"essentials_only", s.essentialsOnly},
-              {"check_updates", s.checkUpdates}, {"update_channel", s.updateChannel},
+              {"check_updates", s.checkUpdates}, {"crash_reports", s.crashReports}, {"update_channel", s.updateChannel},
               {"last_update_check", s.lastUpdateCheck}, {"skipped_version", s.skippedVersion},
               {"hardware_decoding", s.hardwareDecoding}, {"use_proxies", s.useProxies}, {"cache_megabytes", s.cacheMegabytes},
               {"scaled_video_preview", s.scaledVideoPreview}, {"adaptive_playback", s.adaptivePlayback}, {"gpu_rendering", s.gpuRendering},
