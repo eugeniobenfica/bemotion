@@ -951,6 +951,15 @@ changes behavior.
   with nothing repaired (or only what its `<name>.repairs.txt` lists, one
   `where: what` a line), pass `validate` and save back unchanged. Add a file
   here when the format grows; never edit one to make it pass.
+- **Golden images** (`tools/golden.py`, the `golden_images` ctest): renders a
+  contact sheet of every project in `examples/`, `tests/files/`,
+  `tests/corpus/project/` and the Welcome project with `bemotion render` (the
+  CPU renderer) and compares it with `tests/golden/<name>.png`, forgiving
+  antialiasing (4×4 blocks, a small threshold, 0.5% of blocks). A drawing
+  change that is meant: `python tools/golden.py build/bemotion --update`, look
+  at the PNGs, commit them with the change. Text comes from each system's font
+  engine; where one still draws a project differently, its own golden goes in
+  `tests/golden/<windows|linux|macos>/` (CI uploads the renders).
 - **Fuzzing** (`tests/fuzz.cpp`, `bemotion_fuzz [--seconds N] [--seed S]`):
   mutated copies of `tests/corpus/<kind>/` (project, ops, svg, expression,
   mesh) go to `deserializeProject`, `applyOps`, `addSvg`, expressions and

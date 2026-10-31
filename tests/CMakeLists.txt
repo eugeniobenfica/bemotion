@@ -16,6 +16,9 @@ if(Python3_FOUND)
     add_test(NAME plugin_catalog COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/plugin-index.py --check)
     # Every language file has every interface text, with the same placeholders (tools/languages.py).
     add_test(NAME languages COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/languages.py --check)
+    # What the renderer draws, against tests/golden (tools/golden.py --update draws them again).
+    add_test(NAME golden_images COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/golden.py $<TARGET_FILE:bemotion>
+             --out ${CMAKE_CURRENT_BINARY_DIR}/golden)
 endif()
 
 add_executable(bemotion_recording_tests recording_tests.cpp)

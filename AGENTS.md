@@ -84,9 +84,11 @@ cmake --build build && ctest --test-dir build && tools/smoke-test.sh build smoke
   environment. Scripted input moves no real cursor and cannot drive a real
   drag-and-drop (`QDrag`) or a native file dialog — test those paths another
   way (a menu, an operation) and say what was not tested.
-- Before committing: build, core tests, smoke test, and a look at anything
-  visual. After pushing: `gh run list`, then check that Windows, Linux and
-  macOS passed.
+- Before committing: build, core tests (ctest also runs the golden images and
+  a short fuzz), smoke test, and a look at anything visual. A meant change to
+  the drawing: `python tools/golden.py build/bemotion.exe --update`, look at
+  `tests/golden/`, commit the PNGs with it. After pushing: `gh run list`, then
+  check that Windows, Linux and macOS passed.
 
 ## Pitfalls already met (do not repeat them)
 
