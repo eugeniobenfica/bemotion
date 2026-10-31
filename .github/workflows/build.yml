@@ -52,6 +52,11 @@ jobs:
       - name: Smoke test (build)
         run: tools/smoke-test.sh build smoke
 
+      - name: Benchmarks
+        # Reported every time (bench.json in the smoke test output); the limits only catch a
+        # big regression, as shared runners are slow and noisy.
+        run: python3 tools/bench.py build --json smoke/bench.json --max-startup 20 --max-frame-ms 500 --min-export-fps 3
+
       - name: Package
         run: tools/package-windows.sh build dist
 
@@ -73,6 +78,7 @@ jobs:
           name: bemotion-windows-smoke
           path: |
             smoke/*.png
+            smoke/bench.json
             smoke-package/*.png
             smoke/welcome.mp4
             build/tests/golden/*.png
@@ -115,6 +121,11 @@ jobs:
       - name: Smoke test (build)
         run: tools/smoke-test.sh build smoke
 
+      - name: Benchmarks
+        # Reported every time (bench.json in the smoke test output); the limits only catch a
+        # big regression, as shared runners are slow and noisy.
+        run: python3 tools/bench.py build --json smoke/bench.json --max-startup 20 --max-frame-ms 500 --min-export-fps 3
+
       - name: Package
         run: tools/package-linux.sh build dist
 
@@ -134,6 +145,7 @@ jobs:
           name: bemotion-linux-smoke
           path: |
             smoke/*.png
+            smoke/bench.json
             smoke-package/*.png
             smoke/welcome.mp4
             build/tests/golden/*.png
@@ -172,6 +184,11 @@ jobs:
       - name: Smoke test (build)
         run: tools/smoke-test.sh build smoke
 
+      - name: Benchmarks
+        # Reported every time (bench.json in the smoke test output); the limits only catch a
+        # big regression, as shared runners are slow and noisy.
+        run: python3 tools/bench.py build --json smoke/bench.json --max-startup 20 --max-frame-ms 500 --min-export-fps 3
+
       - name: Package
         run: tools/package-macos.sh build dist
 
@@ -191,6 +208,7 @@ jobs:
           name: bemotion-macos-smoke
           path: |
             smoke/*.png
+            smoke/bench.json
             smoke-package/*.png
             smoke/welcome.mp4
             build/tests/golden/*.png

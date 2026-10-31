@@ -1039,6 +1039,10 @@ changes behavior.
   MSYS2's shell sometimes starts programs without their environment variables.
   Scripted input cannot drive a real drag (`QDrag`), a native file dialog or
   the real cursor: test those paths another way and report what was not seen.
+- **Benchmarks** (`tools/bench.py <build dir>`): startup to the first frame,
+  a CPU frame and an export, on the Welcome project; CI reports them on every
+  platform (`bench.json` with the smoke test output) and fails only on a big
+  regression. A change meant to be faster says what it measured.
 - **Rendering checks**: `bemotion render <project> --count 6 --out sheet.png`.
 - **Editor edits are checked**: every build validates the project at every
   committed edit (`EditorContext::commitIfIdle`), logs violations and repairs
