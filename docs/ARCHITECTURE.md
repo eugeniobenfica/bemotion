@@ -1013,6 +1013,9 @@ changes behavior.
   `file_tests` (the format, imports, exports, catalogs, languages, docs); each
   ends with its list of tests, which `core_tests.cpp` runs. `tests/Check.h`
   has `CHECK`, `near` and `run` (operations from JSON text).
+- **Every operation is tested** (`tools/ops-tested.py`, the `operations_tested`
+  ctest): each name in `Ops.cpp`'s table must appear, quoted, in `tests/*.cpp`
+  or `tools/mcp-test.py`. A new operation fails it until its test is written.
 - **Files from earlier versions** (`tests/files/*.bemotion`): each must open
   with nothing repaired (or only what its `<name>.repairs.txt` lists, one
   `where: what` a line), pass `validate` and save back unchanged. Add a file
