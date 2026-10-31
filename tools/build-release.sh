@@ -8,6 +8,7 @@
 # tools/smoke-test.sh. The results land in dist/:
 #   dist/bemotion-<version>-setup.exe      installer
 #   dist/bemotion-<version>-portable.zip   portable folder, zipped
+#   dist/SHA256SUMS.txt                    their sums: upload it with them (the updater checks it)
 #
 # Skia is looked for in $SKIA_ROOT, third_party/skia, then ~/bemotion-deps/skia;
 # build it once with tools/skia/build-skia.sh if you have none.
@@ -39,6 +40,11 @@ echo "== package"
 tools/package-windows.sh "$build" dist
 echo "== check the package"
 tools/smoke-test.sh dist/bemotion "$build/smoke" | tail -1
+echo "== sums"
+version="$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' CMakeLists.txt | head -1)"
+suffix="$(sed -n 's/^set(BEMOTION_VERSION_SUFFIX "\(.*\)")$/\1/p' CMakeLists.txt | head -1)"
+fullversion="$version${suffix:+-$suffix}"
+(cd dist && sha256sum -b "bemotion-$fullversion-setup.exe" "bemotion-$fullversion-portable.zip" >SHA256SUMS.txt)
 echo
-echo "Done:"
-ls -1 dist/bemotion-*-setup.exe dist/bemotion-*-portable.zip
+echo "Done (tag the release v$fullversion; upload these three files):"
+ls -1 "dist/bemotion-$fullversion-setup.exe" "dist/bemotion-$fullversion-portable.zip" dist/SHA256SUMS.txt

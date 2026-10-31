@@ -12,6 +12,8 @@ build="${1:?usage: package-macos.sh <build dir> <output dir>}"
 out="${2:?usage: package-macos.sh <build dir> <output dir>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' "$root/CMakeLists.txt" | head -1)"
+suffix="$(sed -n 's/^set(BEMOTION_VERSION_SUFFIX "\(.*\)")$/\1/p' "$root/CMakeLists.txt" | head -1)"
+fullversion="$version${suffix:+-$suffix}" # 0.1.0-beta.2, as the release tag
 qtbin="$(brew --prefix qt)/bin"
 
 exe="$(find "$build" -maxdepth 3 -type f -name bemotion -perm -u+x | head -1)"
@@ -53,7 +55,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>bemotion</string>
     <key>CFBundleIconFile</key><string>bemotion</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>$version</string>
+    <key>CFBundleShortVersionString</key><string>$fullversion</string>
     <key>CFBundleVersion</key><string>$version</string>
     <key>LSMinimumSystemVersion</key><string>12.0</string>
     <key>NSHighResolutionCapable</key><true/>

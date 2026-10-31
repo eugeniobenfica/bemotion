@@ -13,6 +13,8 @@ build="${1:?usage: package-windows.sh <build dir> <output dir>}"
 out="${2:?usage: package-windows.sh <build dir> <output dir>}"
 root="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' "$root/CMakeLists.txt" | head -1)"
+suffix="$(sed -n 's/^set(BEMOTION_VERSION_SUFFIX "\(.*\)")$/\1/p' "$root/CMakeLists.txt" | head -1)"
+fullversion="$version${suffix:+-$suffix}" # 0.1.0-beta.2: names the packages, as the release tag does
 
 mkdir -p "$out"
 out="$(cd "$out" && pwd)"
@@ -20,16 +22,16 @@ rm -rf "$out/bemotion"
 "$root/tools/deploy-windows.sh" "$build" "$out/bemotion"
 cp "$root/LICENSE" "$out/bemotion/LICENSE.txt"
 
-setup="$out/bemotion-$version-setup.exe"
+setup="$out/bemotion-$fullversion-setup.exe"
 # NSIS needs a Windows temp folder it can map big files in (not MSYS2's /tmp).
 mkdir -p "$out/.nsis-tmp"
 TMP="$(cygpath -w "$out/.nsis-tmp")"
 TEMP="$TMP"
 export TMP TEMP
 (cd "$root/tools/installer" &&
-    makensis -V2 -DSOURCE="$(cygpath -w "$out/bemotion")" -DVERSION="$version" -DOUTFILE="$(cygpath -w "$setup")" bemotion.nsi)
+    makensis -V2 -DSOURCE="$(cygpath -w "$out/bemotion")" -DVERSION="$version" -DFULLVERSION="$fullversion" -DOUTFILE="$(cygpath -w "$setup")" bemotion.nsi)
 
-zip="$out/bemotion-$version-portable.zip"
+zip="$out/bemotion-$fullversion-portable.zip"
 rm -f "$zip"
 # Windows' own tar writes zip files.
 /c/Windows/System32/tar.exe -a -c -f "$(cygpath -w "$zip")" -C "$(cygpath -w "$out")" bemotion

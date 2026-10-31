@@ -5,6 +5,16 @@ project(bemotion
     DESCRIPTION "Free, open source video editor with a focus on 2D animation"
     LANGUAGES C CXX)
 
+# The pre-release part of the version ("beta.2"; empty for a release). With it the version reads
+# 0.1.0-beta.2: in the app, the package names, the release tag (v0.1.0-beta.2) and the updater's
+# comparisons (core/Updates.h). tools/package-*.sh read this line.
+set(BEMOTION_VERSION_SUFFIX "beta.2")
+if(BEMOTION_VERSION_SUFFIX)
+    set(BEMOTION_FULL_VERSION "${PROJECT_VERSION}-${BEMOTION_VERSION_SUFFIX}")
+else()
+    set(BEMOTION_FULL_VERSION "${PROJECT_VERSION}")
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

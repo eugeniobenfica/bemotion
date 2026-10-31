@@ -120,6 +120,11 @@ void loadSettings() {
         s.showSnapshotButton = j.value("show_snapshot_button", s.showSnapshotButton);
         s.showTimelineScrollbar = j.value("show_timeline_scrollbar", s.showTimelineScrollbar);
         s.essentialsOnly = j.value("essentials_only", s.essentialsOnly);
+        s.checkUpdates = j.value("check_updates", s.checkUpdates);
+        s.updateChannel = j.value("update_channel", s.updateChannel);
+        if (s.updateChannel != "stable" && s.updateChannel != "beta") s.updateChannel.clear();
+        s.lastUpdateCheck = j.value("last_update_check", s.lastUpdateCheck);
+        s.skippedVersion = j.value("skipped_version", s.skippedVersion);
         s.hardwareDecoding = j.value("hardware_decoding", s.hardwareDecoding);
         s.useProxies = j.value("use_proxies", s.useProxies);
         s.cacheMegabytes = std::clamp(j.value("cache_megabytes", s.cacheMegabytes), 128, 32768);
@@ -185,6 +190,8 @@ void saveSettings() {
               {"show_expression_buttons", s.showExpressionButtons}, {"show_graph_button", s.showGraphButton},
               {"show_snapshot_button", s.showSnapshotButton}, {"show_timeline_scrollbar", s.showTimelineScrollbar},
               {"experience", s.experience}, {"essentials_only", s.essentialsOnly},
+              {"check_updates", s.checkUpdates}, {"update_channel", s.updateChannel},
+              {"last_update_check", s.lastUpdateCheck}, {"skipped_version", s.skippedVersion},
               {"hardware_decoding", s.hardwareDecoding}, {"use_proxies", s.useProxies}, {"cache_megabytes", s.cacheMegabytes},
               {"scaled_video_preview", s.scaledVideoPreview}, {"adaptive_playback", s.adaptivePlayback}, {"gpu_rendering", s.gpuRendering},
               {"render_engine", s.renderEngine},

@@ -579,7 +579,24 @@ Rules:
   staged in app data, then `PluginHost::install`) and the speech model. Qt
   Network, redirects only to as-safe URLs, a minute without data fails.
   `BEMOTION_PLUGIN_CATALOG` replaces the GitHub address (file:// works, for
-  tests). Nothing goes online at start or in the background.
+  tests). Nothing goes online at start or in the background, except the
+  update check once the user turned it on.
+- **Updates** (`ui/Updates`, `core/Updates`): off until *Settings › Interface
+  › Updates* turns them on (`check_updates`); then, a few seconds after start
+  and at most once a day (`last_update_check`), the GitHub releases list is
+  read (`net::fetchReleases`; `BEMOTION_UPDATE_FEED` replaces the address,
+  file:// for tests) and the newest version above this one (betas with
+  `update_channel` "beta", or when this build is a beta) is offered by a quiet
+  notice in the window's corner (Update, Later, Skip This Version:
+  `skipped_version`). Update downloads the system's package
+  (`packageFor`: `-setup.exe`, `.AppImage`, `.dmg`) into `<app data>/updates`,
+  refuses it unless it matches the release's `SHA256SUMS.txt`, closes the
+  window (which asks about unsaved work) and installs: Windows runs the
+  installer with `/S /RELAUNCH` (it waits for bemotion to close and opens it
+  again), Linux swaps the AppImage. macOS, the portable folder and builds from
+  the sources get the release's page instead. The version is
+  `project(VERSION)` plus `BEMOTION_VERSION_SUFFIX` (`0.1.0-beta.2`), which
+  names the packages and must match the release tag (`v0.1.0-beta.2`).
 - **Experience** (`settings().experience`: friendly, balanced, expert;
   `applyExperience` sets the toolbar, rulers, meters, advanced options) is
   asked by `ui/ExperienceScreen` on the first start (no settings file yet);
@@ -941,7 +958,10 @@ changes behavior.
   `tools/package-macos.sh` (`.app` / `.dmg`) do the same for the other systems.
 - CI (`.github/workflows/build.yml`) builds, tests, smoke-tests and packages on
   Windows, Linux and macOS, and uploads the packages as artifacts.
-- The version is `project(VERSION …)` in the top `CMakeLists.txt`.
+- The version is `project(VERSION …)` plus `BEMOTION_VERSION_SUFFIX` (`beta.2`;
+  empty for a release) in the top `CMakeLists.txt`. A release is tagged
+  `v<version>` and carries the packages and a `SHA256SUMS.txt` of them under
+  the same names: the updater checks downloads against it.
 
 ## 15. Working in parallel (humans and agents)
 

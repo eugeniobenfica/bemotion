@@ -1,5 +1,8 @@
 ; bemotion installer for Windows (NSIS 3). Built by tools/package-windows.sh:
-;   makensis /DSOURCE=<deployed folder> /DVERSION=0.1.0 /DOUTFILE=<setup.exe> bemotion.nsi
+;   makensis /DSOURCE=<deployed folder> /DVERSION=0.1.0 /DFULLVERSION=0.1.0-beta.2 /DOUTFILE=<setup.exe> bemotion.nsi
+;
+; bemotion's updater runs it as `setup.exe /S /RELAUNCH`: quietly, waiting for bemotion to
+; close, then opening it again.
 ;
 ; Installs for the current user (no administrator rights needed) into
 ; %LOCALAPPDATA%\Programs\bemotion, adds Start Menu (and optionally desktop)
@@ -20,8 +23,11 @@ ManifestDPIAware true
 !ifndef VERSION
   !define VERSION "0.0.0"
 !endif
+!ifndef FULLVERSION ; with its pre-release part (0.1.0-beta.2); VERSION stays numeric for Windows
+  !define FULLVERSION "${VERSION}"
+!endif
 !ifndef OUTFILE
-  !define OUTFILE "bemotion-${VERSION}-setup.exe"
+  !define OUTFILE "bemotion-${FULLVERSION}-setup.exe"
 !endif
 
 !define APP "bemotion"
@@ -32,10 +38,10 @@ Name "${APP}"
 OutFile "${OUTFILE}"
 InstallDir "$LOCALAPPDATA\Programs\${APP}"
 InstallDirRegKey HKCU "Software\${APP}" "InstallDir"
-BrandingText "${APP} ${VERSION}"
+BrandingText "${APP} ${FULLVERSION}"
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "${APP}"
-VIAddVersionKey "ProductVersion" "${VERSION}"
+VIAddVersionKey "ProductVersion" "${FULLVERSION}"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "FileDescription" "${APP} installer"
 VIAddVersionKey "LegalCopyright" "The bemotion contributors (MIT License)"
@@ -67,22 +73,38 @@ LangString StillRunning ${LANG_PORTUGUESEBR} "O bemotion está aberto. Feche-o e
 LangString ProjectType ${LANG_ENGLISH} "bemotion Project"
 LangString ProjectType ${LANG_PORTUGUESEBR} "Projeto do bemotion"
 
-; The program's files can't be replaced while it runs.
+; The program's files can't be replaced while it runs. An update starts while bemotion is
+; closing: give it a few seconds before asking.
 !macro WaitUntilClosed
+  StrCpy $1 0
   retry:
-    IfFileExists "$INSTDIRemotion.exe" 0 closed
+    IfFileExists "$INSTDIR\bemotion.exe" 0 closed
     ClearErrors
-    FileOpen $0 "$INSTDIRemotion.exe" a
+    FileOpen $0 "$INSTDIR\bemotion.exe" a
     IfErrors locked
     FileClose $0
     Goto closed
   locked:
+    IntOp $1 $1 + 1
+    IntCmp $1 20 ask 0 ask
+    Sleep 500
+    Goto retry
+  ask:
     MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "$(StillRunning)" IDOK retry
     Abort
   closed:
 !macroend
 
 ; The language follows Windows (English or Brazilian Portuguese).
+
+; After an update from bemotion (`/RELAUNCH`), bemotion opens again.
+Function .onInstSuccess
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/RELAUNCH" $1
+  IfErrors +2
+    Exec '"$INSTDIR\bemotion.exe"'
+FunctionEnd
 
 Function CreateDesktopShortcut
   CreateShortcut "$DESKTOP\${APP}.lnk" "$INSTDIR\bemotion.exe"
@@ -111,7 +133,7 @@ Section "bemotion" SecMain
   ; Settings > Apps.
   WriteRegStr HKCU "Software\${APP}" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${APP}"
-  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${VERSION}"
+  WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${FULLVERSION}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "Publisher" "The bemotion contributors"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "URLInfoAbout" "https://github.com/eugeniobenfica/bemotion"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayIcon" "$INSTDIR\bemotion.exe,0"

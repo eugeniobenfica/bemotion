@@ -26,6 +26,7 @@ add_library(bemotion_core STATIC
     core/Svg.cpp
     core/Tracking.cpp
     core/Transitions.cpp
+    core/Updates.cpp
     core/PluginCatalog.cpp)
 target_include_directories(bemotion_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(bemotion_core PUBLIC nlohmann_json::nlohmann_json)
@@ -108,6 +109,7 @@ add_executable(bemotion WIN32
     ui/panels/ColorPanel.cpp
     ui/Tracking.cpp
     ui/Transcribe.cpp
+    ui/Updates.cpp
     ui/panels/ViewportPanel.cpp
     ui/panels/ViewportTools.cpp
     ui/panels/ToolSettingsPanel.cpp)
@@ -126,7 +128,7 @@ if(WHISPER_FOUND)
     target_compile_definitions(bemotion PRIVATE BEMOTION_WHISPER=1)
 endif()
 target_compile_definitions(bemotion PRIVATE
-    BEMOTION_VERSION="${PROJECT_VERSION}"
+    BEMOTION_VERSION="${BEMOTION_FULL_VERSION}"
     BEMOTION_SOURCE_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
 
 if(UNIX AND NOT APPLE)

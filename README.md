@@ -430,6 +430,11 @@ from the latest successful
   double-click and can be removed from *Settings › Apps*. Your settings and
   projects stay when you uninstall.
 - **Portable zip**: unzip anywhere (even a USB stick) and run `bemotion.exe`.
+- **Updates**: off until you turn on *Settings › Interface › Updates*; then
+  bemotion looks for a new version on GitHub once a day and offers it in a
+  corner of the window. One click downloads it, checks it against the
+  release's `SHA256SUMS.txt` and installs it (the installed version; the
+  portable zip opens the release page).
 
 Runs on 64-bit Windows 10 (1809 or later) and Windows 11, on any x86-64 CPU —
 optimized code paths for newer processors are picked at runtime. The files are

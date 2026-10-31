@@ -17,6 +17,7 @@
 #include "ui/ColorPicker.h"
 #include "ui/GpuContext.h"
 #include "ui/PagedWindow.h"
+#include "ui/Updates.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -625,6 +626,36 @@ QWidget* interfacePage() {
                         saveSettings();
                         emit AppSignals::get().projectsChanged();
                     }));
+
+    // New versions from GitHub: off until turned on here (ui/Updates.h).
+    SettingsCard* updates = addSection(col, tr("Updates"));
+    updates->addRow(tr("Check for updates"),
+                    tr("Once a day bemotion looks for a new version on GitHub and offers it. Nothing is installed without a click"),
+                    switchControl(s.checkUpdates, [](bool on) {
+                        settings().checkUpdates = on;
+                        saveSettings();
+                        if (on) Updates::get().checkIfDue();
+                    }));
+    updates->addRow(tr("Versions"), tr("Betas come sooner and change more"),
+                    segmented({tr("Stable"), tr("Beta")}, Updates::get().betas() ? 1 : 0, [](int i) {
+                        settings().updateChannel = i == 1 ? "beta" : "stable";
+                        saveSettings();
+                    }));
+    auto* updateStatus = new QLabel(Updates::get().status());
+    updateStatus->setWordWrap(true);
+    setTone(updateStatus, Tone::TextDim);
+    auto* checkNow = new QPushButton(tr("Check Now"));
+    auto* updateNow = accentButton(tr("Update"));
+    updateNow->setVisible(Updates::get().available().has_value());
+    QObject::connect(checkNow, &QPushButton::clicked, checkNow, [] { Updates::get().checkNow(); });
+    QObject::connect(updateNow, &QPushButton::clicked, updateNow, [] { Updates::get().install(); });
+    QObject::connect(&Updates::get(), &Updates::changed, updateStatus, [updateStatus, checkNow, updateNow] {
+        updateStatus->setText(Updates::get().status());
+        checkNow->setEnabled(!Updates::get().checking());
+        updateNow->setVisible(Updates::get().available().has_value());
+    });
+    updates->addRow(tr("This version"), tr("bemotion %1").arg(BEMOTION_VERSION), buttonRow({checkNow, updateNow}));
+    updates->addContent(updateStatus);
 
     SettingsCard* reset = addSection(col, tr("Start over"));
     auto* resetInterface = new QPushButton(tr("Reset Interface..."));

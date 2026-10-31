@@ -20,6 +20,7 @@
 #include "ui/ExperienceScreen.h"
 #include "ui/GpuContext.h"
 #include "ui/HomeScreen.h"
+#include "ui/Updates.h"
 #include "ui/IntroScreen.h"
 #include "ui/Language.h"
 #include "ui/Keymap.h"
@@ -217,6 +218,8 @@ int Application::run(int argc, char** argv) {
     // Changes a crash left unsaved: offered once the window (and the intro) is out of the way.
     if (intro_->isVisible()) connect(intro_, &IntroScreen::finished, this, [this] { QTimer::singleShot(0, this, [this] { offerRecovery(); }); });
     else QTimer::singleShot(300, this, [this] { offerRecovery(); });
+    // A new version, when the user turned updates on (at most once a day; ui/Updates.h).
+    QTimer::singleShot(5000, this, [] { ui::Updates::get().checkIfDue(); });
 
     const int result = QApplication::exec();
     platform::log("quitting");
@@ -256,6 +259,7 @@ void Application::buildWindow() {
 
     stack_ = new QStackedWidget;
     window_->setCentralWidget(stack_);
+    ui::attachUpdateNotice(window_); // over the home screen and the editor
     recents_.load(); // the Welcome project joins the projects folder when the user picks one (HomeScreen)
     buildHome();
     home_->refresh();

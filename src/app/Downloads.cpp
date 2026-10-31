@@ -146,6 +146,57 @@ void installCatalogPlugin(const CatalogPlugin& plugin, QObject* context, std::fu
     (*step)();
 }
 
+QString updateFeed() {
+    const QString feed = QString::fromStdString(platform::env("BEMOTION_UPDATE_FEED"));
+    return feed.isEmpty() ? QString("https://api.github.com/repos/eugeniobenfica/bemotion/releases") : feed;
+}
+
+void fetchReleases(QObject* context, std::function<void(bool, std::vector<Release>, QString)> done) {
+    fetch(QUrl(updateFeed()), context, [done](bool ok, const QByteArray& data, const QString& error) {
+        if (!ok) return done(false, {}, error);
+        std::vector<Release> releases;
+        std::string why;
+        if (!parseReleases(data.toStdString(), releases, &why)) return done(false, {}, QString::fromStdString(why));
+        done(true, std::move(releases), {});
+    });
+}
+
+std::function<void()> downloadUpdate(const Release& release, const ReleaseAsset& package, QObject* context,
+                                     std::function<void(bool, std::filesystem::path, QString)> done, Progress progress) {
+    auto current = std::make_shared<QPointer<QNetworkReply>>();
+    const ReleaseAsset* sums = release.asset("SHA256SUMS.txt");
+    if (!sums) {
+        const QString why = "The release lists no SHA256SUMS.txt to check the download against.";
+        QMetaObject::invokeMethod(context, [done, why] { done(false, {}, why); }, Qt::QueuedConnection);
+        return [] {};
+    }
+    const std::filesystem::path file = platform::appDataDir() / "updates" / platform::fromUtf8(package.name);
+    QPointer<QObject> guard(context);
+    *current = fetch(QUrl(QString::fromStdString(sums->url)), context, [=](bool ok, const QByteArray& data, const QString& error) {
+        if (!guard) return;
+        if (!ok) return done(false, {}, error);
+        const auto all = parseSha256Sums(data.toStdString());
+        const auto it = all.find(package.name);
+        if (it == all.end()) return done(false, {}, QString::fromStdString("SHA256SUMS.txt has no sum for " + package.name + "."));
+        const QString expected = QString::fromStdString(it->second);
+        *current = fetch(QUrl(QString::fromStdString(package.url)), guard, [=](bool ok, const QByteArray&, const QString& error) {
+            if (!ok) return done(false, {}, error);
+            QFile f(qpath(file));
+            QCryptographicHash hash(QCryptographicHash::Sha256);
+            const bool read = f.open(QIODevice::ReadOnly) && hash.addData(&f);
+            f.close();
+            if (!read || QString::fromLatin1(hash.result().toHex()) != expected) {
+                QFile::remove(qpath(file));
+                return done(false, {}, read ? QString("The download did not arrive intact.") : "Could not read " + qpath(file));
+            }
+            done(true, file, {});
+        }, progress, file);
+    });
+    return [current] {
+        if (*current) (*current)->abort();
+    };
+}
+
 std::function<void()> downloadSpeechModels(QObject* context, std::function<void(bool, QString)> done, Progress progress) {
     const std::filesystem::path folder = platform::appDataDir() / "models";
     auto current = std::make_shared<QPointer<QNetworkReply>>();

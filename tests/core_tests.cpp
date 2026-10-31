@@ -24,6 +24,7 @@
 #include "core/Svg.h"
 #include "core/Tracking.h"
 #include "core/Transitions.h"
+#include "core/Updates.h"
 
 #include <nlohmann/json.hpp>
 
@@ -1603,6 +1604,44 @@ void testPluginCatalog() {
     CHECK(compareVersions("1.10.0", "1.9") > 0 && compareVersions("1.0", "1.0.0") == 0 && compareVersions("0.9.1", "1.0") < 0);
 }
 
+void testUpdates() {
+    CHECK(compareReleaseVersions("0.2.0", "0.2.0-beta.3") > 0 && compareReleaseVersions("0.2.0-beta.3", "0.2.0-beta.2") > 0);
+    CHECK(compareReleaseVersions("0.2.0-beta.10", "0.2.0-beta.9") > 0 && compareReleaseVersions("0.2.0-beta.2", "0.1.9") > 0);
+    CHECK(compareReleaseVersions("v1.0.0", "1.0") == 0 && compareReleaseVersions("1.0.0-rc.1", "1.0.0-beta.5") > 0);
+    CHECK(compareReleaseVersions("1.0.0-beta", "1.0.0-beta.1") < 0 && compareReleaseVersions("nonsense", "0.0.1") < 0);
+    CHECK(isPrerelease("0.1.0-beta.2") && !isPrerelease("0.1.0"));
+
+    const std::string text = R"([
+        {"tag_name": "v0.3.0-beta.1", "prerelease": true, "html_url": "https://x/3b1",
+         "assets": [{"name": "bemotion-0.3.0-beta.1-setup.exe", "browser_download_url": "https://x/s3", "size": 30},
+                    {"name": "SHA256SUMS.txt", "browser_download_url": "https://x/sums3", "size": 2}]},
+        {"tag_name": "v0.4.0", "draft": true, "assets": []},
+        {"tag_name": "nightly", "assets": []},
+        {"tag_name": "v0.2.0", "name": "bemotion 0.2.0", "body": "Notes",
+         "assets": [{"name": "bemotion-0.2.0-setup.exe", "browser_download_url": "https://x/s2", "size": 20},
+                    {"name": "bemotion-0.2.0-portable.zip", "browser_download_url": "https://x/z2", "size": 21},
+                    {"name": "bemotion-x86_64.AppImage", "browser_download_url": "https://x/a2", "size": 22}]}])";
+    std::vector<Release> releases;
+    CHECK(parseReleases(text, releases) && releases.size() == 2);
+    std::string error;
+    CHECK(!parseReleases(R"({"message": "API rate limit exceeded"})", releases, &error) && error.find("rate limit") != std::string::npos);
+    parseReleases(text, releases);
+
+    auto beta = newestRelease(releases, "0.1.0-beta.2", true);
+    CHECK(beta && beta->version == "0.3.0-beta.1" && beta->prerelease);
+    auto stable = newestRelease(releases, "0.1.0-beta.2", false);
+    CHECK(stable && stable->version == "0.2.0" && stable->notes == "Notes");
+    CHECK(!newestRelease(releases, "0.3.0-beta.1", true) && !newestRelease(releases, "0.2.0", false));
+    const ReleaseAsset* win = packageFor(*stable, UpdatePlatform::Windows);
+    CHECK(win && win->url == "https://x/s2" && win->size == 20);
+    CHECK(packageFor(*stable, UpdatePlatform::Linux) && !packageFor(*stable, UpdatePlatform::Mac));
+    CHECK(beta->asset("SHA256SUMS.txt") && !beta->asset("missing"));
+
+    const std::string a(64, 'A'), b(64, 'b');
+    const auto sums = parseSha256Sums(a + " *bemotion-0.2.0-setup.exe\r\n" + b + "  bemotion-x86_64.AppImage\nnot a line\n");
+    CHECK(sums.size() == 2 && sums.at("bemotion-0.2.0-setup.exe") == std::string(64, 'a') && sums.at("bemotion-x86_64.AppImage") == b);
+}
+
 // A project closed and another opened: expressions read the new one (the closed one is gone,
 // reading it crashed when a project was opened again).
 void testExpressionsAcrossProjects() {
@@ -2346,6 +2385,7 @@ int main() {
         {"gradients and picture frames", testGradientsAndFrames},
         {"references complete", testReferencesComplete},
         {"plugin catalog", testPluginCatalog},
+        {"updates", testUpdates},
         {"paths, masks, blending and mattes", testPathsAndMasks},
         {"clip speed, ripple, roll, slip, markers", testClipTiming},
         {"lut, curves and chroma key", testColorEffects},

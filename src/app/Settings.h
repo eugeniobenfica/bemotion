@@ -7,6 +7,7 @@
 #include "ui/Theme.h"
 #include "ui/Tools.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <map>
 #include <string>
@@ -80,6 +81,11 @@ struct Settings {
     // it). Chosen on the first start (ui/ExperienceScreen), changed in Settings › Interface.
     std::string experience = "balanced";
     bool essentialsOnly = false; // plugins off (no charts, maps, 3D models, recorder): the core alone
+    // Updates (Settings › General › Updates, app/Updater): off until the user turns them on.
+    bool checkUpdates = false;        // look for a new version on GitHub, at most once a day
+    std::string updateChannel;        // "stable", "beta"; empty: as this build (a beta follows betas)
+    int64_t lastUpdateCheck = 0;      // when it last looked (seconds since 1970)
+    std::string skippedVersion;       // "Skip this version": not offered again (a newer one is)
     // Playback (Settings › Editor › Playback).
     bool hardwareDecoding = false; // videos read by the graphics card (media/MediaIO.h); off: a fast processor often beats it
     bool useProxies = true;       // the editor shows videos' proxies when they have one
