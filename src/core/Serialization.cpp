@@ -646,6 +646,8 @@ Layer decodeLayer(const json& j) {
 
 } // namespace
 
+std::string serializeLayer(const Layer& layer) { return encodeLayer(layer).dump(); }
+
 std::string serializeProject(const Project& project) {
     const Composition& c = project.comp;
     json comp;

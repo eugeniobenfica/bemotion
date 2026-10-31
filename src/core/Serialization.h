@@ -15,6 +15,8 @@ namespace bemotion {
 constexpr const char* kProjectExtension = ".bemotion";
 
 std::string serializeProject(const Project& project);
+// One layer as the project file writes it (core/Changes.h compares layers this way).
+std::string serializeLayer(const Layer& layer);
 // Loading repairs whatever breaks the rules (core/Validate.h); `repairs` lists what was fixed.
 bool deserializeProject(const std::string& text, Project& out, std::string* error = nullptr,
                         std::vector<Issue>* repairs = nullptr);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/Changes.h"
 #include "core/Math.h"
 #include "render/SceneRenderer.h"
 
@@ -347,8 +348,16 @@ private:
     // Rendered frames by frame number and resolution divisor, while the view and the document
     // stay the same.
     std::map<std::pair<int, int>, QImage> cache_;
-    FrameKey cacheLook_;             // frameKey_ without the time and the resolution
+    FrameKey cacheLook_;             // frameKey_ without the time, the resolution and the document
     uint64_t cacheGeneration_ = 0;   // MediaManager::generation()
+    // The document the kept frames show: an edit drops only the frames it may change
+    // (core/Changes.h), unless summing the document up got too slow for a big project.
+    uint64_t cacheRevision_ = 0;
+    CompositionPrint cachePrint_; // of cacheRevision_, once a frame is kept (cachePrinted_)
+    bool cachePrinted_ = false;
+    bool cacheByChanges_ = true;
+    void dropChangedFrames(const Composition& c, uint64_t revision);
+    void printCache(const Composition& c);
     size_t cacheBytes_ = 0;
     void clearCache();
 };

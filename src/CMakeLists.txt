@@ -9,6 +9,7 @@ add_library(bemotion_core STATIC
     core/Animated.cpp
     core/Arrange.cpp
     core/AudioDsp.cpp
+    core/Changes.cpp
     core/Clipboard.cpp
     core/Data.cpp
     core/Deform.cpp

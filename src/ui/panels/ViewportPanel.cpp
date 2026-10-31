@@ -305,6 +305,48 @@ void ViewportPanel::clearCache() {
     cacheBytes_ = 0;
 }
 
+// Sums up the document the kept frames show, when the first one is kept.
+void ViewportPanel::printCache(const Composition& c) {
+    if (cachePrinted_ || !cacheByChanges_) return;
+    QElapsedTimer timer;
+    timer.start();
+    cachePrint_ = printOf(c);
+    cachePrinted_ = true;
+    if (timer.elapsed() > 8) cacheByChanges_ = false; // (see dropChangedFrames)
+}
+
+void ViewportPanel::dropChangedFrames(const Composition& c, uint64_t revision) {
+    if (revision == cacheRevision_) return;
+    cacheRevision_ = revision;
+    if (!cacheByChanges_ || !cachePrinted_ || cache_.empty()) {
+        clearCache();
+        cachePrinted_ = false;
+        return;
+    }
+    QElapsedTimer timer;
+    timer.start();
+    CompositionPrint now = printOf(c);
+    const std::vector<TimeSpan> spans = changedSpans(cachePrint_, now);
+    cachePrint_ = std::move(now);
+    // A frame also shows what moves just before and after it (motion blur): a frame of margin.
+    const double margin = c.frameDuration();
+    for (auto it = cache_.begin(); it != cache_.end();) {
+        const double t = c.timeOfFrame(it->first.first);
+        const bool changed = std::any_of(spans.begin(), spans.end(), [&](const TimeSpan& s) {
+            return t + margin >= s.from && t - margin < s.until;
+        });
+        if (!changed) {
+            ++it;
+            continue;
+        }
+        cacheBytes_ -= static_cast<size_t>(it->second.sizeInBytes());
+        it = cache_.erase(it);
+    }
+    // Summing up a big project on every edit would slow dragging down: such a project drops
+    // every frame on an edit, as before.
+    if (timer.elapsed() > 8) cacheByChanges_ = false;
+}
+
 void ViewportPanel::paintEvent(QPaintEvent*) {
     layout();
     positionHud();
@@ -333,13 +375,17 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
     look.time = -1.0;
     look.pixels = size();
     look.scale = devicePixelRatioF();
+    look.revision = 0; // an edit keeps the frames it does not change (dropChangedFrames)
     const uint64_t generation = media::MediaManager::get().generation();
     if (look != cacheLook_ || generation != cacheGeneration_) {
         clearCache();
         frameValid_ = false;
         cacheLook_ = look;
         cacheGeneration_ = generation;
+        cacheRevision_ = key.revision;
+        cachePrinted_ = false;
     }
+    dropChangedFrames(c, key.revision);
     const int frameNumber = c.frameAt(t);
     notePlaybackFrame(frameNumber);
     const bool onFrame = std::fabs(sceneTime - c.snapToFrame(sceneTime)) < 1e-6 && !cropping;
@@ -424,6 +470,7 @@ void ViewportPanel::paintEvent(QPaintEvent*) {
                 const size_t budget = static_cast<size_t>(std::max(0, settings().cacheMegabytes / 2)) << 20;
                 const size_t bytes = static_cast<size_t>(frame_.sizeInBytes());
                 if (bytes <= budget) {
+                    printCache(c);
                     if (const auto old = cache_.find({frameNumber, divisor}); old != cache_.end()) cacheBytes_ -= static_cast<size_t>(old->second.sizeInBytes());
                     cache_[{frameNumber, divisor}] = frame_;
                     cacheBytes_ += bytes;

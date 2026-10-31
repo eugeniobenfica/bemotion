@@ -317,6 +317,8 @@ are their operations (the sound comes in through `OpEnvironment::mediaLoudness`)
   Footage's source time is `MediaProps::sourceTime` (speed, reverse, remap);
   `Composition::sourceSpan` is where a clip has source frames (its trims stop
   there).
+- **`Changes`** — what an edit changed, in time (`printOf`, `changedSpans`):
+  the viewport keeps the rendered frames an edit does not touch.
 - **`Clipboard`** — copy / paste of layers as text (compounds with their
   contents, media items along), pasted at a time with fresh ids.
 - **`Data`** — CSV in and out, people's numbers (`1.234,5`, `R$ 12`), and the
@@ -494,8 +496,12 @@ Rules:
   show the same frames.
 - **Caches**: decoded video frames by file and start time, least recently
   shown first out, half the `cache_megabytes` setting (`setFrameCacheMegabytes`);
-  the viewport keeps rendered frames by frame number while the document, the
-  view and `MediaManager::generation()` stay the same (the other half; no mark
+  the viewport keeps rendered frames by frame number while the view and
+  `MediaManager::generation()` stay the same; an edit drops only the frames it
+  may change (`core/Changes`: the times shown by the layers it added, removed
+  or changed, a frame of margin; everything when the composition's settings,
+  the layer order or an expression is involved, or when summing up the
+  project takes over 8 ms) (the other half; no mark
   on the ruler: a line growing behind the playhead read as a bug). Scrubbing
   the editor's composition, a far video frame is decoded on a thread of its
   own (`Seeker`, the newest wish only) while the last one shows; renders that

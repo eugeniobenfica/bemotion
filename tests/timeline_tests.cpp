@@ -3,6 +3,7 @@
 #include "Check.h"
 
 #include "core/Arrange.h"
+#include "core/Changes.h"
 #include "core/Clipboard.h"
 #include "core/Editing.h"
 #include "core/Ops.h"
@@ -425,6 +426,60 @@ void testClipTiming() {
     CHECK(deserializeProject(serializeProject(mp), mback) && mback.comp.markers == mp.comp.markers);
 }
 
+// What an edit changed, in time: only where the edited clips show (the viewport keeps the rest
+// of its rendered frames).
+void testChangedSpans() {
+    Composition c;
+    c.duration = 20.0;
+    Layer a = makeShapeLayer(ShapeKind::Rectangle, {}, 4.0); // [0, 4)
+    const uint64_t A = c.addLayer(a).id;
+    Layer b = makeShapeLayer(ShapeKind::Ellipse, {}, 3.0);
+    b.shiftTime(10.0); // [10, 13)
+    const uint64_t B = c.addLayer(b).id;
+    const CompositionPrint start = printOf(c);
+    CHECK(changedSpans(start, printOf(c)).empty()); // nothing changed
+
+    c.findLayer(B)->transform.opacity.base = 50.0f;
+    std::vector<TimeSpan> spans = changedSpans(start, printOf(c));
+    auto covers = [&](double t) {
+        return std::any_of(spans.begin(), spans.end(), [&](const TimeSpan& s) { return s.contains(t); });
+    };
+    CHECK(covers(11.0) && !covers(2.0) && !covers(14.0));
+
+    // Moved: where it was and where it is.
+    const CompositionPrint before = printOf(c);
+    c.findLayer(B)->shiftTime(-5.0); // [5, 8)
+    spans = changedSpans(before, printOf(c));
+    CHECK(covers(6.0) && covers(12.0) && !covers(2.0) && !covers(9.0));
+
+    // Added and removed layers: their times.
+    const CompositionPrint two = printOf(c);
+    Layer n = makeTextLayer("New", {}, 1.0);
+    n.shiftTime(15.0);
+    c.addLayer(n);
+    spans = changedSpans(two, printOf(c));
+    CHECK(covers(15.5) && !covers(1.0));
+    const CompositionPrint three = printOf(c);
+    c.removeLayerTree(A);
+    spans = changedSpans(three, printOf(c));
+    CHECK(covers(1.0) && !covers(15.5));
+
+    // What it cannot pin down: everything. The composition's settings, the stacking order,
+    // and expressions (they may read any layer at any time).
+    const CompositionPrint four = printOf(c);
+    c.background = Color::fromHex(0x112233);
+    spans = changedSpans(four, printOf(c));
+    CHECK(spans.size() == 1 && spans[0].from == 0.0 && std::isinf(spans[0].until));
+    const CompositionPrint five = printOf(c);
+    std::swap(c.layers[0], c.layers[1]);
+    spans = changedSpans(five, printOf(c));
+    CHECK(spans.size() == 1 && std::isinf(spans[0].until));
+    const CompositionPrint six = printOf(c);
+    c.layers[0].transform.rotation.expression = "time * 10";
+    spans = changedSpans(six, printOf(c));
+    CHECK(spans.size() == 1 && std::isinf(spans[0].until));
+}
+
 } // namespace
 
 Tests timelineTests() {
@@ -440,5 +495,6 @@ Tests timelineTests() {
         {"cut transitions", testCutTransitions},
         {"separate audio", testSeparateAudio},
         {"clip speed, ripple, roll, slip, markers", testClipTiming},
+        {"what an edit changed, in time", testChangedSpans},
     };
 }
