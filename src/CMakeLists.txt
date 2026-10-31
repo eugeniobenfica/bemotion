@@ -104,6 +104,8 @@ add_executable(bemotion WIN32
     ui/panels/PropertiesPanel.cpp
     ui/panels/TimelineGraph.cpp
     ui/panels/TimelinePanel.cpp
+    ui/panels/TimelinePaint.cpp
+    ui/panels/TimelineInput.cpp
     ui/panels/ToolsPanel.cpp
     ui/panels/AnimationsPanel.cpp
     ui/panels/ColorPanel.cpp
