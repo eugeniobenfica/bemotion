@@ -88,7 +88,10 @@ add_library(bemotion_ui STATIC
     app/Downloads.cpp
     app/EffectLibrary.cpp
     app/Platform.cpp
+    app/PluginApi.cpp
+    app/PluginApiMedia.cpp
     app/PluginHost.cpp
+    app/PluginSandbox.cpp
     app/ProjectPackage.cpp
     app/PresetLibrary.cpp
     app/Recovery.cpp

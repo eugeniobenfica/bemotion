@@ -822,7 +822,10 @@ Rules:
 - **`Services`** — what the command line, MCP and the editor share
   (`automationEnvironment`, `renderFramesPng`, `exportProject`).
 - **`McpServer`** — `bemotion mcp`, the Model Context Protocol server (§10).
-- **`PluginHost`** — Lua plugins (§9).
+- **`PluginHost`** — Lua plugins (§9): loading, commands, objects and drawing in
+  `PluginHost.cpp`; the Lua side in files of its own behind `PluginLua.h`
+  (`PluginSandbox.cpp`: budget and memory cap; `PluginApi.cpp`: `g`,
+  `bemotion`, `doc`, data; `PluginApiMedia.cpp`: meshes, the microphone).
   The application's frame timer processes pending reloads even on the home
   screen; reloads wait until capture stops, then notify the plugin views.
 - **`DevScript`** — scripted mouse / keyboard input for UI checks (§13).
