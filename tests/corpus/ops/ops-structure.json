@@ -1,0 +1,62 @@
+[
+ {
+  "op": "layer.add",
+  "type": "star",
+  "name": "A",
+  "position": [
+   800,
+   540
+  ]
+ },
+ {
+  "op": "layer.add",
+  "type": "polygon",
+  "name": "B",
+  "position": [
+   1100,
+   540
+  ]
+ },
+ {
+  "op": "group",
+  "layers": [
+   "A",
+   "B"
+  ],
+  "name": "Pair"
+ },
+ {
+  "op": "effect.add",
+  "layer": "Pair",
+  "effect": "glow",
+  "params": {
+   "size": 30
+  }
+ },
+ {
+  "op": "layer.split",
+  "layer": "A",
+  "time": 2
+ },
+ {
+  "op": "layer.move",
+  "layer": "Pair",
+  "to": "bottom"
+ },
+ {
+  "op": "ungroup",
+  "layer": "Pair"
+ },
+ {
+  "op": "layer.add",
+  "type": "line",
+  "name": "L1",
+  "start": 0,
+  "duration": 2
+ },
+ {
+  "op": "layer.split",
+  "layer": "L1",
+  "time": 5
+ }
+]

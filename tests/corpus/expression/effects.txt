@@ -1,0 +1,1 @@
+layer("Box").fx0.size * 2 + clamp(abs(-time), 0, 1) % 3

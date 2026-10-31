@@ -1,0 +1,18 @@
+[
+ {
+  "op": "layer.separate_audio",
+  "layer": "Talk"
+ },
+ {
+  "op": "layer.separate_audio",
+  "layer": "Talk"
+ },
+ {
+  "op": "layer.link_audio",
+  "layer": "Talk"
+ },
+ {
+  "op": "layer.link_audio",
+  "layer": "Talk"
+ }
+]

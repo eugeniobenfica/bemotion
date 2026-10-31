@@ -1,0 +1,28 @@
+[
+ {
+  "op": "layer.add",
+  "type": "ellipse",
+  "name": "Dot"
+ },
+ {
+  "op": "property.set",
+  "layer": "Dot",
+  "prop": "opacity",
+  "value": 10
+ },
+ {
+  "op": "property.set",
+  "layer": "Dot",
+  "prop": "opacty",
+  "value": 10
+ },
+ {
+  "op": "layer.set",
+  "layer": "Dott",
+  "visible": false
+ },
+ {
+  "op": "layer.ad",
+  "type": "text"
+ }
+]

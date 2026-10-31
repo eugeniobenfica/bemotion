@@ -1,0 +1,61 @@
+[
+ {
+  "op": "layer.add",
+  "type": "counter",
+  "duration": 4,
+  "start": 1
+ },
+ {
+  "op": "layer.set",
+  "layer": "Counter",
+  "from": 10,
+  "to": 20,
+  "count_duration": 0,
+  "count_easing": "linear"
+ },
+ {
+  "op": "layer.set",
+  "layer": "Counter",
+  "count_easing": "wobbly"
+ },
+ {
+  "op": "layer.set",
+  "layer": "Counter",
+  "start": 2
+ },
+ {
+  "op": "key.add",
+  "layer": "Counter",
+  "prop": "counter_value",
+  "time": 4,
+  "value": 250
+ },
+ {
+  "op": "layer.set",
+  "layer": "Counter",
+  "decimals": 1,
+  "prefix": "R$ ",
+  "suffix": " mil",
+  "separator": "."
+ },
+ {
+  "op": "layer.set",
+  "layer": "Counter",
+  "decimals": 9
+ },
+ {
+  "op": "layer.set",
+  "layer": "Counter",
+  "separator": "_"
+ },
+ {
+  "op": "layer.add",
+  "type": "text",
+  "name": "Plain"
+ },
+ {
+  "op": "layer.set",
+  "layer": "Plain",
+  "suffix": "%"
+ }
+]

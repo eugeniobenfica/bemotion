@@ -1,0 +1,18 @@
+[
+ {
+  "op": "layer.add",
+  "type": "ellipse",
+  "name": "Ball"
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Box"
+ },
+ {
+  "op": "expression.set",
+  "layer": "Box",
+  "prop": "position",
+  "expression": "layer(\"Ball\").position"
+ }
+]

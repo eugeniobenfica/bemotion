@@ -1,0 +1,37 @@
+[
+ {
+  "op": "composition.set",
+  "width": 1080,
+  "height": 1920,
+  "fps": 25,
+  "background": "#202020",
+  "name": "Reel"
+ },
+ {
+  "op": "layer.add",
+  "type": "text",
+  "text": "Hi",
+  "name": "T"
+ },
+ {
+  "op": "key.add",
+  "layer": "T",
+  "prop": "position",
+  "time": 0,
+  "value": [
+   540,
+   2000
+  ]
+ },
+ {
+  "op": "key.add",
+  "layer": "T",
+  "prop": "position",
+  "time": 0.8,
+  "value": [
+   540,
+   960
+  ],
+  "easing": "back_out"
+ }
+]

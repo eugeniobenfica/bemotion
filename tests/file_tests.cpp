@@ -409,6 +409,15 @@ void testMeshFiles() {
         "gltf", R"({"buffers":[{"uri":"model.bin"}]})", [](const std::string&, std::string&) { return false; }, m,
         error));
     CHECK(!loadMeshFile("obj", "garbage", {}, m, error) && !error.empty());
+    // Found by the fuzzer: an accessor whose buffer views are missing, a node that is its own
+    // child (twice: the walk never ended).
+    std::string broken = gltf;
+    broken.replace(broken.find("bufferViews"), 11, "bufferVidws");
+    CHECK(!loadMeshFile("gltf", broken, {}, m, error));
+    broken = gltf;
+    broken.replace(broken.find(R"("translation")"), 0, R"("children":[0,0],)");
+    CHECK(loadMeshFile("gltf", broken, {}, m, error) && m.triangleCount() == 1);
+
     // A fine grid of triangles, simplified to a few.
     MeshData grid;
     const int side = 60;

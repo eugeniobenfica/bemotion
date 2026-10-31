@@ -1,0 +1,30 @@
+[
+ {
+  "op": "layer.add",
+  "type": "text",
+  "text": "Hi",
+  "name": "T"
+ },
+ {
+  "op": "layer.add",
+  "type": "background",
+  "name": "BG",
+  "fill": "radial"
+ },
+ {
+  "op": "property.set",
+  "layer": "BG",
+  "prop": "bg_darken",
+  "value": 30
+ },
+ {
+  "op": "layer.set",
+  "layer": "BG",
+  "fill": "plaid"
+ },
+ {
+  "op": "layer.set",
+  "layer": "BG",
+  "media": 99
+ }
+]

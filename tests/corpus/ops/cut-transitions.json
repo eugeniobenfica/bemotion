@@ -1,0 +1,17 @@
+[
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Clip",
+  "duration": 4
+ },
+ {
+  "op": "layer.split",
+  "layer": "Clip",
+  "time": 2
+ },
+ {
+  "op": "layer.add",
+  "type": "camera"
+ }
+]

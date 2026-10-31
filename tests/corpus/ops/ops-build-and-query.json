@@ -1,0 +1,45 @@
+[
+ {
+  "op": "layer.add",
+  "type": "text",
+  "text": "Hello",
+  "name": "Title",
+  "position": [
+   960,
+   400
+  ]
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "Card",
+  "start": 1,
+  "duration": 3
+ },
+ {
+  "op": "property.set",
+  "layer": "Card",
+  "prop": "fill_color",
+  "value": "#4F8EF7"
+ },
+ {
+  "op": "key.add",
+  "layer": "Title",
+  "prop": "opacity",
+  "time": 0,
+  "value": 0,
+  "easing": "ease_out"
+ },
+ {
+  "op": "key.add",
+  "layer": "Title",
+  "prop": "opacity",
+  "time": 1,
+  "value": 100
+ },
+ {
+  "op": "query.layer",
+  "layer": "Title",
+  "time": 0.5
+ }
+]

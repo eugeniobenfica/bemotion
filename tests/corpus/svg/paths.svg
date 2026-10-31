@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">
+  <path d="M4 4 C 10 0, 20 0, 30 10 S 50 30, 60 4 Q 40 40 32 60 T 4 60 Z" fill="#3a8" fill-opacity=".5" fill-rule="evenodd"/>
+  <polygon points="10,10 54,10 32,50" stroke="#000" stroke-width="3" stroke-linejoin="round"/>
+  <polyline points="0,0 8,8 16,0 24,8" fill="none" stroke="red"/>
+  <ellipse cx="32" cy="32" rx="12" ry="6" transform="matrix(1 0.2 -0.2 1 0 0)" opacity="0.8"/>
+  <line x1="0" y1="63" x2="63" y2="0" stroke="hsl(200, 50%, 50%)"/>
+  <radialGradient id="r"><stop offset="0%" stop-color="white"/><stop offset="100%" stop-color="blue"/></radialGradient>
+  <circle cx="48" cy="48" r="10" fill="url(#r)"/>
+</svg>

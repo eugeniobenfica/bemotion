@@ -1,0 +1,17 @@
+[
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "R1"
+ },
+ {
+  "op": "layer.add",
+  "type": "rectangle",
+  "name": "R2"
+ },
+ {
+  "op": "layer.add",
+  "type": "text",
+  "name": "T"
+ }
+]

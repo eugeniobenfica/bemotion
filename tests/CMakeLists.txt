@@ -4,6 +4,12 @@ target_link_libraries(bemotion_core_tests PRIVATE bemotion_core)
 target_compile_definitions(bemotion_core_tests PRIVATE BEMOTION_SOURCE_DIR="${PROJECT_SOURCE_DIR}") # the docs and files it checks
 add_test(NAME core_tests COMMAND bemotion_core_tests)
 
+# Mutated inputs for the core's readers (tests/corpus): a few seconds here, longer in CI.
+add_executable(bemotion_fuzz fuzz.cpp)
+target_link_libraries(bemotion_fuzz PRIVATE bemotion_core)
+target_compile_definitions(bemotion_fuzz PRIVATE BEMOTION_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+add_test(NAME fuzz COMMAND bemotion_fuzz --seconds 5)
+
 # The official plugin catalog matches the plugin folders (tools/plugin-index.py).
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_FOUND)

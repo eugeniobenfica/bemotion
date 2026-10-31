@@ -951,6 +951,15 @@ changes behavior.
   with nothing repaired (or only what its `<name>.repairs.txt` lists, one
   `where: what` a line), pass `validate` and save back unchanged. Add a file
   here when the format grows; never edit one to make it pass.
+- **Fuzzing** (`tests/fuzz.cpp`, `bemotion_fuzz [--seconds N] [--seed S]`):
+  mutated copies of `tests/corpus/<kind>/` (project, ops, svg, expression,
+  mesh) go to `deserializeProject`, `applyOps`, `addSvg`, expressions and
+  `loadMeshFile`; byte changes plus JSON-aware ones that keep the parser
+  happy. A crash, an exception or an input over 10 s writes
+  `fuzz-failure.<ext>` and prints `--seed S --at I` to replay it. ctest runs
+  5 s, the sanitizer CI job 2 minutes. A bug it finds: fix it, and add the
+  input (made small) to the corpus or a test. No libFuzzer or other
+  infrastructure.
 - **Smoke test** (`tools/smoke-test.sh <build dir>`): exports the Welcome
   project to every format (checked with ffprobe), drives the automation
   commands and the MCP server (`tools/mcp-test.py`), and opens the app

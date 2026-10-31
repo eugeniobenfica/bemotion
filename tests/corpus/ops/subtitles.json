@@ -1,0 +1,45 @@
+[
+ {
+  "op": "layer.set",
+  "layer": "Subtitles",
+  "captions": [
+   {
+    "start": 5,
+    "end": 6,
+    "text": "Bye"
+   },
+   {
+    "start": 0,
+    "end": 1,
+    "text": "Hi"
+   }
+  ]
+ },
+ {
+  "op": "layer.set",
+  "layer": "Subtitles",
+  "captions": [
+   {
+    "start": 2,
+    "end": 1,
+    "text": "x"
+   }
+  ]
+ },
+ {
+  "op": "layer.add",
+  "type": "text",
+  "name": "T"
+ },
+ {
+  "op": "layer.set",
+  "layer": "T",
+  "outline": true,
+  "box": true
+ },
+ {
+  "op": "layer.set",
+  "layer": "T",
+  "srt": ""
+ }
+]

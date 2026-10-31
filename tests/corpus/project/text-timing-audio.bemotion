@@ -1,0 +1,709 @@
+{
+  "composition": {
+    "background": [
+      0.062745101749897,
+      0.062745101749897,
+      0.07058823853731155,
+      1.0
+    ],
+    "duration": 6.0,
+    "fps": 30.0,
+    "guides": [],
+    "height": 1080,
+    "layers": [
+      {
+        "id": 8,
+        "in": 0.0,
+        "label": 0,
+        "locked": false,
+        "name": "T 2",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "box_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              0.6000000238418579
+            ]
+          },
+          "box_padding": {
+            "value": 20.0
+          },
+          "box_roundness": {
+            "value": 12.0
+          },
+          "font_size": {
+            "value": 120.0
+          },
+          "line_height": {
+            "value": 120.0
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "outline_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "outline_width": {
+            "value": 6.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "reveal": {
+            "value": 100.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "text_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "tracking": {
+            "value": 0.0
+          },
+          "wrap_width": {
+            "value": 0.0
+          }
+        },
+        "text": {
+          "align": "center",
+          "box": false,
+          "font_family": "Inter",
+          "font_style": "SemiBold",
+          "outline": false,
+          "text": "Text"
+        },
+        "track": 8,
+        "type": "text",
+        "visible": true
+      },
+      {
+        "id": 7,
+        "in": 0.0,
+        "label": 7,
+        "locked": false,
+        "name": "Two",
+        "out": 1.5,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "roundness": {
+            "value": 24.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              480.0,
+              300.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "rectangle",
+          "stroke": false
+        },
+        "track": 6,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 5,
+        "in": 0.0,
+        "label": 5,
+        "locked": false,
+        "name": "Plain",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "box_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              0.6000000238418579
+            ]
+          },
+          "box_padding": {
+            "value": 20.0
+          },
+          "box_roundness": {
+            "value": 12.0
+          },
+          "font_size": {
+            "value": 120.0
+          },
+          "line_height": {
+            "value": 120.0
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "outline_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "outline_width": {
+            "value": 6.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "reveal": {
+            "value": 100.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "text_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "tracking": {
+            "value": 0.0
+          },
+          "wrap_width": {
+            "value": 0.0
+          }
+        },
+        "text": {
+          "align": "center",
+          "box": false,
+          "font_family": "Inter",
+          "font_style": "SemiBold",
+          "outline": false,
+          "text": "Text"
+        },
+        "track": 5,
+        "type": "text",
+        "visible": true
+      },
+      {
+        "id": 4,
+        "in": 2.0,
+        "label": 4,
+        "locked": false,
+        "name": "Counter",
+        "out": 6.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "box_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              0.6000000238418579
+            ]
+          },
+          "box_padding": {
+            "value": 20.0
+          },
+          "box_roundness": {
+            "value": 12.0
+          },
+          "counter_from": {
+            "value": 10.0
+          },
+          "counter_to": {
+            "value": 20.0
+          },
+          "counter_value": {
+            "keys": [
+              {
+                "ease": "ease_in_out",
+                "t": 4.0,
+                "v": 250.0
+              }
+            ],
+            "value": 0.0
+          },
+          "font_size": {
+            "value": 120.0
+          },
+          "line_height": {
+            "value": 120.0
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "outline_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "outline_width": {
+            "value": 6.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "reveal": {
+            "value": 100.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "text_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "tracking": {
+            "value": 0.0
+          },
+          "wrap_width": {
+            "value": 0.0
+          }
+        },
+        "text": {
+          "align": "center",
+          "box": false,
+          "count_duration": 0.0,
+          "count_easing": "linear",
+          "counter": true,
+          "decimals": 1,
+          "font_family": "Inter",
+          "font_style": "SemiBold",
+          "outline": false,
+          "prefix": "R$ ",
+          "separator": ".",
+          "suffix": " mil",
+          "text": "Counter"
+        },
+        "track": 4,
+        "type": "text",
+        "visible": true
+      },
+      {
+        "id": 3,
+        "in": 0.0,
+        "label": 3,
+        "locked": false,
+        "name": "Subtitles",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "box_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              0.7400000095367432
+            ]
+          },
+          "box_padding": {
+            "value": 23.760000228881836
+          },
+          "box_roundness": {
+            "value": 11.880000114440918
+          },
+          "font_size": {
+            "value": 59.400001525878906
+          },
+          "line_height": {
+            "value": 125.0
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "outline_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "outline_width": {
+            "value": 2.6730000972747803
+          },
+          "position": {
+            "value": [
+              960.0,
+              993.6000366210938
+            ]
+          },
+          "reveal": {
+            "value": 100.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "text_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "tracking": {
+            "value": 0.0
+          },
+          "wrap_width": {
+            "value": 1497.5999755859375
+          }
+        },
+        "text": {
+          "align": "center",
+          "box": true,
+          "captions": [
+            {
+              "end": 1.0,
+              "start": 0.0,
+              "text": "Hi"
+            },
+            {
+              "end": 6.0,
+              "start": 5.0,
+              "text": "Bye"
+            }
+          ],
+          "fit_lines": 2,
+          "font_family": "Inter",
+          "font_style": "SemiBold",
+          "outline": true,
+          "subtitle": true,
+          "text": "Subtitles"
+        },
+        "track": 3,
+        "type": "text",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "in": 0.0,
+        "label": 2,
+        "locked": false,
+        "name": "R",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "roundness": {
+            "value": 24.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              480.0,
+              300.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "rectangle",
+          "stroke": false
+        },
+        "track": 2,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 1,
+        "in": 0.0,
+        "label": 1,
+        "locked": false,
+        "name": "T",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "box_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              0.6000000238418579
+            ]
+          },
+          "box_padding": {
+            "value": 20.0
+          },
+          "box_roundness": {
+            "value": 12.0
+          },
+          "font_size": {
+            "value": 120.0
+          },
+          "line_height": {
+            "value": 120.0
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "outline_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "outline_width": {
+            "value": 6.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "reveal": {
+            "value": 100.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "text_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "tracking": {
+            "value": 0.0
+          },
+          "wrap_width": {
+            "value": 0.0
+          }
+        },
+        "text": {
+          "align": "center",
+          "box": true,
+          "fit_lines": 2,
+          "font_family": "Inter",
+          "font_style": "SemiBold",
+          "letter_by": "word",
+          "letter_delay": 0.10000000149011612,
+          "letter_duration": 0.4000000059604645,
+          "letter_loop": "wave",
+          "letter_order": "center",
+          "letter_out": "fade",
+          "outline": true,
+          "text": "Hello world"
+        },
+        "track": 1,
+        "type": "text",
+        "visible": true
+      }
+    ],
+    "markers": [
+      {
+        "name": "Drop",
+        "time": 2.0
+      }
+    ],
+    "media": [],
+    "next_layer_id": 9,
+    "next_media_id": 1,
+    "next_track_id": 9,
+    "width": 1920
+  },
+  "format": "bemotion",
+  "name": "text-timing-audio",
+  "version": 1
+}

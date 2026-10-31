@@ -1,0 +1,20 @@
+[
+ {
+  "op": "param.set",
+  "layer": "Model",
+  "param": "shading",
+  "value": "Flat"
+ },
+ {
+  "op": "param.set",
+  "layer": "Model",
+  "param": "shading",
+  "value": "Flta"
+ },
+ {
+  "op": "param.set",
+  "layer": "Model",
+  "param": "model",
+  "value": "missing.obj"
+ }
+]

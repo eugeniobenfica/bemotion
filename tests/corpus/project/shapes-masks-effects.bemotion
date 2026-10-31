@@ -1,0 +1,978 @@
+{
+  "composition": {
+    "background": [
+      0.062745101749897,
+      0.062745101749897,
+      0.07058823853731155,
+      1.0
+    ],
+    "duration": 5.0,
+    "fps": 30.0,
+    "guides": [],
+    "height": 1080,
+    "layers": [
+      {
+        "id": 9,
+        "in": 0.0,
+        "label": 1,
+        "locked": false,
+        "name": "Camera",
+        "out": 5.0,
+        "properties": {
+          "camera_zoom": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "position_z": {
+            "value": 200.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "rotation_x": {
+            "value": 0.0
+          },
+          "rotation_y": {
+            "value": 10.0
+          }
+        },
+        "track": 9,
+        "type": "camera",
+        "visible": true
+      },
+      {
+        "id": 8,
+        "in": 0.0,
+        "label": 0,
+        "locked": false,
+        "name": "Deep",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              1060.0,
+              540.0
+            ]
+          },
+          "position_z": {
+            "value": 1000.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "rotation_x": {
+            "value": 0.0
+          },
+          "rotation_y": {
+            "value": 0.0
+          },
+          "roundness": {
+            "value": 24.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              480.0,
+              300.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "rectangle",
+          "stroke": false
+        },
+        "three_d": true,
+        "track": 8,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 7,
+        "in": 0.0,
+        "label": 7,
+        "locked": false,
+        "name": "Flat",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              1060.0,
+              540.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "roundness": {
+            "value": 24.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              480.0,
+              300.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "rectangle",
+          "stroke": false
+        },
+        "track": 7,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 6,
+        "in": 0.0,
+        "label": 6,
+        "locked": false,
+        "name": "Card 2",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "roundness": {
+            "value": 24.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              480.0,
+              300.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "rectangle",
+          "stroke": false
+        },
+        "track": 6,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 4,
+        "in": 0.0,
+        "label": 4,
+        "locked": false,
+        "name": "M",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              320.0,
+              320.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 4,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 5,
+        "in": 0.0,
+        "label": 5,
+        "locked": false,
+        "matte": {
+          "layer": 4,
+          "mode": "luma"
+        },
+        "name": "R",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "roundness": {
+            "value": 24.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              480.0,
+              300.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "rectangle",
+          "stroke": false
+        },
+        "track": 5,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "in": 0.0,
+        "label": 2,
+        "locked": false,
+        "name": "Spot",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "path",
+          "path": {
+            "closed": true,
+            "vertices": [
+              [
+                0.0,
+                -160.0,
+                -88.36555480957031,
+                0.0,
+                88.36555480957031,
+                0.0
+              ],
+              [
+                160.0,
+                0.0,
+                0.0,
+                -88.36555480957031,
+                0.0,
+                88.36555480957031
+              ],
+              [
+                0.0,
+                160.0,
+                88.36555480957031,
+                0.0,
+                -88.36555480957031,
+                0.0
+              ],
+              [
+                -160.0,
+                0.0,
+                0.0,
+                88.36555480957031,
+                0.0,
+                -88.36555480957031
+              ]
+            ]
+          },
+          "stroke": false
+        },
+        "track": 2,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "blend": "multiply",
+        "effects": [
+          {
+            "curves": {
+              "rgb": [
+                [
+                  0.0,
+                  0.0
+                ],
+                [
+                  0.5,
+                  0.699999988079071
+                ],
+                [
+                  1.0,
+                  1.0
+                ]
+              ]
+            },
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 100.0
+              },
+              "shutter": {
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 12,
+            "type": "curves"
+          },
+          {
+            "enabled": true,
+            "file": "C:/looks/film.cube",
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 100.0
+              },
+              "shutter": {
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "relative": "../../../../../../../../../looks/film.cube",
+            "samples": 12,
+            "type": "lut"
+          }
+        ],
+        "id": 3,
+        "in": 0.0,
+        "label": 3,
+        "locked": false,
+        "masks": [
+          {
+            "expansion": {
+              "value": 0.0
+            },
+            "feather": {
+              "value": 12.0
+            },
+            "mode": "subtract",
+            "name": "Mask 1",
+            "opacity": {
+              "value": 50.0
+            },
+            "path": {
+              "closed": true,
+              "vertices": [
+                [
+                  120.0,
+                  -150.0,
+                  -198.82249450683594,
+                  0.0,
+                  198.82249450683594,
+                  0.0
+                ],
+                [
+                  480.0,
+                  0.0,
+                  0.0,
+                  -82.84270477294922,
+                  0.0,
+                  82.84270477294922
+                ],
+                [
+                  120.0,
+                  150.0,
+                  198.82249450683594,
+                  0.0,
+                  -198.82249450683594,
+                  0.0
+                ],
+                [
+                  -240.0,
+                  0.0,
+                  0.0,
+                  82.84270477294922,
+                  0.0,
+                  -82.84270477294922
+                ]
+              ]
+            }
+          }
+        ],
+        "matte": {
+          "layer": 2,
+          "mode": "alpha"
+        },
+        "name": "Card",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_angle": {
+            "value": 90.0
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "fill_color2": {
+            "value": [
+              0.20000000298023224,
+              0.4000000059604645,
+              0.6000000238418579,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "repeat_copies": {
+            "value": 5.0
+          },
+          "repeat_end_opacity": {
+            "value": 100.0
+          },
+          "repeat_offset": {
+            "value": [
+              120.0,
+              0.0
+            ]
+          },
+          "repeat_rotation": {
+            "value": 0.0
+          },
+          "repeat_scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "roundness": {
+            "value": 24.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              480.0,
+              300.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 8.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "gradient": "linear",
+          "kind": "rectangle",
+          "repeater": true,
+          "stroke": false
+        },
+        "track": 3,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 1,
+        "in": 0.0,
+        "label": 1,
+        "locked": false,
+        "name": "Wave",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              540.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_dash": {
+            "value": 0.0
+          },
+          "stroke_dash_offset": {
+            "value": 0.0
+          },
+          "stroke_gap": {
+            "value": 0.0
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": false,
+          "kind": "path",
+          "path": {
+            "closed": false,
+            "vertices": [
+              [
+                0.0,
+                0.0
+              ],
+              [
+                100.0,
+                0.0,
+                -30.0,
+                -40.0,
+                30.0,
+                40.0
+              ],
+              [
+                200.0,
+                0.0
+              ]
+            ]
+          },
+          "stroke": true
+        },
+        "track": 1,
+        "type": "shape",
+        "visible": true
+      }
+    ],
+    "media": [],
+    "next_layer_id": 10,
+    "next_media_id": 1,
+    "next_track_id": 10,
+    "width": 1920
+  },
+  "format": "bemotion",
+  "name": "shapes-masks-effects",
+  "version": 1
+}
