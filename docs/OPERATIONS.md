@@ -60,7 +60,7 @@ the content: it ends with the last clip, but never passes `max_duration`.
   `media` (with `"media": id` from `media.import`), `background` (fills the
   whole frame; goes to the bottom; `fill`: `solid`, `linear`, `radial` or
   `image` with `"media": id` and `fit`: `cover`, `contain`, `stretch`) or
-  `plugin` (with `"object": "charts.bar"`), or `subtitle` (captions at the
+  `plugin` (with `"object": "charts.bars"`), or `subtitle` (captions at the
   bottom of the frame, over the whole composition; `captions` or `srt` as in
   `layer.set`), or `path` (a Bézier shape, as the pen tool draws: `"path":
   {"closed": true, "vertices": [[x, y], [x, y, in_x, in_y, out_x, out_y],
