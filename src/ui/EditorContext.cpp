@@ -1,17 +1,37 @@
 #include "ui/EditorContext.h"
 
+#include "app/Platform.h"
 #include "app/PluginHost.h"
 #include "core/Clipboard.h"
 #include "core/Presets.h"
 #include "core/Serialization.h"
 #include "core/Transitions.h"
+#include "core/Validate.h"
 #include "ui/Language.h"
 
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <cstdlib>
 
 namespace bemotion {
+
+namespace {
+
+// Editor tools change the project directly and keep it valid by construction (ARCHITECTURE §4);
+// this checks that they did. Debug builds, or BEMOTION_STRICT, validate every committed edit and
+// log what is wrong; BEMOTION_STRICT=1 stops at the first invalid edit (the smoke test runs so).
+void checkEdit(const Project& project) {
+    static const std::string strict = platform::env("BEMOTION_STRICT");
+#ifdef NDEBUG
+    if (strict.empty()) return;
+#endif
+    const std::vector<Issue> issues = validate(project);
+    for (const Issue& i : issues) platform::log("invalid edit: " + i.where + ": " + i.what);
+    if (!issues.empty() && strict == "1") std::abort();
+}
+
+} // namespace
 
 void EditorContext::open(Project p, std::filesystem::path file) {
     project = std::move(p);
@@ -213,6 +233,7 @@ void EditorContext::commitIfIdle(bool interacting) {
     if (!pendingCommit_ || interacting) return;
     // The composition grows and shrinks with its content (once an edit is done, not mid-drag).
     project.comp.fitDuration();
+    checkEdit(project);
     history.commit(project);
     pendingCommit_ = false;
 }

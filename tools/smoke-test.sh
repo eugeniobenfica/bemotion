@@ -26,6 +26,7 @@ project="$out/welcome.bemotion"
 cp "$root/assets/welcome/Welcome.bemotion" "$project"
 export BEMOTION_APPDATA="$(native "$out/appdata")" # never the user's settings
 export QT_QPA_PLATFORM=offscreen
+export BEMOTION_STRICT=1 # an editor edit that breaks a rule stops the app (ui/EditorContext.cpp)
 
 # timeout(1) is not on macOS: perl's alarm does the same.
 limited() { if command -v timeout >/dev/null; then timeout "$@"; else perl -e 'alarm shift; exec @ARGV' "$@"; fi; }
