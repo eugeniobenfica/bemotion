@@ -10,7 +10,7 @@
 
 #include "export/Export.h"
 
-#include "app/Platform.h"
+#include "core/Utf8.h"
 #include "media/MediaIO.h"
 
 extern "C" {
@@ -111,7 +111,7 @@ public:
 
     bool open(const EncoderParams& p, std::string& error) override {
         params_ = p;
-        const std::string path = platform::toUtf8(p.output);
+        const std::string path = utf8::fromPath(p.output);
         int r = avformat_alloc_output_context2(&oc_, nullptr, p.format == Format::Gif ? "gif" : nullptr, path.c_str());
         if (r < 0 || !oc_) {
             error = "Could not create the file (" + avError(r) + ").";

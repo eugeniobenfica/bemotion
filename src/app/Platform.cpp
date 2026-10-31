@@ -1,5 +1,7 @@
 #include "app/Platform.h"
 
+#include "core/Utf8.h"
+
 #include <QApplication>
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -50,18 +52,9 @@ std::string withoutDot(const char* ext) { return ext && ext[0] == '.' ? ext + 1 
 
 } // namespace
 
-std::string toUtf8(const fs::path& path) {
-    const std::u8string s = path.u8string();
-    return std::string(s.begin(), s.end());
-}
+std::string toUtf8(const fs::path& path) { return utf8::fromPath(path); }
 
-fs::path fromUtf8(const std::string& utf8) {
-    try {
-        return fs::path(std::u8string(utf8.begin(), utf8.end()));
-    } catch (const std::exception&) { // not UTF-8 after all: read it in the system code page
-        return fs::path(utf8);
-    }
-}
+fs::path fromUtf8(const std::string& utf8) { return bemotion::utf8::toPath(utf8); }
 
 std::vector<std::string> arguments(int argc, char** argv) {
     std::vector<std::string> out;

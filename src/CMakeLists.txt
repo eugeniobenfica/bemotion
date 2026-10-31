@@ -37,33 +37,12 @@ file(READ ${PROJECT_SOURCE_DIR}/docs/EXPRESSIONS.md BEMOTION_EXPRESSIONS_REFEREN
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/docs/OPERATIONS.md ${PROJECT_SOURCE_DIR}/docs/EXPRESSIONS.md)
 configure_file(app/OperationsReference.cpp.in ${CMAKE_CURRENT_BINARY_DIR}/generated/OperationsReference.cpp @ONLY)
 
-# --- bemotion: the desktop application -----------------------------------------
-add_executable(bemotion WIN32
-    main.cpp
-    app/Application.cpp
-    app/AppIcon.cpp
-    app/Automation.cpp
-    app/McpServer.cpp
-    ${CMAKE_CURRENT_BINARY_DIR}/generated/OperationsReference.cpp
-    app/DevScript.cpp
-    app/Downloads.cpp
-    app/EffectLibrary.cpp
-    app/Platform.cpp
-    app/PluginHost.cpp
-    app/ProjectPackage.cpp
-    app/PresetLibrary.cpp
-    app/Recovery.cpp
-    app/Settings.cpp
-    app/RecentProjects.cpp
-    export/Export.cpp
-    export/FfmpegEncoder.cpp
-    export/PngSequenceEncoder.cpp
-    media/AudioEngine.cpp
-    media/FfmpegMedia.cpp
-    media/MediaIO.cpp
-    media/MediaManager.cpp
-    media/Recorder.cpp
-    media/Transcriber.cpp
+# --- The layers above the core, one static library each --------------------------
+# Each links only the layers below it (docs/ARCHITECTURE.md §2), and tests/ links
+# each one whole into a program of its own: an upward include fails to link there.
+
+# bemotion_render: draws compositions with Skia, no Qt.
+add_library(bemotion_render STATIC
     render/Fonts.cpp
     render/Gradient.cpp
     render/Gpu.cpp
@@ -72,7 +51,47 @@ add_executable(bemotion WIN32
     render/OffscreenRenderer.cpp
     render/PluginCanvas.cpp
     render/SceneRenderer.cpp
-    render/Text.cpp
+    render/Text.cpp)
+target_link_libraries(bemotion_render PUBLIC bemotion_core skia)
+
+# bemotion_media: media decoding, audio, recording, speech to text and export, no Qt.
+add_library(bemotion_media STATIC
+    media/AudioEngine.cpp
+    media/FfmpegMedia.cpp
+    media/MediaIO.cpp
+    media/MediaManager.cpp
+    media/Recorder.cpp
+    media/Transcriber.cpp
+    export/Export.cpp
+    export/FfmpegEncoder.cpp
+    export/PngSequenceEncoder.cpp)
+target_link_libraries(bemotion_media PUBLIC bemotion_render PkgConfig::FFMPEG stb miniaudio)
+if(WHISPER_FOUND)
+    target_link_libraries(bemotion_media PRIVATE ${BEMOTION_WHISPER_TARGET})
+    target_compile_definitions(bemotion_media PRIVATE BEMOTION_WHISPER=1)
+endif()
+if(UNIX AND NOT APPLE)
+    target_link_libraries(bemotion_media PUBLIC ${CMAKE_DL_LIBS} pthread m) # miniaudio loads audio backends at runtime
+endif()
+if(WIN32)
+    target_link_libraries(bemotion_media PUBLIC ole32 winmm)
+endif()
+
+# bemotion_ui: the Qt editor, with the application services it stands on (settings,
+# plugins, paths and dialogs, downloads, recovery, libraries). Those use the editor's
+# theme, tools and signals, so they are one layer with it. The program itself (main,
+# Application, Automation, McpServer, DevScript) is only in the executable below.
+add_library(bemotion_ui STATIC
+    app/Downloads.cpp
+    app/EffectLibrary.cpp
+    app/Platform.cpp
+    app/PluginHost.cpp
+    app/ProjectPackage.cpp
+    app/PresetLibrary.cpp
+    app/Recovery.cpp
+    app/RecentProjects.cpp
+    app/Services.cpp
+    app/Settings.cpp
     ui/AppSignals.h
     ui/SkiaQt.h
     ui/WindowChrome.cpp
@@ -114,27 +133,32 @@ add_executable(bemotion WIN32
     ui/panels/ViewportPanel.cpp
     ui/panels/ViewportTools.cpp
     ui/panels/ToolSettingsPanel.cpp)
-set_target_properties(bemotion PROPERTIES AUTOMOC ON)
-target_include_directories(bemotion PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(bemotion PRIVATE
-    bemotion_core
+set_target_properties(bemotion_ui PROPERTIES AUTOMOC ON)
+target_link_libraries(bemotion_ui PUBLIC
+    bemotion_media
     bestyle
     Qt6::Widgets Qt6::Svg Qt6::Network Qt6::Test
     qtadvanceddocking-qt6
-    skia
-    PkgConfig::FFMPEG
-    stb lua miniaudio)
-if(WHISPER_FOUND)
-    target_link_libraries(bemotion PRIVATE ${BEMOTION_WHISPER_TARGET})
-    target_compile_definitions(bemotion PRIVATE BEMOTION_WHISPER=1)
-endif()
-target_compile_definitions(bemotion PRIVATE
+    lua)
+target_compile_definitions(bemotion_ui PRIVATE
     BEMOTION_VERSION="${BEMOTION_FULL_VERSION}"
     BEMOTION_SOURCE_ASSETS_DIR="${PROJECT_SOURCE_DIR}/assets")
-
-if(UNIX AND NOT APPLE)
-    target_link_libraries(bemotion PRIVATE ${CMAKE_DL_LIBS} pthread m) # miniaudio loads audio backends at runtime
+if(WIN32)
+    target_link_libraries(bemotion_ui PUBLIC shell32 ole32 uuid)
 endif()
+
+# --- bemotion: the desktop application -----------------------------------------
+add_executable(bemotion WIN32
+    main.cpp
+    app/Application.cpp
+    app/AppIcon.cpp
+    app/Automation.cpp
+    app/McpServer.cpp
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/OperationsReference.cpp
+    app/DevScript.cpp)
+set_target_properties(bemotion PROPERTIES AUTOMOC ON)
+target_link_libraries(bemotion PRIVATE bemotion_ui)
+target_compile_definitions(bemotion PRIVATE BEMOTION_VERSION="${BEMOTION_FULL_VERSION}")
 
 if(WIN32)
     # The executable's icon. Its own target: windres chokes on include paths with spaces.
@@ -145,13 +169,18 @@ if(WIN32)
 endif()
 
 if(MSVC)
-    target_compile_options(bemotion PRIVATE /W4 /utf-8)
-    target_compile_options(bemotion_core PRIVATE /W4 /utf-8)
+    foreach(target bemotion bemotion_ui bemotion_media bemotion_render bemotion_core)
+        target_compile_options(${target} PRIVATE /W4 /utf-8)
+    endforeach()
     # Portable C functions (fopen, getenv, ...) are fine here.
-    target_compile_definitions(bemotion PRIVATE _CRT_SECURE_NO_WARNINGS)
+    foreach(target bemotion bemotion_ui bemotion_media bemotion_render)
+        target_compile_definitions(${target} PRIVATE _CRT_SECURE_NO_WARNINGS)
+    endforeach()
     target_link_options(bemotion PRIVATE /ENTRY:mainCRTStartup)
 else()
-    target_compile_options(bemotion PRIVATE -Wall -Wextra -Wno-attributes) # Skia headers use clang:: attributes
+    foreach(target bemotion bemotion_ui bemotion_media bemotion_render)
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-attributes) # Skia headers use clang:: attributes
+    endforeach()
     target_compile_options(bemotion_core PRIVATE -Wall -Wextra)
 endif()
 

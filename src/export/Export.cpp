@@ -1,6 +1,6 @@
 #include "export/Export.h"
 
-#include "app/Platform.h"
+#include "core/Utf8.h"
 
 #include <algorithm>
 #include <cmath>
@@ -56,7 +56,7 @@ bool formatHasAudio(Format f) { return f != Format::Gif; }
 bool writeWav(const std::filesystem::path& file, const std::vector<float>& stereo, int rate, std::string& error) {
     std::ofstream out(file, std::ios::binary | std::ios::trunc);
     if (!out) {
-        error = "Could not write " + platform::toUtf8(file);
+        error = "Could not write " + utf8::fromPath(file);
         return false;
     }
     auto u32 = [&](uint32_t v) { out.put(char(v & 255)).put(char((v >> 8) & 255)).put(char((v >> 16) & 255)).put(char(v >> 24)); };
@@ -78,7 +78,7 @@ bool writeWav(const std::filesystem::path& file, const std::vector<float>& stere
     for (size_t i = 0; i < stereo.size(); ++i) pcm[i] = static_cast<int16_t>(std::lround(std::clamp(stereo[i], -1.0f, 1.0f) * 32767.0f));
     out.write(reinterpret_cast<const char*>(pcm.data()), static_cast<std::streamsize>(pcm.size() * 2));
     if (!out) {
-        error = "Could not write " + platform::toUtf8(file);
+        error = "Could not write " + utf8::fromPath(file);
         return false;
     }
     return true;

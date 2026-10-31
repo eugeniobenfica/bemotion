@@ -2,7 +2,7 @@
 
 #include "app/Platform.h"
 #include "app/PluginHost.h"
-#include "app/Automation.h"
+#include "app/Services.h"
 #include "app/PresetLibrary.h"
 #include "core/Transitions.h"
 #include "app/Settings.h"
