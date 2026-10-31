@@ -36,3 +36,7 @@ dist/
 # Smoke test output (tools/smoke-test.sh)
 smoke/
 smoke-package/
+
+# graphify: caches and dated snapshots (graph.json and GRAPH_REPORT.md may be committed)
+graphify-out/cache/
+graphify-out/20*/
