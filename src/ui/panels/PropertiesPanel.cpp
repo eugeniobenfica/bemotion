@@ -16,6 +16,7 @@
 #include "ui/EditorContext.h"
 #include "ui/LayerMenus.h"
 #include "ui/Modules.h"
+#include "ui/PluginInstall.h"
 #include "ui/PropertyRow.h"
 #include "ui/Transcribe.h"
 #include "ui/Theme.h"
@@ -135,7 +136,8 @@ std::string PropertiesPanel::structureKey() {
     k << layer->id << ':' << static_cast<int>(layer->type) << ':' << static_cast<int>(layer->shape.kind) << ':'
       << static_cast<int>(layer->background.fill) << ':' << layer->background.mediaId << ':' << ctx_.comp().media.size() << ':'
       << layer->parent << ':'
-      << layer->plugin.objectType << ':' << layer->plugin.rows.size() << ':' << layer->plugin.table.rows.size() << 'x'
+      << layer->plugin.objectType << ':' << (PluginHost::get().findType(layer->plugin.objectType) != nullptr) << ':'
+      << layer->plugin.params.size() << ':' << layer->plugin.rows.size() << ':' << layer->plugin.table.rows.size() << 'x'
       << layer->plugin.table.header.size() << ':' << layer->media.mediaId << ':' << layer->media.hasAudio
       << ':' << PresetLibrary::all().size() << ':' << presetMessage_ << ':' << layer->text.captions.size();
     if (layer->type == LayerType::Compound)
@@ -880,6 +882,13 @@ void PropertiesPanel::buildLayer(QVBoxLayout* col, Layer& layer) {
             warn->setWordWrap(true);
             ui::setTone(warn, ui::Tone::Danger);
             col->addWidget(warn);
+            const std::vector<std::string> missing = ui::missingPlugins(ctx_.comp());
+            const std::string id = layer.plugin.objectType.substr(0, layer.plugin.objectType.find('.'));
+            if (std::find(missing.begin(), missing.end(), id) != missing.end()) {
+                auto* install = new QPushButton(tr("Download Plugin"));
+                connect(install, &QPushButton::clicked, this, [this, id] { ui::installOfficialPlugins(this, {id}, false); });
+                col->addWidget(install, 0, Qt::AlignLeft);
+            }
         }
     }
 

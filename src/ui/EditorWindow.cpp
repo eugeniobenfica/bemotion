@@ -21,6 +21,7 @@
 #include "ui/LayerMenus.h"
 #include "ui/Mime.h"
 #include "ui/Modules.h"
+#include "ui/PluginInstall.h"
 #include "ui/Theme.h"
 #include "ui/PreviewWindow.h"
 #include "ui/Tools.h"
@@ -283,6 +284,11 @@ void EditorWindow::buildDocks() {
                 ctx_.showRulers = settings().showRulers;
             });
     connect(&ui::AppSignals::get(), &ui::AppSignals::interfaceResetRequested, this, [this] { resetLayout(); });
+    connect(&ui::AppSignals::get(), &ui::AppSignals::pluginsChanged, this, [this] {
+        // A plugin installed or updated: its objects take its parameters (as when a project opens).
+        PluginHost::get().reconcile(ctx_.project.comp);
+        ctx_.redraw();
+    });
 
     objects_ = new ObjectsPanel(ctx_);
     media_ = new MediaPanel(ctx_);
@@ -1631,6 +1637,14 @@ void EditorWindow::exportFrame(bool toClipboard) {
 void EditorWindow::markRecovered() {
     ctx_.touch(); // unsaved until the user saves
     setStatus(tr("Recovered: save to keep the changes"));
+}
+
+void EditorWindow::offerMissingPlugins() {
+    if (settings().essentialsOnly) return; // plugins are off on purpose
+    std::vector<std::string> missing = ui::missingPlugins(ctx_.project.comp);
+    if (missing.empty()) return;
+    // After the window shows: the question is about what the user is looking at.
+    QTimer::singleShot(0, this, [this, missing = std::move(missing)] { ui::installOfficialPlugins(this, missing, true); });
 }
 
 void EditorWindow::markRepaired(const std::vector<Issue>& repairs) {

@@ -445,6 +445,7 @@ void Application::openProject(const std::filesystem::path& path) {
     PluginHost::get().reconcile(project.comp);
     showEditor(std::move(project), path);
     if (!repairs.empty()) editor_->markRepaired(repairs);
+    editor_->offerMissingPlugins();
 }
 
 void Application::createProject(Project project, const std::filesystem::path& path) {
@@ -551,6 +552,7 @@ void Application::offerRecovery() {
     PluginHost::get().reconcile(project.comp);
     showEditor(std::move(project), e.original);
     editor_->markRecovered();
+    editor_->offerMissingPlugins();
 }
 
 void Application::updateTitle() { window_->setWindowTitle(editor_ ? editor_->title() : QString("bemotion")); }

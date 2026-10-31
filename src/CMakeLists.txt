@@ -110,6 +110,7 @@ add_executable(bemotion WIN32
     ui/Tracking.cpp
     ui/Transcribe.cpp
     ui/Modules.cpp
+    ui/PluginInstall.cpp
     ui/Updates.cpp
     ui/panels/ViewportPanel.cpp
     ui/panels/ViewportTools.cpp

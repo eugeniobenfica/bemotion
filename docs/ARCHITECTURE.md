@@ -787,8 +787,9 @@ Rules:
 
 ## 9. Plugins
 
-- A plugin is a folder with `plugin.json` and Lua 5.4 code; bundled ones in
-  `assets/plugins`, user ones in `<app data>/plugins`. Documentation:
+- A plugin is a folder with `plugin.json` and Lua 5.4 code; official ones in
+  `assets/plugins` (left out of the packages, downloaded from the version's
+  tag: `app/Downloads`, `ui/PluginInstall`), user ones in `<app data>/plugins`. Documentation:
   [PLUGINS.md](PLUGINS.md).
 - **Sandbox**: only `base`, `table`, `string`, `math`, `utf8`; no files, OS,
   network, `load` or `require`. Instruction budgets: 4 M per draw, 20 M while

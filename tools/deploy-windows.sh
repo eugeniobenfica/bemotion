@@ -15,9 +15,14 @@ mkdir -p "$out"
 cp "$build/bemotion.exe" "$out/"
 rm -rf "$out/assets"
 cp -r "$(dirname "$build/bemotion.exe")/assets" "$out/assets"
-# Official plugins a release leaves out (they stay downloadable from Settings › Plugins):
-#   BEMOTION_LEAVE_OUT_PLUGINS="models3d recorder" tools/package-....sh ...
-for id in ${BEMOTION_LEAVE_OUT_PLUGINS:-}; do rm -rf "$out/assets/plugins/$id"; done
+# Official plugins are not part of the package: the app downloads them from the release's tag
+# when a project or the user asks (Settings › Plugins). BEMOTION_BUNDLE_PLUGINS="charts" keeps
+# those ids inside ("all": every one).
+bundle=" ${BEMOTION_BUNDLE_PLUGINS:-} "
+for dir in "$out/assets/plugins"/*/; do
+    id="$(basename "$dir")"
+    [[ "$bundle" == *" all "* || "$bundle" == *" $id "* ]] || rm -rf "$dir"
+done
 
 # Qt libraries and plugins (platform, styles, image formats, TLS for the downloads the user asks
 # for: official plugins, the speech model). No network-information or touch plugins.
@@ -43,13 +48,14 @@ copy_deps "$out/bemotion.exe"
 # whisper.cpp's compute backends (CPU variants, Vulkan...) are loaded at run time, from beside the
 # executable: ldd does not see them.
 for dll in "$prefix"/bin/ggml-*.dll; do cp "$dll" "$out/"; done
-# The speech-to-text model ships inside: nobody has to download anything (tools/fetch-speech-model.sh).
+# The speech-to-text model (about 550 MB) is not part of the package: bemotion offers to download
+# it the first time someone transcribes. BEMOTION_BUNDLE_MODELS=1 puts the fetched one inside
+# (tools/fetch-speech-model.sh), for offline installs.
 models="${BEMOTION_MODELS:-$HOME/bemotion-deps/models}"
-if ls "$models"/ggml-*.bin >/dev/null 2>&1; then
+if [ "${BEMOTION_BUNDLE_MODELS:-}" = 1 ]; then
+    ls "$models"/ggml-*.bin >/dev/null 2>&1 || { echo "error: no speech model in $models (run tools/fetch-speech-model.sh)"; exit 1; }
     mkdir -p "$out/assets/models"
     cp "$models"/ggml-*.bin "$out/assets/models/"
-else
-    echo "warning: no speech model in $models (run tools/fetch-speech-model.sh): transcription will be missing"
 fi
 find "$out" -name '*.dll' -print0 | while IFS= read -r -d '' dll; do copy_deps "$dll"; done
 

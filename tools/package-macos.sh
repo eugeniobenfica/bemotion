@@ -22,13 +22,18 @@ rm -rf "$app" "$out/bemotion.dmg"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$exe" "$app/Contents/MacOS/bemotion"
 cp -R "$(dirname "$exe")/assets" "$app/Contents/Resources/assets"
-# Official plugins a release leaves out (they stay downloadable from Settings › Plugins):
-#   BEMOTION_LEAVE_OUT_PLUGINS="models3d recorder" tools/package-....sh ...
-for id in ${BEMOTION_LEAVE_OUT_PLUGINS:-}; do rm -rf "$app/Contents/Resources/assets/plugins/$id"; done
-# The speech models (tools/fetch-speech-model.sh), when they were fetched: transcription works
-# out of the box. Without them bemotion offers to download them when first needed.
+# Official plugins are not part of the package: the app downloads them from the release's tag
+# when a project or the user asks (Settings › Plugins). BEMOTION_BUNDLE_PLUGINS="charts" keeps
+# those ids inside ("all": every one).
+bundle=" ${BEMOTION_BUNDLE_PLUGINS:-} "
+for dir in "$app/Contents/Resources/assets/plugins"/*/; do
+    id="$(basename "$dir")"
+    [[ "$bundle" == *" all "* || "$bundle" == *" $id "* ]] || rm -rf "$dir"
+done
+# The speech models are not part of the package: bemotion offers to download them when first
+# needed. BEMOTION_BUNDLE_MODELS=1 puts the fetched ones inside (tools/fetch-speech-model.sh).
 models="${BEMOTION_MODELS:-$HOME/bemotion-deps/models}"
-if ls "$models"/ggml-*.bin >/dev/null 2>&1; then
+if [ "${BEMOTION_BUNDLE_MODELS:-}" = 1 ] && ls "$models"/ggml-*.bin >/dev/null 2>&1; then
     mkdir -p "$app/Contents/Resources/assets/models"
     cp "$models"/ggml-*.bin "$app/Contents/Resources/assets/models/"
 fi

@@ -77,6 +77,8 @@ public:
     void markRecovered();
     // The file broke rules and was fixed as it opened (core/Validate): says so, unsaved until saved.
     void markRepaired(const std::vector<Issue>& repairs);
+    // The project uses official plugins this installation does not have: offers to download them.
+    void offerMissingPlugins();
     // Closing because a new window takes the project over: its crash-recovery copy stays.
     void handOver() { handedOver_ = true; }
 

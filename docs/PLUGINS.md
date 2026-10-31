@@ -1,18 +1,23 @@
 # Writing plugins
 
 A plugin is a folder with a `plugin.json` manifest and a Lua 5.4 script that
-registers new object types. Bundled plugins live in `assets/plugins`; user
-plugins in `<app data>/bemotion/plugins` (*Plugins → Install Plugin…* copies a
-folder there). The bundled [Charts plugin](../assets/plugins/charts/main.lua)
+registers new object types. Official plugins live in `assets/plugins` (dev
+builds load them from there); user plugins in `<app data>/bemotion/plugins`
+(*Plugins → Install Plugin…* copies a folder there). The official [Charts plugin](../assets/plugins/charts/main.lua)
 is a complete example.
 
-**Official plugins** are the folders in `assets/plugins`. A release can leave
-some out (`BEMOTION_LEAVE_OUT_PLUGINS="models3d recorder"` for the package
-scripts); users get them from *Settings › Plugins › Show Official Plugins*,
-which reads `assets/plugins/index.json` from the repository's main branch on
-GitHub (only when clicked), downloads the plugin's files, checks each one's
-SHA-256 against the catalog, then installs it like *Install Plugin…* (a
-downloaded one replaces a bundled one of the same id, so this also updates).
+**Official plugins** are the folders in `assets/plugins`, and they are
+optional: the packages leave them all out (`BEMOTION_BUNDLE_PLUGINS="charts"`,
+or `"all"`, keeps some inside for offline installs). Users get them when they
+open a project that uses one (the editor offers the missing ones, and
+Properties has *Download Plugin* on such an object), or from *Settings ›
+Plugins › Show Official Plugins*. Both read `assets/plugins/index.json` from
+the repository on GitHub **at the tag of the app's version** (`v<version>`,
+never the main branch: a push does not reach installed apps), only when
+clicked, download the plugin's files, check each one's SHA-256 against the
+catalog, then install it like *Install Plugin…* (a downloaded one replaces a
+bundled one of the same id). A plugin fix reaches users with the next
+release.
 Plugins needing a newer `api` than the app are not offered. After changing an
 official plugin, run `tools/plugin-index.py` (a test fails while the catalog
 is out of date). `BEMOTION_PLUGIN_CATALOG` points the app at another catalog:

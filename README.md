@@ -138,9 +138,9 @@ does.
 - **Speech to text**: right-click a clip with speech, *Transcribe to
   Subtitles*: the words land as captions at their time. Accurate (Whisper
   large-v3-turbo) and fast on the GPU (Vulkan on Windows, Metal on macOS),
-  offline. Windows packages carry the model; elsewhere bemotion offers to
-  download it (about 550 MB) the first time, once
-  ([on Linux and macOS](#speech-to-text-on-linux-and-macos))
+  offline. The model is not in the download: bemotion offers it (about
+  550 MB) the first time you transcribe, once
+  ([building on Linux and macOS](#speech-to-text-on-linux-and-macos))
 - **Media**: import images, video and audio (Ctrl+I or drop files on the
   window) into the *Media* panel; media layers animate like everything else;
   the **Crop** tool (Shift+C) drags a video's or image's edges (four
@@ -338,21 +338,22 @@ does.
   Follow the Leader, Grid of Copies, Random Colors) and your own, one undo
   step each
 - **Plugins** are sandboxed Lua scripts that add new kinds of objects
-- The bundled **Charts** plugin draws animated column / bar, line / area and
+- The official **Charts** plugin draws animated column / bar, line / area and
   donut charts, **tables** and **maps** (world by country; Brazil, USA,
   Canada, Australia, India, China, South Africa by state), from data you
   paste from a spreadsheet or import from a **CSV** file
-- The bundled **3D Models** plugin brings glTF / GLB, OBJ and STL models into
+- The official **3D Models** plugin brings glTF / GLB, OBJ and STL models into
   the 2D scene: turn, zoom, light and color them, all keyframable
-- The bundled **Recorder** plugin records voice-overs from the microphone,
+- The official **Recorder** plugin records voice-overs from the microphone,
   straight into the timeline
 - **Built-in features** that not everyone needs (speech to text, point
   tracking, Puppet and Warp, SVG import, Lottie export, scopes) can be turned
   off like plugins in *Settings › Plugins*: they leave the menus and tools
-- **Official plugins** a release leaves out are a click away: *Settings ›
-  Plugins › Show Official Plugins* lists them from bemotion's repository on
-  GitHub (only when you click), and each file is checked (SHA-256) before it
-  is installed
+- **Official plugins are optional**: the download carries none of them.
+  Open a project that uses one and bemotion offers to get it; or pick them
+  in *Settings › Plugins › Show Official Plugins*. They come from bemotion's
+  repository on GitHub, at the tag of your version (only when you click),
+  and each file is checked (SHA-256) before it is installed
 - Plugin **commands** edit the project through the same operations as
   scripts and AI tools — see [docs/PLUGINS.md](docs/PLUGINS.md)
 - **Robot-friendly**: scripts and AI assistants create and edit projects from
@@ -481,7 +482,6 @@ tools/skia/build-skia.sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/bemotion.exe
-tools/fetch-speech-model.sh                   # once: the speech-to-text model (~550 MB) the package ships
 tools/package-windows.sh build dist           # installer + portable zip (needs: pacman -S mingw-w64-ucrt-x86_64-nsis)
 ```
 
@@ -520,9 +520,11 @@ cmake --build build
 On the GPU on Linux, add `-DGGML_VULKAN=ON` (needs the Vulkan SDK). On macOS,
 `brew install whisper.cpp` works too (found through pkg-config, no option
 needed). The CI builds Linux and macOS this way. The model: run
-`tools/fetch-speech-model.sh` once (the packages then carry it, or point
-`BEMOTION_MODELS` at the folder), or let bemotion download it into its app data
-the first time you transcribe.
+`tools/fetch-speech-model.sh` once and point `BEMOTION_MODELS` at the folder,
+or let bemotion download it into its app data the first time you transcribe.
+Packages leave the model and the official plugins out;
+`BEMOTION_BUNDLE_MODELS=1` and `BEMOTION_BUNDLE_PLUGINS="all"` (or a list of
+ids) put them inside, for offline installs.
 
 Run the unit tests with `ctest --test-dir build`. A Skia built elsewhere can be
 used with `-DSKIA_ROOT=<dir>`.
@@ -587,7 +589,7 @@ src/media    imported media: image / audio / video decoding (FFmpeg), audio play
 src/ui       Qt interface: theme, widgets, intro, home screen, editor window, dock panels, dialogs
 src/app      application window, OS integration, settings, preset/theme libraries, plugin host
 libs/bestyle the look (theme, widget style, drawing, icons, shared controls), reusable by other Qt apps
-assets       fonts, bundled plugins, the Welcome project and the brand files
+assets       fonts, official plugins (downloaded, not packaged), the Welcome project and the brand files
 tools        Skia build, packaging (Windows, Linux, macOS), release, smoke test and language scripts
 tests        unit tests for the core
 ```
