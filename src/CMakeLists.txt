@@ -14,6 +14,9 @@ add_library(bemotion_core STATIC
     core/Deform.cpp
     core/Describe.cpp
     core/Ops.cpp
+    core/OpsAnimation.cpp
+    core/OpsMedia.cpp
+    core/OpsTimeline.cpp
     core/Validate.cpp
     core/Language.cpp
     core/Layer.cpp

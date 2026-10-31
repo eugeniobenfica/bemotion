@@ -1,4 +1,5 @@
 #include "core/Ops.h"
+#include "core/OpsInternal.h"
 
 #include "core/Arrange.h"
 #include "core/AudioDsp.h"
@@ -23,15 +24,10 @@ namespace bemotion {
 
 using json = nlohmann::json;
 
-namespace {
+namespace opsimpl {
 
 const char* kShapeNames[] = {"rectangle", "ellipse", "polygon", "star", "line", "path"};
 const char* kAlignNames[] = {"left", "center", "right"};
-
-// Thrown by the operations; applyOps turns it into OpsResult::error.
-struct OpError : std::runtime_error {
-    using std::runtime_error::runtime_error;
-};
 
 [[noreturn]] void fail(const std::string& message) { throw OpError(message); }
 
@@ -68,11 +64,11 @@ bool boolean(const json& v, const char* name) {
 
 std::string typeName(const Layer& l) { return layerTypeName(l); }
 
-} // namespace
+} // namespace opsimpl
 
 std::string layerTypeName(const Layer& l) {
     switch (l.type) {
-    case LayerType::Shape: return kShapeNames[static_cast<int>(l.shape.kind)];
+    case LayerType::Shape: return opsimpl::kShapeNames[static_cast<int>(l.shape.kind)];
     case LayerType::Text: return l.text.subtitle ? "subtitle" : l.text.counter ? "counter" : "text";
     case LayerType::Camera: return "camera";
     case LayerType::Compound: return "compound";
@@ -83,7 +79,7 @@ std::string layerTypeName(const Layer& l) {
     return "?";
 }
 
-namespace {
+namespace opsimpl {
 
 int shapeKindOf(const std::string& name) {
     for (int i = 0; i < static_cast<int>(ShapeKind::Count); ++i)
@@ -177,1637 +173,819 @@ json valueJson(PropertyKind kind, const std::vector<float>& v) {
 
 // --- the document ----------------------------------------------------------------------------
 
-class Applier {
-public:
-    Applier(Project& p, const OpEnvironment& env) : p_(p), c_(p.comp), env_(env) {}
-    bool changed = false;
-
-    using Handler = json (Applier::*)(const json&);
-
-    json apply(const json& op) {
-        if (!op.is_object()) fail("an operation must be an object like {\"op\": \"layer.add\", ...}");
-        const std::string name = text(field(op, "op"), "op");
-        std::vector<std::string> names;
-        for (const auto& [n, fn] : ops()) {
-            if (n == name) {
-                const bool query = name.rfind("query.", 0) == 0;
-                json r = (this->*fn)(op);
-                if (!query) changed = true;
-                return r;
-            }
-            names.push_back(n);
+json Applier::apply(const json& op) {
+    if (!op.is_object()) fail("an operation must be an object like {\"op\": \"layer.add\", ...}");
+    const std::string name = text(field(op, "op"), "op");
+    std::vector<std::string> names;
+    for (const auto& [n, fn] : ops()) {
+        if (n == name) {
+            const bool query = name.rfind("query.", 0) == 0;
+            json r = (this->*fn)(op);
+            if (!query) changed = true;
+            return r;
         }
-        fail("unknown operation \"" + name + "\"" + suggest(name, names));
+        names.push_back(n);
     }
+    fail("unknown operation \"" + name + "\"" + suggest(name, names));
+}
 
-    static const std::vector<std::pair<std::string, Handler>>& ops() {
-        static const std::vector<std::pair<std::string, Handler>> kOps = {
-            {"composition.set", &Applier::compositionSet},
-            {"layer.add", &Applier::layerAdd},
-            {"layer.remove", &Applier::layerRemove},
-            {"layer.set", &Applier::layerSet},
-            {"layer.move", &Applier::layerMove},
-            {"layer.split", &Applier::layerSplit},
-            {"layer.duplicate", &Applier::layerDuplicate},
-            {"layer.trim", &Applier::layerTrim},
-            {"layer.roll", &Applier::layerRoll},
-            {"layer.slip", &Applier::layerSlip},
-            {"layer.ripple_delete", &Applier::layerRippleDelete},
-            {"track.close_gap", &Applier::trackCloseGap},
-            {"layer.speed", &Applier::layerSpeed},
-            {"layer.time_remap", &Applier::layerTimeRemap},
-            {"layer.freeze", &Applier::layerFreeze},
-            {"layer.separate_audio", &Applier::layerSeparateAudio},
-            {"layer.link_audio", &Applier::layerLinkAudio},
-            {"svg.add", &Applier::svgAdd},
-            {"mask.add", &Applier::maskAdd},
-            {"mask.set", &Applier::maskSet},
-            {"mask.remove", &Applier::maskRemove},
-            {"mask.duplicate", &Applier::maskDuplicate},
-            {"paint.stroke", &Applier::paintStroke},
-            {"paint.clear", &Applier::paintClear},
-            {"puppet.pin.add", &Applier::pinAdd},
-            {"puppet.pin.remove", &Applier::pinRemove},
-            {"marker.add", &Applier::markerAdd},
-            {"marker.set", &Applier::markerSet},
-            {"marker.remove", &Applier::markerRemove},
-            {"group", &Applier::group},
-            {"ungroup", &Applier::ungroup},
-            {"property.set", &Applier::propertySet},
-            {"key.add", &Applier::keyAdd},
-            {"expression.set", &Applier::expressionSet},
-            {"expression.bake", &Applier::expressionBake},
-            {"key.remove", &Applier::keyRemove},
-            {"key.clear", &Applier::keyClear},
-            {"key.easing", &Applier::keyEasing},
-            {"effect.add", &Applier::effectAdd},
-            {"effect.remove", &Applier::effectRemove},
-            {"effect.set", &Applier::effectSet},
-            {"audio_effect.add", &Applier::audioEffectAdd},
-            {"audio_effect.remove", &Applier::audioEffectRemove},
-            {"audio_effect.set", &Applier::audioEffectSet},
-            {"audio.level", &Applier::audioLevel},
-            {"audio.remove_silence", &Applier::audioRemoveSilence},
-            {"transition.add", &Applier::transitionAdd},
-            {"arrange.distribute", &Applier::arrangeDistribute},
-            {"arrange.stagger", &Applier::arrangeStagger},
-            {"data.set", &Applier::dataSet},
-            {"param.set", &Applier::paramSet},
-            {"media.import", &Applier::mediaImport},
-            {"media.move", &Applier::mediaMove},
-            {"folder.add", &Applier::folderAdd},
-            {"folder.rename", &Applier::folderRename},
-            {"folder.remove", &Applier::folderRemove},
-            {"folder.move", &Applier::folderMove},
-            {"query.composition", &Applier::queryComposition},
-            {"query.layers", &Applier::queryLayers},
-            {"query.layer", &Applier::queryLayer},
-            {"query.expression", &Applier::queryExpression},
-        };
-        return kOps;
+const std::vector<std::pair<std::string, Applier::Handler>>& Applier::ops() {
+    static const std::vector<std::pair<std::string, Handler>> kOps = {
+        {"composition.set", &Applier::compositionSet},
+        {"layer.add", &Applier::layerAdd},
+        {"layer.remove", &Applier::layerRemove},
+        {"layer.set", &Applier::layerSet},
+        {"layer.move", &Applier::layerMove},
+        {"layer.split", &Applier::layerSplit},
+        {"layer.duplicate", &Applier::layerDuplicate},
+        {"layer.trim", &Applier::layerTrim},
+        {"layer.roll", &Applier::layerRoll},
+        {"layer.slip", &Applier::layerSlip},
+        {"layer.ripple_delete", &Applier::layerRippleDelete},
+        {"track.close_gap", &Applier::trackCloseGap},
+        {"layer.speed", &Applier::layerSpeed},
+        {"layer.time_remap", &Applier::layerTimeRemap},
+        {"layer.freeze", &Applier::layerFreeze},
+        {"layer.separate_audio", &Applier::layerSeparateAudio},
+        {"layer.link_audio", &Applier::layerLinkAudio},
+        {"svg.add", &Applier::svgAdd},
+        {"mask.add", &Applier::maskAdd},
+        {"mask.set", &Applier::maskSet},
+        {"mask.remove", &Applier::maskRemove},
+        {"mask.duplicate", &Applier::maskDuplicate},
+        {"paint.stroke", &Applier::paintStroke},
+        {"paint.clear", &Applier::paintClear},
+        {"puppet.pin.add", &Applier::pinAdd},
+        {"puppet.pin.remove", &Applier::pinRemove},
+        {"marker.add", &Applier::markerAdd},
+        {"marker.set", &Applier::markerSet},
+        {"marker.remove", &Applier::markerRemove},
+        {"group", &Applier::group},
+        {"ungroup", &Applier::ungroup},
+        {"property.set", &Applier::propertySet},
+        {"key.add", &Applier::keyAdd},
+        {"expression.set", &Applier::expressionSet},
+        {"expression.bake", &Applier::expressionBake},
+        {"key.remove", &Applier::keyRemove},
+        {"key.clear", &Applier::keyClear},
+        {"key.easing", &Applier::keyEasing},
+        {"effect.add", &Applier::effectAdd},
+        {"effect.remove", &Applier::effectRemove},
+        {"effect.set", &Applier::effectSet},
+        {"audio_effect.add", &Applier::audioEffectAdd},
+        {"audio_effect.remove", &Applier::audioEffectRemove},
+        {"audio_effect.set", &Applier::audioEffectSet},
+        {"audio.level", &Applier::audioLevel},
+        {"audio.remove_silence", &Applier::audioRemoveSilence},
+        {"transition.add", &Applier::transitionAdd},
+        {"arrange.distribute", &Applier::arrangeDistribute},
+        {"arrange.stagger", &Applier::arrangeStagger},
+        {"data.set", &Applier::dataSet},
+        {"param.set", &Applier::paramSet},
+        {"media.import", &Applier::mediaImport},
+        {"media.move", &Applier::mediaMove},
+        {"folder.add", &Applier::folderAdd},
+        {"folder.rename", &Applier::folderRename},
+        {"folder.remove", &Applier::folderRemove},
+        {"folder.move", &Applier::folderMove},
+        {"query.composition", &Applier::queryComposition},
+        {"query.layers", &Applier::queryLayers},
+        {"query.layer", &Applier::queryLayer},
+        {"query.expression", &Applier::queryExpression},
+    };
+    return kOps;
+}
+
+Layer& Applier::layer(const json& op, const char* key) {
+    const json& ref = field(op, key);
+    if (ref.is_number_integer()) {
+        if (Layer* l = c_.findLayer(ref.get<uint64_t>())) return *l;
+        fail("there is no layer with id " + std::to_string(ref.get<uint64_t>()));
     }
-
-private:
-    // --- lookups ---
-    Layer& layer(const json& op, const char* key = "layer") {
-        const json& ref = field(op, key);
-        if (ref.is_number_integer()) {
-            if (Layer* l = c_.findLayer(ref.get<uint64_t>())) return *l;
-            fail("there is no layer with id " + std::to_string(ref.get<uint64_t>()));
-        }
-        const std::string name = text(ref, key);
-        if (name.size() > 1 && name[0] == '#' && std::all_of(name.begin() + 1, name.end(), ::isdigit))
-            if (Layer* l = c_.findLayer(std::stoull(name.substr(1)))) return *l;
-        std::vector<Layer*> matches;
-        std::vector<std::string> names;
-        for (Layer& l : c_.layers) {
-            names.push_back(l.name);
-            if (l.name == name) matches.push_back(&l);
-        }
-        if (matches.empty()) fail("there is no layer named \"" + name + "\"" + suggest(name, names));
-        if (matches.size() > 1) {
-            std::string ids;
-            for (const Layer* m : matches) ids += (ids.empty() ? "" : ", ") + std::to_string(m->id);
-            fail("several layers are named \"" + name + "\" (ids " + ids + "): use the id");
-        }
-        return *matches.front();
+    const std::string name = text(ref, key);
+    if (name.size() > 1 && name[0] == '#' && std::all_of(name.begin() + 1, name.end(), ::isdigit))
+        if (Layer* l = c_.findLayer(std::stoull(name.substr(1)))) return *l;
+    std::vector<Layer*> matches;
+    std::vector<std::string> names;
+    for (Layer& l : c_.layers) {
+        names.push_back(l.name);
+        if (l.name == name) matches.push_back(&l);
     }
-
-    // The property `prop` of `l` (ids as in docs/OPERATIONS.md: "position", "opacity", "fx0.size", "p.progress").
-    PropertyRef property(Layer& l, const json& op) {
-        const std::string id = text(field(op, "prop"), "prop");
-        std::vector<std::string> ids;
-        for (const PropertyRef& p : l.properties()) {
-            if (id == p.id) return p;
-            ids.push_back(p.id);
-        }
-        fail("layer \"" + l.name + "\" (" + typeName(l) + ") has no property \"" + id + "\"" + suggest(id, ids));
+    if (matches.empty()) fail("there is no layer named \"" + name + "\"" + suggest(name, names));
+    if (matches.size() > 1) {
+        std::string ids;
+        for (const Layer* m : matches)
+            ids += (ids.empty() ? "" : ", ") + std::to_string(m->id);
+        fail("several layers are named \"" + name + "\" (ids " + ids + "): use the id");
     }
+    return *matches.front();
+}
 
-    int keyAt(const PropertyRef& p, double t) {
-        const int i = p.anim->findKey(t);
-        if (i >= 0) return i;
-        std::string times;
-        for (int k = 0; k < p.anim->keyCount(); ++k) {
-            char buf[32];
-            std::snprintf(buf, sizeof buf, "%s%.3f", k ? ", " : "", p.anim->keyTime(k));
-            times += buf;
-        }
-        fail(std::string("no keyframe of \"") + p.id + "\" at " + std::to_string(t) + " s" +
-             (times.empty() ? " (it has none)" : " (keys at " + times + ")"));
+// The property `prop` of `l` (ids as in docs/OPERATIONS.md: "position", "opacity", "fx0.size", "p.progress").
+PropertyRef Applier::property(Layer& l, const json& op) {
+    const std::string id = text(field(op, "prop"), "prop");
+    std::vector<std::string> ids;
+    for (const PropertyRef& p : l.properties()) {
+        if (id == p.id) return p;
+        ids.push_back(p.id);
     }
+    fail("layer \"" + l.name + "\" (" + typeName(l) + ") has no property \"" + id + "\"" + suggest(id, ids));
+}
 
-    Effect& effect(Layer& l, const json& op) {
-        const double i = number(field(op, "index"), "index");
-        if (i < 0 || i >= static_cast<double>(l.effects.size()) || i != std::floor(i))
-            fail("layer \"" + l.name + "\" has " + std::to_string(l.effects.size()) + " effect(s): index must be 0.." +
-                 std::to_string(static_cast<int>(l.effects.size()) - 1));
-        return l.effects[static_cast<size_t>(i)];
+int Applier::keyAt(const PropertyRef& p, double t) {
+    const int i = p.anim->findKey(t);
+    if (i >= 0) return i;
+    std::string times;
+    for (int k = 0; k < p.anim->keyCount(); ++k) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%s%.3f", k ? ", " : "", p.anim->keyTime(k));
+        times += buf;
     }
+    fail(std::string("no keyframe of \"") + p.id + "\" at " + std::to_string(t) + " s" +
+         (times.empty() ? " (it has none)" : " (keys at " + times + ")"));
+}
 
-    double time(const json& op, const char* name = "time", double fallback = 0.0) {
-        const double t = number(op, name, fallback);
-        if (t < 0.0) fail(std::string("\"") + name + "\" cannot be negative");
-        return t;
+Effect& Applier::effect(Layer& l, const json& op) {
+    const double i = number(field(op, "index"), "index");
+    if (i < 0 || i >= static_cast<double>(l.effects.size()) || i != std::floor(i))
+        fail("layer \"" + l.name + "\" has " + std::to_string(l.effects.size()) + " effect(s): index must be 0.." +
+             std::to_string(static_cast<int>(l.effects.size()) - 1));
+    return l.effects[static_cast<size_t>(i)];
+}
+
+double Applier::time(const json& op, const char* name, double fallback) {
+    const double t = number(op, name, fallback);
+    if (t < 0.0) fail(std::string("\"") + name + "\" cannot be negative");
+    return t;
+}
+
+json Applier::compositionSet(const json& op) {
+    if (has(op, "name")) p_.name = text(op["name"], "name");
+    auto size = [&](const char* key, int& out) {
+        if (!has(op, key)) return;
+        const double v = number(op[key], key);
+        if (v < 16 || v > 16384 || v != std::floor(v))
+            fail(std::string("\"") + key + "\" must be a whole number from 16 to 16384");
+        out = static_cast<int>(v);
+    };
+    size("width", c_.width);
+    size("height", c_.height);
+    if (has(op, "fps")) {
+        const double fps = number(op["fps"], "fps");
+        if (fps < 1 || fps > 240) fail("\"fps\" must be between 1 and 240");
+        c_.fps = fps;
     }
-
-    // --- operations ---
-    json compositionSet(const json& op) {
-        if (has(op, "name")) p_.name = text(op["name"], "name");
-        auto size = [&](const char* key, int& out) {
-            if (!has(op, key)) return;
-            const double v = number(op[key], key);
-            if (v < 16 || v > 16384 || v != std::floor(v)) fail(std::string("\"") + key + "\" must be a whole number from 16 to 16384");
-            out = static_cast<int>(v);
-        };
-        size("width", c_.width);
-        size("height", c_.height);
-        if (has(op, "fps")) {
-            const double fps = number(op["fps"], "fps");
-            if (fps < 1 || fps > 240) fail("\"fps\" must be between 1 and 240");
-            c_.fps = fps;
-        }
-        if (has(op, "background")) c_.background = colorOf(op["background"], "background");
-        if (has(op, "max_duration")) {
-            const double limit = number(op["max_duration"], "max_duration");
-            if (limit < 0 || (limit > 0 && limit < c_.frameDuration())) fail("\"max_duration\" must be 0 (no limit) or at least one frame");
-            c_.maxDuration = limit;
-        }
-        c_.syncCameras();
-        return json::object();
+    if (has(op, "background")) c_.background = colorOf(op["background"], "background");
+    if (has(op, "max_duration")) {
+        const double limit = number(op["max_duration"], "max_duration");
+        if (limit < 0 || (limit > 0 && limit < c_.frameDuration()))
+            fail("\"max_duration\" must be 0 (no limit) or at least one frame");
+        c_.maxDuration = limit;
     }
+    c_.syncCameras();
+    return json::object();
+}
 
-    json layerAdd(const json& op) {
-        const std::string type = text(field(op, "type"), "type");
-        const Vec2 position = has(op, "position") ? vec2Of(op["position"], "position") : c_.center();
-        const double start = c_.snapToFrame(time(op, "start"));
-        double duration = number(op, "duration", kDefaultLayerLength);
-        if (duration < c_.frameDuration()) fail("\"duration\" must be at least one frame");
-        Layer l;
-        if (const int kind = shapeKindOf(type); kind >= 0) {
-            l = makeShapeLayer(static_cast<ShapeKind>(kind), position, duration);
-            if (has(op, "path")) {
-                if (l.shape.kind != ShapeKind::Path) fail("\"path\" is for \"path\" layers (the pen tool's shapes)");
-                l.shape.path = pathOf(op["path"]);
-                if (!l.shape.path.closed) l.shape.fillEnabled = false, l.shape.strokeEnabled = true;
-            }
-        } else if (type == "text") {
-            l = makeTextLayer(has(op, "text") ? text(op["text"], "text") : "Text", position, duration);
-        } else if (type == "counter") {
-            l = makeCounterLayer(position, duration);
-            setCounter(l, op);
-        } else if (type == "subtitle") {
-            l = makeSubtitleLayer({static_cast<float>(c_.width), static_cast<float>(c_.height)},
-                                  has(op, "duration") ? duration : std::max(duration, c_.duration));
-            if (has(op, "position")) l.transform.position.base = position;
-            if (has(op, "captions") || has(op, "srt")) setCaptions(l, op);
-        } else if (type == "camera") {
-            l = makeCameraLayer({static_cast<float>(c_.width), static_cast<float>(c_.height)},
-                                has(op, "duration") ? duration : std::max(duration, c_.duration));
-        } else if (type == "media") {
-            const double id = number(field(op, "media"), "media");
-            const MediaItem* item = c_.findMedia(static_cast<uint64_t>(id));
-            if (!item) fail("there is no media item " + std::to_string(static_cast<uint64_t>(id)) + " (import it first with media.import)");
-            l = makeMediaLayer(*item, position, 0.0, duration);
-            if (item->width > 0 && item->height > 0) { // footage larger than the composition fits inside it
-                const float fit = std::min({1.0f, static_cast<float>(c_.width) / item->width, static_cast<float>(c_.height) / item->height});
-                l.transform.scale.base = {fit * 100.0f, fit * 100.0f};
-            }
-        } else if (type == "background") {
-            l = makeBackgroundLayer(has(op, "duration") ? duration : std::max(duration, c_.duration));
-            if (has(op, "fill") || has(op, "media") || has(op, "fit")) setBackground(l, op);
-        } else if (type == "plugin") {
-            const std::string object = text(field(op, "object"), "object");
-            std::string error;
-            if (!env_.makePluginLayer) fail("plugin objects are not available here");
-            if (!env_.makePluginLayer(object, l, error)) fail(error);
-            l.transform.position.base = position;
-            l.outPoint = l.inPoint + duration;
-        } else {
-            fail("unknown layer type \"" + type + "\"" +
-                 suggest(type, {"text", "counter", "subtitle", "rectangle", "ellipse", "polygon", "star", "line", "camera", "media", "background", "plugin"}));
-        }
-        if (has(op, "name")) l.name = text(op["name"], "name");
-        if (l.type == LayerType::Text) setLetters(l, op);
-        // A 3D layer ("three_d": true) at Z position "z" (a "z" alone makes it 3D; a camera's own Z).
-        if (has(op, "three_d") || has(op, "z")) {
-            const bool on = has(op, "three_d") ? boolean(op["three_d"], "three_d") : l.type != LayerType::Camera;
-            if (l.type == LayerType::Background || (on && l.type == LayerType::Camera))
-                fail("\"" + std::string(has(op, "three_d") ? "three_d" : "z") + "\" does not apply to " + type + " layers");
-            l.threeD = on;
-            if (has(op, "z")) l.transform.depth.base = static_cast<float>(number(op["z"], "z"));
-        }
-        l.name = c_.uniqueLayerName(l.name.empty() ? type : l.name);
-        if (l.type != LayerType::Media) l.label = static_cast<int>(c_.nextLayerId % kLabelColorCount);
-        if (start > 0.0) l.shiftTime(start - l.inPoint);
-        if (has(op, "parent")) {
-            Layer& parent = layer(op, "parent");
-            if (parent.type != LayerType::Compound) fail("\"parent\" must be a compound (made with \"group\")");
-            l.parent = parent.id; // `position` is then in the compound's space
-        }
-        int index = 0; // on top
-        if (has(op, "above")) index = c_.indexOf(layer(op, "above").id);
-        else if (has(op, "below")) {
-            const Layer& ref = layer(op, "below");
-            index = c_.indexOf(ref.id);
-            while (index < static_cast<int>(c_.layers.size()) && c_.layers[index].track == ref.track) ++index;
-        } else if ((has(op, "at") && text(op["at"], "at") == "bottom") || (type == "background" && !has(op, "at")))
-            index = static_cast<int>(c_.layers.size()); // a background goes under everything unless told otherwise
-        const uint64_t addedId = c_.addLayer(std::move(l), index).id;
-        if (has(op, "track_of")) joinTrack(addedId, op);
-        const Layer& added = *c_.findLayer(addedId);
-        return {{"layer", added.id}, {"name", added.name}};
-    }
-
-    // "track_of": the clip goes on that layer's track (a sequence of clips on one row); it must
-    // not overlap the clips there, and be beside it (same compound, or both at the top).
-    void joinTrack(uint64_t id, const json& op) {
-        const Layer& other = layer(op, "track_of");
-        const Layer& l = *c_.findLayer(id);
-        if (other.id == id || other.track == l.track) return;
-        if (other.parent != l.parent) fail("\"track_of\" must be a layer beside it (in the same compound, or both at the top)");
-        if (!c_.moveClipsToTrack({id}, other.track))
-            fail("\"" + l.name + "\" does not fit on the track of \"" + other.name + "\": it would overlap a clip there (" +
-                 std::to_string(l.inPoint) + " to " + std::to_string(l.outPoint) + " s)");
-    }
-
-    // A counter's look: "decimals" (0-6), "prefix", "suffix", "separator" ("", ",", "." or " ").
-    void setCounter(Layer& l, const json& op) {
-        if (has(op, "decimals")) {
-            const double v = number(op["decimals"], "decimals");
-            if (v < 0 || v > 6 || v != std::floor(v)) fail("\"decimals\" must be 0 to 6");
-            l.text.counterDecimals = static_cast<int>(v);
-        }
-        if (has(op, "prefix")) l.text.counterPrefix = text(op["prefix"], "prefix");
-        if (has(op, "suffix")) l.text.counterSuffix = text(op["suffix"], "suffix");
-        if (has(op, "separator")) {
-            const std::string sep = text(op["separator"], "separator");
-            if (!isCounterSeparator(sep)) fail("\"separator\" must be \"\", \",\", \".\" or \" \"");
-            l.text.counterSeparator = sep;
-        }
-        if (has(op, "from")) l.text.counterFrom.base = static_cast<float>(number(op["from"], "from"));
-        if (has(op, "to")) l.text.counterTo.base = static_cast<float>(number(op["to"], "to"));
-        if (has(op, "count_duration")) {
-            const double v = number(op["count_duration"], "count_duration");
-            if (v < 0 || v > 3600) fail("\"count_duration\" must be 0 (the whole clip) to 3600 seconds");
-            l.text.counterDuration = static_cast<float>(v);
-        }
-        if (has(op, "count_easing")) l.text.counterEasing = static_cast<CountEasing>(idOf(kCountEasingIds, op, "count_easing"));
-    }
-
-    // The index of op[key] among `ids`, or a helpful failure.
-    template <size_t N>
-    int idOf(const char* const (&ids)[N], const json& op, const char* key) {
-        const std::string v = text(op[key], key);
-        const int i = indexOfId(ids, v);
-        if (i < 0) fail("unknown " + std::string(key) + " \"" + v + "\"" + suggest(v, std::vector<std::string>(std::begin(ids), std::end(ids))));
-        return i;
-    }
-
-    // Letters coming in, leaving, moving; auto fit.
-    void setLetters(Layer& l, const json& op) {
-        TextProps& t = l.text;
-        if (has(op, "letter_in")) t.letterIn = static_cast<LetterAnim>(idOf(kLetterAnimIds, op, "letter_in"));
-        if (has(op, "letter_out")) t.letterOut = static_cast<LetterAnim>(idOf(kLetterAnimIds, op, "letter_out"));
-        if (has(op, "letter_loop")) t.letterLoop = static_cast<LetterLoop>(idOf(kLetterLoopIds, op, "letter_loop"));
-        if (has(op, "letter_by")) t.letterUnit = static_cast<LetterUnit>(idOf(kLetterUnitIds, op, "letter_by"));
-        if (has(op, "letter_order")) t.letterOrder = static_cast<LetterOrder>(idOf(kLetterOrderIds, op, "letter_order"));
-        if (has(op, "letter_delay")) {
-            const double v = number(op["letter_delay"], "letter_delay");
-            if (v < 0 || v > 10) fail("\"letter_delay\" must be 0 to 10 seconds");
-            t.letterDelay = static_cast<float>(v);
-        }
-        if (has(op, "letter_duration")) {
-            const double v = number(op["letter_duration"], "letter_duration");
-            if (v < 0.01 || v > 30) fail("\"letter_duration\" must be 0.01 to 30 seconds");
-            t.letterDuration = static_cast<float>(v);
-        }
-        if (has(op, "fit_lines")) {
-            const double v = number(op["fit_lines"], "fit_lines");
-            if (v < 0 || v > 20 || v != std::floor(v)) fail("\"fit_lines\" must be 0 (off) to 20");
-            t.fitLines = static_cast<int>(v);
-        }
-    }
-
-    // A subtitle layer's captions: "captions" [{"start", "end", "text"}] or "srt" (SubRip text).
-    void setCaptions(Layer& l, const json& op) {
-        std::vector<Caption> caps;
-        if (has(op, "srt")) {
-            caps = parseSrt(text(op["srt"], "srt"));
-        } else {
-            if (!op["captions"].is_array()) fail("\"captions\" must be a list of {\"start\", \"end\", \"text\"}");
-            for (const json& c : op["captions"]) {
-                if (!c.is_object()) fail("each caption is {\"start\": s, \"end\": s, \"text\": \"...\"}");
-                Caption cap{number(field(c, "start"), "start"), number(field(c, "end"), "end"), text(field(c, "text"), "text")};
-                if (cap.end <= cap.start) fail("a caption must end after it starts (\"" + cap.text + "\")");
-                caps.push_back(std::move(cap));
-            }
-        }
-        std::stable_sort(caps.begin(), caps.end(), [](const Caption& a, const Caption& b) { return a.start < b.start; });
-        for (size_t i = 1; i < caps.size(); ++i) caps[i - 1].end = std::min(caps[i - 1].end, caps[i].start);
-        l.text.captions = std::move(caps);
-    }
-
-    // A background's fill ("solid", "linear", "radial", "image"), picture ("media": id) and fit.
-    void setBackground(Layer& l, const json& op) {
-        BackgroundProps& b = l.background;
-        if (has(op, "fill")) {
-            const std::string fill = text(op["fill"], "fill");
-            std::vector<std::string> ids;
-            bool found = false;
-            for (int i = 0; i < static_cast<int>(BackgroundFill::Count); ++i) {
-                ids.push_back(backgroundFillId(static_cast<BackgroundFill>(i)));
-                if (fill == ids.back()) b.fill = static_cast<BackgroundFill>(i), found = true;
-            }
-            if (!found) fail("unknown fill \"" + fill + "\"" + suggest(fill, ids));
-        }
-        if (has(op, "media")) {
-            const auto id = static_cast<uint64_t>(number(op["media"], "media"));
-            const MediaItem* m = c_.findMedia(id);
-            if (!m || m->kind == MediaKind::Audio) fail("there is no picture or video with media id " + std::to_string(id) + " (media.import it first)");
-            b.mediaId = id;
-            if (!has(op, "fill")) b.fill = BackgroundFill::Image;
-        }
-        if (has(op, "fit")) {
-            const std::string fit = text(op["fit"], "fit");
-            std::vector<std::string> ids;
-            bool found = false;
-            for (int i = 0; i < static_cast<int>(BackgroundFit::Count); ++i) {
-                ids.push_back(backgroundFitId(static_cast<BackgroundFit>(i)));
-                if (fit == ids.back()) b.fit = static_cast<BackgroundFit>(i), found = true;
-            }
-            if (!found) fail("unknown fit \"" + fit + "\"" + suggest(fit, ids));
-        }
-    }
-
-    json layerRemove(const json& op) {
-        const uint64_t id = layer(op).id;
-        c_.removeLayerTree(id);
-        return json::object();
-    }
-
-    json layerSet(const json& op) {
-        Layer& l = layer(op);
-        const uint64_t id = l.id;
-        auto requireType = [&](bool ok, const char* key, const char* what) {
-            if (!ok) fail(std::string("\"") + key + "\" only applies to " + what + " layers (\"" + l.name + "\" is " + typeName(l) + ")");
-        };
-        if (has(op, "name")) {
-            const std::string name = text(op["name"], "name");
-            if (name.empty()) fail("\"name\" cannot be empty");
-            if (name != l.name) {
-                l.name.clear();
-                l.name = c_.uniqueLayerName(name);
-            }
-        }
-        if (has(op, "visible")) l.visible = boolean(op["visible"], "visible");
-        if (has(op, "locked")) l.locked = boolean(op["locked"], "locked");
-        if (has(op, "muted")) l.muted = boolean(op["muted"], "muted");
-        if (has(op, "solo")) l.solo = boolean(op["solo"], "solo");
-        if (has(op, "blend")) {
-            if (l.type == LayerType::Camera) fail("cameras have no blending mode");
-            l.blend = static_cast<BlendMode>(idOf(kBlendModeIds, op, "blend"));
-        }
-        if (has(op, "matte") || has(op, "matte_layer")) setMatte(l, op);
-        if (has(op, "three_d")) {
-            const bool on = boolean(op["three_d"], "three_d");
-            if (on && (l.type == LayerType::Camera || l.type == LayerType::Background))
-                fail(std::string("\"three_d\" does not apply to ") + typeName(l) + " layers (cameras always see in 3D)");
-            l.threeD = on;
-        }
-        if (has(op, "label")) {
-            const double v = number(op["label"], "label");
-            if (v < 0 || v >= kLabelColorCount || v != std::floor(v)) fail("\"label\" must be 0 to 7");
-            l.label = static_cast<int>(v);
-        }
-        if (has(op, "text")) requireType(l.type == LayerType::Text && !l.text.counter, "text", "text"), l.text.text = text(op["text"], "text");
-        for (const char* key : {"decimals", "prefix", "suffix", "separator", "from", "to", "count_duration", "count_easing"})
-            if (has(op, key)) requireType(l.type == LayerType::Text && l.text.counter, key, "counter");
-        setCounter(l, op);
-        for (const char* key : {"letter_in", "letter_out", "letter_loop", "letter_by", "letter_order", "letter_delay", "letter_duration", "fit_lines"})
-            if (has(op, key)) requireType(l.type == LayerType::Text, key, "text");
-        setLetters(l, op);
-        if (has(op, "fit_captions")) {
-            requireType(l.type == LayerType::Text && l.text.subtitle, "fit_captions", "subtitle");
-            if (boolean(op["fit_captions"], "fit_captions")) fitCaptions(l.text.captions);
-        }
-        if (has(op, "outline")) requireType(l.type == LayerType::Text, "outline", "text"), l.text.outlineEnabled = boolean(op["outline"], "outline");
-        if (has(op, "box")) requireType(l.type == LayerType::Text, "box", "text"), l.text.boxEnabled = boolean(op["box"], "box");
-        if (has(op, "captions") || has(op, "srt")) {
-            requireType(l.type == LayerType::Text && l.text.subtitle, has(op, "srt") ? "srt" : "captions", "subtitle");
-            setCaptions(l, op);
-        }
-        if (has(op, "font")) requireType(l.type == LayerType::Text, "font", "text"), l.text.fontFamily = text(op["font"], "font");
-        if (has(op, "style")) requireType(l.type == LayerType::Text, "style", "text"), l.text.fontStyle = text(op["style"], "style");
-        if (has(op, "align")) {
-            requireType(l.type == LayerType::Text, "align", "text");
-            const std::string a = text(op["align"], "align");
-            int i = 0;
-            while (i < 3 && a != kAlignNames[i]) ++i;
-            if (i == 3) fail("\"align\" must be left, center or right");
-            l.text.align = static_cast<TextAlign>(i);
-        }
-        if (has(op, "shape")) {
-            requireType(l.type == LayerType::Shape, "shape", "shape");
-            const std::string s = text(op["shape"], "shape");
-            const int kind = shapeKindOf(s);
-            if (kind < 0) fail("unknown shape \"" + s + "\"" + suggest(s, {"rectangle", "ellipse", "polygon", "star", "line", "path"}));
-            // Becoming a path: its outline so far, as Bézier points to edit (unless one is given).
-            if (kind == static_cast<int>(ShapeKind::Path) && l.shape.kind != ShapeKind::Path && !has(op, "path"))
-                l.shape.path = shapeToBezier(l.shape, time(op));
-            l.shape.kind = static_cast<ShapeKind>(kind);
-        }
+json Applier::layerAdd(const json& op) {
+    const std::string type = text(field(op, "type"), "type");
+    const Vec2 position = has(op, "position") ? vec2Of(op["position"], "position") : c_.center();
+    const double start = c_.snapToFrame(time(op, "start"));
+    double duration = number(op, "duration", kDefaultLayerLength);
+    if (duration < c_.frameDuration()) fail("\"duration\" must be at least one frame");
+    Layer l;
+    if (const int kind = shapeKindOf(type); kind >= 0) {
+        l = makeShapeLayer(static_cast<ShapeKind>(kind), position, duration);
         if (has(op, "path")) {
-            requireType(l.type == LayerType::Shape, "path", "shape");
+            if (l.shape.kind != ShapeKind::Path) fail("\"path\" is for \"path\" layers (the pen tool's shapes)");
             l.shape.path = pathOf(op["path"]);
-            l.shape.kind = ShapeKind::Path;
+            if (!l.shape.path.closed) l.shape.fillEnabled = false, l.shape.strokeEnabled = true;
         }
-        if (has(op, "gradient")) {
-            requireType(l.type == LayerType::Shape || l.type == LayerType::Text || l.type == LayerType::Plugin, "gradient", "shape, text or plugin");
-            const auto fill = static_cast<ShapeFill>(idOf(kShapeFillIds, op, "gradient"));
-            (l.type == LayerType::Text ? l.text.fill : l.type == LayerType::Plugin ? l.plugin.fill : l.shape.fill) = fill;
+    } else if (type == "text") {
+        l = makeTextLayer(has(op, "text") ? text(op["text"], "text") : "Text", position, duration);
+    } else if (type == "counter") {
+        l = makeCounterLayer(position, duration);
+        setCounter(l, op);
+    } else if (type == "subtitle") {
+        l = makeSubtitleLayer({static_cast<float>(c_.width), static_cast<float>(c_.height)},
+                              has(op, "duration") ? duration : std::max(duration, c_.duration));
+        if (has(op, "position")) l.transform.position.base = position;
+        if (has(op, "captions") || has(op, "srt")) setCaptions(l, op);
+    } else if (type == "camera") {
+        l = makeCameraLayer({static_cast<float>(c_.width), static_cast<float>(c_.height)},
+                            has(op, "duration") ? duration : std::max(duration, c_.duration));
+    } else if (type == "media") {
+        const double id = number(field(op, "media"), "media");
+        const MediaItem* item = c_.findMedia(static_cast<uint64_t>(id));
+        if (!item)
+            fail("there is no media item " + std::to_string(static_cast<uint64_t>(id)) +
+                 " (import it first with media.import)");
+        l = makeMediaLayer(*item, position, 0.0, duration);
+        if (item->width > 0 && item->height > 0) { // footage larger than the composition fits inside it
+            const float fit = std::min(
+                {1.0f, static_cast<float>(c_.width) / item->width, static_cast<float>(c_.height) / item->height});
+            l.transform.scale.base = {fit * 100.0f, fit * 100.0f};
         }
-        if (has(op, "repeater")) requireType(l.type == LayerType::Shape, "repeater", "shape"), l.shape.repeater = boolean(op["repeater"], "repeater");
-        if (has(op, "warp")) {
-            requireType(l.type != LayerType::Camera, "warp", "layer with a picture");
-            l.warp = boolean(op["warp"], "warp");
-        }
-        for (const char* key : {"flip_h", "flip_v"})
-            if (has(op, key)) {
-                requireType(l.type == LayerType::Media && l.media.hasVideo, key, "video or image");
-                (key[5] == 'h' ? l.media.flipH : l.media.flipV) = boolean(op[key], key);
-            }
-        if (l.type == LayerType::Background && (has(op, "fill") || has(op, "media") || has(op, "fit"))) setBackground(l, op);
-        else if (has(op, "fill")) requireType(l.type == LayerType::Shape, "fill", "shape"), l.shape.fillEnabled = boolean(op["fill"], "fill");
-        if (has(op, "stroke")) requireType(l.type == LayerType::Shape, "stroke", "shape"), l.shape.strokeEnabled = boolean(op["stroke"], "stroke");
-        json out = json::object();
-        if (has(op, "start")) { // moves the clip, keyframes included
-            const double delta = c_.snapToFrame(time(op, "start")) - l.inPoint;
-            std::vector<uint64_t> moving = c_.descendantsOf(id); // a compound brings its contents
-            moving.push_back(id);
-            // Past the end is fine: the composition grows to hold it (fitDuration after the batch).
-            c_.duration = std::max(c_.duration, l.outPoint + std::max(0.0, delta) + 1.0);
-            double lo = 0, hi = 0;
-            c_.timeShiftLimits(moving, lo, hi);
-            if (delta < lo - kTimeEpsilon || delta > hi + kTimeEpsilon)
-                fail("the clip cannot start at " + std::to_string(l.inPoint + delta) + " s: it would overlap another clip on its track");
-            for (uint64_t m : moving)
-                if (Layer* each = c_.findLayer(m)) each->shiftTime(delta);
-        }
-        if (has(op, "in")) c_.setInPoint(id, time(op, "in"));
-        if (has(op, "out")) c_.setOutPoint(id, time(op, "out"));
-        if (has(op, "track_of")) joinTrack(id, op);
-        const Layer& now = *c_.findLayer(id);
-        out["in"] = now.inPoint;
-        out["out"] = now.outPoint;
-        return out;
-    }
-
-    BezierPath pathOf(const json& v) {
-        BezierPath p;
+    } else if (type == "background") {
+        l = makeBackgroundLayer(has(op, "duration") ? duration : std::max(duration, c_.duration));
+        if (has(op, "fill") || has(op, "media") || has(op, "fit")) setBackground(l, op);
+    } else if (type == "plugin") {
+        const std::string object = text(field(op, "object"), "object");
         std::string error;
-        if (!pathFromJson(v, p, &error)) fail("\"path\": " + error);
-        if (p.vertices.size() < 2) fail("\"path\" needs at least two vertices");
-        if (p.vertices.size() > 10000) fail("\"path\" has too many vertices (10000 at most)");
-        return p;
+        if (!env_.makePluginLayer) fail("plugin objects are not available here");
+        if (!env_.makePluginLayer(object, l, error)) fail(error);
+        l.transform.position.base = position;
+        l.outPoint = l.inPoint + duration;
+    } else {
+        fail("unknown layer type \"" + type + "\"" +
+             suggest(type, {"text", "counter", "subtitle", "rectangle", "ellipse", "polygon", "star", "line", "camera",
+                            "media", "background", "plugin"}));
     }
-
-    // "matte": "alpha" / "alpha_inverted" / "luma" / "luma_inverted" / "none", "matte_layer": the layer
-    // whose picture decides (beside this one; default: the one right above it, like After Effects).
-    void setMatte(Layer& l, const json& op) {
-        const MatteMode mode = has(op, "matte") ? static_cast<MatteMode>(idOf(kMatteModeIds, op, "matte")) : MatteMode::Alpha;
-        if (mode == MatteMode::None) {
-            l.matte = MatteMode::None;
-            l.matteLayer = 0;
-            return;
-        }
-        if (l.type == LayerType::Camera) fail("cameras take no track matte");
-        uint64_t matte = 0;
-        if (has(op, "matte_layer")) {
-            matte = layer(op, "matte_layer").id;
-        } else {
-            for (int i = c_.indexOf(l.id) - 1; i >= 0 && !matte; --i)
-                if (c_.layers[i].parent == l.parent && c_.layers[i].type != LayerType::Camera) matte = c_.layers[i].id;
-            if (!matte) fail("there is no layer above \"" + l.name + "\" to be its matte: give \"matte_layer\"");
-        }
-        const Layer* m = c_.findLayer(matte);
-        if (m->id == l.id) fail("a layer cannot be its own matte");
-        if (m->parent != l.parent) fail("the matte must be beside the layer (in the same compound, or both at the top)");
-        if (m->type == LayerType::Camera) fail("a camera cannot be a matte");
-        l.matte = mode;
-        l.matteLayer = matte;
+    if (has(op, "name")) l.name = text(op["name"], "name");
+    if (l.type == LayerType::Text) setLetters(l, op);
+    // A 3D layer ("three_d": true) at Z position "z" (a "z" alone makes it 3D; a camera's own Z).
+    if (has(op, "three_d") || has(op, "z")) {
+        const bool on = has(op, "three_d") ? boolean(op["three_d"], "three_d") : l.type != LayerType::Camera;
+        if (l.type == LayerType::Background || (on && l.type == LayerType::Camera))
+            fail("\"" + std::string(has(op, "three_d") ? "three_d" : "z") + "\" does not apply to " + type + " layers");
+        l.threeD = on;
+        if (has(op, "z")) l.transform.depth.base = static_cast<float>(number(op["z"], "z"));
     }
-
-    json layerMove(const json& op) {
-        const Layer& l = layer(op);
-        const std::string to = text(field(op, "to"), "to");
-        const int delta = to == "top" ? -100000 : to == "bottom" ? 100000 : to == "up" ? -1 : to == "down" ? 1 : 0;
-        if (!delta) fail("\"to\" must be top, bottom, up or down");
-        c_.shiftTracks({l.track}, delta);
-        return json::object();
+    l.name = c_.uniqueLayerName(l.name.empty() ? type : l.name);
+    if (l.type != LayerType::Media) l.label = static_cast<int>(c_.nextLayerId % kLabelColorCount);
+    if (start > 0.0) l.shiftTime(start - l.inPoint);
+    if (has(op, "parent")) {
+        Layer& parent = layer(op, "parent");
+        if (parent.type != LayerType::Compound) fail("\"parent\" must be a compound (made with \"group\")");
+        l.parent = parent.id; // `position` is then in the compound's space
     }
+    int index = 0; // on top
+    if (has(op, "above"))
+        index = c_.indexOf(layer(op, "above").id);
+    else if (has(op, "below")) {
+        const Layer& ref = layer(op, "below");
+        index = c_.indexOf(ref.id);
+        while (index < static_cast<int>(c_.layers.size()) && c_.layers[index].track == ref.track)
+            ++index;
+    } else if ((has(op, "at") && text(op["at"], "at") == "bottom") || (type == "background" && !has(op, "at")))
+        index = static_cast<int>(c_.layers.size()); // a background goes under everything unless told otherwise
+    const uint64_t addedId = c_.addLayer(std::move(l), index).id;
+    if (has(op, "track_of")) joinTrack(addedId, op);
+    const Layer& added = *c_.findLayer(addedId);
+    return {{"layer", added.id}, {"name", added.name}};
+}
 
-    json layerSplit(const json& op) {
-        const Layer& l = layer(op);
-        const double t = c_.snapToFrame(time(op));
-        const uint64_t copy = c_.splitLayer(l.id, t);
-        if (!copy) fail("\"time\" must be strictly inside the clip (" + std::to_string(l.inPoint) + " to " + std::to_string(l.outPoint) + " s)");
-        return {{"layer", copy}};
+// "track_of": the clip goes on that layer's track (a sequence of clips on one row); it must
+// not overlap the clips there, and be beside it (same compound, or both at the top).
+void Applier::joinTrack(uint64_t id, const json& op) {
+    const Layer& other = layer(op, "track_of");
+    const Layer& l = *c_.findLayer(id);
+    if (other.id == id || other.track == l.track) return;
+    if (other.parent != l.parent)
+        fail("\"track_of\" must be a layer beside it (in the same compound, or both at the top)");
+    if (!c_.moveClipsToTrack({id}, other.track))
+        fail("\"" + l.name + "\" does not fit on the track of \"" + other.name + "\": it would overlap a clip there (" +
+             std::to_string(l.inPoint) + " to " + std::to_string(l.outPoint) + " s)");
+}
+
+// A counter's look: "decimals" (0-6), "prefix", "suffix", "separator" ("", ",", "." or " ").
+void Applier::setCounter(Layer& l, const json& op) {
+    if (has(op, "decimals")) {
+        const double v = number(op["decimals"], "decimals");
+        if (v < 0 || v > 6 || v != std::floor(v)) fail("\"decimals\" must be 0 to 6");
+        l.text.counterDecimals = static_cast<int>(v);
     }
-
-    json layerDuplicate(const json& op) {
-        const Layer& l = layer(op);
-        if (l.type == LayerType::Compound) fail("duplicating compounds is not available as an operation yet");
-        Layer copy = l;
-        copy.track = 0;
-        copy.name = c_.uniqueLayerName(l.name);
-        const int index = c_.indexOf(l.id);
-        const Layer& added = c_.addLayer(std::move(copy), index);
-        return {{"layer", added.id}, {"name", added.name}};
+    if (has(op, "prefix")) l.text.counterPrefix = text(op["prefix"], "prefix");
+    if (has(op, "suffix")) l.text.counterSuffix = text(op["suffix"], "suffix");
+    if (has(op, "separator")) {
+        const std::string sep = text(op["separator"], "separator");
+        if (!isCounterSeparator(sep)) fail("\"separator\" must be \"\", \",\", \".\" or \" \"");
+        l.text.counterSeparator = sep;
     }
-
-    // --- timeline edits (core/Editing.h) ---
-    ClipEdge edgeOf(const json& op) {
-        const std::string e = text(field(op, "edge"), "edge");
-        if (e != "in" && e != "out") fail("\"edge\" must be \"in\" or \"out\"");
-        return e == "in" ? ClipEdge::In : ClipEdge::Out;
+    if (has(op, "from")) l.text.counterFrom.base = static_cast<float>(number(op["from"], "from"));
+    if (has(op, "to")) l.text.counterTo.base = static_cast<float>(number(op["to"], "to"));
+    if (has(op, "count_duration")) {
+        const double v = number(op["count_duration"], "count_duration");
+        if (v < 0 || v > 3600) fail("\"count_duration\" must be 0 (the whole clip) to 3600 seconds");
+        l.text.counterDuration = static_cast<float>(v);
     }
+    if (has(op, "count_easing"))
+        l.text.counterEasing = static_cast<CountEasing>(idOf(kCountEasingIds, op, "count_easing"));
+}
 
-    // An edge to `time`; with "ripple": true the later clips on the track follow (Premiere's ripple trim).
-    json layerTrim(const json& op) {
-        Layer& l = layer(op);
-        const uint64_t id = l.id;
-        const ClipEdge edge = edgeOf(op);
-        const double t = c_.snapToFrame(time(op));
-        c_.duration = std::max(c_.duration, t + 1.0); // room to grow (fitDuration after the batch)
-        if (has(op, "ripple") && boolean(op["ripple"], "ripple")) rippleTrim(c_, id, edge, t);
-        else if (edge == ClipEdge::In) c_.setInPoint(id, t);
-        else c_.setOutPoint(id, t);
-        const Layer& now = *c_.findLayer(id);
-        return {{"in", now.inPoint}, {"out", now.outPoint}};
+// Letters coming in, leaving, moving; auto fit.
+void Applier::setLetters(Layer& l, const json& op) {
+    TextProps& t = l.text;
+    if (has(op, "letter_in")) t.letterIn = static_cast<LetterAnim>(idOf(kLetterAnimIds, op, "letter_in"));
+    if (has(op, "letter_out")) t.letterOut = static_cast<LetterAnim>(idOf(kLetterAnimIds, op, "letter_out"));
+    if (has(op, "letter_loop")) t.letterLoop = static_cast<LetterLoop>(idOf(kLetterLoopIds, op, "letter_loop"));
+    if (has(op, "letter_by")) t.letterUnit = static_cast<LetterUnit>(idOf(kLetterUnitIds, op, "letter_by"));
+    if (has(op, "letter_order")) t.letterOrder = static_cast<LetterOrder>(idOf(kLetterOrderIds, op, "letter_order"));
+    if (has(op, "letter_delay")) {
+        const double v = number(op["letter_delay"], "letter_delay");
+        if (v < 0 || v > 10) fail("\"letter_delay\" must be 0 to 10 seconds");
+        t.letterDelay = static_cast<float>(v);
     }
-
-    json layerRoll(const json& op) {
-        const Layer& l = layer(op);
-        const uint64_t next = clipAfterCut(c_, l.id);
-        if (!next) fail("\"" + l.name + "\" has no clip right after it on its track (a rolling edit moves the cut between two clips)");
-        rollEdit(c_, l.id, c_.snapToFrame(time(op)));
-        return {{"cut", c_.findLayer(l.id)->outPoint}, {"next", next}};
+    if (has(op, "letter_duration")) {
+        const double v = number(op["letter_duration"], "letter_duration");
+        if (v < 0.01 || v > 30) fail("\"letter_duration\" must be 0.01 to 30 seconds");
+        t.letterDuration = static_cast<float>(v);
     }
-
-    json layerSlip(const json& op) {
-        const Layer& l = layer(op);
-        const double delta = number(field(op, "delta"), "delta");
-        return {{"delta", slipClip(c_, l.id, delta)}};
+    if (has(op, "fit_lines")) {
+        const double v = number(op["fit_lines"], "fit_lines");
+        if (v < 0 || v > 20 || v != std::floor(v)) fail("\"fit_lines\" must be 0 (off) to 20");
+        t.fitLines = static_cast<int>(v);
     }
+}
 
-    json layerRippleDelete(const json& op) {
-        const json& list = field(op, "layers");
-        if (!list.is_array() || list.empty()) fail("\"layers\" must be a list of layers");
-        std::vector<uint64_t> ids;
-        for (const json& ref : list) ids.push_back(layer(json{{"layer", ref}}).id);
-        return {{"removed", rippleDelete(c_, ids)}};
-    }
-
-    // The empty space at `time` on the track of `layer` (any clip of it) closes up.
-    json trackCloseGap(const json& op) {
-        const Layer& l = layer(op);
-        const double t = time(op);
-        if (!closeGap(c_, l.track, t)) fail("there is no gap at " + std::to_string(t) + " s on the track of \"" + l.name + "\" with a clip after it");
-        return json::object();
-    }
-
-    Layer& footage(const json& op) {
-        Layer& l = layer(op);
-        if (!hasTimeline(c_, l)) fail("\"" + l.name + "\" is not a video or audio clip (" + typeName(l) + ")");
-        return l;
-    }
-
-    // "speed": percent (100 = as recorded), "reverse": backwards, "ripple": the later clips follow.
-    json layerSpeed(const json& op) {
-        Layer& l = footage(op);
-        const double speed = has(op, "speed") ? number(op["speed"], "speed") : l.media.speed * 100.0;
-        if (speed < 1.0 || speed > 10000.0) fail("\"speed\" is a percent from 1 to 10000");
-        const bool reverse = has(op, "reverse") ? boolean(op["reverse"], "reverse") : l.media.reversed;
-        const bool ripple = has(op, "ripple") && boolean(op["ripple"], "ripple");
-        c_.duration += kMaxOverhang; // a slower clip may grow past the end (fitDuration after the batch)
-        setClipSpeed(c_, l.id, speed / 100.0, reverse, ripple);
-        c_.duration -= kMaxOverhang;
-        const Layer& now = *c_.findLayer(l.id);
-        return {{"in", now.inPoint}, {"out", now.outPoint}};
-    }
-
-    json layerTimeRemap(const json& op) {
-        Layer& l = footage(op);
-        setTimeRemap(c_, l.id, boolean(field(op, "enabled"), "enabled"));
-        return json::object();
-    }
-
-    json layerFreeze(const json& op) {
-        Layer& l = footage(op);
-        freezeFrame(c_, l.id, time(op));
-        return {{"source_time", round3(l.media.remap.base)}};
-    }
-
-    json layerSeparateAudio(const json& op) {
-        Layer& l = layer(op);
-        const std::string name = l.name;
-        if (l.type != LayerType::Media || !l.media.hasVideo || !l.media.hasAudio)
-            fail("layer \"" + name + "\" is not a video with sound (nothing to separate)");
-        const uint64_t audio = separateAudio(c_, l.id);
-        return {{"layer", audio}, {"name", name + " (audio)"}};
-    }
-
-    json svgAdd(const json& op) {
-        if (!has(op, "svg")) fail("missing field \"svg\" (the SVG file's text)");
-        std::string error;
-        const uint64_t id = addSvg(c_, text(op["svg"], "svg"), has(op, "name") ? text(op["name"], "name") : "SVG", time(op), &error);
-        if (!id) fail(error);
-        return {{"layer", id}, {"name", c_.findLayer(id)->name}};
-    }
-
-    json layerLinkAudio(const json& op) {
-        Layer& v = layer(op);
-        const std::string name = v.name;
-        if (v.type != LayerType::Media || !v.media.hasVideo || v.media.hasAudio)
-            fail("layer \"" + name + "\" is not a video without sound (nothing to link)");
-        uint64_t audio = 0;
-        if (has(op, "audio")) audio = layer(json{{"layer", op["audio"]}}).id;
-        else audio = audioToLink(c_, v.id);
-        if (!audio) fail("no sound-only clip of the same media to link with \"" + name + "\"");
-        bool inSync = true;
-        if (!linkAudio(c_, v.id, audio, &inSync)) fail("\"audio\" must be a sound-only clip of the same media");
-        return {{"in_sync", inSync}};
-    }
-
-    // --- masks ---
-    Mask& mask(Layer& l, const json& op) {
-        const double i = number(field(op, "index"), "index");
-        if (i < 0 || i >= static_cast<double>(l.masks.size()) || i != std::floor(i))
-            fail("layer \"" + l.name + "\" has " + std::to_string(l.masks.size()) + " mask(s): index must be 0.." +
-                 std::to_string(static_cast<int>(l.masks.size()) - 1));
-        return l.masks[static_cast<size_t>(i)];
-    }
-
-    void setMask(Mask& m, const json& op) {
-        if (has(op, "name")) {
-            m.name = text(op["name"], "name");
-            if (m.name.empty()) fail("\"name\" cannot be empty");
-        }
-        if (has(op, "mode")) m.mode = static_cast<MaskMode>(idOf(kMaskModeIds, op, "mode"));
-        if (has(op, "inverted")) m.inverted = boolean(op["inverted"], "inverted");
-        if (has(op, "enabled")) m.enabled = boolean(op["enabled"], "enabled");
-        if (has(op, "path")) {
-            // With "time" (or on a mask already animated): a Mask Path keyframe there.
-            if (has(op, "time") || !m.pathKeys.empty()) m.setPathKey(time(op), pathOf(op["path"]));
-            else m.path = pathOf(op["path"]);
-        }
-        if (has(op, "animated") && !boolean(op["animated"], "animated")) { // back to one outline: the one at "time"
-            m.path = m.pathAt(time(op));
-            m.pathKeys.clear();
+// A subtitle layer's captions: "captions" [{"start", "end", "text"}] or "srt" (SubRip text).
+void Applier::setCaptions(Layer& l, const json& op) {
+    std::vector<Caption> caps;
+    if (has(op, "srt")) {
+        caps = parseSrt(text(op["srt"], "srt"));
+    } else {
+        if (!op["captions"].is_array()) fail("\"captions\" must be a list of {\"start\", \"end\", \"text\"}");
+        for (const json& c : op["captions"]) {
+            if (!c.is_object()) fail("each caption is {\"start\": s, \"end\": s, \"text\": \"...\"}");
+            Caption cap{number(field(c, "start"), "start"), number(field(c, "end"), "end"),
+                        text(field(c, "text"), "text")};
+            if (cap.end <= cap.start) fail("a caption must end after it starts (\"" + cap.text + "\")");
+            caps.push_back(std::move(cap));
         }
     }
+    std::stable_sort(caps.begin(), caps.end(), [](const Caption& a, const Caption& b) { return a.start < b.start; });
+    for (size_t i = 1; i < caps.size(); ++i)
+        caps[i - 1].end = std::min(caps[i - 1].end, caps[i].start);
+    l.text.captions = std::move(caps);
+}
 
-    // A mask: "shape" rectangle / ellipse over the layer's bounds (or "box": [x0, y0, x1, y1] in
-    // the layer's space), or a "path"; the animatable values are properties ("mask0.feather").
-    json maskAdd(const json& op) {
-        Layer& l = layer(op);
-        if (l.type == LayerType::Camera || (l.type == LayerType::Media && !l.media.hasVideo)) fail("\"" + l.name + "\" has no picture to mask");
-        Mask m;
-        m.name = "Mask " + std::to_string(l.masks.size() + 1);
-        if (has(op, "path")) {
-            m.path = pathOf(op["path"]);
-        } else {
-            Vec2 mn{-200, -200}, mx{200, 200};
-            if (has(op, "box")) {
-                const json& b = op["box"];
-                if (!b.is_array() || b.size() != 4) fail("\"box\" is [x0, y0, x1, y1] in the layer's own space");
-                mn = {static_cast<float>(number(b[0], "box")), static_cast<float>(number(b[1], "box"))};
-                mx = {static_cast<float>(number(b[2], "box")), static_cast<float>(number(b[3], "box"))};
-            } else if (!env_.layerBounds || !env_.layerBounds(c_, l, time(op), mn, mx)) {
-                // Without the renderer: what the core knows of the layer's size.
-                const Vec2 size = l.type == LayerType::Media ? l.media.size : l.type == LayerType::Plugin ? l.plugin.size.valueAt(time(op))
-                                  : l.type == LayerType::Shape && l.shape.kind != ShapeKind::Path ? l.shape.size.valueAt(time(op))
-                                                                                                    : Vec2{400, 400};
-                mn = size * -0.5f, mx = size * 0.5f;
-                if (l.type == LayerType::Shape && l.shape.kind == ShapeKind::Path) bezierBounds(l.shape.path, mn, mx);
-            }
-            const std::string shape = has(op, "shape") ? text(op["shape"], "shape") : "rectangle";
-            if (shape != "rectangle" && shape != "ellipse") fail("\"shape\" must be \"rectangle\" or \"ellipse\" (or give a \"path\")");
-            m.path = shape == "ellipse" ? ellipsePath(mn, mx) : rectanglePath(mn, mx);
+// A background's fill ("solid", "linear", "radial", "image"), picture ("media": id) and fit.
+void Applier::setBackground(Layer& l, const json& op) {
+    BackgroundProps& b = l.background;
+    if (has(op, "fill")) {
+        const std::string fill = text(op["fill"], "fill");
+        std::vector<std::string> ids;
+        bool found = false;
+        for (int i = 0; i < static_cast<int>(BackgroundFill::Count); ++i) {
+            ids.push_back(backgroundFillId(static_cast<BackgroundFill>(i)));
+            if (fill == ids.back()) b.fill = static_cast<BackgroundFill>(i), found = true;
         }
-        setMask(m, op);
-        l.masks.push_back(std::move(m));
-        const int index = static_cast<int>(l.masks.size()) - 1;
-        if (has(op, "feather")) propertySet({{"layer", l.id}, {"prop", "mask" + std::to_string(index) + ".feather"}, {"value", op["feather"]}});
-        return {{"index", index}};
+        if (!found) fail("unknown fill \"" + fill + "\"" + suggest(fill, ids));
     }
-
-    json maskSet(const json& op) {
-        Layer& l = layer(op);
-        setMask(mask(l, op), op);
-        return json::object();
+    if (has(op, "media")) {
+        const auto id = static_cast<uint64_t>(number(op["media"], "media"));
+        const MediaItem* m = c_.findMedia(id);
+        if (!m || m->kind == MediaKind::Audio)
+            fail("there is no picture or video with media id " + std::to_string(id) + " (media.import it first)");
+        b.mediaId = id;
+        if (!has(op, "fill")) b.fill = BackgroundFill::Image;
     }
-
-    // Paint, Puppet and Warp: on layers with a picture.
-    Layer& pictureLayer(const json& op, const char* what) {
-        Layer& l = layer(op);
-        if (l.type == LayerType::Camera || (l.type == LayerType::Media && !l.media.hasVideo))
-            fail("\"" + l.name + "\" has no picture for " + what);
-        return l;
-    }
-    Vec2 pointOf(const json& v, const char* name) {
-        if (!v.is_array() || v.size() != 2) fail(std::string("\"") + name + "\" is [x, y] in the layer's own space");
-        return {static_cast<float>(number(v[0], name)), static_cast<float>(number(v[1], name))};
-    }
-    json paintStroke(const json& op) {
-        Layer& l = pictureLayer(op, "paint");
-        const json& pts = field(op, "points");
-        if (!pts.is_array() || pts.empty()) fail("\"points\" is a list of [x, y] in the layer's own space");
-        if (pts.size() > 100000) fail("\"points\" has too many points (100000 at most)");
-        PaintStroke s;
-        for (const json& p : pts) s.points.push_back(pointOf(p, "points"));
-        if (has(op, "color")) s.color = colorOf(op["color"], "color");
-        s.width = static_cast<float>(number(op, "width", s.width));
-        if (s.width < 0.5 || s.width > 2000) fail("\"width\" must be 0.5 to 2000 px");
-        if (has(op, "erase")) s.erase = boolean(op["erase"], "erase");
-        s.softness = static_cast<float>(number(op, "softness", 0.0));
-        if (s.softness < 0 || s.softness > 500) fail("\"softness\" must be 0 to 500 px");
-        l.paint.push_back(std::move(s));
-        return {{"index", l.paint.size() - 1}};
-    }
-    json paintClear(const json& op) {
-        Layer& l = layer(op);
-        l.paint.clear();
-        l.paintReveal = AnimFloat{100.0f};
-        return json::object();
-    }
-    json pinAdd(const json& op) {
-        Layer& l = pictureLayer(op, "puppet pins");
-        if (l.pins.size() >= 64) fail("a layer takes 64 puppet pins at most");
-        PuppetPin pin;
-        pin.rest = pointOf(field(op, "point"), "point");
-        pin.position = AnimVec2{pin.rest};
-        if (has(op, "starch")) pin.starch = boolean(op["starch"], "starch");
-        l.pins.push_back(std::move(pin));
-        return {{"index", l.pins.size() - 1}, {"property", "pin" + std::to_string(l.pins.size() - 1)}};
-    }
-    json pinRemove(const json& op) {
-        Layer& l = layer(op);
-        const double i = number(field(op, "index"), "index");
-        if (i < 0 || i >= static_cast<double>(l.pins.size()) || i != std::floor(i))
-            fail("layer \"" + l.name + "\" has " + std::to_string(l.pins.size()) + " pin(s): index must be 0.." + std::to_string(static_cast<int>(l.pins.size()) - 1));
-        l.pins.erase(l.pins.begin() + static_cast<std::ptrdiff_t>(i));
-        return json::object();
-    }
-
-    json maskDuplicate(const json& op) {
-        Layer& l = layer(op);
-        Mask copy = mask(l, op);
-        const auto at = &mask(l, op) - l.masks.data() + 1;
-        copy.name += " " + std::string("copy");
-        l.masks.insert(l.masks.begin() + at, std::move(copy));
-        return {{"index", at}};
-    }
-
-    json maskRemove(const json& op) {
-        Layer& l = layer(op);
-        Mask& m = mask(l, op);
-        l.masks.erase(l.masks.begin() + (&m - l.masks.data()));
-        return json::object();
-    }
-
-    // --- markers ---
-    int markerIndex(const json& op) {
-        if (has(op, "index")) {
-            const double i = number(op["index"], "index");
-            if (i < 0 || i >= static_cast<double>(c_.markers.size()) || i != std::floor(i))
-                fail("there are " + std::to_string(c_.markers.size()) + " marker(s): index must be 0.." + std::to_string(static_cast<int>(c_.markers.size()) - 1));
-            return static_cast<int>(i);
+    if (has(op, "fit")) {
+        const std::string fit = text(op["fit"], "fit");
+        std::vector<std::string> ids;
+        bool found = false;
+        for (int i = 0; i < static_cast<int>(BackgroundFit::Count); ++i) {
+            ids.push_back(backgroundFitId(static_cast<BackgroundFit>(i)));
+            if (fit == ids.back()) b.fit = static_cast<BackgroundFit>(i), found = true;
         }
-        const double t = time(op);
-        const int i = markerAt(c_, t);
-        if (i < 0) fail("there is no marker at " + std::to_string(t) + " s (give \"index\" or the marker's \"time\")");
-        return i;
+        if (!found) fail("unknown fit \"" + fit + "\"" + suggest(fit, ids));
     }
+}
 
-    int markerColorOf(const json& op) {
-        if (!has(op, "color")) return -1;
-        const double v = number(op["color"], "color");
-        if (v < 0 || v >= kLabelColorCount || v != std::floor(v)) fail("\"color\" is a label color, 0 to 7");
-        return static_cast<int>(v);
-    }
+json Applier::layerRemove(const json& op) {
+    const uint64_t id = layer(op).id;
+    c_.removeLayerTree(id);
+    return json::object();
+}
 
-    json markerAdd(const json& op) {
-        const int i = addMarker(c_, time(op), has(op, "name") ? text(op["name"], "name") : std::string(), markerColorOf(op));
-        return {{"index", i}, {"time", c_.markers[i].time}};
-    }
-
-    json markerSet(const json& op) {
-        int i = markerIndex(op);
-        if (has(op, "name")) c_.markers[i].name = text(op["name"], "name");
-        if (const int color = markerColorOf(op); color >= 0) c_.markers[i].color = color;
-        if (has(op, "to")) i = moveMarker(c_, i, time(op, "to"));
-        return {{"index", i}, {"time", c_.markers[i].time}};
-    }
-
-    json markerRemove(const json& op) {
-        c_.markers.erase(c_.markers.begin() + markerIndex(op));
-        return json::object();
-    }
-
-    json group(const json& op) {
-        const json& list = field(op, "layers");
-        if (!list.is_array() || list.empty()) fail("\"layers\" must be a list of layers");
-        std::vector<uint64_t> ids;
-        uint64_t parent = UINT64_MAX;
-        for (const json& ref : list) {
-            const Layer& l = layer(json{{"layer", ref}});
-            if (parent != UINT64_MAX && l.parent != parent) fail("the layers to group must be inside the same compound (or none)");
-            parent = l.parent;
-            ids.push_back(l.id);
-        }
-        const uint64_t compound = c_.createCompound(ids, time(op));
-        if (!compound) fail("could not group these layers");
-        if (has(op, "name")) {
-            Layer& g = *c_.findLayer(compound);
-            g.name.clear();
-            g.name = c_.uniqueLayerName(text(op["name"], "name"));
-        }
-        return {{"layer", compound}};
-    }
-
-    json ungroup(const json& op) {
-        const Layer& l = layer(op);
-        if (l.type != LayerType::Compound) fail("\"" + l.name + "\" is not a compound");
-        c_.releaseCompound(l.id, time(op));
-        return json::object();
-    }
-
-    json propertySet(const json& op) {
-        Layer& l = layer(op);
-        const PropertyRef p = property(l, op);
-        setPropertyValue(p, time(op), valueOf(p, field(op, "value")));
-        return json::object();
-    }
-
-    template <typename T>
-    static void addKey(const PropertyRef& p, double t, const std::vector<float>& v, Easing e) {
-        auto& a = *static_cast<Animated<T>*>(p.anim);
-        T value;
-        if constexpr (std::is_same_v<T, float>) value = v[0];
-        else if constexpr (std::is_same_v<T, Vec2>) value = {v[0], v[1]};
-        else value = {v[0], v[1], v[2], v[3]};
-        a.setKey(t, value, e);
-    }
-
-    json keyAdd(const json& op) {
-        Layer& l = layer(op);
-        const PropertyRef p = property(l, op);
-        const double t = time(op, "time", -1.0);
-        if (!has(op, "time")) fail("missing field \"time\"");
-        const std::vector<float> v = has(op, "value") ? valueOf(p, op["value"]) : propertyValue(p, t);
-        const Easing e = has(op, "easing") ? easingOf(op["easing"]) : Easing::EaseInOut;
-        switch (p.kind) {
-        case PropertyKind::Float: addKey<float>(p, t, v, e); break;
-        case PropertyKind::Vec2: addKey<Vec2>(p, t, v, e); break;
-        case PropertyKind::Color: addKey<Color>(p, t, v, e); break;
-        }
-        return json::object();
-    }
-
-    // A formula for the property, every frame (core/Expressions.h); "" removes it.
-    json expressionSet(const json& op) {
-        Layer& l = layer(op);
-        const PropertyRef p = property(l, op);
-        const std::string e = text(field(op, "expression"), "expression");
-        if (const std::string problem = e.empty() ? std::string() : checkExpression(e); !problem.empty())
-            fail("the expression does not read: " + problem);
-        p.anim->expression = e;
-        return json::object();
-    }
-
-    // The expression turned into keyframes, one a frame (After Effects' Convert Expression to
-    // Keyframes): `from` / `to` default to the clip, `step` (frames, default 1).
-    json expressionBake(const json& op) {
-        Layer& l = layer(op);
-        const PropertyRef p = property(l, op);
-        if (!p.anim->hasExpression()) fail("\"" + std::string(p.id) + "\" of \"" + l.name + "\" has no expression");
-        if (const std::string problem = expressionError(*p.anim); !problem.empty()) fail("the expression does not work: " + problem);
-        const double from = time(op, "from", l.inPoint), to = has(op, "to") ? time(op, "to") : l.outPoint;
-        if (to <= from) fail("\"to\" must be after \"from\"");
-        const int step = static_cast<int>(number(op, "step", 1.0));
-        if (step < 1 || step > 1000) fail("\"step\" is a number of frames, from 1 to 1000");
-        const double dt = step / std::max(1.0, c_.fps);
-        std::vector<std::pair<double, std::vector<float>>> samples;
-        for (int i = 0;; ++i) {
-            const double at = std::min(to, from + i * dt);
-            std::vector<float> v;
-            if (const std::string problem = evaluateExpressionFor(p.anim->expression, l, p, at, v); !problem.empty())
-                fail("the expression does not work at " + std::to_string(at) + " s: " + problem);
-            samples.emplace_back(at, std::move(v));
-            if (at >= to || samples.size() > 100000) break;
-        }
-        p.anim->expression.clear();
-        p.anim->clearKeys(from);
-        for (const auto& [at, v] : samples) switch (p.kind) {
-            case PropertyKind::Float: addKey<float>(p, at, v, Easing::Linear); break;
-            case PropertyKind::Vec2: addKey<Vec2>(p, at, v, Easing::Linear); break;
-            case PropertyKind::Color: addKey<Color>(p, at, v, Easing::Linear); break;
-            }
-        return {{"keys", samples.size()}};
-    }
-
-    json keyRemove(const json& op) {
-        Layer& l = layer(op);
-        const PropertyRef p = property(l, op);
-        p.anim->removeKey(keyAt(p, time(op)));
-        return json::object();
-    }
-
-    json keyClear(const json& op) {
-        Layer& l = layer(op);
-        const PropertyRef p = property(l, op);
-        const double t = time(op);
-        p.anim->clearKeys(t); // keeps the value it had at `t`
-        if (has(op, "value")) setPropertyValue(p, t, valueOf(p, op["value"]));
-        return json::object();
-    }
-
-    json keyEasing(const json& op) {
-        Layer& l = layer(op);
-        const PropertyRef p = property(l, op);
-        const Easing e = easingOf(field(op, "easing"));
-        if (has(op, "all") && boolean(op["all"], "all")) {
-            for (int i = 0; i < p.anim->keyCount(); ++i) p.anim->setKeyEasing(i, e);
-        } else {
-            p.anim->setKeyEasing(keyAt(p, time(op)), e);
-        }
-        return json::object();
-    }
-
-    json effectAdd(const json& op) {
-        Layer& l = layer(op);
-        if (l.type == LayerType::Camera) fail("cameras have no effects");
-        const std::string id = text(field(op, "effect"), "effect");
-        const EffectType type = effectFromId(id);
-        if (type == EffectType::Count) {
-            std::vector<std::string> ids;
-            for (int i = 0; i < static_cast<int>(EffectType::Count); ++i) ids.push_back(effectId(static_cast<EffectType>(i)));
-            fail("unknown effect \"" + id + "\"" + suggest(id, ids));
-        }
-        l.effects.push_back(makeEffect(type));
-        const int index = static_cast<int>(l.effects.size()) - 1;
-        json props = json::array();
-        const std::string prefix = "fx" + std::to_string(index) + ".";
-        for (const PropertyRef& p : l.properties())
-            if (p.effectIndex == index) props.push_back(std::string(p.id).substr(prefix.size()));
-        if (has(op, "params")) {
-            if (!op["params"].is_object()) fail("\"params\" must be an object like {\"size\": 20}");
-            for (const auto& [slot, value] : op["params"].items())
-                propertySet({{"layer", l.id}, {"prop", prefix + slot}, {"value", value}});
-        }
-        return {{"index", index}, {"params", props}};
-    }
-
-    json effectRemove(const json& op) {
-        Layer& l = layer(op);
-        Effect& e = effect(l, op);
-        l.effects.erase(l.effects.begin() + (&e - l.effects.data()));
-        return json::object();
-    }
-
-    json effectSet(const json& op) {
-        Layer& l = layer(op);
-        Effect& e = effect(l, op);
-        if (has(op, "enabled")) e.enabled = boolean(op["enabled"], "enabled");
-        if (has(op, "samples")) {
-            const double s = number(op["samples"], "samples");
-            if (s < 2 || s > 64) fail("\"samples\" must be 2 to 64");
-            e.samples = static_cast<int>(s);
-        }
-        if (has(op, "file")) {
-            if (e.type != EffectType::Lut) fail("\"file\" is for lut effects (a .cube file)");
-            e.file = text(op["file"], "file");
-            e.relative.clear();
-        }
-        if (has(op, "curves")) {
-            if (e.type != EffectType::Curves) fail("\"curves\" is for curves effects");
-            const json& curves = op["curves"];
-            if (!curves.is_object()) fail("\"curves\" must be an object like {\"rgb\": [[0, 0], [0.5, 0.6], [1, 1]]}");
-            for (const auto& [name, points] : curves.items()) {
-                int channel = -1;
-                for (int c = 0; c < 4; ++c)
-                    if (name == curveId(c)) channel = c;
-                if (channel < 0) fail("unknown curve \"" + name + "\" (rgb, red, green or blue)" + suggest(name, {"rgb", "red", "green", "blue"}));
-                std::vector<Vec2> pts;
-                if (!points.is_null()) {
-                    if (!points.is_array()) fail("curve \"" + name + "\" must be a list of [x, y] points (0 to 1), or null to reset it");
-                    for (const json& pt : points) {
-                        if (!pt.is_array() || pt.size() != 2 || !pt[0].is_number() || !pt[1].is_number())
-                            fail("curve \"" + name + "\": each point is [x, y] (0 to 1)");
-                        const float x = pt[0].get<float>(), y = pt[1].get<float>();
-                        if (x < 0 || x > 1 || y < 0 || y > 1) fail("curve \"" + name + "\": points are 0 to 1");
-                        pts.push_back({x, y});
-                    }
-                    if (pts.size() > static_cast<size_t>(kMaxCurvePoints)) fail("curve \"" + name + "\": at most " + std::to_string(kMaxCurvePoints) + " points");
-                }
-                cleanCurve(pts);
-                e.curves[channel] = std::move(pts);
-            }
-        }
-        return json::object();
-    }
-
-    // Sound-only and sound-carrying clips take audio effects.
-    Layer& audioLayer(const json& op) {
-        Layer& l = layer(op);
-        if (l.type != LayerType::Media || !l.media.hasAudio) fail("layer \"" + l.name + "\" has no sound: audio effects are for video and audio clips with sound");
-        return l;
-    }
-
-    AudioEffect& audioEffect(Layer& l, const json& op) {
-        const double i = number(field(op, "index"), "index");
-        if (i < 0 || i >= static_cast<double>(l.audioEffects.size()) || i != std::floor(i))
-            fail("layer \"" + l.name + "\" has " + std::to_string(l.audioEffects.size()) + " audio effect(s): index must be 0.." +
-                 std::to_string(static_cast<int>(l.audioEffects.size()) - 1));
-        return l.audioEffects[static_cast<size_t>(i)];
-    }
-
-    // An audio effect's values by name ("low", "amount"...), each inside its range.
-    void audioValues(AudioEffect& e, const json& op) {
-        if (!has(op, "values")) return;
-        if (!op["values"].is_object()) fail("\"values\" must be an object like {\"low\": 3}");
-        const auto& params = audioEffectParams(e.type);
-        for (const auto& [name, value] : op["values"].items()) {
-            const auto it = std::find_if(params.begin(), params.end(), [&](const AudioEffectParam& p) { return name == p.id; });
-            if (it == params.end()) {
-                std::vector<std::string> ids;
-                for (const AudioEffectParam& p : params) ids.push_back(p.id);
-                std::string list;
-                for (const std::string& id : ids) list += (list.empty() ? "" : ", ") + id;
-                fail(std::string(audioEffectId(e.type)) + " has no value \"" + name + "\" (it has " + list + ")" + suggest(name, ids));
-            }
-            const double v = number(value, name.c_str());
-            if (v < it->min || v > it->max) {
-                char range[96];
-                std::snprintf(range, sizeof range, "\"%s\" must be %g to %g", it->id, it->min, it->max);
-                fail(range);
-            }
-            audioEffectValue(e, it->index) = static_cast<float>(v);
+json Applier::layerSet(const json& op) {
+    Layer& l = layer(op);
+    const uint64_t id = l.id;
+    auto requireType = [&](bool ok, const char* key, const char* what) {
+        if (!ok)
+            fail(std::string("\"") + key + "\" only applies to " + what + " layers (\"" + l.name + "\" is " +
+                 typeName(l) + ")");
+    };
+    if (has(op, "name")) {
+        const std::string name = text(op["name"], "name");
+        if (name.empty()) fail("\"name\" cannot be empty");
+        if (name != l.name) {
+            l.name.clear();
+            l.name = c_.uniqueLayerName(name);
         }
     }
+    if (has(op, "visible")) l.visible = boolean(op["visible"], "visible");
+    if (has(op, "locked")) l.locked = boolean(op["locked"], "locked");
+    if (has(op, "muted")) l.muted = boolean(op["muted"], "muted");
+    if (has(op, "solo")) l.solo = boolean(op["solo"], "solo");
+    if (has(op, "blend")) {
+        if (l.type == LayerType::Camera) fail("cameras have no blending mode");
+        l.blend = static_cast<BlendMode>(idOf(kBlendModeIds, op, "blend"));
+    }
+    if (has(op, "matte") || has(op, "matte_layer")) setMatte(l, op);
+    if (has(op, "three_d")) {
+        const bool on = boolean(op["three_d"], "three_d");
+        if (on && (l.type == LayerType::Camera || l.type == LayerType::Background))
+            fail(std::string("\"three_d\" does not apply to ") + typeName(l) + " layers (cameras always see in 3D)");
+        l.threeD = on;
+    }
+    if (has(op, "label")) {
+        const double v = number(op["label"], "label");
+        if (v < 0 || v >= kLabelColorCount || v != std::floor(v)) fail("\"label\" must be 0 to 7");
+        l.label = static_cast<int>(v);
+    }
+    if (has(op, "text"))
+        requireType(l.type == LayerType::Text && !l.text.counter, "text", "text"),
+            l.text.text = text(op["text"], "text");
+    for (const char* key :
+         {"decimals", "prefix", "suffix", "separator", "from", "to", "count_duration", "count_easing"})
+        if (has(op, key)) requireType(l.type == LayerType::Text && l.text.counter, key, "counter");
+    setCounter(l, op);
+    for (const char* key : {"letter_in", "letter_out", "letter_loop", "letter_by", "letter_order", "letter_delay",
+                            "letter_duration", "fit_lines"})
+        if (has(op, key)) requireType(l.type == LayerType::Text, key, "text");
+    setLetters(l, op);
+    if (has(op, "fit_captions")) {
+        requireType(l.type == LayerType::Text && l.text.subtitle, "fit_captions", "subtitle");
+        if (boolean(op["fit_captions"], "fit_captions")) fitCaptions(l.text.captions);
+    }
+    if (has(op, "outline"))
+        requireType(l.type == LayerType::Text, "outline", "text"),
+            l.text.outlineEnabled = boolean(op["outline"], "outline");
+    if (has(op, "box"))
+        requireType(l.type == LayerType::Text, "box", "text"), l.text.boxEnabled = boolean(op["box"], "box");
+    if (has(op, "captions") || has(op, "srt")) {
+        requireType(l.type == LayerType::Text && l.text.subtitle, has(op, "srt") ? "srt" : "captions", "subtitle");
+        setCaptions(l, op);
+    }
+    if (has(op, "font"))
+        requireType(l.type == LayerType::Text, "font", "text"), l.text.fontFamily = text(op["font"], "font");
+    if (has(op, "style"))
+        requireType(l.type == LayerType::Text, "style", "text"), l.text.fontStyle = text(op["style"], "style");
+    if (has(op, "align")) {
+        requireType(l.type == LayerType::Text, "align", "text");
+        const std::string a = text(op["align"], "align");
+        int i = 0;
+        while (i < 3 && a != kAlignNames[i])
+            ++i;
+        if (i == 3) fail("\"align\" must be left, center or right");
+        l.text.align = static_cast<TextAlign>(i);
+    }
+    if (has(op, "shape")) {
+        requireType(l.type == LayerType::Shape, "shape", "shape");
+        const std::string s = text(op["shape"], "shape");
+        const int kind = shapeKindOf(s);
+        if (kind < 0)
+            fail("unknown shape \"" + s + "\"" +
+                 suggest(s, {"rectangle", "ellipse", "polygon", "star", "line", "path"}));
+        // Becoming a path: its outline so far, as Bézier points to edit (unless one is given).
+        if (kind == static_cast<int>(ShapeKind::Path) && l.shape.kind != ShapeKind::Path && !has(op, "path"))
+            l.shape.path = shapeToBezier(l.shape, time(op));
+        l.shape.kind = static_cast<ShapeKind>(kind);
+    }
+    if (has(op, "path")) {
+        requireType(l.type == LayerType::Shape, "path", "shape");
+        l.shape.path = pathOf(op["path"]);
+        l.shape.kind = ShapeKind::Path;
+    }
+    if (has(op, "gradient")) {
+        requireType(l.type == LayerType::Shape || l.type == LayerType::Text || l.type == LayerType::Plugin, "gradient",
+                    "shape, text or plugin");
+        const auto fill = static_cast<ShapeFill>(idOf(kShapeFillIds, op, "gradient"));
+        (l.type == LayerType::Text ? l.text.fill : l.type == LayerType::Plugin ? l.plugin.fill : l.shape.fill) = fill;
+    }
+    if (has(op, "repeater"))
+        requireType(l.type == LayerType::Shape, "repeater", "shape"),
+            l.shape.repeater = boolean(op["repeater"], "repeater");
+    if (has(op, "warp")) {
+        requireType(l.type != LayerType::Camera, "warp", "layer with a picture");
+        l.warp = boolean(op["warp"], "warp");
+    }
+    for (const char* key : {"flip_h", "flip_v"})
+        if (has(op, key)) {
+            requireType(l.type == LayerType::Media && l.media.hasVideo, key, "video or image");
+            (key[5] == 'h' ? l.media.flipH : l.media.flipV) = boolean(op[key], key);
+        }
+    if (l.type == LayerType::Background && (has(op, "fill") || has(op, "media") || has(op, "fit")))
+        setBackground(l, op);
+    else if (has(op, "fill"))
+        requireType(l.type == LayerType::Shape, "fill", "shape"), l.shape.fillEnabled = boolean(op["fill"], "fill");
+    if (has(op, "stroke"))
+        requireType(l.type == LayerType::Shape, "stroke", "shape"),
+            l.shape.strokeEnabled = boolean(op["stroke"], "stroke");
+    json out = json::object();
+    if (has(op, "start")) { // moves the clip, keyframes included
+        const double delta = c_.snapToFrame(time(op, "start")) - l.inPoint;
+        std::vector<uint64_t> moving = c_.descendantsOf(id); // a compound brings its contents
+        moving.push_back(id);
+        // Past the end is fine: the composition grows to hold it (fitDuration after the batch).
+        c_.duration = std::max(c_.duration, l.outPoint + std::max(0.0, delta) + 1.0);
+        double lo = 0, hi = 0;
+        c_.timeShiftLimits(moving, lo, hi);
+        if (delta < lo - kTimeEpsilon || delta > hi + kTimeEpsilon)
+            fail("the clip cannot start at " + std::to_string(l.inPoint + delta) +
+                 " s: it would overlap another clip on its track");
+        for (uint64_t m : moving)
+            if (Layer* each = c_.findLayer(m)) each->shiftTime(delta);
+    }
+    if (has(op, "in")) c_.setInPoint(id, time(op, "in"));
+    if (has(op, "out")) c_.setOutPoint(id, time(op, "out"));
+    if (has(op, "track_of")) joinTrack(id, op);
+    const Layer& now = *c_.findLayer(id);
+    out["in"] = now.inPoint;
+    out["out"] = now.outPoint;
+    return out;
+}
 
-    // Noise Reduction's sample of only the noise: [from, to] seconds of the clip's source, or null.
-    void audioSample(AudioEffect& e, const json& op) {
-        if (!op.contains("sample")) return;
-        if (e.type != AudioEffectType::NoiseReduction) fail("only noise_reduction takes a \"sample\"");
-        const json& s = op["sample"];
-        if (s.is_null()) {
-            e.sampleFrom = e.sampleTo = -1.0;
-            return;
-        }
-        if (!s.is_array() || s.size() != 2 || !s[0].is_number() || !s[1].is_number() || s[0].get<double>() < 0.0 || s[1].get<double>() <= s[0].get<double>())
-            fail("\"sample\" must be [from, to]: seconds of the clip's source with only the noise, from < to (null: none)");
-        e.sampleFrom = s[0].get<double>();
-        e.sampleTo = s[1].get<double>();
-    }
+BezierPath Applier::pathOf(const json& v) {
+    BezierPath p;
+    std::string error;
+    if (!pathFromJson(v, p, &error)) fail("\"path\": " + error);
+    if (p.vertices.size() < 2) fail("\"path\" needs at least two vertices");
+    if (p.vertices.size() > 10000) fail("\"path\" has too many vertices (10000 at most)");
+    return p;
+}
 
-    json audioEffectAdd(const json& op) {
-        Layer& l = audioLayer(op);
-        const std::string id = text(field(op, "effect"), "effect");
-        const AudioEffectType type = audioEffectFromId(id);
-        if (type == AudioEffectType::Count) {
-            std::vector<std::string> ids;
-            for (int i = 0; i < static_cast<int>(AudioEffectType::Count); ++i) ids.push_back(audioEffectId(static_cast<AudioEffectType>(i)));
-            fail("unknown audio effect \"" + id + "\"" + suggest(id, ids));
-        }
-        AudioEffect e = makeAudioEffect(type);
-        audioValues(e, op);
-        audioSample(e, op);
-        l.audioEffects.push_back(e);
-        json values = json::object();
-        for (const AudioEffectParam& p : audioEffectParams(type)) values[p.id] = audioEffectValue(e, p.index);
-        return {{"index", l.audioEffects.size() - 1}, {"values", values}};
+// "matte": "alpha" / "alpha_inverted" / "luma" / "luma_inverted" / "none", "matte_layer": the layer
+// whose picture decides (beside this one; default: the one right above it, like After Effects).
+void Applier::setMatte(Layer& l, const json& op) {
+    const MatteMode mode =
+        has(op, "matte") ? static_cast<MatteMode>(idOf(kMatteModeIds, op, "matte")) : MatteMode::Alpha;
+    if (mode == MatteMode::None) {
+        l.matte = MatteMode::None;
+        l.matteLayer = 0;
+        return;
     }
+    if (l.type == LayerType::Camera) fail("cameras take no track matte");
+    uint64_t matte = 0;
+    if (has(op, "matte_layer")) {
+        matte = layer(op, "matte_layer").id;
+    } else {
+        for (int i = c_.indexOf(l.id) - 1; i >= 0 && !matte; --i)
+            if (c_.layers[i].parent == l.parent && c_.layers[i].type != LayerType::Camera) matte = c_.layers[i].id;
+        if (!matte) fail("there is no layer above \"" + l.name + "\" to be its matte: give \"matte_layer\"");
+    }
+    const Layer* m = c_.findLayer(matte);
+    if (m->id == l.id) fail("a layer cannot be its own matte");
+    if (m->parent != l.parent) fail("the matte must be beside the layer (in the same compound, or both at the top)");
+    if (m->type == LayerType::Camera) fail("a camera cannot be a matte");
+    l.matte = mode;
+    l.matteLayer = matte;
+}
 
-    json audioEffectRemove(const json& op) {
-        Layer& l = audioLayer(op);
-        AudioEffect& e = audioEffect(l, op);
-        l.audioEffects.erase(l.audioEffects.begin() + (&e - l.audioEffects.data()));
-        return json::object();
-    }
+json Applier::layerMove(const json& op) {
+    const Layer& l = layer(op);
+    const std::string to = text(field(op, "to"), "to");
+    const int delta = to == "top" ? -100000 : to == "bottom" ? 100000 : to == "up" ? -1 : to == "down" ? 1 : 0;
+    if (!delta) fail("\"to\" must be top, bottom, up or down");
+    c_.shiftTracks({l.track}, delta);
+    return json::object();
+}
 
-    json audioEffectSet(const json& op) {
-        Layer& l = audioLayer(op);
-        AudioEffect& e = audioEffect(l, op);
-        if (has(op, "enabled")) e.enabled = boolean(op["enabled"], "enabled");
-        audioValues(e, op);
-        audioSample(e, op);
-        return json::object();
-    }
+json Applier::layerSplit(const json& op) {
+    const Layer& l = layer(op);
+    const double t = c_.snapToFrame(time(op));
+    const uint64_t copy = c_.splitLayer(l.id, t);
+    if (!copy)
+        fail("\"time\" must be strictly inside the clip (" + std::to_string(l.inPoint) + " to " +
+             std::to_string(l.outPoint) + " s)");
+    return {{"layer", copy}};
+}
 
-    // Automatic levels for one or more clips: each gets an Auto Level effect at the same target
-    // (the one it has is set), so they all sound as loud.
-    json audioLevel(const json& op) {
-        std::vector<uint64_t> ids;
-        if (has(op, "layer")) ids.push_back(audioLayer(op).id);
-        else
-            for (uint64_t id : layerList(op))
-                if (const Layer* l = c_.findLayer(id); l && l->type == LayerType::Media && l->media.hasAudio) ids.push_back(id);
-        if (ids.empty()) fail("no clips with sound to level");
-        AudioEffect level = makeAudioEffect(AudioEffectType::AutoLevel);
-        audioValues(level, {{"values", {{"target", number(op, "target", level.value)}, {"even_out", number(op, "even_out", level.value2)}}}});
-        for (uint64_t id : ids) {
-            Layer& l = *c_.findLayer(id);
-            const auto it = std::find_if(l.audioEffects.begin(), l.audioEffects.end(), [](const AudioEffect& e) { return e.type == AudioEffectType::AutoLevel; });
-            if (it != l.audioEffects.end()) it->value = level.value, it->value2 = level.value2, it->enabled = true;
-            else l.audioEffects.push_back(level);
-        }
-        return {{"layers", ids}, {"target", level.value}};
-    }
+json Applier::layerDuplicate(const json& op) {
+    const Layer& l = layer(op);
+    if (l.type == LayerType::Compound) fail("duplicating compounds is not available as an operation yet");
+    Layer copy = l;
+    copy.track = 0;
+    copy.name = c_.uniqueLayerName(l.name);
+    const int index = c_.indexOf(l.id);
+    const Layer& added = c_.addLayer(std::move(copy), index);
+    return {{"layer", added.id}, {"name", added.name}};
+}
 
-    // Removes the quiet stretches of a clip with sound: below `threshold` dB (or learned from a
-    // `sample` of the silence: [from, to] composition seconds) for at least `min` seconds.
-    json audioRemoveSilence(const json& op) {
-        Layer& l = audioLayer(op);
-        if (l.media.reversed || l.media.timeRemap) fail("layer \"" + l.name + "\" plays reversed or with Time Remap: turn that off first");
-        const MediaItem* item = c_.findMedia(l.media.mediaId);
-        if (!item) fail("layer \"" + l.name + "\" has no media");
-        if (!env_.mediaLoudness) fail("reading sound is not available here");
-        std::vector<float> loud;
-        double block = 0.0;
-        std::string error;
-        if (!env_.mediaLoudness(*item, loud, block, error)) fail("could not read the sound of \"" + item->name + "\": " + error);
-        const double minimum = number(op, "min", 0.5), padding = number(op, "padding", 0.1);
-        if (minimum < 0.05 || minimum > 60) fail("\"min\" must be 0.05 to 60 seconds");
-        if (padding < 0 || padding > 5) fail("\"padding\" must be 0 to 5 seconds");
-        double threshold = number(op, "threshold", -40.0);
-        if (has(op, "sample")) {
-            const json& s = op["sample"];
-            if (!s.is_array() || s.size() != 2 || !s[0].is_number() || !s[1].is_number())
-                fail("\"sample\" must be [from, to]: composition seconds of a moment that is only silence or noise");
-            const double speed = std::max(1e-3, l.media.speed);
-            const double from = (s[0].get<double>() - l.media.start) * speed, to = (s[1].get<double>() - l.media.start) * speed;
-            threshold = dsp::thresholdFromSample(loud, block, from, to);
-            if (threshold <= -99.0) fail("the sample is outside the clip's sound");
-        }
-        if (threshold < -100 || threshold > 0) fail("\"threshold\" must be -100 to 0 dB");
-        const auto quiet = dsp::quietStretches(loud, block, static_cast<float>(threshold), minimum, padding);
-        const double removed = removeQuietParts(c_, l.id, quiet, !has(op, "ripple") || boolean(op["ripple"], "ripple"));
-        return {{"removed_seconds", removed}, {"threshold", threshold}};
+json Applier::queryComposition(const json&) {
+    json media = json::array();
+    for (const MediaItem& m : c_.media) {
+        json mj = {{"media", m.id}, {"name", m.name}, {"kind", mediaKindLabel(m.kind)}, {"path", m.path}};
+        if (!m.folder.empty()) mj["folder"] = m.folder;
+        media.push_back(std::move(mj));
     }
+    json out = {{"name", p_.name},
+                {"width", c_.width},
+                {"height", c_.height},
+                {"fps", c_.fps},
+                {"duration", c_.duration},
+                {"max_duration", c_.maxDuration},
+                {"background", hexOf(c_.background)},
+                {"layers", c_.layers.size()},
+                {"media", media}};
+    if (!c_.mediaFolders.empty()) out["folders"] = c_.mediaFolders;
+    if (!c_.markers.empty()) {
+        json markers = json::array();
+        for (const Marker& m : c_.markers)
+            markers.push_back({{"time", m.time}, {"name", m.name}, {"color", m.color}});
+        out["markers"] = markers;
+    }
+    return out;
+}
 
-    // A "layers" list (ids or names); "all" or missing: every layer.
-    std::vector<uint64_t> layerList(const json& op) {
-        std::vector<uint64_t> ids;
-        if (!has(op, "layers") || (op["layers"].is_string() && op["layers"].get<std::string>() == "all")) {
-            for (const Layer& l : c_.layers) ids.push_back(l.id);
-            return ids;
-        }
-        if (!op["layers"].is_array()) fail("\"layers\" must be a list of layers (ids or names) or \"all\"");
-        for (const json& ref : op["layers"]) ids.push_back(layer(json{{"layer", ref}}).id);
-        return ids;
-    }
+json Applier::layerSummary(const Layer& l) {
+    json j = {{"layer", l.id},   {"name", l.name},    {"type", typeName(l)},
+              {"in", l.inPoint}, {"out", l.outPoint}, {"track", c_.trackRowOf(l.id)}};
+    if (l.parent) j["parent"] = l.parent;
+    if (!l.visible) j["visible"] = false;
+    if (l.locked) j["locked"] = true;
+    if (l.muted) j["muted"] = true;
+    if (l.solo) j["solo"] = true;
+    if (l.threeD) j["three_d"] = true;
+    if (l.blend != BlendMode::Normal) j["blend"] = kBlendModeIds[static_cast<int>(l.blend)];
+    if (l.matte != MatteMode::None)
+        j["matte"] = {{"mode", kMatteModeIds[static_cast<int>(l.matte)]}, {"layer", l.matteLayer}};
+    if (c_.isMatte(l.id)) j["is_matte"] = true;
+    if (!l.masks.empty()) j["masks"] = l.masks.size();
+    if (l.type == LayerType::Media && (l.media.speed != 1.0 || l.media.reversed))
+        j["speed"] = round3(static_cast<float>(l.media.speed * 100.0));
+    if (l.type == LayerType::Media && l.media.reversed) j["reversed"] = true;
+    if (l.type == LayerType::Media && l.media.flipH) j["flip_h"] = true;
+    if (l.type == LayerType::Media && l.media.flipV) j["flip_v"] = true;
+    if (l.type == LayerType::Media && l.media.timeRemap) j["time_remap"] = true;
+    if (l.text.subtitle && l.type == LayerType::Text) j["captions"] = l.text.captions.size();
+    if (!l.effects.empty()) j["effects"] = l.effects.size();
+    return j;
+}
 
-    json transitionAdd(const json& op) {
-        Layer& l = layer(op);
-        const std::string id = text(field(op, "transition"), "transition");
-        if (!findTransition(id)) {
-            std::vector<std::string> ids;
-            for (const TransitionInfo& t : transitions()) ids.push_back(t.id);
-            fail("unknown transition \"" + id + "\"" + suggest(id, ids));
-        }
-        const std::string edgeName = has(op, "edge") ? text(op["edge"], "edge") : "in";
-        if (edgeName == "cut") { // across the cut after this clip (with the next one on its track)
-            const double duration = number(op, "duration", 1.0);
-            if (duration <= 0) fail("\"duration\" must be positive");
-            if (!nextOnTrack(c_, l)) fail("layer \"" + l.name + "\" has no clip right after it on its track (\"cut\" needs one)");
-            if (!applyCutTransition(c_, l, id, duration)) fail("these clips cannot take a transition");
-            return json::object();
-        }
-        TransitionEdge edge = TransitionEdge::In;
-        if (edgeName == "out") edge = TransitionEdge::Out;
-        else if (edgeName == "both") edge = TransitionEdge::Both;
-        else if (edgeName != "in") fail("\"edge\" must be \"in\", \"out\", \"both\" or \"cut\"");
-        const double duration = number(op, "duration", 0.5);
-        if (duration <= 0) fail("\"duration\" must be positive");
-        if (!applyTransition(l, id, edge, duration)) fail("layer \"" + l.name + "\" cannot take a transition (" + typeName(l) + ")");
-        return json::object();
-    }
+json Applier::queryLayers(const json&) {
+    json list = json::array();
+    for (const Layer& l : c_.layers)
+        list.push_back(layerSummary(l));
+    return list;
+}
 
-    json arrangeDistribute(const json& op) {
-        const std::string axis = has(op, "axis") ? text(op["axis"], "axis") : "x";
-        if (axis != "x" && axis != "y") fail("\"axis\" must be \"x\" or \"y\"");
-        std::string error;
-        if (!distributeLayers(c_, layerList(op), axis == "y", time(op), &error)) fail(error);
-        return json::object();
+// Works an expression out without setting it: `expression` (default: the property's own) at
+// `time` or each of `times`. Never fails for the expression's sake: `error` says what is wrong.
+json Applier::queryExpression(const json& op) {
+    Layer& l = layer(op);
+    const PropertyRef p = property(l, op);
+    const std::string e = has(op, "expression") ? text(op["expression"], "expression") : p.anim->expression;
+    if (e.empty())
+        fail("\"" + std::string(p.id) + "\" of \"" + l.name + "\" has no expression: give one in \"expression\"");
+    std::vector<double> times;
+    if (has(op, "times")) {
+        if (!op["times"].is_array() || op["times"].empty() || op["times"].size() > 1000)
+            fail("\"times\" must be a list of 1 to 1000 seconds");
+        for (const json& x : op["times"]) {
+            if (!x.is_number() || x.get<double>() < 0.0) fail("\"times\" must hold seconds (0 or more)");
+            times.push_back(x.get<double>());
+        }
+    } else {
+        times.push_back(time(op));
     }
+    json values = json::array();
+    for (double at : times) {
+        std::vector<float> v;
+        if (const std::string problem = evaluateExpressionFor(e, l, p, at, v); !problem.empty())
+            return {{"ok", false}, {"error", problem}, {"time", at}};
+        values.push_back(valueJson(p.kind, v));
+    }
+    json out = {{"ok", true}};
+    if (has(op, "times"))
+        out["values"] = values;
+    else
+        out["value"] = values[0];
+    return out;
+}
 
-    json arrangeStagger(const json& op) {
-        const double step = number(op, "step", 0.1);
-        std::string error;
-        if (!staggerLayers(c_, layerList(op), step, &error)) fail(error);
-        return json::object();
+json Applier::queryLayer(const json& op) {
+    Layer& l = layer(op);
+    const double t = time(op);
+    json j = layerSummary(l);
+    if (l.type == LayerType::Text)
+        j["text"] = {{"text", l.text.text},
+                     {"font", l.text.fontFamily},
+                     {"style", l.text.fontStyle},
+                     {"align", kAlignNames[static_cast<int>(l.text.align)]},
+                     {"outline", l.text.outlineEnabled},
+                     {"box", l.text.boxEnabled},
+                     {"gradient", kShapeFillIds[static_cast<int>(l.text.fill)]}};
+    if (l.type == LayerType::Text && l.text.subtitle) {
+        json caps = json::array();
+        for (const Caption& c : l.text.captions)
+            caps.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
+        j["captions"] = std::move(caps);
     }
-
-    // A plugin object's toggle, choice, text or file parameter (numbers and colors are
-    // properties: property.set with "p.<id>").
-    json paramSet(const json& op) {
-        Layer& l = layer(op);
-        if (l.type != LayerType::Plugin) fail("layer \"" + l.name + "\" is not a plugin object (" + typeName(l) + ")");
-        const std::string id = text(field(op, "param"), "param");
-        PluginParam* p = l.plugin.find(id);
-        if (!p) {
-            std::vector<std::string> ids;
-            for (const PluginParam& q : l.plugin.params) ids.push_back(q.id);
-            fail("\"" + l.name + "\" has no parameter \"" + id + "\"" + suggest(id, ids));
-        }
-        const json& v = field(op, "value");
-        switch (p->kind) {
-        case PluginParamKind::Number:
-        case PluginParamKind::Color:
-            fail("\"" + id + "\" is animatable: use property.set with \"prop\": \"p." + id + "\"");
-        case PluginParamKind::Toggle: p->toggle = boolean(v, "value"); break;
-        case PluginParamKind::Text: p->text = text(v, "value"); break;
-        case PluginParamKind::Choice: {
-            const std::string c = text(v, "value");
-            const auto it = std::find(p->choices.begin(), p->choices.end(), c);
-            if (it == p->choices.end()) fail("\"" + c + "\" is not a choice of \"" + id + "\"" + suggest(c, p->choices));
-            p->choice = static_cast<int>(it - p->choices.begin());
-            break;
-        }
-        case PluginParamKind::File: {
-            const std::string path = text(v, "value");
-            if (!path.empty()) {
-                std::string ext = path.substr(path.find_last_of('.') == std::string::npos ? path.size() : path.find_last_of('.') + 1);
-                for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-                if (!p->accept.empty() && std::find(p->accept.begin(), p->accept.end(), ext) == p->accept.end())
-                    fail("\"" + id + "\" takes " + [&] {
-                        std::string list;
-                        for (const auto& a : p->accept) list += (list.empty() ? "." : ", .") + a;
-                        return list;
-                    }() + " files");
-                std::error_code ec;
-                if (!std::filesystem::is_regular_file(std::filesystem::path(std::u8string(path.begin(), path.end())), ec))
-                    fail("there is no file \"" + path + "\"");
-            }
-            p->text = path;
-            p->relative.clear();
-            break;
-        }
-        }
-        return json::object();
+    if (l.type == LayerType::Shape) {
+        j["shape"] = {{"fill", l.shape.fillEnabled},
+                      {"stroke", l.shape.strokeEnabled},
+                      {"gradient", kShapeFillIds[static_cast<int>(l.shape.fill)]},
+                      {"repeater", l.shape.repeater}};
+        if (l.shape.kind == ShapeKind::Path) j["shape"]["path"] = pathToJson(l.shape.path);
     }
-
-    // The data of a plugin object (charts: rows; tables: a table), from JSON or CSV text.
-    json dataSet(const json& op) {
-        Layer& l = layer(op);
-        PluginProps& p = l.plugin;
-        if (l.type != LayerType::Plugin || (!p.hasRows && !p.hasTable)) fail("layer \"" + l.name + "\" holds no data (" + typeName(l) + ")");
-        if (has(op, "csv")) {
-            const Cells cells = parseCsv(text(op["csv"], "csv"));
-            if (p.hasRows) {
-                std::vector<DataRow> rows = rowsFromCells(cells);
-                if (rows.empty()) fail("no \"label, value\" lines found in the CSV");
-                p.rows = std::move(rows);
-            } else {
-                if (cells.empty()) fail("the CSV is empty");
-                p.table = tableFromCells(cells);
-            }
-            return json::object();
-        }
-        if (has(op, "rows")) {
-            if (!p.hasRows) fail("this object takes a \"table\", not \"rows\"");
-            if (!op["rows"].is_array()) fail("\"rows\" must be a list of {\"label\", \"value\", \"color\"} (or [label, value, color])");
-            std::vector<DataRow> rows;
-            for (const json& r : op["rows"]) {
-                DataRow row;
-                row.color = labelColor(static_cast<int>(rows.size()));
-                if (r.is_array() && r.size() >= 2) {
-                    row.label = r[0].is_string() ? r[0].get<std::string>() : r[0].dump();
-                    row.value = static_cast<float>(number(r[1], "value"));
-                    if (r.size() > 2) row.color = colorOf(r[2], "color");
-                } else if (r.is_object()) {
-                    row.label = has(r, "label") ? text(r["label"], "label") : "";
-                    row.value = static_cast<float>(number(field(r, "value"), "value"));
-                    if (has(r, "color")) row.color = colorOf(r["color"], "color");
-                } else {
-                    fail("each row must be {\"label\", \"value\"(, \"color\")} or [label, value(, color)]");
-                }
-                rows.push_back(std::move(row));
-            }
-            p.rows = std::move(rows);
-            return json::object();
-        }
-        if (has(op, "table")) {
-            if (!p.hasTable) fail("this object takes \"rows\", not a \"table\"");
-            const json& t = op["table"];
-            if (!t.is_object() || !has(t, "rows") || !t["rows"].is_array())
-                fail("\"table\" must be {\"header\": [...], \"rows\": [[...], ...]}");
-            auto cell = [](const json& c) { return c.is_string() ? c.get<std::string>() : c.dump(); };
-            Cells cells;
-            std::vector<std::string> header;
-            if (has(t, "header") && t["header"].is_array())
-                for (const json& h : t["header"]) header.push_back(cell(h));
-            cells.push_back(header);
-            for (const json& r : t["rows"]) {
-                if (!r.is_array()) fail("every table row must be a list of cells");
-                std::vector<std::string> row;
-                for (const json& c : r) row.push_back(cell(c));
-                cells.push_back(std::move(row));
-            }
-            p.table = tableFromCells(cells);
-            return json::object();
-        }
-        fail("give \"rows\", \"table\" or \"csv\"");
-    }
-
-    json mediaImport(const json& op) {
-        const std::string path = text(field(op, "path"), "path");
-        if (!env_.probeMedia) fail("importing media is not available here");
-        MediaItem item;
-        std::string error;
-        if (!env_.probeMedia(path, item, error)) fail("could not import \"" + path + "\": " + error);
-        const uint64_t id = c_.addMedia(item);
-        const MediaItem& m = *c_.findMedia(id);
-        return {{"media", id}, {"name", m.name}, {"kind", mediaKindLabel(m.kind)}, {"width", m.width}, {"height", m.height},
-                {"duration", m.duration}};
-    }
-
-    // Media folders: names only, to keep the Media panel tidy (nothing moves on disk).
-    MediaItem& mediaItem(const json& op) {
-        const json& ref = field(op, "media");
-        if (!ref.is_number_integer()) fail("\"media\" must be a media id (from media.import or query.composition)");
-        if (MediaItem* m = c_.findMedia(ref.get<uint64_t>())) return *m;
-        fail("there is no media item with id " + std::to_string(ref.get<uint64_t>()));
-    }
-    std::string folderName(const json& op, const char* key, bool mustExist) {
-        const std::string name = text(field(op, key), key);
-        const bool exists = std::find(c_.mediaFolders.begin(), c_.mediaFolders.end(), name) != c_.mediaFolders.end();
-        if (mustExist && !exists) fail("there is no media folder named \"" + name + "\"" + suggest(name, c_.mediaFolders));
-        return name;
-    }
-    std::string newFolderName(const json& op, const char* key) {
-        std::string name = text(field(op, key), key);
-        while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
-        while (!name.empty() && std::isspace(static_cast<unsigned char>(name.front()))) name.erase(name.begin());
-        if (name.empty()) fail("a folder needs a name");
-        if (std::find(c_.mediaFolders.begin(), c_.mediaFolders.end(), name) != c_.mediaFolders.end())
-            fail("there is already a media folder named \"" + name + "\"");
-        return name;
-    }
-    json folderAdd(const json& op) {
-        const std::string name = newFolderName(op, "name");
-        c_.mediaFolders.push_back(name);
-        return {{"folder", name}};
-    }
-    json folderRename(const json& op) {
-        const std::string from = folderName(op, "folder", true);
-        const std::string to = newFolderName(op, "name");
-        std::replace(c_.mediaFolders.begin(), c_.mediaFolders.end(), from, to);
-        for (MediaItem& m : c_.media)
-            if (m.folder == from) m.folder = to;
-        return {{"folder", to}};
-    }
-    json folderMove(const json& op) { // to another place in the list (the Media panel's order)
-        const std::string name = folderName(op, "folder", true);
-        const double i = number(field(op, "index"), "index");
-        if (i != std::floor(i)) fail("\"index\" must be a whole number (0: the first folder)");
-        std::erase(c_.mediaFolders, name);
-        const auto at = static_cast<size_t>(std::clamp(i, 0.0, static_cast<double>(c_.mediaFolders.size())));
-        c_.mediaFolders.insert(c_.mediaFolders.begin() + static_cast<std::ptrdiff_t>(at), name);
-        return {{"folder", name}, {"index", at}};
-    }
-    json folderRemove(const json& op) { // its media go to the top
-        const std::string name = folderName(op, "folder", true);
-        std::erase(c_.mediaFolders, name);
-        for (MediaItem& m : c_.media)
-            if (m.folder == name) m.folder.clear();
-        return json::object();
-    }
-    json mediaMove(const json& op) {
-        MediaItem& m = mediaItem(op);
-        const std::string folder = has(op, "folder") && !(op["folder"].is_string() && op["folder"].get<std::string>().empty())
-                                       ? folderName(op, "folder", true)
-                                       : std::string();
-        m.folder = folder;
-        return json::object();
-    }
-
-    // --- queries ---
-    json queryComposition(const json&) {
-        json media = json::array();
-        for (const MediaItem& m : c_.media) {
-            json mj = {{"media", m.id}, {"name", m.name}, {"kind", mediaKindLabel(m.kind)}, {"path", m.path}};
-            if (!m.folder.empty()) mj["folder"] = m.folder;
-            media.push_back(std::move(mj));
-        }
-        json out = {{"name", p_.name}, {"width", c_.width}, {"height", c_.height}, {"fps", c_.fps}, {"duration", c_.duration},
-                    {"max_duration", c_.maxDuration}, {"background", hexOf(c_.background)}, {"layers", c_.layers.size()},
-                    {"media", media}};
-        if (!c_.mediaFolders.empty()) out["folders"] = c_.mediaFolders;
-        if (!c_.markers.empty()) {
-            json markers = json::array();
-            for (const Marker& m : c_.markers) markers.push_back({{"time", m.time}, {"name", m.name}, {"color", m.color}});
-            out["markers"] = markers;
-        }
-        return out;
-    }
-
-    json layerSummary(const Layer& l) {
-        json j = {{"layer", l.id}, {"name", l.name}, {"type", typeName(l)}, {"in", l.inPoint}, {"out", l.outPoint},
-                  {"track", c_.trackRowOf(l.id)}};
-        if (l.parent) j["parent"] = l.parent;
-        if (!l.visible) j["visible"] = false;
-        if (l.locked) j["locked"] = true;
-        if (l.muted) j["muted"] = true;
-        if (l.solo) j["solo"] = true;
-        if (l.threeD) j["three_d"] = true;
-        if (l.blend != BlendMode::Normal) j["blend"] = kBlendModeIds[static_cast<int>(l.blend)];
-        if (l.matte != MatteMode::None) j["matte"] = {{"mode", kMatteModeIds[static_cast<int>(l.matte)]}, {"layer", l.matteLayer}};
-        if (c_.isMatte(l.id)) j["is_matte"] = true;
-        if (!l.masks.empty()) j["masks"] = l.masks.size();
-        if (l.type == LayerType::Media && (l.media.speed != 1.0 || l.media.reversed)) j["speed"] = round3(static_cast<float>(l.media.speed * 100.0));
-        if (l.type == LayerType::Media && l.media.reversed) j["reversed"] = true;
-        if (l.type == LayerType::Media && l.media.flipH) j["flip_h"] = true;
-        if (l.type == LayerType::Media && l.media.flipV) j["flip_v"] = true;
-        if (l.type == LayerType::Media && l.media.timeRemap) j["time_remap"] = true;
-        if (l.text.subtitle && l.type == LayerType::Text) j["captions"] = l.text.captions.size();
-        if (!l.effects.empty()) j["effects"] = l.effects.size();
-        return j;
-    }
-
-    json queryLayers(const json&) {
-        json list = json::array();
-        for (const Layer& l : c_.layers) list.push_back(layerSummary(l));
-        return list;
-    }
-
-    // Works an expression out without setting it: `expression` (default: the property's own) at
-    // `time` or each of `times`. Never fails for the expression's sake: `error` says what is wrong.
-    json queryExpression(const json& op) {
-        Layer& l = layer(op);
-        const PropertyRef p = property(l, op);
-        const std::string e = has(op, "expression") ? text(op["expression"], "expression") : p.anim->expression;
-        if (e.empty()) fail("\"" + std::string(p.id) + "\" of \"" + l.name + "\" has no expression: give one in \"expression\"");
-        std::vector<double> times;
-        if (has(op, "times")) {
-            if (!op["times"].is_array() || op["times"].empty() || op["times"].size() > 1000) fail("\"times\" must be a list of 1 to 1000 seconds");
-            for (const json& x : op["times"]) {
-                if (!x.is_number() || x.get<double>() < 0.0) fail("\"times\" must hold seconds (0 or more)");
-                times.push_back(x.get<double>());
-            }
-        } else {
-            times.push_back(time(op));
-        }
-        json values = json::array();
-        for (double at : times) {
-            std::vector<float> v;
-            if (const std::string problem = evaluateExpressionFor(e, l, p, at, v); !problem.empty())
-                return {{"ok", false}, {"error", problem}, {"time", at}};
-            values.push_back(valueJson(p.kind, v));
-        }
-        json out = {{"ok", true}};
-        if (has(op, "times")) out["values"] = values;
-        else out["value"] = values[0];
-        return out;
-    }
-
-    json queryLayer(const json& op) {
-        Layer& l = layer(op);
-        const double t = time(op);
-        json j = layerSummary(l);
-        if (l.type == LayerType::Text)
-            j["text"] = {{"text", l.text.text}, {"font", l.text.fontFamily}, {"style", l.text.fontStyle},
-                         {"align", kAlignNames[static_cast<int>(l.text.align)]}, {"outline", l.text.outlineEnabled}, {"box", l.text.boxEnabled},
-                         {"gradient", kShapeFillIds[static_cast<int>(l.text.fill)]}};
-        if (l.type == LayerType::Text && l.text.subtitle) {
-            json caps = json::array();
-            for (const Caption& c : l.text.captions) caps.push_back({{"start", c.start}, {"end", c.end}, {"text", c.text}});
-            j["captions"] = std::move(caps);
-        }
-        if (l.type == LayerType::Shape) {
-            j["shape"] = {{"fill", l.shape.fillEnabled}, {"stroke", l.shape.strokeEnabled}, {"gradient", kShapeFillIds[static_cast<int>(l.shape.fill)]},
-                          {"repeater", l.shape.repeater}};
-            if (l.shape.kind == ShapeKind::Path) j["shape"]["path"] = pathToJson(l.shape.path);
-        }
-        if (!l.masks.empty()) {
-            json masks = json::array();
-            for (size_t i = 0; i < l.masks.size(); ++i) {
-                const Mask& m = l.masks[i];
-                masks.push_back({{"index", i}, {"name", m.name}, {"mode", kMaskModeIds[static_cast<int>(m.mode)]}, {"inverted", m.inverted},
-                                 {"enabled", m.enabled}, {"path", pathToJson(m.path)}});
-                if (!m.pathKeys.empty()) {
-                    json keys = json::array();
-                    for (const Mask::PathKey& k : m.pathKeys) keys.push_back({{"time", k.time}, {"path", pathToJson(k.path)}});
-                    masks.back()["path_keys"] = std::move(keys);
-                }
-            }
-            j["mask_list"] = masks;
-        }
-        if (l.type == LayerType::Media) j["media"] = l.media.mediaId;
-        if (l.type == LayerType::Background)
-            j["background"] = {{"fill", backgroundFillId(l.background.fill)}, {"media", l.background.mediaId},
-                               {"fit", backgroundFitId(l.background.fit)}};
-        if (l.plugin.hasRows) {
-            json rows = json::array();
-            for (const DataRow& r : l.plugin.rows) rows.push_back({{"label", r.label}, {"value", r.value}, {"color", hexOf(r.color)}});
-            j["rows"] = rows;
-        }
-        if (l.plugin.hasTable) j["table"] = {{"header", l.plugin.table.header}, {"rows", l.plugin.table.rows}};
-        if (l.type == LayerType::Plugin) { // the parameters that are not properties (param.set)
-            json params = json::object();
-            for (const PluginParam& pp : l.plugin.params)
-                switch (pp.kind) {
-                case PluginParamKind::Toggle: params[pp.id] = pp.toggle; break;
-                case PluginParamKind::Choice:
-                    params[pp.id] = {{"value", pp.choice < static_cast<int>(pp.choices.size()) ? pp.choices[pp.choice] : ""},
-                                     {"choices", pp.choices}};
-                    break;
-                case PluginParamKind::Text: params[pp.id] = pp.text; break;
-                case PluginParamKind::File: params[pp.id] = {{"file", pp.text}, {"accept", pp.accept}}; break;
-                default: break;
-                }
-            if (!params.empty()) j["params"] = params;
-        }
-        json props = json::object();
-        for (const PropertyRef& p : l.properties()) {
-            json pj = {{"value", valueJson(p.kind, propertyValue(p, t))}};
-            if (p.anim->hasExpression()) {
-                pj["expression"] = p.anim->expression;
-                if (const std::string problem = expressionError(*p.anim); !problem.empty()) pj["expression_error"] = problem;
-            }
-            if (p.anim->isAnimated()) {
+    if (!l.masks.empty()) {
+        json masks = json::array();
+        for (size_t i = 0; i < l.masks.size(); ++i) {
+            const Mask& m = l.masks[i];
+            masks.push_back({{"index", i},
+                             {"name", m.name},
+                             {"mode", kMaskModeIds[static_cast<int>(m.mode)]},
+                             {"inverted", m.inverted},
+                             {"enabled", m.enabled},
+                             {"path", pathToJson(m.path)}});
+            if (!m.pathKeys.empty()) {
                 json keys = json::array();
-                for (int k = 0; k < p.anim->keyCount(); ++k) {
-                    const double kt = p.anim->keyTime(k);
-                    float kv[4] = {0, 0, 0, 0}; // what the key holds, whatever an expression makes of it
-                    p.anim->keyedValue(kt, kv);
-                    keys.push_back({{"time", kt}, {"value", valueJson(p.kind, std::vector<float>(kv, kv + p.anim->components()))},
-                                    {"easing", easingId(p.anim->keyEasing(k))}});
-                }
-                pj["keys"] = keys;
+                for (const Mask::PathKey& k : m.pathKeys)
+                    keys.push_back({{"time", k.time}, {"path", pathToJson(k.path)}});
+                masks.back()["path_keys"] = std::move(keys);
             }
-            props[p.id] = pj;
         }
-        j["props"] = props;
-        json effects = json::array();
-        for (size_t i = 0; i < l.effects.size(); ++i) {
-            const Effect& e = l.effects[i];
-            json ej = {{"index", i}, {"effect", effectId(e.type)}, {"enabled", e.enabled}};
-            if (e.type == EffectType::Lut) ej["file"] = e.file;
-            if (e.type == EffectType::Curves) {
-                json curves = json::object();
-                for (int c = 0; c < 4; ++c) {
-                    json pts = json::array();
-                    for (const Vec2& p : e.curves[c]) pts.push_back({p.x, p.y});
-                    curves[curveId(c)] = std::move(pts);
-                }
-                ej["curves"] = std::move(curves);
-            }
-            effects.push_back(std::move(ej));
-        }
-        j["effect_list"] = effects;
-        if (l.type == LayerType::Media && l.media.hasAudio) {
-            json audio = json::array();
-            for (size_t i = 0; i < l.audioEffects.size(); ++i) {
-                const AudioEffect& e = l.audioEffects[i];
-                json values = json::object();
-                for (const AudioEffectParam& p : audioEffectParams(e.type)) values[p.id] = audioEffectValue(e, p.index);
-                audio.push_back({{"index", i}, {"effect", audioEffectId(e.type)}, {"enabled", e.enabled}, {"values", values}});
-            }
-            j["audio_effects"] = std::move(audio);
-        }
-        return j;
+        j["mask_list"] = masks;
     }
+    if (l.type == LayerType::Media) j["media"] = l.media.mediaId;
+    if (l.type == LayerType::Background)
+        j["background"] = {{"fill", backgroundFillId(l.background.fill)},
+                           {"media", l.background.mediaId},
+                           {"fit", backgroundFitId(l.background.fit)}};
+    if (l.plugin.hasRows) {
+        json rows = json::array();
+        for (const DataRow& r : l.plugin.rows)
+            rows.push_back({{"label", r.label}, {"value", r.value}, {"color", hexOf(r.color)}});
+        j["rows"] = rows;
+    }
+    if (l.plugin.hasTable) j["table"] = {{"header", l.plugin.table.header}, {"rows", l.plugin.table.rows}};
+    if (l.type == LayerType::Plugin) { // the parameters that are not properties (param.set)
+        json params = json::object();
+        for (const PluginParam& pp : l.plugin.params)
+            switch (pp.kind) {
+            case PluginParamKind::Toggle: params[pp.id] = pp.toggle; break;
+            case PluginParamKind::Choice:
+                params[pp.id] = {
+                    {"value", pp.choice < static_cast<int>(pp.choices.size()) ? pp.choices[pp.choice] : ""},
+                    {"choices", pp.choices}};
+                break;
+            case PluginParamKind::Text: params[pp.id] = pp.text; break;
+            case PluginParamKind::File: params[pp.id] = {{"file", pp.text}, {"accept", pp.accept}}; break;
+            default: break;
+            }
+        if (!params.empty()) j["params"] = params;
+    }
+    json props = json::object();
+    for (const PropertyRef& p : l.properties()) {
+        json pj = {{"value", valueJson(p.kind, propertyValue(p, t))}};
+        if (p.anim->hasExpression()) {
+            pj["expression"] = p.anim->expression;
+            if (const std::string problem = expressionError(*p.anim); !problem.empty())
+                pj["expression_error"] = problem;
+        }
+        if (p.anim->isAnimated()) {
+            json keys = json::array();
+            for (int k = 0; k < p.anim->keyCount(); ++k) {
+                const double kt = p.anim->keyTime(k);
+                float kv[4] = {0, 0, 0, 0}; // what the key holds, whatever an expression makes of it
+                p.anim->keyedValue(kt, kv);
+                keys.push_back({{"time", kt},
+                                {"value", valueJson(p.kind, std::vector<float>(kv, kv + p.anim->components()))},
+                                {"easing", easingId(p.anim->keyEasing(k))}});
+            }
+            pj["keys"] = keys;
+        }
+        props[p.id] = pj;
+    }
+    j["props"] = props;
+    json effects = json::array();
+    for (size_t i = 0; i < l.effects.size(); ++i) {
+        const Effect& e = l.effects[i];
+        json ej = {{"index", i}, {"effect", effectId(e.type)}, {"enabled", e.enabled}};
+        if (e.type == EffectType::Lut) ej["file"] = e.file;
+        if (e.type == EffectType::Curves) {
+            json curves = json::object();
+            for (int c = 0; c < 4; ++c) {
+                json pts = json::array();
+                for (const Vec2& p : e.curves[c])
+                    pts.push_back({p.x, p.y});
+                curves[curveId(c)] = std::move(pts);
+            }
+            ej["curves"] = std::move(curves);
+        }
+        effects.push_back(std::move(ej));
+    }
+    j["effect_list"] = effects;
+    if (l.type == LayerType::Media && l.media.hasAudio) {
+        json audio = json::array();
+        for (size_t i = 0; i < l.audioEffects.size(); ++i) {
+            const AudioEffect& e = l.audioEffects[i];
+            json values = json::object();
+            for (const AudioEffectParam& p : audioEffectParams(e.type))
+                values[p.id] = audioEffectValue(e, p.index);
+            audio.push_back(
+                {{"index", i}, {"effect", audioEffectId(e.type)}, {"enabled", e.enabled}, {"values", values}});
+        }
+        j["audio_effects"] = std::move(audio);
+    }
+    return j;
+}
 
-    Project& p_;
-    Composition& c_;
-    const OpEnvironment& env_;
-};
+} // namespace opsimpl
 
-} // namespace
+using opsimpl::Applier;
+using opsimpl::OpError;
 
 std::vector<std::string> operationNames() {
     std::vector<std::string> names;

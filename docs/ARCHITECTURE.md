@@ -952,8 +952,10 @@ category, description) and `effectParams` (which slots, labels, ranges) in
 cheap filters (§5). Check speed with `bemotion --export` on a test project.
 Update the effect list in `docs/OPERATIONS.md`.
 
-**An operation** — a method in `Applier` (`core/Ops.cpp`) registered in the
-operation table; validate every field with the `field` / `number` / `text`
+**An operation** — a method in `Applier` (declared in `core/OpsInternal.h`,
+defined in the area's file: `Ops.cpp` for the composition, layers and queries,
+`OpsTimeline.cpp`, `OpsAnimation.cpp` or `OpsMedia.cpp`) registered in the
+operation table (`Ops.cpp`); validate every field with the `field` / `number` / `text`
 helpers so errors are precise; return created ids. Tests in
 `tests/operations_tests.cpp` (or the area's file), reference in
 `docs/OPERATIONS.md`. MCP and Lua get it automatically.
