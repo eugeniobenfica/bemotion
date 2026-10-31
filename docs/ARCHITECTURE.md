@@ -1001,7 +1001,12 @@ changes behavior.
   `-portable.zip`. `tools/package-linux.sh` (AppImage) and
   `tools/package-macos.sh` (`.app` / `.dmg`) do the same for the other systems.
 - CI (`.github/workflows/build.yml`) builds, tests, smoke-tests and packages on
-  Windows, Linux and macOS, and uploads the packages as artifacts.
+  Windows, Linux and macOS, and uploads the packages as artifacts. Two more
+  jobs: **sanitizers** (Linux, `-fsanitize=address,undefined`, no recovery:
+  ctest, the smoke test and 2 minutes of fuzzing; leaks are not checked) and
+  **format** (`git clang-format --diff` against the base: only the lines a
+  change touches must follow `.clang-format`, so older code is formatted as it
+  is edited; `libs/bestyle` and `third_party` are left out).
 - The version is `project(VERSION …)` plus `BEMOTION_VERSION_SUFFIX` (`beta.2`;
   empty for a release) in the top `CMakeLists.txt`. A release is tagged
   `v<version>` and carries the packages and a `SHA256SUMS.txt` of them under
