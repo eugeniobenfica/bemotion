@@ -37,6 +37,8 @@ int toolIndex(std::string_view id); // -1 when unknown
 std::vector<std::string> defaultToolbar();
 std::string toolTooltip(const ToolInfo& tool);
 
+// Whether the tool's built-in feature is on (ui/Modules.h): off, it is not offered anywhere.
+bool toolAvailable(const ToolInfo& tool);
 bool toolEnabled(EditorContext& ctx, const ToolInfo& tool);
 bool toolActive(const EditorContext& ctx, const ToolInfo& tool); // the current modal tool
 // Runs the tool. Call it where layers may change (not while timeline rows are being drawn).

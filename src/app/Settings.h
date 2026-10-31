@@ -69,6 +69,7 @@ struct Settings {
     bool toolbarInWindow = false;        // window-relative floating position; older viewport positions stay unchanged
     float toolbarX = 0.5f, toolbarY = 0.0f; // ... with its top-left here (fractions of the free space)
     std::vector<std::string> disabledPlugins; // plugin ids
+    std::vector<std::string> disabledModules; // built-in features turned off (ui/Modules.h ids)
     std::vector<std::string> recentColors;    // the color picker's last colors, "#RRGGBBAA", newest first
     bool showMeters = true;                   // the left / right audio level meters beside the timeline
     // What the interface shows, one by one (Settings › Interface › Show); Friendly starts with
@@ -80,7 +81,7 @@ struct Settings {
     // How much the interface shows: "friendly" (the essentials), "balanced" or "expert" (all of
     // it). Chosen on the first start (ui/ExperienceScreen), changed in Settings › Interface.
     std::string experience = "balanced";
-    bool essentialsOnly = false; // plugins off (no charts, maps, 3D models, recorder): the core alone
+    bool essentialsOnly = false; // plugins and built-in features (ui/Modules.h) off: the core alone
     // Updates (Settings › General › Updates, app/Updater): off until the user turns them on.
     bool checkUpdates = false;        // look for a new version on GitHub, at most once a day
     std::string updateChannel;        // "stable", "beta"; empty: as this build (a beta follows betas)

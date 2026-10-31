@@ -3,6 +3,7 @@
 #include "ui/Language.h"
 
 #include "ui/EditorContext.h"
+#include "ui/Modules.h"
 #include "ui/Theme.h"
 #include "ui/panels/TimelinePanel.h"
 
@@ -64,8 +65,16 @@ std::string toolTooltip(const ToolInfo& tool) {
     return tip + "\n" + tr(tool.description).toStdString();
 }
 
+bool toolAvailable(const ToolInfo& tool) {
+    const std::string_view id = tool.id;
+    if (id == "puppet" || id == "warp") return moduleEnabled(kPuppetWarp);
+    if (id == "track") return moduleEnabled(kPointTracking);
+    return true;
+}
+
 bool toolEnabled(EditorContext& ctx, const ToolInfo& tool) {
     const std::string_view id = tool.id;
+    if (!toolAvailable(tool)) return false;
     if (id == "split" || id == "compound" || id == "duplicate" || id == "forward" || id == "backward")
         return !ctx.selection.empty();
     if (id == "release") return ctx.selectionHasCompound();

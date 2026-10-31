@@ -84,6 +84,7 @@ void loadSettings() {
         s.advanced = j.value("advanced", false);
         s.snapDistance = std::clamp(j.value("snap_distance", s.snapDistance), 2.0f, 30.0f);
         s.disabledPlugins = j.value("disabled_plugins", std::vector<std::string>{});
+        s.disabledModules = j.value("disabled_modules", std::vector<std::string>{});
         s.timelineLayerRow = std::clamp(j.value("timeline_layer_row", s.timelineLayerRow), 22.0f, 80.0f);
         s.timelinePropertyRow = std::clamp(j.value("timeline_property_row", s.timelinePropertyRow), 20.0f, 60.0f);
         s.keyframeSize = std::clamp(j.value("keyframe_size", s.keyframeSize), 3.0f, 10.0f);
@@ -180,7 +181,7 @@ void loadSettings() {
 void saveSettings() {
     const Settings& s = settings();
     json j = {{"theme", s.theme},        {"custom_accent", s.customAccent}, {"accent", s.accent},
-              {"advanced", s.advanced}, {"snap_distance", s.snapDistance}, {"disabled_plugins", s.disabledPlugins},
+              {"advanced", s.advanced}, {"snap_distance", s.snapDistance}, {"disabled_plugins", s.disabledPlugins}, {"disabled_modules", s.disabledModules},
               {"timeline_layer_row", s.timelineLayerRow}, {"timeline_property_row", s.timelinePropertyRow},
               {"keyframe_size", s.keyframeSize}, {"text_scale", s.textScale}, {"ui_font", s.uiFont},
               {"arrow_frames", s.arrowFrames}, {"big_arrow_frames", s.bigArrowFrames},

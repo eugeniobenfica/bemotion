@@ -28,6 +28,7 @@ ToolsPanel::ToolsPanel(EditorContext& ctx, QWidget* parent) : QScrollArea(parent
     setFrameShape(QFrame::NoFrame);
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     rebuild();
+    connect(&ui::AppSignals::get(), &ui::AppSignals::modulesChanged, this, [this] { rebuild(); });
 }
 
 void ToolsPanel::resizeEvent(QResizeEvent* e) {
@@ -58,7 +59,7 @@ void ToolsPanel::rebuild() {
         int n = 0;
         for (int i = 0; i < static_cast<int>(catalog.size()); ++i) {
             const ui::ToolInfo& tool = catalog[i];
-            if (tool.modal != modal) continue;
+            if (tool.modal != modal || !ui::toolAvailable(tool)) continue;
             auto* t = new ui::Tile(tool.icon, tr(tool.label));
             t->setTileSize(tile);
             t->setToolTip(QString::fromStdString(ui::toolTooltip(tool)) + tr("\n\nDrag it into the toolbar to keep it at hand."));

@@ -6,6 +6,7 @@
 #include "ui/Draw.h"
 #include "ui/EditorContext.h"
 #include "ui/Language.h"
+#include "ui/Modules.h"
 #include "ui/PropertyRow.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
@@ -347,6 +348,7 @@ void ColorPanel::rebuild() {
     auto* scopes = new QPushButton(ui::makeIcon(ui::Icon::Scopes, theme::kTextDim, 16), tr("Show Scopes"));
     scopes->setToolTip(tr("Waveform, RGB parade, vectorscope and histogram of the frame"));
     connect(scopes, &QPushButton::clicked, this, &ColorPanel::showScopesRequested);
+    if (!ui::moduleEnabled(ui::kScopes)) scopes->hide();
     auto* row = new QHBoxLayout;
     row->addWidget(scopes);
     row->addStretch();

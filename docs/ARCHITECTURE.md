@@ -53,8 +53,11 @@ follow from that:
    `ui::Draw`, the renderer, the encoders, `OpEnvironment`) and contracts are
    written down (file format, operations, plugin API), so a part can be
    rewritten — in another library or language — without touching the rest.
-9. **A small core, the rest as plugins.** The download stays essential; new
+9. **A small core, the rest switchable.** The download stays essential; new
    kinds of objects, commands and workflows go into plugins when they can.
+   What needs native speed (speech to text, tracking, bending, scopes, SVG and
+   Lottie) stays in the app as built-in features that can be turned off like
+   plugins (`ui/Modules`).
 10. **Calm interface.** Show what is needed now; everything else one click away
    and rearrangeable. No feature earns permanent space by default.
 
@@ -604,7 +607,17 @@ Rules:
   `show_graph_button`, `show_snapshot_button`, `show_timeline_scrollbar`,
   `show_meters`: Settings › Interface › Show) that the experiences preset
   (Friendly turns the first two off; a file without them follows its
-  experience). `essentials_only` makes `PluginHost::load` load no plugin.
+  experience). `essentials_only` makes `PluginHost::load` load no plugin and
+  turns the built-in features off.
+- **Built-in features** (`ui/Modules`: speech to text, point tracking, Puppet
+  and Warp, SVG import, Lottie export, scopes) are switched in *Settings ›
+  Plugins › Built-in features* (`disabled_modules`, ids never renamed;
+  `AppSignals::modulesChanged`). Off, a feature leaves the interface: its menu
+  actions are hidden (so are their shortcuts: `EditorWindow::applyModules`),
+  its tools leave the toolbar and the Tools popover (`ui::toolAvailable`), its
+  buttons go (`canTranscribe`, Color's *Show Scopes*) and a dropped `.svg`
+  says where to turn it on. Operations, the command line and MCP ignore the
+  switches: scripts and files rely on them.
 - **Media folders** (`Composition::mediaFolders`, `MediaItem::folder`) are
   names only, for the Media panel; changed through `folder.*` and
   `media.move`; `Validate` keeps every item's folder in the list. Their order is
@@ -911,6 +924,10 @@ transition (`transitionLayer`), a Quick Animation (`animationLayer` /
 Delete and the toolbar's trash do. A video's sound shows on an Audio row
 under its track; `separateAudio` / `linkAudio` (`core/Editing`) split and
 join it.
+
+**A built-in feature that can be turned off** — its id, name, description and
+icon in `ui/Modules.cpp`; every entry point checks `moduleEnabled` (menus in
+`EditorWindow::applyModules`, tools in `toolAvailable`, buttons where built).
 
 **A setting** — a field with a default in `Settings`, read and written in
 `Settings.cpp`, a control in `SettingsWindow.cpp`, and a reset in its page.

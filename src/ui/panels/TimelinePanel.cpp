@@ -819,7 +819,7 @@ private:
     static std::vector<int> tools() {
         std::vector<int> out;
         for (const std::string& id : settings().toolbar)
-            if (const int i = ui::toolIndex(id); i >= 0) out.push_back(i);
+            if (const int i = ui::toolIndex(id); i >= 0 && ui::toolAvailable(ui::toolCatalog()[i])) out.push_back(i);
         return out;
     }
     QRectF oriented(QRectF r) const { return vertical_ ? QRectF(r.y(), r.x(), r.height(), r.width()) : r; }
@@ -880,10 +880,11 @@ TimelinePanel::TimelinePanel(EditorContext& ctx, QWidget* parent) : QWidget(pare
     hscroll_ = new TimelineScrollbar(this);
     col->addWidget(hscroll_); // parented first: shown on its own, it would flash up as a window
     hscroll_->setVisible(settings().showTimelineScrollbar);
-    connect(&ui::AppSignals::get(), &ui::AppSignals::toolbarChanged, this, [this] {
-        pill_->updateGeometry();
-        pill_->update();
-    });
+    for (auto signal : {&ui::AppSignals::toolbarChanged, &ui::AppSignals::modulesChanged})
+        connect(&ui::AppSignals::get(), signal, this, [this] {
+            pill_->updateGeometry();
+            pill_->update();
+        });
     connect(&ui::AppSignals::get(), &ui::AppSignals::appearanceChanged, this, [this] {
         hscroll_->setVisible(settings().showTimelineScrollbar);
         relayout();

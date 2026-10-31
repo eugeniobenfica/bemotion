@@ -16,6 +16,7 @@
 #include "ui/Language.h"
 #include "ui/ColorPicker.h"
 #include "ui/GpuContext.h"
+#include "ui/Modules.h"
 #include "ui/PagedWindow.h"
 #include "ui/Updates.h"
 #include "ui/Theme.h"
@@ -272,6 +273,8 @@ void addPageHeader(QVBoxLayout* col, const QString& title, std::function<void()>
 void enableAllPlugins() {
     for (const Plugin& p : PluginHost::get().plugins()) PluginHost::get().setEnabled(p.id, true);
     settings().disabledPlugins.clear();
+    settings().disabledModules.clear(); // the built-in features too
+    emit AppSignals::get().modulesChanged();
 }
 
 // Every color a theme can set, by group. The optional ones show what they are worked out to.
@@ -547,12 +550,14 @@ QWidget* interfacePage() {
                            emit AppSignals::get().toolbarChanged();
                            changed(true);
                        }));
-    experience->addRow(tr("Essentials only"), tr("Plugins off: no charts, maps, 3D models or voice recording. The simplest bemotion"),
+    experience->addRow(tr("Essentials only"),
+                       tr("Plugins and built-in extras off: no charts, maps, 3D models, voice recording, speech to text or tracking. The simplest bemotion"),
                        switchControl(s.essentialsOnly, [](bool on) {
                            settings().essentialsOnly = on;
                            saveSettings();
                            PluginHost::get().requestReload();
                            emit AppSignals::get().pluginsChanged();
+                           emit AppSignals::get().modulesChanged();
                        }));
 
     SettingsCard* timeline = addSection(col, tr("Timeline"));
@@ -1483,8 +1488,19 @@ QWidget* pluginsPage() {
             saveSettings();
             PluginHost::get().requestReload();
             emit AppSignals::get().pluginsChanged();
+            emit AppSignals::get().modulesChanged();
         });
         off->addRow(tr("Plugins are off"), tr("Essentials only (Settings › Interface) keeps bemotion to its core: none of these load"), on);
+    }
+
+    // Features of the app itself that can be turned off like plugins (ui/Modules.h).
+    SettingsCard* features = addSection(col, tr("Built-in features"),
+                                        tr("Part of bemotion. Turned off, they leave the menus and tools; scripts and AI tools can still use them"));
+    for (const Module& m : modules()) {
+        const std::string id = m.id;
+        Switch* sw = switchControl(moduleEnabled(id), [id](bool on) { setModuleEnabled(id, on); });
+        sw->setEnabled(!settings().essentialsOnly);
+        features->addRow(tr(m.name), tr(m.description), sw);
     }
 
     // What comes with bemotion first; then what was installed (or how to).

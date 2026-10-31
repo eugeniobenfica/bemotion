@@ -5,6 +5,7 @@
 #include "app/Settings.h"
 #include "media/Transcriber.h"
 #include "ui/EditorContext.h"
+#include "ui/Modules.h"
 #include "ui/PagedWindow.h"
 #include "ui/Widgets.h"
 
@@ -124,7 +125,9 @@ void offerSpeechModel(QWidget* parent, std::function<void()> then) {
     dialog->show();
 }
 
-bool canTranscribe(const EditorContext& ctx, uint64_t clipId) { return soundOf(ctx, clipId, nullptr) != nullptr; }
+bool canTranscribe(const EditorContext& ctx, uint64_t clipId) {
+    return moduleEnabled(kSpeechToText) && soundOf(ctx, clipId, nullptr) != nullptr;
+}
 
 void transcribeClip(EditorContext& ctx, uint64_t clipId, uint64_t subtitlesId, QWidget* parent) {
     const Layer* clip = nullptr;

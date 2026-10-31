@@ -106,6 +106,7 @@ private:
     void openPreview(); // full screen, only the picture, playing
     void exportFrame(bool toClipboard = false); // the frame at the playhead, as a PNG
     void exportLottieFile();                    // File › Export Lottie (core/Lottie.h)
+    void applyModules();                        // built-in features turned off leave the menus (ui/Modules.h)
     void resetLayout();
     void fitSideAreas(); // side areas at least as wide as their tabs
     void maximizeDock(ads::CDockWidget* dock);
@@ -166,6 +167,8 @@ private:
     std::vector<Minimized> minimized_;
 
     std::map<ui::Action, QAction*> actions_;
+    QAction* importSvg_ = nullptr;
+    QAction* exportLottie_ = nullptr;
     QTimer* timer_ = nullptr;
     QElapsedTimer clock_;
     QPointer<ui::PreviewWindow> preview_; // the full screen preview, while open

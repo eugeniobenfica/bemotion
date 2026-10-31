@@ -15,6 +15,7 @@
 #include "render/Fonts.h"
 #include "ui/EditorContext.h"
 #include "ui/LayerMenus.h"
+#include "ui/Modules.h"
 #include "ui/PropertyRow.h"
 #include "ui/Transcribe.h"
 #include "ui/Theme.h"
@@ -1523,6 +1524,10 @@ void PropertiesPanel::buildCaptions(QVBoxLayout* col, Layer& layer) {
     row2->addWidget(import);
     row2->addWidget(exportSrt);
     s->body()->addLayout(row2);
+    if (!ui::moduleEnabled(ui::kSpeechToText)) {
+        col->addWidget(s);
+        return;
+    }
     // Speech to text: the clips with sound, one of which fills this layer.
     std::vector<std::pair<uint64_t, std::string>> sounds;
     for (const Layer& l : ctx_.comp().layers)

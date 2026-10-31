@@ -8,6 +8,7 @@
 #include "media/MediaManager.h"
 #include "ui/EditorContext.h"
 #include "ui/Mime.h"
+#include "ui/Modules.h"
 #include "ui/Theme.h"
 #include "ui/Widgets.h"
 
@@ -709,6 +710,10 @@ void MediaPanel::importFiles(const std::vector<std::filesystem::path>& allFiles,
         for (char& c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
         if (ext != ".svg") {
             files.push_back(f);
+            continue;
+        }
+        if (!ui::moduleEnabled(ui::kSvgImport)) {
+            errors.push_back(platform::toUtf8(f.filename()) + ": " + tr("SVG import is off (Settings › Plugins)").toStdString());
             continue;
         }
         std::ifstream in(f, std::ios::binary);

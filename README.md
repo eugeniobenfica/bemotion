@@ -57,7 +57,8 @@ press play.
   on any 64-bit PC.
 - **An engine and a basic app.** A small core you can drive headless — render,
   export, edit from scripts — and a simple editor on top. Download the
-  essentials; add what you need as [plugins](docs/PLUGINS.md).
+  essentials; add what you need as [plugins](docs/PLUGINS.md), and turn off
+  the built-in extras you never use (speech to text, tracking, Puppet...).
 - **Free.** No price, no account, no subscription, no watermark. Open source
   under the MIT license — kept that way by [people who support it](#support-bemotion).
 - **An idea more than a technology.** bemotion is defined by its philosophy, its
@@ -345,6 +346,9 @@ does.
   the 2D scene: turn, zoom, light and color them, all keyframable
 - The bundled **Recorder** plugin records voice-overs from the microphone,
   straight into the timeline
+- **Built-in features** that not everyone needs (speech to text, point
+  tracking, Puppet and Warp, SVG import, Lottie export, scopes) can be turned
+  off like plugins in *Settings › Plugins*: they leave the menus and tools
 - **Official plugins** a release leaves out are a click away: *Settings ›
   Plugins › Show Official Plugins* lists them from bemotion's repository on
   GitHub (only when you click), and each file is checked (SHA-256) before it

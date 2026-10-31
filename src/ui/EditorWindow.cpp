@@ -20,6 +20,7 @@
 #include "ui/Keymap.h"
 #include "ui/LayerMenus.h"
 #include "ui/Mime.h"
+#include "ui/Modules.h"
 #include "ui/Theme.h"
 #include "ui/PreviewWindow.h"
 #include "ui/Tools.h"
@@ -223,6 +224,8 @@ EditorWindow::EditorWindow(EditorContext context, RecentProjects& recents, QWidg
 
     buildDocks();
     buildMenus();
+    applyModules();
+    connect(&ui::AppSignals::get(), &ui::AppSignals::modulesChanged, this, &EditorWindow::applyModules);
     applyShortcuts();
     connect(&ui::AppSignals::get(), &ui::AppSignals::shortcutsChanged, this, &EditorWindow::applyShortcuts);
 
@@ -941,7 +944,7 @@ void EditorWindow::buildMenus() {
     });
     file->addSeparator();
     file->addAction(action(Action::ImportMedia, tr("Import Media..."), [this] { media_->openImportDialog(); }));
-    file->addAction(ui::menuIcon(ui::Icon::Pen, theme::kTextDim), tr("Import SVG..."), this, [this] {
+    importSvg_ = file->addAction(ui::menuIcon(ui::Icon::Pen, theme::kTextDim), tr("Import SVG..."), this, [this] {
         // A drawing: shape layers at the playhead, each outline a path (core/Svg.h).
         if (auto f = platform::openFileDialog(TR_NOOP("Import SVG"), TR_NOOP("SVG drawing"), ".svg")) media_->importFiles({*f}, true);
     });
@@ -951,7 +954,7 @@ void EditorWindow::buildMenus() {
     file->addSeparator();
     file->addAction(action(Action::Export, tr("Export Video..."), [this] { ui::showExportDialog(ctx_, this); }));
     file->addAction(action(Action::ExportFrame, tr("Export Frame..."), [this] { exportFrame(); }));
-    file->addAction(tr("Export Lottie (JSON)..."), this, [this] { exportLottieFile(); });
+    exportLottie_ = file->addAction(tr("Export Lottie (JSON)..."), this, [this] { exportLottieFile(); });
     file->addAction(tr("Copy Frame"), this, [this] { exportFrame(true); });
     file->addSeparator();
     file->addAction(action(Action::CloseProject, tr("Close Project"), [this] {
@@ -1560,6 +1563,21 @@ void EditorWindow::openPreview() {
     preview_->activateWindow();
     preview_->setFocus();
     ctx_.playing = true;
+}
+
+// A hidden action's shortcut does nothing either; a tool that went away gives way to Selection.
+void EditorWindow::applyModules() {
+    const bool bend = ui::moduleEnabled(ui::kPuppetWarp), track = ui::moduleEnabled(ui::kPointTracking);
+    actions_[Action::PuppetTool]->setVisible(bend);
+    actions_[Action::WarpTool]->setVisible(bend);
+    actions_[Action::TrackTool]->setVisible(track);
+    if ((!bend && (ctx_.tool == Tool::Puppet || ctx_.tool == Tool::Warp)) || (!track && ctx_.tool == Tool::Track)) ctx_.tool = Tool::Select;
+    importSvg_->setVisible(ui::moduleEnabled(ui::kSvgImport));
+    exportLottie_->setVisible(ui::moduleEnabled(ui::kLottieExport));
+    const bool scopes = ui::moduleEnabled(ui::kScopes);
+    ads::CDockWidget* dock = dockWidgets_["Scopes"];
+    dock->toggleViewAction()->setVisible(scopes);
+    if (!scopes && !dock->isClosed()) dock->toggleView(false);
 }
 
 void EditorWindow::exportLottieFile() {

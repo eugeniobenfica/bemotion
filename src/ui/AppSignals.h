@@ -21,6 +21,7 @@ signals:
     void toolbarChanged();    // the timeline toolbar's tools
     void interfaceResetRequested(); // restore the editor's dock layout
     void pluginsChanged();    // enabled / installed plugins
+    void modulesChanged();    // built-in features turned on or off (ui/Modules.h)
     void projectsChanged();   // the home screen's list (the Welcome project shown again...)
     void languageChanged();   // another language installed: windows build themselves again
 };
