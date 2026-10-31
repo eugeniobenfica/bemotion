@@ -49,7 +49,7 @@ if "%BUILDNOW%"=="1" (
     )
     set "SKIA=!SKIA:\=/!"
     echo Configuring build ^(Skia: !SKIA!^)...
-    cmake -S "%HERE:~0,-1%" -B "%BUILD%" -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIA_ROOT="!SKIA!" >nul || (
+    cmake -S "%HERE:~0,-1%" --preset dev -DSKIA_ROOT="!SKIA!" >nul || (
       echo Configuring failed.
       pause
       exit /b 1

@@ -50,6 +50,12 @@ tools/smoke-test.sh build smoke                  # exports, automation, MCP, the
 python3 tools/bench.py build                     # startup, a frame, an export
 ```
 
+The builds have presets (`CMakePresets.json`): `dev` (`build/`, the one
+above), `release` (`build-release/`, what `tools/build-release.sh` packages),
+`sanitize` (`build-sanitize/`, address and undefined behavior sanitizers, as
+the CI) and `coverage` (`build-coverage/`: `tools/coverage.sh` builds it, runs
+the tests and writes which lines they reached).
+
 - A change to the drawing that is meant: `python3 tools/golden.py build/bemotion --update`
   (`bemotion.exe` on Windows), and look at the new images before committing them.
 - A crash or a hang the fuzzer (`build/bemotion_fuzz`) found is written out

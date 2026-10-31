@@ -1064,15 +1064,20 @@ changes behavior.
   `tools/skia/build-skia.sh` (pinned revision, no AVX2 / AVX-512 code paths:
   the binaries run on any x86-64 CPU). Third-party code fetched by CMake is
   pinned to exact versions.
+- `CMakePresets.json` names the builds: `dev` (`build/`, everyday, Release),
+  `release` (`build-release/`, packaged), `sanitize` (`build-sanitize/`) and
+  `coverage` (`build-coverage/`, gcov counters; `tools/coverage.sh` reports
+  them). `run.bat`, `tools/build-release.sh` and the CI use them.
 - `tools/build-release.sh` (or `build-release.bat`): build, test, package,
   check → `dist/bemotion-<version>-setup.exe` (NSIS, per-user, no admin) and
   `-portable.zip`. `tools/package-linux.sh` (AppImage) and
   `tools/package-macos.sh` (`.app` / `.dmg`) do the same for the other systems.
 - CI (`.github/workflows/build.yml`) builds, tests, smoke-tests and packages on
-  Windows, Linux and macOS, and uploads the packages as artifacts. Two more
+  Windows, Linux and macOS, and uploads the packages as artifacts. Three more
   jobs: **sanitizers** (Linux, `-fsanitize=address,undefined`, no recovery:
-  ctest, the smoke test and 2 minutes of fuzzing; leaks are not checked) and
-  **format** (`git clang-format --diff` against the base: only the lines a
+  ctest, the smoke test and 2 minutes of fuzzing; leaks are not checked),
+  **coverage** (Linux, `tools/coverage.sh`: a report of the lines the tests
+  reach, uploaded as an artifact, not a gate) and **format** (`git clang-format --diff` against the base: only the lines a
   change touches must follow `.clang-format`, so older code is formatted as it
   is edited; `libs/bestyle` and `third_party` are left out).
 - **Code signing**, ready for when there are certificates: the package

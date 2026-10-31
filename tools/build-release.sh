@@ -3,7 +3,7 @@
 #
 #   tools/build-release.sh            (or double-click build-release.bat)
 #
-# Configures and builds bemotion in build-release/ (Release), runs the core tests,
+# Configures and builds bemotion in build-release/ (the "release" preset, CMakePresets.json), runs the core tests,
 # packages it (tools/package-windows.sh) and checks the package with
 # tools/smoke-test.sh. The results land in dist/:
 #   dist/bemotion-<version>-setup.exe      installer
@@ -33,7 +33,7 @@ if [ "${BEMOTION_BUNDLE_MODELS:-}" = 1 ]; then
     tools/fetch-speech-model.sh
 fi
 echo "== configure ($build, Skia: $skia)"
-cmake -S . -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release -DSKIA_ROOT="$(cygpath -m "$skia" 2>/dev/null || echo "$skia")" >/dev/null
+cmake --preset release -B "$build" -DSKIA_ROOT="$(cygpath -m "$skia" 2>/dev/null || echo "$skia")" >/dev/null
 echo "== build"
 cmake --build "$build"
 echo "== core tests"

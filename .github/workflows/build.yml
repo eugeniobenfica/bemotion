@@ -279,23 +279,19 @@ jobs:
         run: bash -x tools/skia/build-skia.sh
 
       - name: Configure
-        run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer" \
-            -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer" \
-            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+        run: cmake --preset sanitize
 
       - name: Build
-        run: cmake --build build
+        run: cmake --build --preset sanitize
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --preset sanitize
 
       - name: Smoke test
-        run: tools/smoke-test.sh build smoke
+        run: tools/smoke-test.sh build-sanitize smoke
 
       - name: Fuzz (2 minutes)
-        working-directory: build
+        working-directory: build-sanitize
         run: |
           fuzz="$(find . -maxdepth 3 -type f -name bemotion_fuzz | head -1)"
           "$fuzz" --seconds 120
@@ -306,9 +302,45 @@ jobs:
         with:
           name: bemotion-sanitizers-failure
           path: |
-            build/fuzz-failure.*
-            build/tests/golden/*.png
+            build-sanitize/fuzz-failure.*
+            build-sanitize/tests/golden/*.png
             smoke/*.png
+
+  coverage:
+    name: linux (test coverage)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build python3 pipx pkg-config ffmpeg qmake6 file             qt6-base-dev qt6-base-private-dev qt6-base-dev-tools qt6-qpa-plugins libqt6svg6-dev libgl-dev libxkbcommon-dev             libavcodec-dev libavformat-dev libavfilter-dev libswscale-dev libswresample-dev libavutil-dev             libharfbuzz-dev libicu-dev libfreetype-dev libfontconfig-dev             libpng-dev libjpeg-dev libwebp-dev libexpat1-dev zlib1g-dev
+          pipx install gcovr
+
+      - name: Cache Skia
+        id: skia
+        uses: actions/cache@v6
+        with:
+          path: third_party/skia
+          key: skia-linux-${{ hashFiles('tools/skia/**') }}
+
+      - name: Build Skia
+        if: steps.skia.outputs.cache-hit != 'true'
+        run: bash -x tools/skia/build-skia.sh
+
+      # A report, not a gate: it shows where tests are missing (the summary is in the job's log).
+      - name: Coverage
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: tools/coverage.sh
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: bemotion-coverage
+          path: build-coverage/coverage/
 
   commits:
     name: commit messages (pull requests)
