@@ -5,6 +5,7 @@
 // double-click a tab to maximize), keyboard shortcuts and the update loop
 // (playback, media, audio, undo commits).
 
+#include "core/Validate.h"
 #include "ui/EditorContext.h"
 
 #include <QElapsedTimer>
@@ -74,6 +75,8 @@ public:
     void applyShortcuts(); // after the keymap changed
     // Opened from a crash-recovery copy: the changes count as unsaved.
     void markRecovered();
+    // The file broke rules and was fixed as it opened (core/Validate): says so, unsaved until saved.
+    void markRepaired(const std::vector<Issue>& repairs);
     // Closing because a new window takes the project over: its crash-recovery copy stays.
     void handOver() { handedOver_ = true; }
 

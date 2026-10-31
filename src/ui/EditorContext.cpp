@@ -19,16 +19,18 @@ namespace bemotion {
 namespace {
 
 // Editor tools change the project directly and keep it valid by construction (ARCHITECTURE §4);
-// this checks that they did. Debug builds, or BEMOTION_STRICT, validate every committed edit and
-// log what is wrong; BEMOTION_STRICT=1 stops at the first invalid edit (the smoke test runs so).
-void checkEdit(const Project& project) {
+// this checks that they did, at every committed edit, in every build: what is wrong is logged and
+// repaired at once, so an invalid project is never saved (and never silently fixed only on the
+// next load). BEMOTION_STRICT=1 stops at the first invalid edit instead (the smoke test runs so).
+// Returns true when the project was repaired.
+bool checkEdit(Project& project) {
     static const std::string strict = platform::env("BEMOTION_STRICT");
-#ifdef NDEBUG
-    if (strict.empty()) return;
-#endif
     const std::vector<Issue> issues = validate(project);
+    if (issues.empty()) return false;
     for (const Issue& i : issues) platform::log("invalid edit: " + i.where + ": " + i.what);
-    if (!issues.empty() && strict == "1") std::abort();
+    if (strict == "1") std::abort();
+    repair(project);
+    return true;
 }
 
 } // namespace
@@ -233,7 +235,7 @@ void EditorContext::commitIfIdle(bool interacting) {
     if (!pendingCommit_ || interacting) return;
     // The composition grows and shrinks with its content (once an edit is done, not mid-drag).
     project.comp.fitDuration();
-    checkEdit(project);
+    if (checkEdit(project)) pruneSelection();
     history.commit(project);
     pendingCommit_ = false;
 }

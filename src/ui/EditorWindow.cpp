@@ -1633,6 +1633,12 @@ void EditorWindow::markRecovered() {
     setStatus(tr("Recovered: save to keep the changes"));
 }
 
+void EditorWindow::markRepaired(const std::vector<Issue>& repairs) {
+    for (const Issue& i : repairs) platform::log("repaired on open: " + i.where + ": " + i.what);
+    ctx_.touch(); // unsaved until the user saves
+    setStatus(tr("This file had problems and was repaired (%count): save to keep the fix").replace("%count", QString::number(repairs.size())));
+}
+
 void EditorWindow::runPluginCommand(const std::string& id, bool pressed) {
     auto& recorder = media::Recorder::get();
     const bool wasRecording = recorder.recording();

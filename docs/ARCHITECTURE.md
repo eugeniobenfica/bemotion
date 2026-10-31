@@ -335,9 +335,9 @@ are their operations (the sound comes in through `OpEnvironment::mediaLoudness`)
 
 | Who | How | Undo | Validation |
 | --- | --- | --- | --- |
-| The editor's own tools (drag, inspector) | mutate the project directly, then `EditorContext::touch()` | one step when the gesture ends (`commitIfIdle`) | by construction (they use the core's track / compound functions); files are repaired on load |
+| The editor's own tools (drag, inspector) | mutate the project directly, then `EditorContext::touch()` | one step when the gesture ends (`commitIfIdle`) | by construction (they use the core's track / compound functions), checked at every committed edit (repaired and logged if broken) |
 | Plugins (Lua commands), the command line, AI tools (MCP) | **operations** (`applyOps`) | a command or batch = one step | every batch, atomically |
-| Opening a file | `loadProject` | — | `repair()` |
+| Opening a file | `loadProject` | — | `repair()`; the editor says the file was repaired (unsaved until saved) |
 
 Rules:
 
@@ -956,8 +956,9 @@ changes behavior.
   Scripted input cannot drive a real drag (`QDrag`), a native file dialog or
   the real cursor: test those paths another way and report what was not seen.
 - **Rendering checks**: `bemotion render <project> --count 6 --out sheet.png`.
-- **Editor edits are checked**: debug builds validate the project at every
-  committed edit (`EditorContext::commitIfIdle`) and log violations;
+- **Editor edits are checked**: every build validates the project at every
+  committed edit (`EditorContext::commitIfIdle`), logs violations and repairs
+  them before the edit enters the history (an invalid project is never saved);
   `BEMOTION_STRICT=1` (the smoke test sets it) stops the app at the first one.
 - Before committing: build, core tests, and the smoke test (or at least the
   part your change touches).

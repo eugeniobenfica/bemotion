@@ -1132,6 +1132,7 @@
   "Recover": "Recuperar",
   "Recover Unsaved Changes": "Recuperar alterações não salvas",
   "Recovered: save to keep the changes": "Recuperado: salve para manter as alterações",
+  "This file had problems and was repaired (%count): save to keep the fix": "Este arquivo tinha problemas e foi reparado (%count): salve para manter a correção",
   "Rectangle": "Retângulo",
   "Red": "Vermelho",
   "Redo": "Refazer",

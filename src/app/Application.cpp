@@ -432,8 +432,9 @@ int Application::runCommandLineExport(const std::filesystem::path& projectPath, 
 void Application::openProject(const std::filesystem::path& path) {
     Project project;
     std::string err;
+    std::vector<Issue> repairs;
     platform::log("opening " + platform::toUtf8(path));
-    if (!loadProject(path, project, &err)) {
+    if (!loadProject(path, project, &err, &repairs)) {
         platform::log("could not open it: " + err);
         const std::string message = tr("Could not open \"%1\": %2").arg(QString::fromStdString(platform::toUtf8(path.filename())), QString::fromStdString(err)).toStdString();
         if (editor_) QMessageBox::warning(window_, tr("Open Project"), QString::fromStdString(message)); // from the editor's File menu
@@ -443,6 +444,7 @@ void Application::openProject(const std::filesystem::path& path) {
     recents_.touch(path, project.name);
     PluginHost::get().reconcile(project.comp);
     showEditor(std::move(project), path);
+    if (!repairs.empty()) editor_->markRepaired(repairs);
 }
 
 void Application::createProject(Project project, const std::filesystem::path& path) {
