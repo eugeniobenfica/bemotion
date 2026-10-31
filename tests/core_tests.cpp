@@ -592,6 +592,38 @@ void testHistory() {
     CHECK(p.comp.layers.empty());
     CHECK(h.redo(p));
     CHECK(p.comp.layers.size() == 1);
+
+    // Capped by bytes as well as steps: the oldest snapshots go, the last one stays.
+    Project q;
+    History steps(3);
+    steps.reset(q);
+    for (int i = 0; i < 5; ++i) {
+        q.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0));
+        steps.commit(q);
+    }
+    CHECK(steps.undoSteps() == 3);
+    const size_t snapshot = serializeProject(q).size();
+    Project r;
+    History small(200, snapshot * 3);
+    small.reset(r);
+    for (int i = 0; i < 10; ++i) {
+        r.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0));
+        small.commit(r);
+    }
+    CHECK(small.bytes() <= snapshot * 3);
+    CHECK(small.undoSteps() >= 1 && small.undoSteps() < 10);
+    while (small.undo(r)) {}
+    CHECK(!r.comp.layers.empty()); // the first steps are gone
+    while (small.redo(r)) {}
+    CHECK(r.comp.layers.size() == 10);
+    History tiny(200, 1);
+    tiny.reset(r);
+    r.comp.layers.clear();
+    tiny.commit(r);
+    r.comp.addLayer(makeShapeLayer(ShapeKind::Rectangle, {}, 1.0));
+    tiny.commit(r);
+    CHECK(tiny.undoSteps() == 1); // over the limit, one step is still kept
+    CHECK(tiny.undo(r) && r.comp.layers.empty());
 }
 
 // --- operations, validation ------------------------------------------------------------------
