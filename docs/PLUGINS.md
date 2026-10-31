@@ -38,6 +38,22 @@ operations, 3 tables and CSV import, 4 files and 3D meshes, 5 command buttons
 and the microphone, 6 include, 7 row labels, 8 settings, 9 `load_mesh`.
 `bemotion.api_version` tells the running version.
 
+### Stability
+
+The plugin API is a public contract, kept as the file format is:
+
+- **A version only adds.** A new API version brings new functions, fields or
+  options with defaults; nothing an older version had is renamed, removed or
+  changes meaning. A plugin written for API *n* runs unchanged on every later
+  bemotion.
+- **Breaking is a last resort**, announced a release before (the old way keeps
+  working and logs a warning), and documented here with how to move.
+- **Versions come with releases**, not with every commit: several additions in
+  one release share one number. The changes of each version are listed above,
+  one line per version.
+- **Limits are not API**: instruction budgets and memory caps (below) can be
+  tuned between releases; a plugin should keep well inside them.
+
 Scripts run in a sandbox (base, table, string, math and utf8 only — no files,
 OS or network) with an instruction budget per draw call and at most 256 MB of
 memory per plugin, 768 MB for all plugins together (past either, an

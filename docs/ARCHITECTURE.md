@@ -81,7 +81,7 @@ Dependencies only point **down**. In particular:
 | `render` | `core`, Skia | Qt, `ui`, `app` |
 | `media`, `export` | `core`, `render`, FFmpeg, stb, miniaudio | `ui`, `app` (`Platform` path helpers are the one exception) |
 | `libs/bestyle` | Qt Widgets, nlohmann/json | anything of bemotion (it is reusable by other apps) |
-| `ui` | everything below, Qt, `bestyle` | `app` internals other than `Platform`, `Settings`, `PluginHost`, the libraries |
+| `ui` | everything below, Qt, `bestyle` | `app` internals other than `Platform`, `Settings`, `PluginHost`, `Downloads`, the libraries |
 | `app` | everything | — |
 
 `core` builds as its own library (`bemotion_core`) with its own tests; a core
@@ -334,6 +334,15 @@ are their operations (the sound comes in through `OpEnvironment::mediaLoudness`)
   clip's frames from the playhead and keys a marker layer's Position.
 
 ## 4. Changing a project: the three paths
+
+```mermaid
+flowchart LR
+    tools["Editor tools<br/>(drag, inspector)"] -->|mutate directly| project[(Project)]
+    ops["Plugins · command line · MCP"] -->|"applyOps (atomic, on a copy)"| project
+    file[".bemotion file"] -->|"loadProject + repair()"| project
+    project -->|"commitIfIdle: validate, repair, snapshot"| history["History<br/>(undo / redo)"]
+    project -->|"saveProject (temp file + rename)"| file
+```
 
 | Who | How | Undo | Validation |
 | --- | --- | --- | --- |
@@ -786,6 +795,24 @@ Rules:
 - **`DevScript`** — scripted mouse / keyboard input for UI checks (§13).
 
 ## 9. Plugins
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant E as Editor (ui/PluginInstall)
+    participant D as app/Downloads
+    participant G as GitHub tag v<version>
+    participant H as PluginHost
+    U->>E: opens a project using a missing plugin
+    E->>U: "Download them?"
+    U->>E: Download
+    E->>D: fetchPluginCatalog
+    D->>G: assets/plugins/index.json
+    E->>D: installCatalogPlugin(id)
+    D->>G: each file, checked against its SHA-256
+    D->>H: install (user plugins folder), reload
+    H-->>E: pluginsChanged: objects reconciled
+```
 
 - A plugin is a folder with `plugin.json` and Lua 5.4 code; official ones in
   `assets/plugins` (left out of the packages, downloaded from the version's
