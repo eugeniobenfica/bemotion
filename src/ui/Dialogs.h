@@ -10,7 +10,7 @@ class EditorContext;
 
 namespace ui {
 
-enum class SettingsTab { Theme, Interface, Editor, Shortcuts, Plugins };
+enum class SettingsTab { Theme, Interface, Editor, Performance, Shortcuts, Plugins }; // the pages, in order
 enum class HelpTab { Shortcuts, About, Credits, License, Learn };
 
 void openSettings(SettingsTab tab = SettingsTab::Theme); // SettingsWindow.cpp (one window, raised if open)
