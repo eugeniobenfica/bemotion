@@ -947,6 +947,10 @@ changes behavior.
   `file_tests` (the format, imports, exports, catalogs, languages, docs); each
   ends with its list of tests, which `core_tests.cpp` runs. `tests/Check.h`
   has `CHECK`, `near` and `run` (operations from JSON text).
+- **Files from earlier versions** (`tests/files/*.bemotion`): each must open
+  with nothing repaired (or only what its `<name>.repairs.txt` lists, one
+  `where: what` a line), pass `validate` and save back unchanged. Add a file
+  here when the format grows; never edit one to make it pass.
 - **Smoke test** (`tools/smoke-test.sh <build dir>`): exports the Welcome
   project to every format (checked with ffprobe), drives the automation
   commands and the MCP server (`tools/mcp-test.py`), and opens the app

@@ -195,6 +195,39 @@ void testLegacyFormatId() {
     CHECK(deserializeProject(text, q));
 }
 
+// Files saved by earlier versions (tests/files/) open as they were: nothing repaired unless the
+// file's .repairs.txt names it (one "where: what" a line), and saving them changes nothing more.
+void testOldFiles() {
+    const auto folder = std::filesystem::path(BEMOTION_SOURCE_DIR) / "tests" / "files";
+    int count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(folder)) {
+        if (entry.path().extension() != kProjectExtension) continue;
+        ++count;
+        const std::string name = entry.path().filename().generic_string();
+        Project p;
+        std::string error;
+        std::vector<Issue> repairs;
+        if (!loadProject(entry.path(), p, &error, &repairs)) {
+            std::printf("  %s: %s\n", name.c_str(), error.c_str());
+            CHECK(false);
+            continue;
+        }
+        std::vector<std::string> expected;
+        std::ifstream list(std::filesystem::path(entry.path()).replace_extension(".repairs.txt"));
+        for (std::string line; std::getline(list, line);)
+            if (!line.empty()) expected.push_back(line);
+        for (const Issue& issue : repairs)
+            if (std::find(expected.begin(), expected.end(), issue.where + ": " + issue.what) == expected.end()) {
+                std::printf("  %s: unexpected repair %s: %s\n", name.c_str(), issue.where.c_str(), issue.what.c_str());
+                CHECK(false);
+            }
+        CHECK(!p.comp.layers.empty() && validate(p).empty());
+        Project again;
+        CHECK(deserializeProject(serializeProject(p), again) && serializeProject(again) == serializeProject(p));
+    }
+    CHECK(count >= 3);
+}
+
 void testFileParams() {
     // A plugin object with a file parameter (like a 3D model), its path saved relative to the project.
     namespace fs = std::filesystem;
@@ -565,6 +598,7 @@ Tests fileTests() {
         {"effects round trip", testEffectsRoundTrip},
         {"plugin layer round trip", testPluginLayerRoundTrip},
         {"legacy format id", testLegacyFormatId},
+        {"files from earlier versions", testOldFiles},
         {"file parameters", testFileParams},
         {"svg import", testSvgImport},
         {"lottie export", testLottieExport},

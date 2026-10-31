@@ -1,0 +1,99 @@
+{
+  "composition": {
+    "background": [0.08, 0.09, 0.12, 1.0],
+    "duration": 3.0,
+    "fps": 30.0,
+    "height": 720,
+    "layers": [
+      {
+        "id": 1,
+        "in": 0.0,
+        "label": 1,
+        "locked": false,
+        "name": "Title",
+        "out": 3.0,
+        "properties": {
+          "anchor": {"value": [0.0, 0.0]},
+          "font_size": {"value": 96.0},
+          "opacity": {"keys": [{"ease": "ease_out", "t": 0.0, "v": 0.0}, {"ease": "linear", "t": 0.8, "v": 100.0}], "value": 100.0},
+          "position": {"keys": [{"ease": "back_out", "t": 0.0, "v": [640.0, 420.0]}, {"ease": "linear", "t": 0.8, "v": [640.0, 330.0]}], "value": [640.0, 360.0]},
+          "reveal": {"keys": [{"ease": "linear", "t": 0.0, "v": 0.0}, {"ease": "linear", "t": 1.5, "v": 100.0}], "value": 100.0},
+          "rotation": {"value": 0.0},
+          "scale": {"value": [100.0, 100.0]},
+          "text_color": {"value": [1.0, 1.0, 1.0, 1.0]},
+          "tracking": {"value": 0.0},
+          "line_height": {"value": 120.0}
+        },
+        "text": {"align": "center", "text": "Mirage", "weight": "bold"},
+        "type": "text",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "in": 0.0,
+        "label": 3,
+        "locked": false,
+        "name": "Star",
+        "out": 3.0,
+        "properties": {
+          "anchor": {"value": [0.0, 0.0]},
+          "fill_color": {"value": [0.98, 0.75, 0.2, 1.0]},
+          "inner_radius": {"value": 45.0},
+          "opacity": {"value": 100.0},
+          "position": {"value": [640.0, 520.0]},
+          "rotation": {"keys": [{"ease": "ease_in_out", "t": 0.0, "v": 0.0}, {"ease": "linear", "t": 3.0, "v": 360.0}], "value": 0.0},
+          "scale": {"keys": [{"ease": "elastic", "t": 0.2, "v": [0.0, 0.0]}, {"ease": "linear", "t": 1.2, "v": [100.0, 100.0]}], "value": [100.0, 100.0]},
+          "sides": {"value": 5.0},
+          "size": {"value": [160.0, 160.0]},
+          "stroke_color": {"value": [1.0, 1.0, 1.0, 1.0]},
+          "stroke_width": {"value": 4.0},
+          "trim_end": {"value": 100.0},
+          "trim_start": {"value": 0.0}
+        },
+        "shape": {"fill": true, "kind": "star", "stroke": true},
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 3,
+        "in": 0.5,
+        "label": 0,
+        "locked": true,
+        "name": "Line",
+        "out": 2.5,
+        "properties": {
+          "position": {"value": [640.0, 640.0]},
+          "size": {"value": [500.0, 0.0]},
+          "stroke_color": {"value": [0.4, 0.7, 1.0, 1.0]},
+          "stroke_width": {"value": 6.0},
+          "trim_end": {"keys": [{"ease": "ease_out", "t": 0.5, "v": 0.0}, {"ease": "hold", "t": 1.5, "v": 100.0}], "value": 100.0}
+        },
+        "shape": {"fill": false, "kind": "line", "stroke": true},
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 4,
+        "in": 0.0,
+        "label": 2,
+        "locked": false,
+        "name": "Backdrop",
+        "out": 3.0,
+        "properties": {
+          "fill_color": {"value": [0.15, 0.2, 0.35, 1.0]},
+          "position": {"value": [640.0, 360.0]},
+          "roundness": {"value": 40.0},
+          "size": {"value": [1100.0, 560.0]}
+        },
+        "shape": {"fill": true, "kind": "rectangle", "stroke": false},
+        "type": "shape",
+        "visible": true
+      }
+    ],
+    "next_layer_id": 5,
+    "width": 1280
+  },
+  "format": "mirage",
+  "name": "First format (Mirage, October 2026)",
+  "version": 1
+}

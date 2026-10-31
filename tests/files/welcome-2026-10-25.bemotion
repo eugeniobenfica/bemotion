@@ -1,0 +1,3546 @@
+{
+  "composition": {
+    "background": [
+      0.06300000101327896,
+      0.06300000101327896,
+      0.07100000232458115,
+      1.0
+    ],
+    "duration": 5.0,
+    "fps": 30.0,
+    "guides": [],
+    "height": 1080,
+    "layers": [
+      {
+        "id": 20,
+        "in": 0.0,
+        "label": 4,
+        "locked": false,
+        "name": "Sparks",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              530.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          }
+        },
+        "track": 20,
+        "type": "compound",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 19,
+        "in": 0.0,
+        "label": 3,
+        "locked": false,
+        "name": "Spark 10",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.07, 0.25, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.07, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 5.812 + e * 2.6\n[cos(a), sin(a)] * 520 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              28.0,
+              28.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 19,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 18,
+        "in": 0.0,
+        "label": 2,
+        "locked": false,
+        "name": "Spark 9",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.02, 0.2, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.02, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 5.166 + e * 2.6\n[cos(a), sin(a)] * 700 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              20.0,
+              20.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 18,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 17,
+        "in": 0.0,
+        "label": 1,
+        "locked": false,
+        "name": "Spark 8",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9725490212440491,
+              0.9411764740943909,
+              0.8941176533699036,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.17, 0.35, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.17, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 4.520 + e * 2.6\n[cos(a), sin(a)] * 610 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              20.0,
+              20.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 17,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 16,
+        "in": 0.0,
+        "label": 0,
+        "locked": false,
+        "name": "Spark 7",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.12, 0.3, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.12, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 3.875 + e * 2.6\n[cos(a), sin(a)] * 520 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              28.0,
+              28.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 16,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 15,
+        "in": 0.0,
+        "label": 7,
+        "locked": false,
+        "name": "Spark 6",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.07, 0.25, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.07, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 3.229 + e * 2.6\n[cos(a), sin(a)] * 700 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              20.0,
+              20.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 15,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 14,
+        "in": 0.0,
+        "label": 6,
+        "locked": false,
+        "name": "Spark 5",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.02, 0.2, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.02, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 2.583 + e * 2.6\n[cos(a), sin(a)] * 610 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              20.0,
+              20.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 14,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 13,
+        "in": 0.0,
+        "label": 5,
+        "locked": false,
+        "name": "Spark 4",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9725490212440491,
+              0.9411764740943909,
+              0.8941176533699036,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.17, 0.35, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.17, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 1.937 + e * 2.6\n[cos(a), sin(a)] * 520 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              28.0,
+              28.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 13,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 12,
+        "in": 0.0,
+        "label": 4,
+        "locked": false,
+        "name": "Spark 3",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.12, 0.3, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.12, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 1.292 + e * 2.6\n[cos(a), sin(a)] * 700 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              20.0,
+              20.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 12,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 11,
+        "in": 0.0,
+        "label": 3,
+        "locked": false,
+        "name": "Spark 2",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.07, 0.25, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.07, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 0.646 + e * 2.6\n[cos(a), sin(a)] * 610 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              20.0,
+              20.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 11,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.86,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.9,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 24,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 10,
+        "in": 0.0,
+        "label": 2,
+        "locked": false,
+        "name": "Spark 1",
+        "out": 5.0,
+        "parent": 20,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "time < 0.88 ? map(time, 0.02, 0.2, 0, 100) : 0",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.02, 0.86, 0, 1)   // 0 -> 1 on the way in\nvar e = u * u                         // faster near the end\nvar a = 0.000 + e * 2.6\n[cos(a), sin(a)] * 520 * (1 - e)            // around the compound's center",
+            "value": [
+              953.3939819335938,
+              532.4197387695313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.5 * smooth(map(time, 0.55, 0.86, 0, 1)))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              28.0,
+              28.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 10,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 7,
+        "in": 3.15,
+        "label": 1,
+        "locked": false,
+        "name": "Tagline",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "box_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              0.6000000238418579
+            ]
+          },
+          "box_padding": {
+            "value": 20.0
+          },
+          "box_roundness": {
+            "value": 12.0
+          },
+          "font_size": {
+            "value": 46.0
+          },
+          "line_height": {
+            "value": 120.0
+          },
+          "opacity": {
+            "keys": [
+              {
+                "ease": "ease_in",
+                "t": 4.45,
+                "v": 100.0
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 5.0,
+                "v": 0.0
+              }
+            ],
+            "value": 100.0
+          },
+          "outline_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "outline_width": {
+            "value": 6.0
+          },
+          "position": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 3.15,
+                "v": [
+                  818.0,
+                  642.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 4.05,
+                "v": [
+                  804.0,
+                  642.0
+                ]
+              }
+            ],
+            "value": [
+              804.0,
+              642.0
+            ]
+          },
+          "reveal": {
+            "value": 100.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "text_color": {
+            "value": [
+              0.6000000238418579,
+              0.6000000238418579,
+              0.6399999856948853,
+              1.0
+            ]
+          },
+          "tracking": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 3.15,
+                "v": 9.0
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 4.1,
+                "v": 1.0
+              }
+            ],
+            "value": 1.0
+          },
+          "wrap_width": {
+            "value": 0.0
+          }
+        },
+        "text": {
+          "align": "left",
+          "box": false,
+          "font_family": "Inter",
+          "font_style": "Medium",
+          "letter_by": "word",
+          "letter_delay": 0.11999999731779099,
+          "letter_duration": 0.6000000238418579,
+          "letter_in": "blur",
+          "letter_order": "forward",
+          "outline": false,
+          "text": "where motion takes shape"
+        },
+        "track": 1,
+        "type": "text",
+        "visible": true
+      },
+      {
+        "id": 6,
+        "in": 2.5,
+        "label": 0,
+        "locked": false,
+        "name": "Wordmark",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "box_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              0.6000000238418579
+            ]
+          },
+          "box_padding": {
+            "value": 20.0
+          },
+          "box_roundness": {
+            "value": 12.0
+          },
+          "font_size": {
+            "value": 190.0
+          },
+          "line_height": {
+            "value": 120.0
+          },
+          "opacity": {
+            "keys": [
+              {
+                "ease": "ease_in",
+                "t": 4.45,
+                "v": 100.0
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 5.0,
+                "v": 0.0
+              }
+            ],
+            "value": 100.0
+          },
+          "outline_color": {
+            "value": [
+              0.0,
+              0.0,
+              0.0,
+              1.0
+            ]
+          },
+          "outline_width": {
+            "value": 6.0
+          },
+          "position": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 2.5,
+                "v": [
+                  836.0,
+                  524.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 3.4,
+                "v": [
+                  800.0,
+                  524.0
+                ]
+              }
+            ],
+            "value": [
+              870.0,
+              524.0
+            ]
+          },
+          "reveal": {
+            "value": 100.0
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "text_color": {
+            "value": [
+              0.9729999899864197,
+              0.9409999847412109,
+              0.8939999938011169,
+              1.0
+            ]
+          },
+          "tracking": {
+            "value": -4.0
+          },
+          "wrap_width": {
+            "value": 0.0
+          }
+        },
+        "text": {
+          "align": "left",
+          "box": false,
+          "font_family": "Inter",
+          "font_style": "Bold",
+          "letter_by": "letter",
+          "letter_delay": 0.04500000178813934,
+          "letter_duration": 0.550000011920929,
+          "letter_in": "rise",
+          "letter_order": "forward",
+          "outline": false,
+          "text": "bemotion"
+        },
+        "track": 2,
+        "type": "text",
+        "visible": true
+      },
+      {
+        "id": 8,
+        "in": 0.0,
+        "label": 0,
+        "locked": false,
+        "name": "Shockwave",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 0.86,
+                "v": 0.0
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 0.9199999999999999,
+                "v": 85.0
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 1.75,
+                "v": 0.0
+              }
+            ],
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              530.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 0.86,
+                "v": [
+                  55.0,
+                  55.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 1.75,
+                "v": [
+                  340.0,
+                  340.0
+                ]
+              }
+            ],
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              260.0,
+              260.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 0.86,
+                "v": 24.0
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 1.75,
+                "v": 1.0
+              }
+            ],
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": false,
+          "kind": "ellipse",
+          "stroke": true
+        },
+        "track": 8,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 35,
+        "in": 0.0,
+        "label": 4,
+        "locked": false,
+        "name": "Burst",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              530.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "value": [
+              100.0,
+              100.0
+            ]
+          }
+        },
+        "track": 35,
+        "type": "compound",
+        "visible": true
+      },
+      {
+        "id": 34,
+        "in": 0.0,
+        "label": 2,
+        "locked": false,
+        "name": "Speck 14",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(5.817), sin(5.817)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              12.0,
+              12.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 34,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 33,
+        "in": 0.0,
+        "label": 1,
+        "locked": false,
+        "name": "Speck 13",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9725490212440491,
+              0.9411764740943909,
+              0.8941176533699036,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(5.543), sin(5.543)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              8.0,
+              8.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 33,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 32,
+        "in": 0.0,
+        "label": 0,
+        "locked": false,
+        "name": "Speck 12",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 330   // fast, then slowing down\n[cos(4.913), sin(4.913)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              12.0,
+              12.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 32,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 31,
+        "in": 0.0,
+        "label": 7,
+        "locked": false,
+        "name": "Speck 11",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(4.337), sin(4.337)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              8.0,
+              8.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 31,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 30,
+        "in": 0.0,
+        "label": 6,
+        "locked": false,
+        "name": "Speck 10",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9725490212440491,
+              0.9411764740943909,
+              0.8941176533699036,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(4.102), sin(4.102)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              12.0,
+              12.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 30,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 29,
+        "in": 0.0,
+        "label": 5,
+        "locked": false,
+        "name": "Speck 9",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 330   // fast, then slowing down\n[cos(3.725), sin(3.725)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              8.0,
+              8.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 29,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 28,
+        "in": 0.0,
+        "label": 4,
+        "locked": false,
+        "name": "Speck 8",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(3.044), sin(3.044)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              12.0,
+              12.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 28,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 27,
+        "in": 0.0,
+        "label": 3,
+        "locked": false,
+        "name": "Speck 7",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9725490212440491,
+              0.9411764740943909,
+              0.8941176533699036,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(2.583), sin(2.583)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              8.0,
+              8.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 27,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 26,
+        "in": 0.0,
+        "label": 2,
+        "locked": false,
+        "name": "Speck 6",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 330   // fast, then slowing down\n[cos(2.369), sin(2.369)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              12.0,
+              12.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 26,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 25,
+        "in": 0.0,
+        "label": 1,
+        "locked": false,
+        "name": "Speck 5",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(1.873), sin(1.873)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              8.0,
+              8.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 25,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 24,
+        "in": 0.0,
+        "label": 0,
+        "locked": false,
+        "name": "Speck 4",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9725490212440491,
+              0.9411764740943909,
+              0.8941176533699036,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(1.201), sin(1.201)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              12.0,
+              12.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 24,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 23,
+        "in": 0.0,
+        "label": 7,
+        "locked": false,
+        "name": "Speck 3",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 330   // fast, then slowing down\n[cos(0.857), sin(0.857)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              8.0,
+              8.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 23,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 22,
+        "in": 0.0,
+        "label": 6,
+        "locked": false,
+        "name": "Speck 2",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 450   // fast, then slowing down\n[cos(0.605), sin(0.605)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              12.0,
+              12.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 22,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 21,
+        "in": 0.0,
+        "label": 5,
+        "locked": false,
+        "name": "Speck 1",
+        "out": 5.0,
+        "parent": 35,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9725490212440491,
+              0.9411764740943909,
+              0.8941176533699036,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nu <= 0 || u >= 1 ? 0 : (1 - u) * 100",
+            "value": 100.0
+          },
+          "position": {
+            "expression": "var u = map(time, 0.86, 1.76, 0, 1)\nvar d = 120 + (1 - pow(1 - u, 3)) * 210   // fast, then slowing down\n[cos(0.000), sin(0.000)] * d",
+            "value": [
+              959.6729736328125,
+              528.8630981445313
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "value * (1 - 0.6 * map(time, 0.86, 1.76, 0, 1))",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              8.0,
+              8.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 21,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 9,
+        "in": 0.0,
+        "label": 1,
+        "locked": false,
+        "name": "Echo",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9098039269447327,
+              0.7254902124404907,
+              0.1921568661928177,
+              1.0
+            ]
+          },
+          "opacity": {
+            "expression": "layer(\"Shockwave\").opacity(time - 0.14) * 0.45",
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              960.0,
+              530.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "expression": "layer(\"Shockwave\").scale(time - 0.14) * 0.82",
+            "value": [
+              100.0,
+              100.0
+            ]
+          },
+          "size": {
+            "value": [
+              260.0,
+              260.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              0.9725490212440491,
+              0.9411764740943909,
+              0.8941176533699036,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "expression": "layer(\"Shockwave\").stroke_width(time - 0.14) * 0.6",
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": false,
+          "kind": "ellipse",
+          "stroke": true
+        },
+        "track": 9,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "effects": [
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.9098039269447327,
+                  0.7254902124404907,
+                  0.1921568661928177,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "keys": [
+                  {
+                    "ease": "ease_out",
+                    "t": 0.82,
+                    "v": 0.0
+                  },
+                  {
+                    "ease": "ease_in_out",
+                    "t": 0.98,
+                    "v": 85.0
+                  },
+                  {
+                    "ease": "ease_in_out",
+                    "t": 1.3,
+                    "v": 0.0
+                  }
+                ],
+                "value": 80.0
+              },
+              "shutter": {
+                "value": 180.0
+              },
+              "size": {
+                "expression": "value * (1 + 0.2 * sin(time * 18) * (1 - progress))   // a flicker as it flashes",
+                "keys": [
+                  {
+                    "ease": "ease_out",
+                    "t": 0.82,
+                    "v": 10.0
+                  },
+                  {
+                    "ease": "ease_in_out",
+                    "t": 1.05,
+                    "v": 70.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 1.3,
+                    "v": 45.0
+                  },
+                  {
+                    "ease": "ease_in_out",
+                    "t": 1.32,
+                    "v": 0.0
+                  }
+                ],
+                "value": 24.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 12,
+            "type": "glow"
+          },
+          {
+            "enabled": true,
+            "params": {
+              "color": {
+                "value": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  1.0
+                ]
+              },
+              "offset": {
+                "value": [
+                  12.0,
+                  12.0
+                ]
+              },
+              "opacity": {
+                "value": 70.0
+              },
+              "shutter": {
+                "keys": [
+                  {
+                    "ease": "hold",
+                    "t": 0.0,
+                    "v": 0.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 0.82,
+                    "v": 180.0
+                  },
+                  {
+                    "ease": "hold",
+                    "t": 2.75,
+                    "v": 0.0
+                  }
+                ],
+                "value": 180.0
+              },
+              "size": {
+                "value": 12.0
+              },
+              "v1": {
+                "value": 0.0
+              },
+              "v2": {
+                "value": 0.0
+              },
+              "v3": {
+                "value": 0.0
+              }
+            },
+            "samples": 8,
+            "type": "motion_blur"
+          }
+        ],
+        "id": 5,
+        "in": 0.0,
+        "label": 4,
+        "locked": false,
+        "name": "Mark",
+        "out": 5.0,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "opacity": {
+            "keys": [
+              {
+                "ease": "ease_in",
+                "t": 4.45,
+                "v": 100.0
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 5.0,
+                "v": 0.0
+              }
+            ],
+            "value": 100.0
+          },
+          "position": {
+            "keys": [
+              {
+                "ease": "ease_in_out",
+                "t": 1.95,
+                "v": [
+                  960.0,
+                  530.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 2.7,
+                "v": [
+                  640.0,
+                  530.0
+                ]
+              }
+            ],
+            "value": [
+              960.0,
+              530.0
+            ]
+          },
+          "rotation": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 0.82,
+                "v": -40.0
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 2.0,
+                "v": 0.0
+              }
+            ],
+            "value": -35.0
+          },
+          "scale": {
+            "keys": [
+              {
+                "ease": "ease_in",
+                "t": 4.45,
+                "v": [
+                  100.0,
+                  100.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 5.0,
+                "v": [
+                  94.0,
+                  94.0
+                ]
+              }
+            ],
+            "value": [
+              100.0,
+              100.0
+            ]
+          }
+        },
+        "track": 3,
+        "type": "compound",
+        "visible": true
+      },
+      {
+        "id": 4,
+        "in": 0.0,
+        "label": 0,
+        "locked": false,
+        "name": "Bowl",
+        "out": 5.0,
+        "parent": 5,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9100000262260437,
+              0.7250000238418579,
+              0.19200000166893005,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              47.84000015258789,
+              5.849999904632568
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "keys": [
+              {
+                "ease": "back_out",
+                "t": 1.55,
+                "v": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 2.05,
+                "v": [
+                  100.0,
+                  100.0
+                ]
+              }
+            ],
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "size": {
+            "value": [
+              136.5,
+              136.5
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 4,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 3,
+        "in": 0.0,
+        "label": 6,
+        "locked": false,
+        "name": "Stem Cut",
+        "out": 5.0,
+        "parent": 5,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              -80.92500305175781
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.06300000101327896,
+              0.06300000101327896,
+              0.07100000232458115,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              -32.435001373291016,
+              -156.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "roundness": {
+            "value": 0.0
+          },
+          "scale": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 1.35,
+                "v": [
+                  100.0,
+                  0.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 1.75,
+                "v": [
+                  100.0,
+                  100.0
+                ]
+              }
+            ],
+            "value": [
+              100.0,
+              0.0
+            ]
+          },
+          "size": {
+            "value": [
+              24.049999237060547,
+              161.85000610351563
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "rectangle",
+          "stroke": false
+        },
+        "track": 5,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 2,
+        "in": 0.0,
+        "label": 6,
+        "locked": false,
+        "name": "Ring Cut",
+        "out": 5.0,
+        "parent": 5,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.06300000101327896,
+              0.06300000101327896,
+              0.07100000232458115,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              47.84000015258789,
+              5.849999904632568
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "keys": [
+              {
+                "ease": "ease_out",
+                "t": 1.15,
+                "v": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 1.6,
+                "v": [
+                  100.0,
+                  100.0
+                ]
+              }
+            ],
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "size": {
+            "value": [
+              184.60000610351563,
+              184.60000610351563
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 6,
+        "type": "shape",
+        "visible": true
+      },
+      {
+        "id": 1,
+        "in": 0.0,
+        "label": 0,
+        "locked": false,
+        "name": "Disc",
+        "out": 5.0,
+        "parent": 5,
+        "properties": {
+          "anchor": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "fill_color": {
+            "value": [
+              0.9100000262260437,
+              0.7250000238418579,
+              0.19200000166893005,
+              1.0
+            ]
+          },
+          "opacity": {
+            "value": 100.0
+          },
+          "position": {
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "rotation": {
+            "value": 0.0
+          },
+          "scale": {
+            "keys": [
+              {
+                "ease": "back_out",
+                "t": 0.82,
+                "v": [
+                  0.0,
+                  0.0
+                ]
+              },
+              {
+                "ease": "ease_in_out",
+                "t": 1.32,
+                "v": [
+                  100.0,
+                  100.0
+                ]
+              }
+            ],
+            "value": [
+              0.0,
+              0.0
+            ]
+          },
+          "size": {
+            "value": [
+              260.0,
+              260.0
+            ]
+          },
+          "stroke_color": {
+            "value": [
+              1.0,
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "stroke_width": {
+            "value": 8.0
+          },
+          "trim_end": {
+            "value": 100.0
+          },
+          "trim_start": {
+            "value": 0.0
+          }
+        },
+        "shape": {
+          "fill": true,
+          "kind": "ellipse",
+          "stroke": false
+        },
+        "track": 7,
+        "type": "shape",
+        "visible": true
+      }
+    ],
+    "max_duration": 5.0,
+    "media": [],
+    "next_layer_id": 36,
+    "next_media_id": 1,
+    "next_track_id": 36,
+    "width": 1920
+  },
+  "format": "bemotion",
+  "name": "Welcome to bemotion",
+  "version": 1
+}
