@@ -43,7 +43,11 @@ def count(path, color, tolerance=24):
     return sum(1 for row in rows for p in row if all(abs(a - b) <= tolerance for a, b in zip(p, color)))
 
 
-def run(exe, out, name, ops, steps):
+class Skipped(Exception):
+    """The scenario does not apply to this build (a package without the official plugins)."""
+
+
+def run(exe, out, name, ops, steps, needs=None):
     folder = out / name
     folder.mkdir(parents=True, exist_ok=True)
     appdata = folder / "appdata"
@@ -53,7 +57,11 @@ def run(exe, out, name, ops, steps):
     project = folder / "p.bemotion"
     subprocess.run([exe, "new", str(project)], env=env, check=True, capture_output=True)
     (folder / "ops.json").write_text(json.dumps(ops))
-    subprocess.run([exe, "apply", str(project), str(folder / "ops.json")], env=env, check=True, capture_output=True)
+    applied = subprocess.run([exe, "apply", str(project), str(folder / "ops.json")], env=env, capture_output=True, text=True)
+    if applied.returncode != 0:
+        if needs and needs in applied.stdout + applied.stderr:
+            raise Skipped(f"no {needs} plugin in this build")
+        raise subprocess.CalledProcessError(applied.returncode, applied.args, applied.stdout, applied.stderr)
     script = ["resize 1600 900", "wait 90"]
     for s in steps:
         script.append(s.replace("@", str(folder) + os.sep))
@@ -107,7 +115,7 @@ def scenario_plugin_object(exe, out):
     # Near the end (the bars grow in at the start): End, a frame back, then another one.
     steps = (["move 800 300 3"] + key("End") + key("Left") + ["wait 30", "capture @shown.bmp"] + key("Left")
              + ["wait 20", "capture @stepped.bmp"])
-    folder = run(exe, out, "plugin-object", ops, steps)
+    folder = run(exe, out, "plugin-object", ops, steps, needs="charts")
     shots = [folder / "shown.bmp", folder / "stepped.bmp"]
     if not all(s.exists() for s in shots):
         return "no capture"
@@ -130,6 +138,9 @@ def main():
     for name, test in SCENARIOS:
         try:
             problem = test(exe, out)
+        except Skipped as why:
+            print(f"  {name}: skipped ({why})")
+            continue
         except (subprocess.SubprocessError, OSError) as e:
             problem = f"could not run: {e}"
         print(f"  {name}: " + ("ok" if problem is None else "FAILED, " + problem))
