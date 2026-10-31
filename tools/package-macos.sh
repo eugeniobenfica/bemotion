@@ -142,8 +142,23 @@ for pass in 1 2 3 4 5 6 7 8; do
         break
     fi
 done
-# Ad-hoc signature: required on Apple silicon (not notarized: Gatekeeper still asks on first open).
-codesign --force --deep --sign - "$app"
+# Signed with a Developer ID when BEMOTION_MACOS_IDENTITY names one in the keychain ("Developer
+# ID Application: ..."), with the hardened runtime, then notarized when BEMOTION_NOTARY_PROFILE
+# names a notarytool keychain profile: Gatekeeper opens it without asking. Otherwise an ad-hoc
+# signature, required on Apple silicon (Gatekeeper still asks on first open).
+if [ -n "${BEMOTION_MACOS_IDENTITY:-}" ]; then
+    codesign --force --deep --options runtime --timestamp --sign "$BEMOTION_MACOS_IDENTITY" "$app"
+    codesign --verify --deep --strict "$app"
+else
+    codesign --force --deep --sign - "$app"
+fi
 
 hdiutil create -volname bemotion -srcfolder "$app" -ov -format UDZO "$out/bemotion.dmg" >/dev/null
+if [ -n "${BEMOTION_MACOS_IDENTITY:-}" ]; then
+    codesign --force --timestamp --sign "$BEMOTION_MACOS_IDENTITY" "$out/bemotion.dmg"
+    if [ -n "${BEMOTION_NOTARY_PROFILE:-}" ]; then
+        xcrun notarytool submit "$out/bemotion.dmg" --keychain-profile "$BEMOTION_NOTARY_PROFILE" --wait
+        xcrun stapler staple "$out/bemotion.dmg"
+    fi
+fi
 echo "Packaged $app and $out/bemotion.dmg"

@@ -22,6 +22,19 @@ rm -rf "$out/bemotion"
 "$root/tools/deploy-windows.sh" "$build" "$out/bemotion"
 cp "$root/LICENSE" "$out/bemotion/LICENSE.txt"
 
+# Authenticode, when BEMOTION_SIGN_PFX names a code-signing certificate (.pfx; its password in
+# BEMOTION_SIGN_PASSWORD): SmartScreen then knows who made the program. Unsigned otherwise.
+sign() {
+    [ -n "${BEMOTION_SIGN_PFX:-}" ] || return 0
+    local signtool
+    signtool="$(ls /c/Program\ Files\ \(x86\)/Windows\ Kits/10/bin/*/x64/signtool.exe 2>/dev/null | sort -V | tail -1)"
+    [ -n "$signtool" ] || { echo "error: signtool.exe not found (Windows SDK)"; exit 1; }
+    # (Double slashes: MSYS2 would take /f for a path and convert it.)
+    "$signtool" sign //fd SHA256 //tr http://timestamp.digicert.com //td SHA256 \
+        //f "$(cygpath -w "$BEMOTION_SIGN_PFX")" //p "${BEMOTION_SIGN_PASSWORD:-}" "$@"
+}
+sign "$(cygpath -w "$out/bemotion/bemotion.exe")"
+
 setup="$out/bemotion-$fullversion-setup.exe"
 # NSIS needs a Windows temp folder it can map big files in (not MSYS2's /tmp).
 mkdir -p "$out/.nsis-tmp"
@@ -30,6 +43,8 @@ TEMP="$TMP"
 export TMP TEMP
 (cd "$root/tools/installer" &&
     makensis -V2 -DSOURCE="$(cygpath -w "$out/bemotion")" -DVERSION="$version" -DFULLVERSION="$fullversion" -DOUTFILE="$(cygpath -w "$setup")" bemotion.nsi)
+
+sign "$(cygpath -w "$setup")"
 
 zip="$out/bemotion-$fullversion-portable.zip"
 rm -f "$zip"

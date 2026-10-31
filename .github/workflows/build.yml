@@ -58,7 +58,17 @@ jobs:
         run: python3 tools/bench.py build --json smoke/bench.json --max-startup 20 --max-frame-ms 500 --min-export-fps 3
 
       - name: Package
-        run: tools/package-windows.sh build dist
+        # Signed when the repository has a code-signing certificate (secrets; never on pull
+        # requests from forks, which do not get them): tools/package-windows.sh.
+        env:
+          SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
+          BEMOTION_SIGN_PASSWORD: ${{ secrets.WINDOWS_SIGN_PASSWORD }}
+        run: |
+          if [ -n "$SIGN_PFX_BASE64" ]; then
+            export BEMOTION_SIGN_PFX="$(cygpath -u "$RUNNER_TEMP")/sign.pfx"
+            echo "$SIGN_PFX_BASE64" | base64 -d > "$BEMOTION_SIGN_PFX"
+          fi
+          tools/package-windows.sh build dist
 
       - name: Smoke test (package)
         run: tools/smoke-test.sh dist/bemotion smoke-package
@@ -190,7 +200,32 @@ jobs:
         run: python3 tools/bench.py build --json smoke/bench.json --max-startup 20 --max-frame-ms 500 --min-export-fps 3
 
       - name: Package
-        run: tools/package-macos.sh build dist
+        # Signed with a Developer ID and notarized when the repository has them (secrets):
+        # tools/package-macos.sh. Otherwise an ad-hoc signature.
+        env:
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_IDENTITY: ${{ secrets.MACOS_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          if [ -n "$MACOS_CERT_P12_BASE64" ]; then
+            kc="$RUNNER_TEMP/sign.keychain-db"
+            security create-keychain -p ci "$kc"
+            security set-keychain-settings "$kc"
+            security unlock-keychain -p ci "$kc"
+            echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+            security import "$RUNNER_TEMP/cert.p12" -k "$kc" -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k ci "$kc"
+            security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+            export BEMOTION_MACOS_IDENTITY="$MACOS_IDENTITY"
+            if [ -n "$APPLE_ID" ]; then
+              xcrun notarytool store-credentials bemotion-notary --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+              export BEMOTION_NOTARY_PROFILE=bemotion-notary
+            fi
+          fi
+          tools/package-macos.sh build dist
 
       - name: Smoke test (package)
         run: tools/smoke-test.sh dist/bemotion.app/Contents/MacOS smoke-package

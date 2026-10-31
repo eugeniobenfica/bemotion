@@ -1075,6 +1075,15 @@ changes behavior.
   **format** (`git clang-format --diff` against the base: only the lines a
   change touches must follow `.clang-format`, so older code is formatted as it
   is edited; `libs/bestyle` and `third_party` are left out).
+- **Code signing**, ready for when there are certificates: the package
+  scripts sign when told how (Windows: `BEMOTION_SIGN_PFX` and
+  `BEMOTION_SIGN_PASSWORD`, Authenticode with a timestamp; macOS:
+  `BEMOTION_MACOS_IDENTITY`, a Developer ID with the hardened runtime, and
+  `BEMOTION_NOTARY_PROFILE` to notarize and staple the dmg), and CI feeds them
+  from the repository secrets `WINDOWS_SIGN_PFX_BASE64`,
+  `WINDOWS_SIGN_PASSWORD`, `MACOS_CERT_P12_BASE64`, `MACOS_CERT_PASSWORD`,
+  `MACOS_IDENTITY`, `APPLE_ID`, `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD`.
+  Without them the packages are unsigned (macOS: ad hoc), as before.
 - The version is `project(VERSION …)` plus `BEMOTION_VERSION_SUFFIX` (`beta.2`;
   empty for a release) in the top `CMakeLists.txt`. A release is tagged
   `v<version>` and carries the packages and a `SHA256SUMS.txt` of them under
