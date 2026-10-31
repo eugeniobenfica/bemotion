@@ -21,6 +21,7 @@ capability). This file is the short, practical version.
 | App, platform, plugins, automation | `src/app` (`Application`, `Platform`, `Settings`, `PluginHost`, `Automation`, `McpServer`, `Recovery`, `DevScript`) |
 | Bundled plugins | `assets/plugins` (charts, models3d, recorder) |
 | Contracts in prose | `docs/OPERATIONS.md`, `docs/PLUGINS.md`, `docs/AUTOMATION.md`, `docs/EXPRESSIONS.md` |
+| What users see | `docs/USER-GUIDE.md` (every feature, shortcuts); the README keeps the short version |
 
 ## Rules
 

@@ -936,6 +936,9 @@ sequenceDiagram
 
 ## 12. Recipes: adding things
 
+Whatever a user sees goes into [USER-GUIDE.md](USER-GUIDE.md), in its area;
+the README keeps a short list and changes only for a new kind of thing.
+
 **An animatable property** — add an `Animated<T>` member to the right props
 struct (`Layer.h`) with its default value, and list it in
 `Layer::properties()` with a new stable id (`defaultPropertyValue`, used by the
