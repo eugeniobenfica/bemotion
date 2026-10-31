@@ -66,7 +66,11 @@ double removeQuietParts(Composition& comp, uint64_t id, const std::vector<std::p
     for (const auto& [a, b] : cuts) {
         const Layer* h = comp.findLayer(head);
         if (!h) break;
-        if (b < h->outPoint - kEps) comp.splitLayer(head, b);
+        if (b < h->outPoint - kEps) {
+            comp.splitLayer(head, b);
+            h = comp.findLayer(head); // (splitting adds a layer: the list may have moved)
+            if (!h) break;
+        }
         uint64_t piece = head;
         if (a > h->inPoint + kEps) piece = comp.splitLayer(head, a);
         if (!piece) continue;
