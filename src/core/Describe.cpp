@@ -103,7 +103,7 @@ void describeLayer(std::string& out, Composition& c, Layer& l, int depth) {
 std::string describeProject(const Project& project) {
     Project p = project; // properties() needs mutable layers
     Composition& c = p.comp;
-    const ExpressionScope expressions(c); // positions as they render
+    const ExpressionScope expressions(c, true); // positions as they render
     std::string out = "Project " + inQuotes(p.name) + ": " + std::to_string(c.width) + "x" + std::to_string(c.height) + ", " +
                       fmt("%g", c.fps) + " fps, " + seconds(c.duration) + " s, background " + hex(c.background) + "\n";
     out += "Layers, top first (id \"name\" type, time, position; refer to layers by id or name):\n";

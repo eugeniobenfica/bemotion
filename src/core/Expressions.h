@@ -18,21 +18,26 @@
 #include "core/Project.h"
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace bemotion {
 
 // The composition expressions read (layers, other properties) on this thread, for its
 // lifetime; scopes nest. Rendering opens one; the editor keeps one for its composition.
+// `frozen`: nothing changes the composition while the scope lasts (drawing a frame), so each
+// layer's properties are listed once and every expression reading them shares the list.
 class ExpressionScope {
 public:
-    explicit ExpressionScope(const Composition& comp);
-    ~ExpressionScope();
-    ExpressionScope(const ExpressionScope&) = delete;
-    ExpressionScope& operator=(const ExpressionScope&) = delete;
+  explicit ExpressionScope(const Composition& comp, bool frozen = false);
+  ~ExpressionScope();
+  ExpressionScope(const ExpressionScope&) = delete;
+  ExpressionScope& operator=(const ExpressionScope&) = delete;
 
 private:
     const Composition* previous_;
+    std::unordered_map<const Layer*, std::vector<PropertyRef>>* previousProperties_;
+    std::unordered_map<const Layer*, std::vector<PropertyRef>> properties_;
 };
 
 // The editor's composition, as a scope that lasts (null: none).

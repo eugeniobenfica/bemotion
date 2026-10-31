@@ -343,6 +343,8 @@ struct Context {
     std::unordered_map<const AnimatedBase*, std::pair<uint64_t, std::string>> owners; // property -> layer id, property id
     std::unordered_map<const AnimatedBase*, std::string> errors;
     int depth = 0;
+    // In a frozen scope: each layer's properties, listed once (bind) for every expression.
+    std::unordered_map<const Layer*, std::vector<PropertyRef>>* properties = nullptr;
 };
 thread_local Context t_ctx;
 thread_local const Composition* t_editorComp = nullptr;
@@ -357,9 +359,13 @@ bool belongs(const AnimatedBase* p, const Layer& l) {
 
 void bind(const Composition& comp) {
     t_ctx.owners.clear();
-    for (const Layer& l : comp.layers)
-        for (const PropertyRef& p : const_cast<Layer&>(l).properties())
+    if (t_ctx.properties) t_ctx.properties->clear();
+    for (const Layer& l : comp.layers) {
+        std::vector<PropertyRef> props = const_cast<Layer&>(l).properties();
+        for (const PropertyRef& p : props)
             if (p.anim->hasExpression()) t_ctx.owners[p.anim] = {l.id, p.id};
+        if (t_ctx.properties) t_ctx.properties->emplace(&l, std::move(props));
+    }
 }
 
 Owner ownerOf(const AnimatedBase& prop) {
@@ -422,8 +428,14 @@ struct Eval {
 
     Val propertyAt(const Layer& layer, const std::string& id, double at) const {
         Layer& l = const_cast<Layer&>(layer);
-        auto props = l.properties();
-        const PropertyRef* p = l.findProperty(props, id.c_str());
+        std::vector<PropertyRef> own;
+        std::vector<PropertyRef>* props = &own;
+        if (t_ctx.properties) {
+            auto it = t_ctx.properties->find(&layer);
+            if (it != t_ctx.properties->end()) props = &it->second;
+        }
+        if (props == &own) own = l.properties();
+        const PropertyRef* p = l.findProperty(*props, id.c_str());
         if (!p) throw Error("\"" + layer.name + "\" has no property \"" + id + "\"");
         if (t_ctx.depth > 8) throw Error("expressions read each other in a circle");
         ++t_ctx.depth;
@@ -735,13 +747,16 @@ struct Eval {
 
 } // namespace
 
-ExpressionScope::ExpressionScope(const Composition& comp) : previous_(t_ctx.comp) {
+ExpressionScope::ExpressionScope(const Composition& comp, bool frozen)
+    : previous_(t_ctx.comp), previousProperties_(t_ctx.properties) {
     t_ctx.comp = &comp;
+    t_ctx.properties = frozen ? &properties_ : nullptr;
     bind(comp);
 }
 
 ExpressionScope::~ExpressionScope() {
     t_ctx.comp = previous_ ? previous_ : t_editorComp;
+    t_ctx.properties = previousProperties_;
     if (t_ctx.comp) bind(*t_ctx.comp);
 }
 

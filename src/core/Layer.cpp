@@ -68,6 +68,9 @@ PluginParam* PluginProps::find(const std::string& id) {
 
 std::vector<PropertyRef> Layer::properties() {
     std::vector<PropertyRef> p;
+    // Room for everything listed below, so the list is allocated once (it is built often).
+    p.reserve(40 + masks.size() * 3 + pins.size() + (warp ? kWarpPoints : 0) + plugin.params.size() +
+              effects.size() * kEffectSlotCount);
     auto& tr = transform;
     // Masks' feather, opacity and expansion ("mask0.feather"), grouped by mask.
     auto addMasks = [&] {

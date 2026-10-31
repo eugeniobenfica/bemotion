@@ -1238,7 +1238,7 @@ void drawComposition(SkCanvas* canvas, const Composition& comp, double time, con
     const Vec2 a = view.toScreen({0, 0});
     const Vec2 b = view.toScreen({static_cast<float>(comp.width), static_cast<float>(comp.height)});
     const SkRect frame = SkRect::MakeLTRB(a.x, a.y, b.x, b.y);
-    const ExpressionScope expressions(comp); // what expressions read while drawing
+    const ExpressionScope expressions(comp, true); // what expressions read while drawing (unchanged meanwhile)
     if (background && !lens) {
         const Color bg = comp.background;
         canvas->drawRect(frame, SkPaint(SkColor4f{bg.r, bg.g, bg.b, 1.0f}));
